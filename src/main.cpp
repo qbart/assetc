@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fmt/format.h>
 #include <iostream>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -18,6 +19,38 @@ enum class AssetType
     Shader,
     Mesh,
     Material
+};
+
+constexpr std::string_view to_string(AssetType t)
+{
+    switch (t)
+    {
+    case AssetType::Grayscale:
+        return "Grayscale";
+    case AssetType::Normal:
+        return "Normal";
+    case AssetType::Color:
+        return "Color";
+    case AssetType::Array:
+        return "Array";
+    case AssetType::Cubemap:
+        return "Cubemap";
+    case AssetType::Shader:
+        return "Shader";
+    case AssetType::Mesh:
+        return "Mesh";
+    case AssetType::Material:
+        return "Material";
+    }
+    return "???"; // unreachable if enum is exhaustive
+}
+
+template <> struct fmt::formatter<AssetType> : fmt::formatter<std::string_view>
+{
+    auto format(AssetType t, format_context &ctx) const
+    {
+        return fmt::formatter<std::string_view>::format(to_string(t), ctx);
+    }
 };
 
 struct Asset
@@ -81,9 +114,9 @@ int main(int argc, char **argv)
             else
                 continue;
         }
-        if (ext == ".n.png")
+        if (name.ends_with(".n.png"))
             assets.emplace_back(Asset{.path = name, .type = AssetType::Normal});
-        else if (ext == ".ao.png" || ext == ".h.png" || ext == ".r.png")
+        else if (name.ends_with(".ao.png") || name.ends_with(".h.png") || name.ends_with(".r.png"))
             assets.emplace_back(Asset{.path = name, .type = AssetType::Grayscale});
         else if (ext == ".png")
             assets.emplace_back(Asset{.path = name, .type = AssetType::Color});
@@ -95,8 +128,9 @@ int main(int argc, char **argv)
             assets.emplace_back(Asset{.path = name, .type = AssetType::Material});
     }
 
-    for (const auto& a : assets) {
-        fmtx::Info(fmt::format("Asset {}", a.path));
+    for (const auto &a : assets)
+    {
+        fmtx::Info(fmt::format("Asset {} {}", a.type, a.path));
     }
 
     return 0;
