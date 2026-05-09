@@ -17,17 +17,21 @@ add_executable(${PROJECT_NAME}
     src/deps/fmt.cpp
     src/deps/stb.cpp
     src/deps/ktx.cpp
+    src/assetc/shader.cpp
     src/main.cpp
     )
+
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
             CXX_STANDARD 23
             CXX_EXTENSIONS OFF
             )
 
+
 include(ktx)
 include(cli11)
-find_package(fmt CONFIG REQUIRED)
+include(fmt)
+include(slang)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
@@ -45,12 +49,14 @@ if(APPLE)
         fmt::fmt
         CLI11::CLI11
         ktx
+        slang
     )
 elseif (LINUX)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         fmt::fmt
         CLI11::CLI11
         ktx
+        slang
     )
 else()
     # For non-macOS systems, you can specify general linking here
@@ -58,6 +64,7 @@ else()
         fmt::fmt
         CLI11::CLI11
         ktx
+        slang
     )
 endif()
 

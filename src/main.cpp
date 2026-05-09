@@ -69,14 +69,51 @@ struct Asset
     std::string RuntimePath() const;
 };
 
-std::string Asset::RuntimePath() const {}
+std::string Asset::RuntimePath() const
+{
+    std::string_view ext;
+    switch (type)
+    {
+    case AssetType::Grayscale:
+        ext = ".ktx2";
+        break;
+    case AssetType::Normal:
+        ext = ".ktx2";
+        break;
+    case AssetType::Color:
+        ext = ".ktx2";
+        break;
+    case AssetType::Array:
+        ext = ".arr.ktx2";
+        break;
+    case AssetType::Cubemap:
+        ext = ".env.ktx2";
+        break;
+    case AssetType::Shader:
+        ext = ".spv";
+        break;
+    case AssetType::Mesh:
+        ext = ".hmesh";
+        break;
+    case AssetType::Material:
+        ext = ".hmat";
+        break;
+    }
+
+    fs::path out = fs::path("runtime") / fs::path(path).lexically_relative("assets");
+    if (out.has_extension()) out.replace_extension();
+
+    // bake -o out (vertex)   -> slangc <src> -profile spirv_1_5 -target spirv -entry vsMain -stage vertex   -o
+    out += ext;
+    return out;
+}
 
 int handleAsset(const Asset &asset)
 {
     stb::Image img = stb::Load(asset.path);
     if (!img.pixels)
     {
-        fmtx::Error(fmt::format("stbi_load failed: {}", stb::ImageError()));
+        fmtx::Error(fmt::format("load failed: {}", stb::ImageError()));
         return 1;
     }
     fmtx::Info(fmt::format("{}x{}x{}", img.w, img.h, img.channels));
@@ -154,10 +191,10 @@ int main(int argc, char **argv)
 
     for (const auto &a : assets)
     {
-        if (a.type == AssetType::Color)
+        // if (a.type == AssetType::Color)
         {
-            fmtx::Info(fmt::format("Asset {} {}", a.type, a.path));
-            return handleAsset(a);
+            fmtx::Info(fmt::format("Asset {} {} -> {}", a.type, a.path, a.RuntimePath()));
+            // return handleAsset(a);
         }
     }
 

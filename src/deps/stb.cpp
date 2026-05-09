@@ -1,5 +1,7 @@
 #include "stb.hpp"
 
+#include <memory>
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
@@ -29,3 +31,17 @@ stb::Image::~Image()
 }
 
 int stb::Image::Size() const { return w * h * channels; }
+
+std::unique_ptr<stb::Image> Resize(const stb::Image &img, int w, int h)
+{
+    uint8_t *pixels = (uint8_t *)STBI_MALLOC(w * h * 4);
+    stbir_resize_uint8_linear(img.pixels, img.w, img.h, 0, pixels, w, h, 0, STBIR_RGBA);
+
+    auto out = std::make_unique(new stb::Image());
+    out.w = w;
+    out.h = h;
+    out.channels = 4;
+    out.pixels = pixels;
+
+    return std::move(out);
+}

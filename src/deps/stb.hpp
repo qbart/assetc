@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <stdint.h>
+#include <string>
 
 namespace stb
 {
@@ -19,4 +19,5 @@ struct Image
 
 std::string ImageError();
 Image Load(const std::string &path);
+Image &Resize(const Image &img, int w, int h);
 } // namespace stb
