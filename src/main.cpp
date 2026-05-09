@@ -1,11 +1,19 @@
 #include "deps/fmt.hpp"
+#include "deps/ktx.hpp"
+#include "deps/stb.hpp"
 #include <CLI/CLI.hpp>
 #include <filesystem>
+#include <fmt/core.h>
 #include <fmt/format.h>
 #include <iostream>
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#include <bit>
+#include <ktx.h>
+#include <thread>
+#include <vulkan/vulkan.hpp>
 
 namespace fs = std::filesystem;
 
@@ -57,7 +65,23 @@ struct Asset
 {
     std::string path;
     AssetType type;
+
+    std::string RuntimePath() const;
 };
+
+std::string Asset::RuntimePath() const {}
+
+int handleAsset(const Asset &asset)
+{
+    stb::Image img = stb::Load(asset.path);
+    if (!img.pixels)
+    {
+        fmtx::Error(fmt::format("stbi_load failed: {}", stb::ImageError()));
+        return 1;
+    }
+    fmtx::Info(fmt::format("{}x{}x{}", img.w, img.h, img.channels));
+    return ktx::FromImageToASTC(img, "out2.ktx2");
+}
 
 int main(int argc, char **argv)
 {
@@ -130,7 +154,11 @@ int main(int argc, char **argv)
 
     for (const auto &a : assets)
     {
-        fmtx::Info(fmt::format("Asset {} {}", a.type, a.path));
+        if (a.type == AssetType::Color)
+        {
+            fmtx::Info(fmt::format("Asset {} {}", a.type, a.path));
+            return handleAsset(a);
+        }
     }
 
     return 0;

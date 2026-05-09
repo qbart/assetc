@@ -1,10 +1,22 @@
 #pragma once
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb/stb_image.h"
+#include <string>
+#include <stdint.h>
 
-#define STB_IMAGE_RESIZE2_IMPLEMENTATION
-#include "stb/stb_image_resize2.h"
+namespace stb
+{
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb/stb_image_write.h"
+struct Image
+{
+    int w           = 0;
+    int h           = 0;
+    int channels    = 0;
+    uint8_t *pixels = nullptr;
+
+    ~Image();
+    int Size() const;
+};
+
+std::string ImageError();
+Image Load(const std::string &path);
+} // namespace stb

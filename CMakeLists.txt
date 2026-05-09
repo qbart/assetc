@@ -15,6 +15,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 add_executable(${PROJECT_NAME}
     src/deps/fmt.cpp
+    src/deps/stb.cpp
+    src/deps/ktx.cpp
     src/main.cpp
     )
 
