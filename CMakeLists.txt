@@ -18,6 +18,7 @@ add_executable(${PROJECT_NAME}
     src/deps/stb.cpp
     src/deps/ktx.cpp
     src/assetc/shader.cpp
+    src/assetc/runtime_mesh.cpp
     src/main.cpp
     )
 
@@ -31,7 +32,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 include(ktx)
 include(cli11)
 include(fmt)
-include(slang)
+# include(slang)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
@@ -49,14 +50,14 @@ if(APPLE)
         fmt::fmt
         CLI11::CLI11
         ktx
-        slang
+        # slang
     )
 elseif (LINUX)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         fmt::fmt
         CLI11::CLI11
         ktx
-        slang
+        # slang
     )
 else()
     # For non-macOS systems, you can specify general linking here
@@ -64,7 +65,7 @@ else()
         fmt::fmt
         CLI11::CLI11
         ktx
-        slang
+        # slang
     )
 endif()
 

@@ -38,11 +38,11 @@ KTX_error_code ktx::FromImageToASTC(const stb::Image &img, const std::string &de
     // levels 1..N — downscale yourself, then upload
     for (uint32_t lvl = 1; lvl < info.numLevels; ++lvl)
     {
-        int lw = std::max(1, img.w >> lvl);
-        int lh = std::max(1, img.h >> lvl);
-        std::vector<uint8_t> mip(lw * lh * 4);
-        // stbir_resize_uint8_linear(img.pixels, img.w, img.h, 0, mip.data(), lw, lh, 0, STBIR_RGBA);
-        err = ktxTexture_SetImageFromMemory(ktxTexture(tex), lvl, 0, 0, mip.data(), mip.size());
+        int lw   = std::max(1, img.w >> lvl);
+        int lh   = std::max(1, img.h >> lvl);
+        auto mip = stb::Resize(img, lw, lh);
+
+        err = ktxTexture_SetImageFromMemory(ktxTexture(tex), lvl, 0, 0, mip->pixels, mip->Size());
         if (err != KTX_SUCCESS)
         {
             return err;

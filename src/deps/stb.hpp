@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <stdint.h>
 #include <string>
 
@@ -19,5 +20,5 @@ struct Image
 
 std::string ImageError();
 Image Load(const std::string &path);
-Image &Resize(const Image &img, int w, int h);
+std::unique_ptr<Image> Resize(const Image &img, int w, int h);
 } // namespace stb
