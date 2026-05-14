@@ -1,17 +1,23 @@
 #include "ktx.hpp"
 
 #include <bit>
+#include <cstring>
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <vector>
 #include <vulkan/vulkan.hpp>
 
-KTX_error_code ktx::FromImageToASTC(const stb::Image &img, const std::string &destPath)
+KTX_error_code ktx::FromImageToASTC(const stb::Image &img, const std::string &destPath, ASTCMode mode)
 {
     auto threadCount = 1u; // std::thread::hardware_concurrency();
 
+    // Color: sRGB OETF in the output DFD (--assign_oetf srgb, the toktx default for 8-bit PNGs).
+    // Normal/Grayscale: linear OETF (--assign_oetf linear).
+    const VkFormat srcFormat =
+        (mode == ASTCMode::Color) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+
     ktxTextureCreateInfo info{};
-    info.vkFormat        = VK_FORMAT_R8G8B8A8_UNORM; // source format
+    info.vkFormat        = srcFormat;
     info.baseWidth       = img.w;
     info.baseHeight      = img.h;
     info.baseDepth       = 1;
@@ -49,13 +55,37 @@ KTX_error_code ktx::FromImageToASTC(const stb::Image &img, const std::string &de
         }
     }
 
-    // ASTC encode = your --encode astc --astc_blk_d 4x4 --astc_quality medium
+    // ASTC encode = --encode astc --astc_blk_d 4x4 --astc_quality medium
     ktxAstcParams astc{};
     astc.structSize     = sizeof(astc);
     astc.threadCount    = threadCount;
     astc.blockDimension = KTX_PACK_ASTC_BLOCK_DIMENSION_4x4;
-    astc.qualityLevel   = KTX_PACK_ASTC_QUALITY_LEVEL_MEDIUM;
-    // astc.normalMap   = KTX_TRUE;  // for normal maps
+    astc.qualityLevel   = KTX_PACK_ASTC_QUALITY_LEVEL_THOROUGH;
+
+    switch (mode)
+    {
+    case ASTCMode::Color:
+        break;
+    case ASTCMode::Normal:
+        // Encode as 2-channel L+A with angular error metric.
+        // Encoder applies its own "rrrg" swizzle internally; X ends up in .a, Y in .g.
+        //
+        // Shader sampling (GLSL):
+        //   vec3 n;
+        //   n.xy = texture(normalMap, uv).ag * 2.0 - 1.0;   // .ag, not .rg
+        //   n.z  = sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        //
+        // Old encoding was: std::memcpy(astc.inputSwizzle, "rg01", 4);
+        // matching shader sampling (GLSL):
+        //   vec3 n;
+        //   n.xy = texture(normalMap, uv).rg * 2.0 - 1.0;
+        //   n.z  = sqrt(max(0.0, 1.0 - dot(n.xy, n.xy)));
+        astc.normalMap = KTX_TRUE;
+        break;
+    case ASTCMode::Grayscale:
+        std::memcpy(astc.inputSwizzle, "r001", 4);
+        break;
+    }
 
     err = ktxTexture2_CompressAstcEx(tex, &astc);
     if (err != KTX_SUCCESS)
