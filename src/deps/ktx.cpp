@@ -128,8 +128,10 @@ KTX_error_code ktx::FromImageToASTC(const stb::Image &img, const std::string &de
 // better quality. Single file works across desktop + mobile.
 KTX_error_code ktx::FromImageToUASTC(const stb::Image &img, const std::string &destPath, UASTCMode mode)
 {
-    // auto threadCount = 1u; // std::thread::hardware_concurrency();
-    auto threadCount = std::thread::hardware_concurrency();
+    // Outer pool (in main.cpp) parallelizes across assets, so encode single-threaded here
+    // to avoid oversubscription. Flip to hardware_concurrency() if you switch to a
+    // sequential outer loop with one large texture at a time.
+    auto threadCount = 1u;
 
     const VkFormat srcFormat =
         (mode == UASTCMode::Color) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;

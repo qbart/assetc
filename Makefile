@@ -6,6 +6,10 @@ run: build
 build:
 	@cmake --build build/
 
+.PHONY: install
+install: build
+	cp build/assetc ~/bin/assetc
+
 .PHONY: clean
 clean:
 	@rm -rf build/

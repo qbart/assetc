@@ -2,10 +2,12 @@
 #include "deps/ktx.hpp"
 #include "deps/stb.hpp"
 #include <CLI/CLI.hpp>
+#include <atomic>
 #include <filesystem>
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <iostream>
+#include <mutex>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -198,11 +200,30 @@ int main(int argc, char **argv)
             assets.emplace_back(Asset{.path = name, .type = AssetType::Material});
     }
 
-    for (const auto &a : assets)
-    {
-        if (handleAsset(a, outputDir) != 0)
-            fmtx::Error(fmt::format("failed: {}", a.path));
-    }
+    std::mutex logMu;
+    std::atomic<size_t> next{0};
+    std::atomic<int> failures{0};
 
-    return 0;
+    auto worker = [&] {
+        for (;;)
+        {
+            size_t i = next.fetch_add(1, std::memory_order_relaxed);
+            if (i >= assets.size()) return;
+            if (handleAsset(assets[i], outputDir) != 0)
+            {
+                std::lock_guard<std::mutex> lk(logMu);
+                fmtx::Error(fmt::format("failed: {}", assets[i].path));
+                failures.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+    };
+
+    std::vector<std::thread> workers;
+    workers.reserve(jobs);
+    for (unsigned i = 0; i < jobs; ++i)
+        workers.emplace_back(worker);
+    for (auto &t : workers)
+        t.join();
+
+    return failures.load() == 0 ? 0 : 1;
 }
