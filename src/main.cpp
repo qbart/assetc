@@ -66,20 +66,16 @@ struct Asset
     std::string path;
     AssetType type;
 
-    std::string RuntimePath() const;
+    std::string RuntimePath(const std::string &outputDir) const;
 };
 
-std::string Asset::RuntimePath() const
+std::string Asset::RuntimePath(const std::string &outputDir) const
 {
     std::string_view ext;
     switch (type)
     {
     case AssetType::Grayscale:
-        ext = ".ktx2";
-        break;
     case AssetType::Normal:
-        ext = ".ktx2";
-        break;
     case AssetType::Color:
         ext = ".ktx2";
         break;
@@ -100,24 +96,41 @@ std::string Asset::RuntimePath() const
         break;
     }
 
-    fs::path out = fs::path("runtime") / fs::path(path).lexically_relative("assets");
+    fs::path out = fs::path(outputDir) / fs::path(path).lexically_relative("assets");
     if (out.has_extension()) out.replace_extension();
-
-    // bake -o out (vertex)   -> slangc <src> -profile spirv_1_5 -target spirv -entry vsMain -stage vertex   -o
     out += ext;
-    return out;
+    return out.generic_string();
 }
 
-int handleAsset(const Asset &asset)
+int handleAsset(const Asset &asset, const std::string &outputDir)
 {
+    const auto out = asset.RuntimePath(outputDir);
+
+    switch (asset.type)
+    {
+    case AssetType::Color:
+    case AssetType::Normal:
+    case AssetType::Grayscale:
+        break;
+    default:
+        fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, asset.type));
+        return 0;
+    }
+
     stb::Image img = stb::Load(asset.path);
     if (!img.pixels)
     {
-        fmtx::Error(fmt::format("load failed: {}", stb::ImageError()));
+        fmtx::Error(fmt::format("load failed: {}: {}", asset.path, stb::ImageError()));
         return 1;
     }
-    fmtx::Info(fmt::format("{}x{}x{}", img.w, img.h, img.channels));
-    return ktx::FromImageToASTC(img, "out2.ktx2");
+    fmtx::Info(fmt::format("{} {}x{}x{} -> {}", asset.type, img.w, img.h, img.channels, out));
+
+    fs::create_directories(fs::path(out).parent_path());
+
+    ktx::UASTCMode mode = ktx::UASTCMode::Color;
+    if (asset.type == AssetType::Normal)    mode = ktx::UASTCMode::Normal;
+    if (asset.type == AssetType::Grayscale) mode = ktx::UASTCMode::Grayscale;
+    return ktx::FromImageToUASTC(img, out, mode);
 }
 
 int main(int argc, char **argv)
@@ -128,7 +141,9 @@ int main(int argc, char **argv)
     CLI::App app{"Asset compiler"};
     argv = app.ensure_utf8(argv);
 
+    std::string outputDir = "runtime";
     app.add_option("-j,--jobs", jobs, "Concurrent jobs")->check(CLI::PositiveNumber);
+    app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
     app.add_subcommand("init", "Initialize structure");
 
     CLI11_PARSE(app, argc, argv);
@@ -156,21 +171,11 @@ int main(int argc, char **argv)
         {
             if (name.ends_with(".env"))
             {
-                assets.emplace_back(
-                    Asset{
-                        .path = name,
-                        .type = AssetType::Cubemap,
-                    }
-                );
+                assets.emplace_back(Asset{.path = name, .type = AssetType::Cubemap});
             }
             else if (name.ends_with(".array"))
             {
-                assets.emplace_back(
-                    Asset{
-                        .path = name,
-                        .type = AssetType::Array,
-                    }
-                );
+                assets.emplace_back(Asset{.path = name, .type = AssetType::Array});
             }
             else
                 continue;
@@ -185,17 +190,18 @@ int main(int argc, char **argv)
             assets.emplace_back(Asset{.path = name, .type = AssetType::Shader});
         else if (ext == ".obj")
             assets.emplace_back(Asset{.path = name, .type = AssetType::Mesh});
+        else if (ext == ".gltf")
+            assets.emplace_back(Asset{.path = name, .type = AssetType::Mesh});
+        else if (ext == ".glb")
+            assets.emplace_back(Asset{.path = name, .type = AssetType::Mesh});
         else if (ext == ".mat")
             assets.emplace_back(Asset{.path = name, .type = AssetType::Material});
     }
 
     for (const auto &a : assets)
     {
-        // if (a.type == AssetType::Color)
-        {
-            fmtx::Info(fmt::format("Asset {} {} -> {}", a.type, a.path, a.RuntimePath()));
-            // return handleAsset(a);
-        }
+        if (handleAsset(a, outputDir) != 0)
+            fmtx::Error(fmt::format("failed: {}", a.path));
     }
 
     return 0;
