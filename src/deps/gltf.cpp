@@ -2,14 +2,6 @@
 #include "fmt.hpp"
 #include <memory>
 
-#define TINYGLTF_IMPLEMENTATION
-#define INYGLTF3_ENABLE_FS
-#define TINYGLTF_NOEXCEPTION
-#define TINYGLTF3_ENABLE_STB_IMAGE
-#define TINYGLTF3_ENABLE_COROUTINES
-#include "stb.hpp"
-#include "tinygltf/tiny_gltf_v3.h"
-
 gltf::GLTF::~GLTF() { tg3_model_free(&model); }
 
 std::unique_ptr<gltf::GLTF> gltf::Load(const std::string &path)
