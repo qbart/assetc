@@ -126,12 +126,9 @@ KTX_error_code ktx::FromImageToASTC(const stb::Image &img, const std::string &de
 // UASTC = Basis Universal high-quality mode. Output KTX2 transcodes at runtime
 // to BC7/ASTC/ETC2 with quality close to native BC7. Larger than ETC1S, much
 // better quality. Single file works across desktop + mobile.
-KTX_error_code ktx::FromImageToUASTC(const stb::Image &img, const std::string &destPath, UASTCMode mode)
+KTX_error_code ktx::FromImageToUASTC(const stb::Image &img, const std::string &destPath, UASTCMode mode, unsigned threadCount)
 {
-    // Outer pool (in main.cpp) parallelizes across assets, so encode single-threaded here
-    // to avoid oversubscription. Flip to hardware_concurrency() if you switch to a
-    // sequential outer loop with one large texture at a time.
-    auto threadCount = 1u;
+    if (threadCount == 0) threadCount = 1u;
 
     const VkFormat srcFormat =
         (mode == UASTCMode::Color) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;

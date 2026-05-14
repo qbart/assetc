@@ -2,6 +2,7 @@
 #include "deps/ktx.hpp"
 #include "deps/stb.hpp"
 #include <CLI/CLI.hpp>
+#include <algorithm>
 #include <atomic>
 #include <filesystem>
 #include <fmt/core.h>
@@ -104,7 +105,7 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
     return out.generic_string();
 }
 
-int handleAsset(const Asset &asset, const std::string &outputDir)
+int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount)
 {
     const auto out = asset.RuntimePath(outputDir);
 
@@ -132,7 +133,7 @@ int handleAsset(const Asset &asset, const std::string &outputDir)
     ktx::UASTCMode mode = ktx::UASTCMode::Color;
     if (asset.type == AssetType::Normal)    mode = ktx::UASTCMode::Normal;
     if (asset.type == AssetType::Grayscale) mode = ktx::UASTCMode::Grayscale;
-    return ktx::FromImageToUASTC(img, out, mode);
+    return ktx::FromImageToUASTC(img, out, mode, threadCount);
 }
 
 int main(int argc, char **argv)
@@ -200,6 +201,22 @@ int main(int argc, char **argv)
             assets.emplace_back(Asset{.path = name, .type = AssetType::Material});
     }
 
+    // Split the `jobs` thread budget between outer (across assets) and inner
+    // (within each ktx encode), based on how much real work there is.
+    //
+    //   24 jobs, 3 image assets  -> 3 outer * 8 inner = 24 threads used
+    //   24 jobs, 100 image assets -> 24 outer * 1 inner = 24 threads used
+    //   24 jobs, 1 image asset   -> 1 outer * 24 inner = 24 threads used
+    const size_t imageCount = std::count_if(assets.begin(), assets.end(), [](const Asset &a) {
+        return a.type == AssetType::Color || a.type == AssetType::Normal ||
+               a.type == AssetType::Grayscale;
+    });
+
+    const unsigned outerWorkers = std::min<unsigned>(jobs, std::max<size_t>(1, imageCount));
+    const unsigned innerThreads = std::max(1u, jobs / outerWorkers);
+    fmtx::Info(fmt::format("schedule: {} outer x {} inner = {} threads",
+                           outerWorkers, innerThreads, outerWorkers * innerThreads));
+
     std::mutex logMu;
     std::atomic<size_t> next{0};
     std::atomic<int> failures{0};
@@ -209,7 +226,7 @@ int main(int argc, char **argv)
         {
             size_t i = next.fetch_add(1, std::memory_order_relaxed);
             if (i >= assets.size()) return;
-            if (handleAsset(assets[i], outputDir) != 0)
+            if (handleAsset(assets[i], outputDir, innerThreads) != 0)
             {
                 std::lock_guard<std::mutex> lk(logMu);
                 fmtx::Error(fmt::format("failed: {}", assets[i].path));
@@ -219,8 +236,8 @@ int main(int argc, char **argv)
     };
 
     std::vector<std::thread> workers;
-    workers.reserve(jobs);
-    for (unsigned i = 0; i < jobs; ++i)
+    workers.reserve(outerWorkers);
+    for (unsigned i = 0; i < outerWorkers; ++i)
         workers.emplace_back(worker);
     for (auto &t : workers)
         t.join();

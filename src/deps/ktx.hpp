@@ -24,5 +24,5 @@ enum class UASTCMode
 };
 
 KTX_error_code FromImageToASTC(const stb::Image &img, const std::string &destPath, ASTCMode mode);
-KTX_error_code FromImageToUASTC(const stb::Image &img, const std::string &destPath, UASTCMode mode);
+KTX_error_code FromImageToUASTC(const stb::Image &img, const std::string &destPath, UASTCMode mode, unsigned threadCount);
 } // namespace ktx
