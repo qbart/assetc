@@ -17,6 +17,7 @@ add_executable(${PROJECT_NAME}
     src/deps/fmt.cpp
     src/deps/stb.cpp
     src/deps/ktx.cpp
+    src/deps/gltf.cpp
     src/assetc/shader.cpp
     src/assetc/runtime_mesh.cpp
     src/main.cpp
