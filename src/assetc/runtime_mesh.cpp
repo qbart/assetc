@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <ios>
+#include <type_traits>
 
 static_assert(std::endian::native == std::endian::little,
               "assetc currently supports little-endian targets only");
@@ -150,4 +151,93 @@ std::array<int16_t, 2> assetc::OctEncodeTangent(Vec3 t, float handedness) noexce
     if (handedness < 0.0f)
         packed[0] = static_cast<int16_t>(packed[0] | int16_t{1});
     return packed;
+}
+
+// --- WriteHMesh ---------------------------------------------------------------
+
+namespace
+{
+template <typename T>
+void AppendPod(std::vector<std::byte> &dst, const T &v)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+    const auto *p = reinterpret_cast<const std::byte *>(&v);
+    dst.insert(dst.end(), p, p + sizeof(T));
+}
+
+template <typename T>
+std::span<const std::byte> VecBytes(const std::vector<T> &v) noexcept
+{
+    return std::as_bytes(std::span<const T>(v.data(), v.size()));
+}
+} // namespace
+
+int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds &bounds,
+                       std::span<const uint64_t> materialHashes)
+{
+    if (m.vertices.empty())
+    {
+        fmtx::Error(fmt::format("WriteHMesh: empty vertex buffer, refusing to write {}", path));
+        return 1;
+    }
+
+    // VTXS: u32 count, u32 stride, then count*stride bytes.
+    std::vector<std::byte> vtxBuf;
+    {
+        const uint32_t count  = static_cast<uint32_t>(m.vertices.size());
+        const uint32_t stride = sizeof(GpuVertex);
+        vtxBuf.reserve(8 + static_cast<size_t>(count) * stride);
+        AppendPod(vtxBuf, count);
+        AppendPod(vtxBuf, stride);
+        const auto bytes = VecBytes(m.vertices);
+        vtxBuf.insert(vtxBuf.end(), bytes.begin(), bytes.end());
+    }
+
+    // IDXS: u32 count, u32 size (2 or 4), then bytes. Downcast to u16 if vertexCount fits.
+    std::vector<std::byte> idxBuf;
+    {
+        const uint32_t count  = static_cast<uint32_t>(m.indices.size());
+        const bool     fits16 = m.vertices.size() <= 0xFFFFu;
+        const uint32_t size   = fits16 ? 2u : 4u;
+        idxBuf.reserve(8 + static_cast<size_t>(count) * size);
+        AppendPod(idxBuf, count);
+        AppendPod(idxBuf, size);
+        if (fits16)
+        {
+            for (uint32_t v : m.indices)
+            {
+                const uint16_t v16 = static_cast<uint16_t>(v);
+                AppendPod(idxBuf, v16);
+            }
+        }
+        else
+        {
+            const auto bytes = VecBytes(m.indices);
+            idxBuf.insert(idxBuf.end(), bytes.begin(), bytes.end());
+        }
+    }
+
+    // MTRL: u32 count, then count*u64.
+    std::vector<std::byte> mtrlBuf;
+    {
+        const uint32_t count = static_cast<uint32_t>(materialHashes.size());
+        mtrlBuf.reserve(4 + static_cast<size_t>(count) * 8);
+        AppendPod(mtrlBuf, count);
+        const auto bytes = std::as_bytes(materialHashes);
+        mtrlBuf.insert(mtrlBuf.end(), bytes.begin(), bytes.end());
+    }
+
+    const auto boundsBytes = std::as_bytes(std::span<const MeshBounds>(&bounds, 1));
+
+    const ChunkPayload chunks[] = {
+        {ChunkId::Bounds, boundsBytes},
+        {ChunkId::Vertices, std::span<const std::byte>(vtxBuf.data(), vtxBuf.size())},
+        {ChunkId::Indices, std::span<const std::byte>(idxBuf.data(), idxBuf.size())},
+        {ChunkId::Meshlets, VecBytes(m.meshlets)},
+        {ChunkId::MeshletVertices, VecBytes(m.meshletVertices)},
+        {ChunkId::MeshletTriangles, VecBytes(m.meshletTriangles)},
+        {ChunkId::MeshletBounds, VecBytes(m.meshletBounds)},
+        {ChunkId::Materials, std::span<const std::byte>(mtrlBuf.data(), mtrlBuf.size())},
+    };
+    return WriteChunked(path, chunks);
 }

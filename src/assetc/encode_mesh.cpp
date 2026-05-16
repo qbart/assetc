@@ -389,35 +389,48 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
         return cm;
     }
 
-    const auto &last = mo[meshletCount - 1];
-    mvi.resize(last.vertex_offset + last.vertex_count);
-    mti.resize(last.triangle_offset + ((last.triangle_count * 3u + 3u) & ~3u));
-    mo.resize(meshletCount);
+    // meshopt writes triangle data with 4-byte padding between meshlets, and
+    // mo[i].triangle_offset is a *byte* offset into mti. Our on-disk format
+    // expects a dense MeshletTriangle[] (3 B each, no inter-meshlet padding)
+    // with triangleOffset in triangle units, so we repack here.
 
+    const auto &last      = mo[meshletCount - 1];
+    const size_t vtxUsed  = last.vertex_offset + last.vertex_count;
+
+    size_t totalTris = 0;
+    for (size_t i = 0; i < meshletCount; ++i)
+        totalTris += mo[i].triangle_count;
+
+    cm.mesh.meshletVertices.assign(mvi.begin(), mvi.begin() + vtxUsed);
     cm.mesh.meshlets.resize(meshletCount);
-    for (size_t i = 0; i < meshletCount; ++i)
-    {
-        cm.mesh.meshlets[i] = Meshlet{mo[i].vertex_offset, mo[i].vertex_count,
-                                      mo[i].triangle_offset, mo[i].triangle_count};
-    }
-    cm.mesh.meshletVertices.assign(mvi.begin(), mvi.end());
-    cm.mesh.meshletTriangles.resize(mti.size() / 3);
-    for (size_t i = 0; i < mti.size() / 3; ++i)
-    {
-        cm.mesh.meshletTriangles[i] =
-            MeshletTriangle{mti[3 * i + 0], mti[3 * i + 1], mti[3 * i + 2]};
-    }
-
-    // 9) Per-meshlet bounds (frustum + cone culling).
+    cm.mesh.meshletTriangles.resize(totalTris);
     cm.mesh.meshletBounds.resize(meshletCount);
+
+    size_t triCursor = 0;
     for (size_t i = 0; i < meshletCount; ++i)
     {
+        const auto &src = mo[i];
+
+        // Dense copy: drop the padding bytes that follow this meshlet's triangles.
+        const unsigned char *triBytes = &mti[src.triangle_offset];
+        for (uint32_t t = 0; t < src.triangle_count; ++t)
+        {
+            cm.mesh.meshletTriangles[triCursor + t] = MeshletTriangle{
+                triBytes[t * 3 + 0], triBytes[t * 3 + 1], triBytes[t * 3 + 2]};
+        }
+
+        cm.mesh.meshlets[i] = Meshlet{src.vertex_offset, src.vertex_count,
+                                      static_cast<uint32_t>(triCursor), src.triangle_count};
+
+        // Bounds: meshopt still wants its own raw mti pointer + byte offset.
         const meshopt_Bounds b = meshopt_computeMeshletBounds(
-            &mvi[mo[i].vertex_offset], &mti[mo[i].triangle_offset], mo[i].triangle_count,
+            &mvi[src.vertex_offset], &mti[src.triangle_offset], src.triangle_count,
             &cm.mesh.vertices[0].position[0], cm.mesh.vertices.size(), sizeof(GpuVertex));
         cm.mesh.meshletBounds[i] =
             MeshletBounds{Vec3{b.center[0], b.center[1], b.center[2]}, b.radius,
                           Vec3{b.cone_axis[0], b.cone_axis[1], b.cone_axis[2]}, b.cone_cutoff};
+
+        triCursor += src.triangle_count;
     }
 
     // 10) Material refs: one hash per material in source-index order.

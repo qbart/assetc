@@ -150,6 +150,18 @@ struct ChunkPayload
 
 int WriteChunked(const std::string &path, std::span<const ChunkPayload> chunks);
 
+// Serialize a Mesh + bounds + material hashes to a v1 .hmesh file.
+// Builds 8 ChunkPayloads (BNDS, VTXS, IDXS, MLET, MLVR, MLTR, MLBN, MTRL) and
+// hands them to WriteChunked. Returns 0 on success, non-zero on failure.
+//
+// VTXS/IDXS/MTRL chunks carry small preludes (count + per-element metadata)
+// so the loader doesn't have to infer count from chunk size.
+//
+// Indices are written as uint16_t when vertexCount <= 65535, else uint32_t.
+// The IDXS prelude's `size` field tells the loader which.
+int WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds &bounds,
+               std::span<const uint64_t> materialHashes);
+
 // Pack a unit-length vector into two int16_t using octahedral projection.
 // Range: each component encodes [-1, 1] as [-32767, 32767] (Vulkan SNORM convention).
 std::array<int16_t, 2> OctEncode(Vec3 n) noexcept;
