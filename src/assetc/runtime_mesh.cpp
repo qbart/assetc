@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <fstream>
 #include <ios>
 #include <type_traits>
@@ -240,4 +242,163 @@ int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds 
         {ChunkId::Materials, std::span<const std::byte>(mtrlBuf.data(), mtrlBuf.size())},
     };
     return WriteChunked(path, chunks);
+}
+
+// --- ValidateHMesh ------------------------------------------------------------
+
+int assetc::ValidateHMesh(const std::string &path)
+{
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    if (!in)
+    {
+        fmtx::Error(fmt::format("validate: cannot open {}", path));
+        return 1;
+    }
+    const auto fileSize = static_cast<size_t>(in.tellg());
+    in.seekg(0, std::ios::beg);
+
+    std::vector<std::byte> buf(fileSize);
+    in.read(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(fileSize));
+    if (!in)
+    {
+        fmtx::Error(fmt::format("validate: read failed {}", path));
+        return 1;
+    }
+
+    if (fileSize < sizeof(FileHeader))
+    {
+        fmtx::Error(fmt::format("validate: {} too small ({} B)", path, fileSize));
+        return 1;
+    }
+
+    FileHeader hdr{};
+    std::memcpy(&hdr, buf.data(), sizeof(FileHeader));
+    if (hdr.magic != MeshMagic)
+    {
+        fmtx::Error(fmt::format("validate: {} bad magic 0x{:08x}", path, hdr.magic));
+        return 1;
+    }
+    if (hdr.version != 1)
+    {
+        fmtx::Error(fmt::format("validate: {} unsupported version {}", path, hdr.version));
+        return 1;
+    }
+
+    const size_t tableOffset = sizeof(FileHeader);
+    const size_t tableBytes  = static_cast<size_t>(hdr.chunkCount) * sizeof(ChunkEntry);
+    if (tableOffset + tableBytes > fileSize)
+    {
+        fmtx::Error(fmt::format("validate: {} chunk table truncated", path));
+        return 1;
+    }
+
+    std::vector<ChunkEntry> table(hdr.chunkCount);
+    std::memcpy(table.data(), buf.data() + tableOffset, tableBytes);
+
+    for (size_t i = 0; i < table.size(); ++i)
+    {
+        const auto &e = table[i];
+        if (e.offset > fileSize || e.size > fileSize - e.offset)
+        {
+            fmtx::Error(fmt::format("validate: {} chunk {} (fourcc 0x{:08x}) extends past EOF",
+                                    path, i, e.fourcc));
+            return 1;
+        }
+    }
+
+    auto findChunk = [&](ChunkId id) -> const ChunkEntry * {
+        const auto v = std::to_underlying(id);
+        for (const auto &e : table)
+            if (e.fourcc == v)
+                return &e;
+        return nullptr;
+    };
+
+    const auto *bnds = findChunk(ChunkId::Bounds);
+    const auto *vtxs = findChunk(ChunkId::Vertices);
+    const auto *idxs = findChunk(ChunkId::Indices);
+    if (!bnds || !vtxs || !idxs)
+    {
+        fmtx::Error(fmt::format("validate: {} missing required chunk (BNDS/VTXS/IDXS)", path));
+        return 1;
+    }
+
+    if (bnds->size != sizeof(MeshBounds))
+    {
+        fmtx::Error(fmt::format("validate: {} BNDS size {} != {}", path, bnds->size,
+                                sizeof(MeshBounds)));
+        return 1;
+    }
+    MeshBounds bounds{};
+    std::memcpy(&bounds, buf.data() + bnds->offset, sizeof(MeshBounds));
+
+    if (vtxs->size < 8)
+    {
+        fmtx::Error(fmt::format("validate: {} VTXS truncated prelude", path));
+        return 1;
+    }
+    uint32_t vtxCount  = 0;
+    uint32_t vtxStride = 0;
+    std::memcpy(&vtxCount, buf.data() + vtxs->offset + 0, 4);
+    std::memcpy(&vtxStride, buf.data() + vtxs->offset + 4, 4);
+    if (vtxStride != sizeof(GpuVertex))
+    {
+        fmtx::Error(fmt::format("validate: {} VTXS stride {} != sizeof(GpuVertex)={}", path,
+                                vtxStride, sizeof(GpuVertex)));
+        return 1;
+    }
+    if (8 + static_cast<size_t>(vtxCount) * vtxStride != vtxs->size)
+    {
+        fmtx::Error(fmt::format("validate: {} VTXS size mismatch (prelude+data={} chunk={})",
+                                path, 8 + static_cast<size_t>(vtxCount) * vtxStride, vtxs->size));
+        return 1;
+    }
+
+    if (idxs->size < 8)
+    {
+        fmtx::Error(fmt::format("validate: {} IDXS truncated prelude", path));
+        return 1;
+    }
+    uint32_t idxCount = 0;
+    uint32_t idxSize  = 0;
+    std::memcpy(&idxCount, buf.data() + idxs->offset + 0, 4);
+    std::memcpy(&idxSize, buf.data() + idxs->offset + 4, 4);
+    if (idxSize != 2 && idxSize != 4)
+    {
+        fmtx::Error(fmt::format("validate: {} IDXS size {} not 2 or 4", path, idxSize));
+        return 1;
+    }
+    if (8 + static_cast<size_t>(idxCount) * idxSize != idxs->size)
+    {
+        fmtx::Error(fmt::format("validate: {} IDXS size mismatch", path));
+        return 1;
+    }
+
+    // AABB containment check on positions.
+    const float range = std::max(
+        {bounds.aabbMax.x - bounds.aabbMin.x, bounds.aabbMax.y - bounds.aabbMin.y,
+         bounds.aabbMax.z - bounds.aabbMin.z, 1.0f});
+    const float        eps     = 1e-5f * range;
+    const std::byte   *vtxData = buf.data() + vtxs->offset + 8;
+    for (uint32_t i = 0; i < vtxCount; ++i)
+    {
+        float pos[3]{};
+        std::memcpy(pos, vtxData + static_cast<size_t>(i) * vtxStride
+                            + offsetof(GpuVertex, position),
+                    sizeof(pos));
+        if (pos[0] < bounds.aabbMin.x - eps || pos[0] > bounds.aabbMax.x + eps
+            || pos[1] < bounds.aabbMin.y - eps || pos[1] > bounds.aabbMax.y + eps
+            || pos[2] < bounds.aabbMin.z - eps || pos[2] > bounds.aabbMax.z + eps)
+        {
+            fmtx::Error(fmt::format(
+                "validate: {} vertex {} ({},{},{}) outside AABB [({},{},{})-({},{},{})]", path, i,
+                pos[0], pos[1], pos[2], bounds.aabbMin.x, bounds.aabbMin.y, bounds.aabbMin.z,
+                bounds.aabbMax.x, bounds.aabbMax.y, bounds.aabbMax.z));
+            return 1;
+        }
+    }
+
+    fmtx::Success(fmt::format("validate: {} ok ({} verts, {} idx@{}B, {} chunks)", path,
+                              vtxCount, idxCount, idxSize, hdr.chunkCount));
+    return 0;
 }

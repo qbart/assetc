@@ -162,6 +162,16 @@ int WriteChunked(const std::string &path, std::span<const ChunkPayload> chunks);
 int WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds &bounds,
                std::span<const uint64_t> materialHashes);
 
+// Read a written .hmesh and run structural + semantic checks:
+//   - magic, version, chunk table fits in file
+//   - every chunk's [offset, offset+size) fits in file
+//   - required chunks present (BNDS, VTXS, IDXS)
+//   - VTXS stride matches sizeof(GpuVertex); IDXS size is 2 or 4
+//   - prelude counts match chunk size for VTXS/IDXS
+//   - every vertex position is inside the BNDS AABB (within float epsilon)
+// Returns 0 on success, non-zero with logged error on the first failure.
+int ValidateHMesh(const std::string &path);
+
 // Pack a unit-length vector into two int16_t using octahedral projection.
 // Range: each component encodes [-1, 1] as [-32767, 32767] (Vulkan SNORM convention).
 std::array<int16_t, 2> OctEncode(Vec3 n) noexcept;

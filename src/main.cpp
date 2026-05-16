@@ -124,7 +124,8 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
     return out.generic_string();
 }
 
-int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount)
+int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount,
+                bool verify)
 {
     const auto out = asset.RuntimePath(outputDir);
     fs::create_directories(fs::path(out).parent_path());
@@ -170,7 +171,11 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
                                    asset.type, cm.mesh.vertices.size(),
                                    cm.mesh.indices.size() / 3, cm.mesh.meshlets.size(),
                                    cm.materialRefs.size(), out));
-            return assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.materialRefs);
+            if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.materialRefs); rc != 0)
+                return rc;
+            if (verify)
+                return assetc::ValidateHMesh(out);
+            return 0;
         }
 
         fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, ext.string()));
@@ -191,8 +196,10 @@ int main(int argc, char **argv)
     argv = app.ensure_utf8(argv);
 
     std::string outputDir = "runtime";
+    bool        verify    = false;
     app.add_option("-j,--jobs", jobs, "Concurrent jobs")->check(CLI::PositiveNumber);
     app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
+    app.add_flag("--verify", verify, "Re-read each written .hmesh and check structural validity");
     app.add_subcommand("init", "Initialize structure");
 
     CLI11_PARSE(app, argc, argv);
@@ -272,7 +279,7 @@ int main(int argc, char **argv)
         {
             size_t i = next.fetch_add(1, std::memory_order_relaxed);
             if (i >= assets.size()) return;
-            if (handleAsset(assets[i], outputDir, innerThreads) != 0)
+            if (handleAsset(assets[i], outputDir, innerThreads, verify) != 0)
             {
                 std::lock_guard<std::mutex> lk(logMu);
                 fmtx::Error(fmt::format("failed: {}", assets[i].path));
