@@ -125,7 +125,40 @@ uint64_t HashAssetRef(std::string_view runtimeRefNoExt) noexcept
     return h;
 }
 
-CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view meshRef)
+std::string MaterialLeaf(std::string_view name, size_t index,
+                         std::span<const std::string_view> allNames)
+{
+    if (name.empty())
+        return fmt::format("material_{}", index);
+
+    std::string lower;
+    lower.reserve(name.size());
+    for (char c : name)
+        lower.push_back(AsciiLower(c));
+
+    for (size_t j = 0; j < allNames.size(); ++j)
+    {
+        if (j == index)
+            continue;
+        const auto &other = allNames[j];
+        if (other.size() != name.size())
+            continue;
+        bool same = true;
+        for (size_t k = 0; k < name.size(); ++k)
+        {
+            if (AsciiLower(other[k]) != lower[k])
+            {
+                same = false;
+                break;
+            }
+        }
+        if (same)
+            return fmt::format("material_{}", index);
+    }
+    return lower;
+}
+
+CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
 {
     CompiledMesh cm{};
 
@@ -144,8 +177,6 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view meshRef)
 
     std::vector<FlatVertex> flat;
     flat.reserve(triangleCount * 3);
-    std::vector<int> faceMaterial;
-    faceMaterial.reserve(triangleCount);
 
     bool warnedMissingUV     = false;
     bool warnedMissingNormal = false;
@@ -161,7 +192,6 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view meshRef)
                 fmtx::Warn(fmt::format(
                     "BuildFromObj: non-triangle face ({}); enable triangulate=true", nv));
                 cursor += nv;
-                faceMaterial.push_back(-1);
                 continue;
             }
 
@@ -209,7 +239,6 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view meshRef)
 
                 flat.push_back(v);
             }
-            faceMaterial.push_back(sh.mesh.material_ids[f]);
             cursor += 3;
         }
     }
@@ -391,24 +420,20 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view meshRef)
                           Vec3{b.cone_axis[0], b.cone_axis[1], b.cone_axis[2]}, b.cone_cutoff};
     }
 
-    // 10) Material refs.
-    //     For each *used* material, hash "<meshRef>/<material_name_lowercased>".
-    //     Mesh sub-grouping by material is deferred to v2 (SUBM chunk); v1 just
-    //     records the set of materials this mesh touches so the engine can pre-resolve.
-    std::vector<bool> used(src.materials.size(), false);
-    for (int mid : faceMaterial)
-    {
-        if (mid >= 0 && static_cast<size_t>(mid) < src.materials.size())
-            used[mid] = true;
-    }
+    // 10) Material refs: one hash per material in source-index order.
+    //     File-scoped under sourceRef so multiple meshes from one source share refs.
+    //     Leaf is name-or-index (see MaterialLeaf) to survive empty/duplicate names.
+    std::vector<std::string_view> names;
+    names.reserve(src.materials.size());
+    for (const auto &mat : src.materials)
+        names.emplace_back(mat.name);
+
+    cm.materialRefs.reserve(src.materials.size());
     for (size_t m = 0; m < src.materials.size(); ++m)
     {
-        if (!used[m])
-            continue;
-        std::string ref(meshRef);
+        std::string ref(sourceRef);
         ref.push_back('/');
-        for (char c : src.materials[m].name)
-            ref.push_back(AsciiLower(c));
+        ref.append(MaterialLeaf(names[m], m, names));
         cm.materialRefs.push_back(HashAssetRef(ref));
     }
 
