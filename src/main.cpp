@@ -1,5 +1,8 @@
+#include "assetc/encode_mesh.hpp"
+#include "assetc/runtime_mesh.hpp"
 #include "deps/fmt.hpp"
 #include "deps/ktx.hpp"
+#include "deps/obj.hpp"
 #include "deps/stb.hpp"
 #include <CLI/CLI.hpp>
 #include <algorithm>
@@ -70,7 +73,23 @@ struct Asset
     AssetType type;
 
     std::string RuntimePath(const std::string &outputDir) const;
+    std::string SourceRef() const; // canonical file-level namespace ref (lowercase, no ext)
 };
+
+std::string Asset::SourceRef() const
+{
+    fs::path rel = fs::path(path).lexically_relative("assets");
+    if (rel.empty())
+        rel = fs::path(path);
+    rel.replace_extension();
+    std::string s = rel.generic_string();
+    for (char &c : s)
+    {
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+    }
+    return s;
+}
 
 std::string Asset::RuntimePath(const std::string &outputDir) const
 {
@@ -108,32 +127,59 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
 int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount)
 {
     const auto out = asset.RuntimePath(outputDir);
+    fs::create_directories(fs::path(out).parent_path());
 
     switch (asset.type)
     {
     case AssetType::Color:
     case AssetType::Normal:
     case AssetType::Grayscale:
-        break;
+    {
+        stb::Image img = stb::Load(asset.path);
+        if (!img.pixels)
+        {
+            fmtx::Error(fmt::format("load failed: {}: {}", asset.path, stb::ImageError()));
+            return 1;
+        }
+        fmtx::Info(
+            fmt::format("{} {}x{}x{} -> {}", asset.type, img.w, img.h, img.channels, out));
+
+        ktx::UASTCMode mode = ktx::UASTCMode::Color;
+        if (asset.type == AssetType::Normal)    mode = ktx::UASTCMode::Normal;
+        if (asset.type == AssetType::Grayscale) mode = ktx::UASTCMode::Grayscale;
+        return ktx::FromImageToUASTC(img, out, mode, threadCount);
+    }
+    case AssetType::Mesh:
+    {
+        const auto ext = fs::path(asset.path).extension();
+        if (ext == ".obj")
+        {
+            auto src = obj::Load(asset.path);
+            if (!src)
+                return 1;
+
+            const auto sourceRef = asset.SourceRef();
+            auto       cm        = assetc::BuildFromObj(*src, sourceRef);
+            if (cm.mesh.vertices.empty())
+            {
+                fmtx::Error(fmt::format("encode failed: {}", asset.path));
+                return 1;
+            }
+
+            fmtx::Info(fmt::format("{} {} verts / {} tris / {} meshlets / {} mats -> {}",
+                                   asset.type, cm.mesh.vertices.size(),
+                                   cm.mesh.indices.size() / 3, cm.mesh.meshlets.size(),
+                                   cm.materialRefs.size(), out));
+            return assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.materialRefs);
+        }
+
+        fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, ext.string()));
+        return 0;
+    }
     default:
         fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, asset.type));
         return 0;
     }
-
-    stb::Image img = stb::Load(asset.path);
-    if (!img.pixels)
-    {
-        fmtx::Error(fmt::format("load failed: {}: {}", asset.path, stb::ImageError()));
-        return 1;
-    }
-    fmtx::Info(fmt::format("{} {}x{}x{} -> {}", asset.type, img.w, img.h, img.channels, out));
-
-    fs::create_directories(fs::path(out).parent_path());
-
-    ktx::UASTCMode mode = ktx::UASTCMode::Color;
-    if (asset.type == AssetType::Normal)    mode = ktx::UASTCMode::Normal;
-    if (asset.type == AssetType::Grayscale) mode = ktx::UASTCMode::Grayscale;
-    return ktx::FromImageToUASTC(img, out, mode, threadCount);
 }
 
 int main(int argc, char **argv)
