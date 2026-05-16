@@ -2,6 +2,9 @@
 
 #include <array>
 #include <cstdint>
+#include <span>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace assetc
@@ -22,34 +25,58 @@ struct Vec4
     float x, y, z, w;
 };
 
+constexpr uint32_t MakeFourCC(char a, char b, char c, char d)
+{
+    return static_cast<uint32_t>(static_cast<uint8_t>(a))
+         | (static_cast<uint32_t>(static_cast<uint8_t>(b)) << 8)
+         | (static_cast<uint32_t>(static_cast<uint8_t>(c)) << 16)
+         | (static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24);
+}
+
+constexpr uint32_t MeshMagic = MakeFourCC('H', 'M', 'S', 'H'); // 0x4853'4D48
+
+enum class ChunkId : uint32_t
+{
+    Bounds           = MakeFourCC('B', 'N', 'D', 'S'),
+    Vertices         = MakeFourCC('V', 'T', 'X', 'S'),
+    Indices          = MakeFourCC('I', 'D', 'X', 'S'),
+    Meshlets         = MakeFourCC('M', 'L', 'E', 'T'),
+    MeshletVertices  = MakeFourCC('M', 'L', 'V', 'R'),
+    MeshletTriangles = MakeFourCC('M', 'L', 'T', 'R'),
+    MeshletBounds    = MakeFourCC('M', 'L', 'B', 'N'),
+    Materials        = MakeFourCC('M', 'T', 'R', 'L'),
+};
+
 #pragma pack(push, 1)
 
-struct MeshHeader
+struct FileHeader
 {
-    uint32_t magic;   // "HMSH"
-    uint32_t version;
-    // 8 bytes
-    uint32_t vertexCount;
-    uint32_t vertexStride;
-    // 16 bytes
-    uint32_t indexCount;
-    uint32_t indexSize;
-    // 24 bytes
-    uint32_t meshletCount;
-    uint32_t _pad1;
-    // 32 bytes
-    uint64_t vertexOffset;
-    uint64_t indexOffset;
-    // 48 bytes
-    uint64_t meshletOffset;
-    uint64_t meshletVerticesOffset;
-    uint64_t meshletTrianglesOffset;
-    uint64_t meshletBoundsOffset;
-    // 80 bytes
-    std::array<uint8_t, 16> reserved;
-    // 96 bytes
+    uint32_t magic;      // == MeshMagic
+    uint32_t version;    // 1
+    uint32_t chunkCount; // entries in ChunkTable
+    uint32_t flags;      // file-level flags, reserved
+    uint64_t _reserved1; // (was contentHash; held for future use)
+    uint64_t _reserved2;
 };
-static_assert(sizeof(MeshHeader) == 96, "MeshHeader must be 96 bytes");
+static_assert(sizeof(FileHeader) == 32, "FileHeader must be 32 bytes");
+
+struct ChunkEntry
+{
+    uint32_t fourcc; // ChunkId value
+    uint32_t flags;  // per-chunk flags (compression, alignment hint), reserved
+    uint64_t offset; // from file start
+    uint64_t size;   // payload bytes
+};
+static_assert(sizeof(ChunkEntry) == 24, "ChunkEntry must be 24 bytes");
+
+struct MeshBounds
+{
+    Vec3  aabbMin;
+    Vec3  aabbMax;
+    Vec3  sphereCenter;
+    float sphereRadius;
+};
+static_assert(sizeof(MeshBounds) == 40, "MeshBounds must be 40 bytes");
 
 struct CpuVertex
 {
@@ -62,8 +89,8 @@ struct CpuVertex
 struct GpuVertex
 {
     float   position[3];
-    int16_t normal[4];
-    int16_t tangent[4];
+    int16_t normal[4];  // [0..1] = octahedral normal; [2..3] reserved (0 in v1)
+    int16_t tangent[4]; // [0..1] = octahedral tangent + handedness bit; [2..3] reserved
     float   uv[2];
 };
 
@@ -115,6 +142,12 @@ struct Mesh
     std::vector<MeshletBounds>   meshletBounds;
 };
 
-constexpr uint32_t MeshMagic = 0x4853'4D48; // 'HMSH' little-endian
+struct ChunkPayload
+{
+    ChunkId                    id;
+    std::span<const std::byte> bytes;
+};
 
-}
+int WriteChunked(const std::string &path, std::span<const ChunkPayload> chunks);
+
+} // namespace assetc
