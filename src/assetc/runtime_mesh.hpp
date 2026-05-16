@@ -150,4 +150,15 @@ struct ChunkPayload
 
 int WriteChunked(const std::string &path, std::span<const ChunkPayload> chunks);
 
+// Pack a unit-length vector into two int16_t using octahedral projection.
+// Range: each component encodes [-1, 1] as [-32767, 32767] (Vulkan SNORM convention).
+std::array<int16_t, 2> OctEncode(Vec3 n) noexcept;
+
+// Same as OctEncode, but bit 0 of the X component carries handedness:
+//   bit 0 == 0 -> handedness >= 0
+//   bit 0 == 1 -> handedness <  0
+// The shader recovers the sign from the LSB and treats the rest as the direction.
+// Costs ~1/32767 of x-axis precision, which is well below visible threshold.
+std::array<int16_t, 2> OctEncodeTangent(Vec3 t, float handedness) noexcept;
+
 } // namespace assetc
