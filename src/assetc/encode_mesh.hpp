@@ -12,6 +12,11 @@ namespace obj
 struct OBJ;
 }
 
+namespace gltf
+{
+struct GLTF;
+}
+
 namespace assetc
 {
 
@@ -39,6 +44,20 @@ struct CompiledMesh
 //
 // On failure, the returned CompiledMesh has empty vectors.
 CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef);
+
+// Build a runtime-ready mesh from a parsed glTF/GLB.
+//
+// v1 limitation: emits only the first primitive of the first mesh in the source.
+// Multi-mesh / multi-primitive support requires a SUBM chunk (v2). All materials
+// from the source are still hashed in source-index order so engine-side material
+// dedupe works correctly even though only one primitive's geometry is exported.
+//
+// Uses source TANGENT attribute if present; otherwise runs MikkTSpace if UVs
+// are present; otherwise emits zero tangents and warns. Synthesizes face normals
+// if NORMAL is absent.
+//
+// glTF UVs are top-left-origin (matches Vulkan), so no V flip applied.
+CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef);
 
 // FNV1a64 hash of a runtime-relative asset reference. Caller-side normalization
 // (lowercase, /-separated, no extension, no leading "runtime/" prefix) is the

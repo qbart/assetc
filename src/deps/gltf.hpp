@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <string>
-#define TINYGLTF3_IMPLEMENTATION
 #define TINYGLTF3_ENABLE_FS
 #define TINYGLTF3_NOEXCEPTION
 #include "stb.hpp"

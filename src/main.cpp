@@ -1,6 +1,7 @@
 #include "assetc/encode_mesh.hpp"
 #include "assetc/runtime_mesh.hpp"
 #include "deps/fmt.hpp"
+#include "deps/gltf.hpp"
 #include "deps/ktx.hpp"
 #include "deps/obj.hpp"
 #include "deps/stb.hpp"
@@ -152,33 +153,44 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
     }
     case AssetType::Mesh:
     {
-        const auto ext = fs::path(asset.path).extension();
+        const auto         ext       = fs::path(asset.path).extension();
+        const auto         sourceRef = asset.SourceRef();
+        assetc::CompiledMesh cm;
+
         if (ext == ".obj")
         {
             auto src = obj::Load(asset.path);
             if (!src)
                 return 1;
-
-            const auto sourceRef = asset.SourceRef();
-            auto       cm        = assetc::BuildFromObj(*src, sourceRef);
-            if (cm.mesh.vertices.empty())
-            {
-                fmtx::Error(fmt::format("encode failed: {}", asset.path));
+            cm = assetc::BuildFromObj(*src, sourceRef);
+        }
+        else if (ext == ".gltf" || ext == ".glb")
+        {
+            auto src = gltf::Load(asset.path);
+            if (!src)
                 return 1;
-            }
-
-            fmtx::Info(fmt::format("{} {} verts / {} tris / {} meshlets / {} mats -> {}",
-                                   asset.type, cm.mesh.vertices.size(),
-                                   cm.mesh.indices.size() / 3, cm.mesh.meshlets.size(),
-                                   cm.materialRefs.size(), out));
-            if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.materialRefs); rc != 0)
-                return rc;
-            if (verify)
-                return assetc::ValidateHMesh(out);
+            cm = assetc::BuildFromGltf(*src, sourceRef);
+        }
+        else
+        {
+            fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, ext.string()));
             return 0;
         }
 
-        fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, ext.string()));
+        if (cm.mesh.vertices.empty())
+        {
+            fmtx::Error(fmt::format("encode failed: {}", asset.path));
+            return 1;
+        }
+
+        fmtx::Info(fmt::format("{} {} verts / {} tris / {} meshlets / {} mats -> {}",
+                               asset.type, cm.mesh.vertices.size(),
+                               cm.mesh.indices.size() / 3, cm.mesh.meshlets.size(),
+                               cm.materialRefs.size(), out));
+        if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.materialRefs); rc != 0)
+            return rc;
+        if (verify)
+            return assetc::ValidateHMesh(out);
         return 0;
     }
     default:

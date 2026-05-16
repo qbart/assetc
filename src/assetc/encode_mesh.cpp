@@ -1,6 +1,7 @@
 #include "encode_mesh.hpp"
 
 #include "../deps/fmt.hpp"
+#include "../deps/gltf.hpp"
 #include "../deps/obj.hpp"
 #include "../deps/tiny/mikktspace.h"
 
@@ -10,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <unordered_map>
 
 namespace assetc
@@ -109,6 +111,223 @@ struct VertexKeyHash
 inline char AsciiLower(char c) noexcept
 {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+}
+
+void FillFaceNormals(std::vector<FlatVertex> &flat) noexcept
+{
+    for (size_t i = 0; i + 3 <= flat.size(); i += 3)
+    {
+        const auto &a = flat[i + 0].pos;
+        const auto &b = flat[i + 1].pos;
+        const auto &c = flat[i + 2].pos;
+        const float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+        const float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+        Vec3        n{uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx};
+        const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        if (len > 0.0f)
+        {
+            n.x /= len;
+            n.y /= len;
+            n.z /= len;
+        }
+        flat[i + 0].normal = n;
+        flat[i + 1].normal = n;
+        flat[i + 2].normal = n;
+    }
+}
+
+bool RunMikkTSpace(std::vector<FlatVertex> &flat)
+{
+    MikkCtx              mctx{&flat};
+    SMikkTSpaceInterface mIface{};
+    mIface.m_getNumFaces          = MikkGetNumFaces;
+    mIface.m_getNumVerticesOfFace = MikkGetNumVerticesOfFace;
+    mIface.m_getPosition          = MikkGetPosition;
+    mIface.m_getNormal            = MikkGetNormal;
+    mIface.m_getTexCoord          = MikkGetTexCoord;
+    mIface.m_setTSpaceBasic       = MikkSetTSpaceBasic;
+    SMikkTSpaceContext mkc{};
+    mkc.m_pInterface = &mIface;
+    mkc.m_pUserData  = &mctx;
+    return genTangSpaceDefault(&mkc) != 0;
+}
+
+// --- glTF accessor helpers ---------------------------------------------------
+
+const uint8_t *AccessorPtr(const tg3_model &m, const tg3_accessor &a) noexcept
+{
+    if (a.buffer_view < 0 || static_cast<uint32_t>(a.buffer_view) >= m.buffer_views_count)
+        return nullptr;
+    const auto &bv = m.buffer_views[a.buffer_view];
+    if (bv.buffer < 0 || static_cast<uint32_t>(bv.buffer) >= m.buffers_count)
+        return nullptr;
+    const auto &buf = m.buffers[bv.buffer];
+    return buf.data.data + bv.byte_offset + a.byte_offset;
+}
+
+size_t AccessorStride(const tg3_model &m, const tg3_accessor &a) noexcept
+{
+    if (a.buffer_view >= 0 && static_cast<uint32_t>(a.buffer_view) < m.buffer_views_count)
+    {
+        const auto &bv = m.buffer_views[a.buffer_view];
+        if (bv.byte_stride > 0)
+            return bv.byte_stride;
+    }
+    const int cs = tg3_component_size(a.component_type);
+    const int nc = tg3_num_components(a.type);
+    return static_cast<size_t>(cs) * static_cast<size_t>(nc);
+}
+
+int FindAttr(const tg3_primitive &p, const char *name) noexcept
+{
+    for (uint32_t i = 0; i < p.attributes_count; ++i)
+    {
+        if (tg3_str_equals_cstr(p.attributes[i].key, name))
+            return p.attributes[i].value;
+    }
+    return -1;
+}
+
+// --- Shared finalize: dedupe -> bounds -> oct pack -> meshlets -> materials --
+
+CompiledMesh FinalizeMesh(std::vector<FlatVertex> &&flat,
+                          std::span<const std::string_view> materialNames,
+                          std::string_view                  sourceRef)
+{
+    CompiledMesh cm{};
+
+    // Dedupe.
+    std::vector<CpuVertex> cpuVerts;
+    cpuVerts.reserve(flat.size() / 2);
+    std::vector<uint32_t> indices;
+    indices.reserve(flat.size());
+    std::unordered_map<VertexKey, uint32_t, VertexKeyHash> seen;
+    seen.reserve(flat.size());
+    for (const auto &fv : flat)
+    {
+        VertexKey key{fv};
+        auto [it, inserted] = seen.emplace(key, static_cast<uint32_t>(cpuVerts.size()));
+        if (inserted)
+            cpuVerts.push_back(CpuVertex{fv.pos, fv.normal, fv.tangent, fv.uv});
+        indices.push_back(it->second);
+    }
+
+    // Bounds (AABB + sphere).
+    Vec3 mn{std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
+            std::numeric_limits<float>::infinity()};
+    Vec3 mx{-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+            -std::numeric_limits<float>::infinity()};
+    for (const auto &v : cpuVerts)
+    {
+        mn.x = std::min(mn.x, v.pos.x);
+        mn.y = std::min(mn.y, v.pos.y);
+        mn.z = std::min(mn.z, v.pos.z);
+        mx.x = std::max(mx.x, v.pos.x);
+        mx.y = std::max(mx.y, v.pos.y);
+        mx.z = std::max(mx.z, v.pos.z);
+    }
+    const Vec3 center{0.5f * (mn.x + mx.x), 0.5f * (mn.y + mx.y), 0.5f * (mn.z + mx.z)};
+    float      r2 = 0.0f;
+    for (const auto &v : cpuVerts)
+    {
+        const float dx = v.pos.x - center.x;
+        const float dy = v.pos.y - center.y;
+        const float dz = v.pos.z - center.z;
+        r2             = std::max(r2, dx * dx + dy * dy + dz * dz);
+    }
+    cm.bounds = MeshBounds{mn, mx, center, std::sqrt(r2)};
+
+    // CpuVertex -> GpuVertex (oct pack).
+    cm.mesh.vertices.resize(cpuVerts.size());
+    for (size_t i = 0; i < cpuVerts.size(); ++i)
+    {
+        const auto &cv = cpuVerts[i];
+        auto       &gv = cm.mesh.vertices[i];
+        gv.position[0] = cv.pos.x;
+        gv.position[1] = cv.pos.y;
+        gv.position[2] = cv.pos.z;
+        const auto n   = OctEncode(cv.normal);
+        gv.normal[0]   = n[0];
+        gv.normal[1]   = n[1];
+        gv.normal[2]   = 0;
+        gv.normal[3]   = 0;
+        const auto t   = OctEncodeTangent(Vec3{cv.tangent.x, cv.tangent.y, cv.tangent.z},
+                                          cv.tangent.w);
+        gv.tangent[0]  = t[0];
+        gv.tangent[1]  = t[1];
+        gv.tangent[2]  = 0;
+        gv.tangent[3]  = 0;
+        gv.uv[0]       = cv.uv.x;
+        gv.uv[1]       = cv.uv.y;
+    }
+    cm.mesh.indices = std::move(indices);
+
+    meshopt_optimizeVertexCache(cm.mesh.indices.data(), cm.mesh.indices.data(),
+                                cm.mesh.indices.size(), cm.mesh.vertices.size());
+
+    constexpr size_t MaxVerts    = 64;
+    constexpr size_t MaxTris     = 124;
+    constexpr float  ConeWeight  = 0.25f;
+    const size_t     maxMeshlets = meshopt_buildMeshletsBound(cm.mesh.indices.size(),
+                                                              MaxVerts, MaxTris);
+
+    std::vector<meshopt_Meshlet> mo(maxMeshlets);
+    std::vector<unsigned int>    mvi(maxMeshlets * MaxVerts);
+    std::vector<unsigned char>   mti(maxMeshlets * MaxTris * 3);
+
+    const size_t meshletCount = meshopt_buildMeshlets(
+        mo.data(), mvi.data(), mti.data(), cm.mesh.indices.data(), cm.mesh.indices.size(),
+        &cm.mesh.vertices[0].position[0], cm.mesh.vertices.size(), sizeof(GpuVertex), MaxVerts,
+        MaxTris, ConeWeight);
+
+    if (meshletCount == 0)
+    {
+        fmtx::Error("FinalizeMesh: meshopt_buildMeshlets produced 0 meshlets");
+        return CompiledMesh{};
+    }
+
+    const auto  &last    = mo[meshletCount - 1];
+    const size_t vtxUsed = last.vertex_offset + last.vertex_count;
+    size_t       totalTris = 0;
+    for (size_t i = 0; i < meshletCount; ++i)
+        totalTris += mo[i].triangle_count;
+
+    cm.mesh.meshletVertices.assign(mvi.begin(), mvi.begin() + vtxUsed);
+    cm.mesh.meshlets.resize(meshletCount);
+    cm.mesh.meshletTriangles.resize(totalTris);
+    cm.mesh.meshletBounds.resize(meshletCount);
+
+    size_t triCursor = 0;
+    for (size_t i = 0; i < meshletCount; ++i)
+    {
+        const auto          &src      = mo[i];
+        const unsigned char *triBytes = &mti[src.triangle_offset];
+        for (uint32_t t = 0; t < src.triangle_count; ++t)
+        {
+            cm.mesh.meshletTriangles[triCursor + t] = MeshletTriangle{
+                triBytes[t * 3 + 0], triBytes[t * 3 + 1], triBytes[t * 3 + 2]};
+        }
+        cm.mesh.meshlets[i] = Meshlet{src.vertex_offset, src.vertex_count,
+                                      static_cast<uint32_t>(triCursor), src.triangle_count};
+        const meshopt_Bounds b = meshopt_computeMeshletBounds(
+            &mvi[src.vertex_offset], &mti[src.triangle_offset], src.triangle_count,
+            &cm.mesh.vertices[0].position[0], cm.mesh.vertices.size(), sizeof(GpuVertex));
+        cm.mesh.meshletBounds[i] =
+            MeshletBounds{Vec3{b.center[0], b.center[1], b.center[2]}, b.radius,
+                          Vec3{b.cone_axis[0], b.cone_axis[1], b.cone_axis[2]}, b.cone_cutoff};
+        triCursor += src.triangle_count;
+    }
+
+    cm.materialRefs.reserve(materialNames.size());
+    for (size_t i = 0; i < materialNames.size(); ++i)
+    {
+        std::string ref(sourceRef);
+        ref.push_back('/');
+        ref.append(MaterialLeaf(materialNames[i], i, materialNames));
+        cm.materialRefs.push_back(HashAssetRef(ref));
+    }
+
+    return cm;
 }
 
 } // namespace
@@ -249,208 +468,249 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
         return cm;
     }
 
-    // 2) Fill missing normals with per-face normals.
     if (warnedMissingNormal)
-    {
-        for (size_t i = 0; i < flat.size(); i += 3)
-        {
-            const auto &a = flat[i + 0].pos;
-            const auto &b = flat[i + 1].pos;
-            const auto &c = flat[i + 2].pos;
-            const float ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
-            const float vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
-            Vec3        n{uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx};
-            const float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
-            if (len > 0.0f)
-            {
-                n.x /= len;
-                n.y /= len;
-                n.z /= len;
-            }
-            flat[i + 0].normal = n;
-            flat[i + 1].normal = n;
-            flat[i + 2].normal = n;
-        }
-    }
+        FillFaceNormals(flat);
 
-    // 3) MikkTSpace tangents — pre-dedupe (mikk needs face-vertex access).
-    MikkCtx              mctx{&flat};
-    SMikkTSpaceInterface mIface{};
-    mIface.m_getNumFaces          = MikkGetNumFaces;
-    mIface.m_getNumVerticesOfFace = MikkGetNumVerticesOfFace;
-    mIface.m_getPosition          = MikkGetPosition;
-    mIface.m_getNormal            = MikkGetNormal;
-    mIface.m_getTexCoord          = MikkGetTexCoord;
-    mIface.m_setTSpaceBasic       = MikkSetTSpaceBasic;
-
-    SMikkTSpaceContext mkc{};
-    mkc.m_pInterface = &mIface;
-    mkc.m_pUserData  = &mctx;
-    if (genTangSpaceDefault(&mkc) == 0)
+    if (!RunMikkTSpace(flat))
     {
         fmtx::Error("BuildFromObj: MikkTSpace failed");
         return cm;
     }
 
-    // 4) Dedupe.
-    std::vector<CpuVertex> cpuVerts;
-    cpuVerts.reserve(flat.size() / 2);
-    std::vector<uint32_t> indices;
-    indices.reserve(flat.size());
-
-    std::unordered_map<VertexKey, uint32_t, VertexKeyHash> seen;
-    seen.reserve(flat.size());
-
-    for (const auto &fv : flat)
-    {
-        VertexKey key{fv};
-        auto [it, inserted] = seen.emplace(key, static_cast<uint32_t>(cpuVerts.size()));
-        if (inserted)
-            cpuVerts.push_back(CpuVertex{fv.pos, fv.normal, fv.tangent, fv.uv});
-        indices.push_back(it->second);
-    }
-
-    // 5) Bounds.
-    Vec3 mn{std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
-            std::numeric_limits<float>::infinity()};
-    Vec3 mx{-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
-            -std::numeric_limits<float>::infinity()};
-    for (const auto &v : cpuVerts)
-    {
-        mn.x = std::min(mn.x, v.pos.x);
-        mn.y = std::min(mn.y, v.pos.y);
-        mn.z = std::min(mn.z, v.pos.z);
-        mx.x = std::max(mx.x, v.pos.x);
-        mx.y = std::max(mx.y, v.pos.y);
-        mx.z = std::max(mx.z, v.pos.z);
-    }
-    const Vec3 center{0.5f * (mn.x + mx.x), 0.5f * (mn.y + mx.y), 0.5f * (mn.z + mx.z)};
-    float      r2 = 0.0f;
-    for (const auto &v : cpuVerts)
-    {
-        const float dx = v.pos.x - center.x;
-        const float dy = v.pos.y - center.y;
-        const float dz = v.pos.z - center.z;
-        r2             = std::max(r2, dx * dx + dy * dy + dz * dz);
-    }
-    cm.bounds = MeshBounds{mn, mx, center, std::sqrt(r2)};
-
-    // 6) CpuVertex -> GpuVertex with oct packing.
-    cm.mesh.vertices.resize(cpuVerts.size());
-    for (size_t i = 0; i < cpuVerts.size(); ++i)
-    {
-        const auto &cv = cpuVerts[i];
-        auto       &gv = cm.mesh.vertices[i];
-        gv.position[0] = cv.pos.x;
-        gv.position[1] = cv.pos.y;
-        gv.position[2] = cv.pos.z;
-
-        const auto n = OctEncode(cv.normal);
-        gv.normal[0] = n[0];
-        gv.normal[1] = n[1];
-        gv.normal[2] = 0;
-        gv.normal[3] = 0;
-
-        const auto t = OctEncodeTangent(Vec3{cv.tangent.x, cv.tangent.y, cv.tangent.z},
-                                        cv.tangent.w);
-        gv.tangent[0] = t[0];
-        gv.tangent[1] = t[1];
-        gv.tangent[2] = 0;
-        gv.tangent[3] = 0;
-
-        gv.uv[0] = cv.uv.x;
-        gv.uv[1] = cv.uv.y;
-    }
-    cm.mesh.indices = std::move(indices);
-
-    // 7) Vertex cache optimization.
-    meshopt_optimizeVertexCache(cm.mesh.indices.data(), cm.mesh.indices.data(),
-                                cm.mesh.indices.size(), cm.mesh.vertices.size());
-
-    // 8) Meshlet build (Vulkan mesh-shader friendly limits: 64 verts, 124 tris).
-    constexpr size_t MaxVerts    = 64;
-    constexpr size_t MaxTris     = 124;
-    constexpr float  ConeWeight  = 0.25f;
-    const size_t     maxMeshlets = meshopt_buildMeshletsBound(cm.mesh.indices.size(),
-                                                              MaxVerts, MaxTris);
-
-    std::vector<meshopt_Meshlet> mo(maxMeshlets);
-    std::vector<unsigned int>    mvi(maxMeshlets * MaxVerts);
-    std::vector<unsigned char>   mti(maxMeshlets * MaxTris * 3);
-
-    const size_t meshletCount = meshopt_buildMeshlets(
-        mo.data(), mvi.data(), mti.data(), cm.mesh.indices.data(), cm.mesh.indices.size(),
-        &cm.mesh.vertices[0].position[0], cm.mesh.vertices.size(), sizeof(GpuVertex), MaxVerts,
-        MaxTris, ConeWeight);
-
-    if (meshletCount == 0)
-    {
-        fmtx::Error("BuildFromObj: meshopt_buildMeshlets produced 0 meshlets");
-        return cm;
-    }
-
-    // meshopt writes triangle data with 4-byte padding between meshlets, and
-    // mo[i].triangle_offset is a *byte* offset into mti. Our on-disk format
-    // expects a dense MeshletTriangle[] (3 B each, no inter-meshlet padding)
-    // with triangleOffset in triangle units, so we repack here.
-
-    const auto &last      = mo[meshletCount - 1];
-    const size_t vtxUsed  = last.vertex_offset + last.vertex_count;
-
-    size_t totalTris = 0;
-    for (size_t i = 0; i < meshletCount; ++i)
-        totalTris += mo[i].triangle_count;
-
-    cm.mesh.meshletVertices.assign(mvi.begin(), mvi.begin() + vtxUsed);
-    cm.mesh.meshlets.resize(meshletCount);
-    cm.mesh.meshletTriangles.resize(totalTris);
-    cm.mesh.meshletBounds.resize(meshletCount);
-
-    size_t triCursor = 0;
-    for (size_t i = 0; i < meshletCount; ++i)
-    {
-        const auto &src = mo[i];
-
-        // Dense copy: drop the padding bytes that follow this meshlet's triangles.
-        const unsigned char *triBytes = &mti[src.triangle_offset];
-        for (uint32_t t = 0; t < src.triangle_count; ++t)
-        {
-            cm.mesh.meshletTriangles[triCursor + t] = MeshletTriangle{
-                triBytes[t * 3 + 0], triBytes[t * 3 + 1], triBytes[t * 3 + 2]};
-        }
-
-        cm.mesh.meshlets[i] = Meshlet{src.vertex_offset, src.vertex_count,
-                                      static_cast<uint32_t>(triCursor), src.triangle_count};
-
-        // Bounds: meshopt still wants its own raw mti pointer + byte offset.
-        const meshopt_Bounds b = meshopt_computeMeshletBounds(
-            &mvi[src.vertex_offset], &mti[src.triangle_offset], src.triangle_count,
-            &cm.mesh.vertices[0].position[0], cm.mesh.vertices.size(), sizeof(GpuVertex));
-        cm.mesh.meshletBounds[i] =
-            MeshletBounds{Vec3{b.center[0], b.center[1], b.center[2]}, b.radius,
-                          Vec3{b.cone_axis[0], b.cone_axis[1], b.cone_axis[2]}, b.cone_cutoff};
-
-        triCursor += src.triangle_count;
-    }
-
-    // 10) Material refs: one hash per material in source-index order.
-    //     File-scoped under sourceRef so multiple meshes from one source share refs.
-    //     Leaf is name-or-index (see MaterialLeaf) to survive empty/duplicate names.
-    std::vector<std::string_view> names;
-    names.reserve(src.materials.size());
+    std::vector<std::string_view> matNames;
+    matNames.reserve(src.materials.size());
     for (const auto &mat : src.materials)
-        names.emplace_back(mat.name);
+        matNames.emplace_back(mat.name);
 
-    cm.materialRefs.reserve(src.materials.size());
-    for (size_t m = 0; m < src.materials.size(); ++m)
+    return FinalizeMesh(std::move(flat), matNames, sourceRef);
+}
+
+// --- BuildFromGltf -----------------------------------------------------------
+
+CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
+{
+    const auto &m = src.model;
+    if (m.meshes_count == 0 || m.meshes[0].primitives_count == 0)
     {
-        std::string ref(sourceRef);
-        ref.push_back('/');
-        ref.append(MaterialLeaf(names[m], m, names));
-        cm.materialRefs.push_back(HashAssetRef(ref));
+        fmtx::Error("BuildFromGltf: no meshes/primitives");
+        return {};
+    }
+    if (m.meshes_count > 1)
+        fmtx::Warn(fmt::format("BuildFromGltf: {} meshes; only mesh 0 is exported (v1)",
+                               m.meshes_count));
+    if (m.meshes[0].primitives_count > 1)
+        fmtx::Warn(fmt::format("BuildFromGltf: {} primitives; only primitive 0 is exported (v1)",
+                               m.meshes[0].primitives_count));
+
+    const auto &prim = m.meshes[0].primitives[0];
+    const int   mode = prim.mode < 0 ? TG3_MODE_TRIANGLES : prim.mode;
+    if (mode != TG3_MODE_TRIANGLES)
+    {
+        fmtx::Error(fmt::format("BuildFromGltf: mode {} not supported (TRIANGLES only)", mode));
+        return {};
     }
 
-    return cm;
+    const int posIdx = FindAttr(prim, "POSITION");
+    if (posIdx < 0 || static_cast<uint32_t>(posIdx) >= m.accessors_count)
+    {
+        fmtx::Error("BuildFromGltf: missing POSITION");
+        return {};
+    }
+    const int normIdx = FindAttr(prim, "NORMAL");
+    const int uvIdx   = FindAttr(prim, "TEXCOORD_0");
+    const int tanIdx  = FindAttr(prim, "TANGENT");
+
+    const auto &posAcc = m.accessors[posIdx];
+    if (posAcc.component_type != TG3_COMPONENT_TYPE_FLOAT || posAcc.type != TG3_TYPE_VEC3)
+    {
+        fmtx::Error("BuildFromGltf: POSITION must be FLOAT VEC3");
+        return {};
+    }
+    const uint64_t   vc      = posAcc.count;
+    const uint8_t   *posData = AccessorPtr(m, posAcc);
+    const size_t     posStr  = AccessorStride(m, posAcc);
+    if (!posData)
+    {
+        fmtx::Error("BuildFromGltf: POSITION accessor has no buffer view");
+        return {};
+    }
+
+    std::vector<Vec3> positions(vc);
+    for (uint64_t i = 0; i < vc; ++i)
+    {
+        const float *p = reinterpret_cast<const float *>(posData + i * posStr);
+        positions[i]   = Vec3{p[0], p[1], p[2]};
+    }
+
+    std::vector<Vec3> normals;
+    bool              hasNormals = false;
+    if (normIdx >= 0 && static_cast<uint32_t>(normIdx) < m.accessors_count)
+    {
+        const auto &a = m.accessors[normIdx];
+        if (a.component_type == TG3_COMPONENT_TYPE_FLOAT && a.type == TG3_TYPE_VEC3
+            && a.count == vc)
+        {
+            const uint8_t *d = AccessorPtr(m, a);
+            const size_t   s = AccessorStride(m, a);
+            if (d)
+            {
+                normals.resize(vc);
+                for (uint64_t i = 0; i < vc; ++i)
+                {
+                    const float *p = reinterpret_cast<const float *>(d + i * s);
+                    normals[i]     = Vec3{p[0], p[1], p[2]};
+                }
+                hasNormals = true;
+            }
+        }
+    }
+
+    std::vector<Vec2> uvs;
+    bool              hasUVs = false;
+    if (uvIdx >= 0 && static_cast<uint32_t>(uvIdx) < m.accessors_count)
+    {
+        const auto &a = m.accessors[uvIdx];
+        if (a.component_type == TG3_COMPONENT_TYPE_FLOAT && a.type == TG3_TYPE_VEC2
+            && a.count == vc)
+        {
+            const uint8_t *d = AccessorPtr(m, a);
+            const size_t   s = AccessorStride(m, a);
+            if (d)
+            {
+                uvs.resize(vc);
+                for (uint64_t i = 0; i < vc; ++i)
+                {
+                    const float *p = reinterpret_cast<const float *>(d + i * s);
+                    uvs[i]         = Vec2{p[0], p[1]}; // glTF UV is top-left, matches Vulkan
+                }
+                hasUVs = true;
+            }
+        }
+    }
+
+    std::vector<Vec4> tangents;
+    bool              hasTangents = false;
+    if (tanIdx >= 0 && static_cast<uint32_t>(tanIdx) < m.accessors_count)
+    {
+        const auto &a = m.accessors[tanIdx];
+        if (a.component_type == TG3_COMPONENT_TYPE_FLOAT && a.type == TG3_TYPE_VEC4
+            && a.count == vc)
+        {
+            const uint8_t *d = AccessorPtr(m, a);
+            const size_t   s = AccessorStride(m, a);
+            if (d)
+            {
+                tangents.resize(vc);
+                for (uint64_t i = 0; i < vc; ++i)
+                {
+                    const float *p = reinterpret_cast<const float *>(d + i * s);
+                    tangents[i]    = Vec4{p[0], p[1], p[2], p[3]};
+                }
+                hasTangents = true;
+            }
+        }
+    }
+
+    std::vector<uint32_t> indices;
+    if (prim.indices >= 0 && static_cast<uint32_t>(prim.indices) < m.accessors_count)
+    {
+        const auto &a = m.accessors[prim.indices];
+        if (a.type != TG3_TYPE_SCALAR)
+        {
+            fmtx::Error("BuildFromGltf: indices accessor must be SCALAR");
+            return {};
+        }
+        const uint8_t *d = AccessorPtr(m, a);
+        const size_t   s = AccessorStride(m, a);
+        if (!d)
+        {
+            fmtx::Error("BuildFromGltf: indices accessor has no buffer view");
+            return {};
+        }
+        indices.resize(a.count);
+        switch (a.component_type)
+        {
+        case TG3_COMPONENT_TYPE_UNSIGNED_INT:
+            for (uint64_t i = 0; i < a.count; ++i)
+                indices[i] = *reinterpret_cast<const uint32_t *>(d + i * s);
+            break;
+        case TG3_COMPONENT_TYPE_UNSIGNED_SHORT:
+            for (uint64_t i = 0; i < a.count; ++i)
+                indices[i] = *reinterpret_cast<const uint16_t *>(d + i * s);
+            break;
+        case TG3_COMPONENT_TYPE_UNSIGNED_BYTE:
+            for (uint64_t i = 0; i < a.count; ++i)
+                indices[i] = *reinterpret_cast<const uint8_t *>(d + i * s);
+            break;
+        default:
+            fmtx::Error(fmt::format("BuildFromGltf: indices component_type {} not supported",
+                                    a.component_type));
+            return {};
+        }
+    }
+    else
+    {
+        indices.resize(vc);
+        for (uint64_t i = 0; i < vc; ++i)
+            indices[i] = static_cast<uint32_t>(i);
+    }
+
+    if (indices.size() % 3 != 0)
+    {
+        fmtx::Error("BuildFromGltf: index count not divisible by 3");
+        return {};
+    }
+
+    std::vector<FlatVertex> flat;
+    flat.reserve(indices.size());
+    for (uint32_t idx : indices)
+    {
+        if (idx >= vc)
+        {
+            fmtx::Error(fmt::format("BuildFromGltf: index {} >= vertex count {}", idx, vc));
+            return {};
+        }
+        FlatVertex v{};
+        v.pos     = positions[idx];
+        v.normal  = hasNormals ? normals[idx] : Vec3{0, 0, 0};
+        v.uv      = hasUVs ? uvs[idx] : Vec2{0, 0};
+        v.tangent = hasTangents ? tangents[idx] : Vec4{0, 0, 0, 0};
+        flat.push_back(v);
+    }
+
+    if (!hasNormals)
+    {
+        fmtx::Warn("BuildFromGltf: missing NORMAL; using face normals");
+        FillFaceNormals(flat);
+    }
+
+    if (!hasTangents)
+    {
+        if (!hasUVs)
+        {
+            fmtx::Warn("BuildFromGltf: missing TANGENT and TEXCOORD_0; tangents will be zero");
+        }
+        else if (!RunMikkTSpace(flat))
+        {
+            fmtx::Error("BuildFromGltf: MikkTSpace failed");
+            return {};
+        }
+    }
+
+    // Materials: need stable backing storage for the string_view spans we pass
+    // into FinalizeMesh (tg3_str is not null-terminated; copy into std::strings).
+    std::vector<std::string>      nameStorage;
+    std::vector<std::string_view> names;
+    nameStorage.reserve(m.materials_count);
+    names.reserve(m.materials_count);
+    for (uint32_t i = 0; i < m.materials_count; ++i)
+    {
+        nameStorage.emplace_back(m.materials[i].name.data ? m.materials[i].name.data : "",
+                                 m.materials[i].name.len);
+        names.emplace_back(nameStorage.back());
+    }
+
+    return FinalizeMesh(std::move(flat), names, sourceRef);
 }
 
 } // namespace assetc

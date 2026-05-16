@@ -1,3 +1,4 @@
+#define TINYGLTF3_IMPLEMENTATION
 #include "gltf.hpp"
 #include "fmt.hpp"
 #include <memory>
