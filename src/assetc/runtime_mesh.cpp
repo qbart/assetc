@@ -76,26 +76,36 @@ int assetc::WriteChunked(const std::string &path, std::span<const ChunkPayload> 
 // Maps a unit vector to a 2D square via octahedral projection (Meyer et al. 2010),
 // then quantizes each axis to int16 in SNORM range.
 //
-// Shader-side decoder (matches OctEncode exactly):
+// Shader-side decoder in Slang (matches OctEncode exactly):
 //
-//     vec3 octDecode(vec2 e) {
-//         vec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));
+//     float3 octDecode(float2 e) {
+//         float3 n = float3(e, 1.0 - abs(e.x) - abs(e.y));
 //         if (n.z < 0.0) n.xy = (1.0 - abs(n.yx)) * sign(n.xy);
 //         return normalize(n);
 //     }
 //
-// Normal slot (recommended Vulkan format = VK_FORMAT_R16G16_SNORM — hardware
-// divides by 32767 on fetch, shader receives a vec2 in [-1, 1] directly):
+// Vertex input — two slots, two Vulkan formats:
 //
-//     vec3 normal = octDecode(inNormalPacked);
+//   Normal  -> VK_FORMAT_R16G16_SNORM   (hardware divides by 32767 on fetch;
+//                                        shader receives float2 in [-1, 1])
+//   Tangent -> VK_FORMAT_R16G16_SINT    (shader needs raw integer to extract
+//                                        the handedness bit; divides manually)
 //
-// Tangent slot (must be VK_FORMAT_R16G16_SINT — shader needs integer access to
-// recover the handedness bit, then divides by 32767 manually):
+// Slang vertex input struct:
 //
-//     float handedness = ((inTangentPacked.x & 1) == 0) ? 1.0 : -1.0;
-//     vec2  enc        = vec2(inTangentPacked) / 32767.0;
-//     vec3  tangent    = octDecode(enc);
-//     vec3  bitangent  = cross(normal, tangent) * handedness;
+//     struct VSInput {
+//         [[vk::location(0)]] float3 position       : POSITION;
+//         [[vk::location(1)]] float2 normalPacked   : NORMAL;   // SNORM
+//         [[vk::location(2)]] int2   tangentPacked  : TANGENT;  // SINT
+//         [[vk::location(3)]] float2 uv             : TEXCOORD0;
+//     };
+//
+// Decoding in the vertex shader:
+//
+//     float3 normal     = octDecode(input.normalPacked);
+//     float  handedness = ((input.tangentPacked.x & 1) == 0) ? 1.0 : -1.0;
+//     float3 tangent    = octDecode(float2(input.tangentPacked) / 32767.0);
+//     float3 bitangent  = cross(normal, tangent) * handedness;
 
 namespace
 {

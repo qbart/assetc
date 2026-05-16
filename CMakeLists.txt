@@ -19,8 +19,10 @@ add_executable(${PROJECT_NAME}
     src/deps/ktx.cpp
     src/deps/gltf.cpp
     src/deps/obj.cpp
+    src/deps/tiny/mikktspace.c
     src/assetc/shader.cpp
     src/assetc/runtime_mesh.cpp
+    src/assetc/encode_mesh.cpp
     src/main.cpp
     )
 
@@ -34,6 +36,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 include(ktx)
 include(cli11)
 include(fmt)
+include(meshoptimizer)
 # include(slang)
 
 if(APPLE)
@@ -52,6 +55,7 @@ if(APPLE)
         fmt::fmt
         CLI11::CLI11
         ktx
+        meshoptimizer
         # slang
     )
 elseif (LINUX)
@@ -59,6 +63,7 @@ elseif (LINUX)
         fmt::fmt
         CLI11::CLI11
         ktx
+        meshoptimizer
         # slang
     )
 else()
@@ -67,6 +72,7 @@ else()
         fmt::fmt
         CLI11::CLI11
         ktx
+        meshoptimizer
         # slang
     )
 endif()
