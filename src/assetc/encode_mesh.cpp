@@ -188,6 +188,52 @@ int FindAttr(const tg3_primitive &p, const char *name) noexcept
     return -1;
 }
 
+void DumpGltfStructure(const tg3_model &m)
+{
+    fmtx::Info(fmt::format("gltf: meshes={} materials={} accessors={} buffer_views={} buffers={}",
+                           m.meshes_count, m.materials_count, m.accessors_count,
+                           m.buffer_views_count, m.buffers_count));
+    for (uint32_t mi = 0; mi < m.meshes_count; ++mi)
+    {
+        const auto       &mesh = m.meshes[mi];
+        const std::string name(mesh.name.data ? mesh.name.data : "", mesh.name.len);
+        fmtx::Info(fmt::format("  mesh[{}] \"{}\" primitives={}", mi, name,
+                               mesh.primitives_count));
+        for (uint32_t pi = 0; pi < mesh.primitives_count; ++pi)
+        {
+            const auto &prim   = mesh.primitives[pi];
+            const int   posIdx = FindAttr(prim, "POSITION");
+            uint64_t    vc     = 0;
+            if (posIdx >= 0 && static_cast<uint32_t>(posIdx) < m.accessors_count)
+                vc = m.accessors[posIdx].count;
+            uint64_t ic = 0;
+            if (prim.indices >= 0 && static_cast<uint32_t>(prim.indices) < m.accessors_count)
+                ic = m.accessors[prim.indices].count;
+            const int mode = prim.mode < 0 ? TG3_MODE_TRIANGLES : prim.mode;
+
+            // Build a compact attribute list "POSITION,NORMAL,TEXCOORD_0,TANGENT".
+            std::string attrs;
+            for (uint32_t i = 0; i < prim.attributes_count; ++i)
+            {
+                if (i > 0)
+                    attrs.push_back(',');
+                attrs.append(prim.attributes[i].key.data,
+                             prim.attributes[i].key.len);
+            }
+            fmtx::Info(fmt::format("    prim[{}] verts={} idx={} mode={} material={} attrs=[{}]",
+                                   pi, vc, ic, mode, prim.material, attrs));
+        }
+    }
+    // Spot-check: any bufferview marked as draco-decoded?
+    for (uint32_t bi = 0; bi < m.buffer_views_count; ++bi)
+    {
+        if (m.buffer_views[bi].draco_decoded)
+        {
+            fmtx::Info(fmt::format("  bufferview[{}] draco_decoded=1", bi));
+        }
+    }
+}
+
 // --- Shared finalize: dedupe -> bounds -> oct pack -> meshlets -> materials --
 
 CompiledMesh FinalizeMesh(std::vector<FlatVertex> &&flat,
@@ -490,6 +536,8 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
 CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
 {
     const auto &m = src.model;
+    DumpGltfStructure(m);
+
     if (m.meshes_count == 0 || m.meshes[0].primitives_count == 0)
     {
         fmtx::Error("BuildFromGltf: no meshes/primitives");
@@ -502,6 +550,7 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
         fmtx::Warn(fmt::format("BuildFromGltf: {} primitives; only primitive 0 is exported (v1)",
                                m.meshes[0].primitives_count));
 
+    fmtx::Info("BuildFromGltf: selecting mesh[0].primitive[0]");
     const auto &prim = m.meshes[0].primitives[0];
     const int   mode = prim.mode < 0 ? TG3_MODE_TRIANGLES : prim.mode;
     if (mode != TG3_MODE_TRIANGLES)
