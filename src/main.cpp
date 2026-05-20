@@ -1,5 +1,6 @@
 #include "assetc/encode_mesh.hpp"
 #include "assetc/runtime_mesh.hpp"
+#include "assetc/shader.hpp"
 #include "deps/fmt.hpp"
 #include "deps/gltf.hpp"
 #include "deps/ktx.hpp"
@@ -94,6 +95,13 @@ std::string Asset::SourceRef() const
 
 std::string Asset::RuntimePath(const std::string &outputDir) const
 {
+    fs::path rel = fs::path(path).lexically_relative("assets");
+
+    // A shader mirrors its source `.shader` directory: the runtime path is the
+    // folder itself (extension kept), into which vertex.spv / fragment.spv go.
+    if (type == AssetType::Shader)
+        return (fs::path(outputDir) / rel).generic_string();
+
     std::string_view ext;
     switch (type)
     {
@@ -109,8 +117,7 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
         ext = ".env.ktx2";
         break;
     case AssetType::Shader:
-        ext = ".spv";
-        break;
+        break; // handled above
     case AssetType::Mesh:
         ext = ".hmesh";
         break;
@@ -119,7 +126,7 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
         break;
     }
 
-    fs::path out = fs::path(outputDir) / fs::path(path).lexically_relative("assets");
+    fs::path out = fs::path(outputDir) / rel;
     if (out.has_extension()) out.replace_extension();
     out += ext;
     return out.generic_string();
@@ -193,6 +200,11 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
             return assetc::ValidateHMesh(out);
         return 0;
     }
+    case AssetType::Shader:
+    {
+        fmtx::Info(fmt::format("{} {} -> {}", asset.type, asset.path, out));
+        return assetc::CompileShaderFolder(asset.path, out);
+    }
     default:
         fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, asset.type));
         return 0;
@@ -245,6 +257,10 @@ int main(int argc, char **argv)
             {
                 assets.emplace_back(Asset{.path = name, .type = AssetType::Array});
             }
+            else if (name.ends_with(".shader"))
+            {
+                assets.emplace_back(Asset{.path = name, .type = AssetType::Shader});
+            }
             else
                 continue;
         }
@@ -254,8 +270,6 @@ int main(int argc, char **argv)
             assets.emplace_back(Asset{.path = name, .type = AssetType::Grayscale});
         else if (ext == ".png")
             assets.emplace_back(Asset{.path = name, .type = AssetType::Color});
-        else if (ext == ".slang")
-            assets.emplace_back(Asset{.path = name, .type = AssetType::Shader});
         else if (ext == ".obj")
             assets.emplace_back(Asset{.path = name, .type = AssetType::Mesh});
         else if (ext == ".gltf")
