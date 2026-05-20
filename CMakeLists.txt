@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 4.3.2)
 
-include(ExternalProject)
 include(FetchContent)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -37,7 +36,7 @@ include(ktx)
 include(cli11)
 include(fmt)
 include(meshoptimizer)
-# include(slang)
+include(slang)
 
 if(APPLE)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
@@ -56,7 +55,7 @@ if(APPLE)
         CLI11::CLI11
         ktx
         meshoptimizer
-        # slang
+        slang
     )
 elseif (LINUX)
     target_link_libraries(${PROJECT_NAME} PRIVATE
@@ -64,7 +63,7 @@ elseif (LINUX)
         CLI11::CLI11
         ktx
         meshoptimizer
-        # slang
+        slang
     )
 else()
     # For non-macOS systems, you can specify general linking here
@@ -73,7 +72,7 @@ else()
         CLI11::CLI11
         ktx
         meshoptimizer
-        # slang
+        slang
     )
 endif()
 
