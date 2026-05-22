@@ -4,7 +4,7 @@ run: build
 
 .PHONY: build
 build:
-	@cmake --build build/
+	@cmake --build build/debug
 
 .PHONY: install
 install: build
@@ -21,3 +21,11 @@ setup:
 .PHONY: init
 init:
 	cmake --preset debug .
+
+.PHONY: init.release
+init.release:
+	cmake --preset release .
+
+.PHONY: release
+release:
+    @cmake --build build/release
