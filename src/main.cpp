@@ -1,3 +1,4 @@
+#include "assetc/encode_lut.hpp"
 #include "assetc/encode_mesh.hpp"
 #include "assetc/runtime_mesh.hpp"
 #include "assetc/shader.hpp"
@@ -34,7 +35,8 @@ enum class AssetType
     Cubemap,
     Shader,
     Mesh,
-    Material
+    Material,
+    LUT
 };
 
 constexpr std::string_view to_string(AssetType t)
@@ -57,6 +59,8 @@ constexpr std::string_view to_string(AssetType t)
         return "Mesh";
     case AssetType::Material:
         return "Material";
+    case AssetType::LUT:
+        return "LUT";
     }
     return "???"; // unreachable if enum is exhaustive
 }
@@ -123,6 +127,10 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
         break;
     case AssetType::Material:
         ext = ".hmat";
+        break;
+    case AssetType::LUT:
+        // foo.lut.cube -> foo.lut.ktx2 (the .cube is stripped below, .ktx2 added)
+        ext = ".ktx2";
         break;
     }
 
@@ -205,6 +213,11 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         fmtx::Info(fmt::format("{} {} -> {}", asset.type, asset.path, out));
         return assetc::CompileShaderFolder(asset.path, out);
     }
+    case AssetType::LUT:
+    {
+        fmtx::Info(fmt::format("{} {} -> {}", asset.type, asset.path, out));
+        return assetc::EncodeLutCube(asset.path, out);
+    }
     default:
         fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, asset.type));
         return 0;
@@ -264,7 +277,9 @@ int main(int argc, char **argv)
             else
                 continue;
         }
-        if (name.ends_with(".n.png"))
+        if (name.ends_with(".lut.cube"))
+            assets.emplace_back(Asset{.path = name, .type = AssetType::LUT});
+        else if (name.ends_with(".n.png"))
             assets.emplace_back(Asset{.path = name, .type = AssetType::Normal});
         else if (name.ends_with(".ao.png") || name.ends_with(".h.png") || name.ends_with(".r.png"))
             assets.emplace_back(Asset{.path = name, .type = AssetType::Grayscale});

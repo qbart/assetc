@@ -208,3 +208,49 @@ KTX_error_code ktx::FromImageToUASTC(const stb::Image &img, const std::string &d
 
     return KTX_SUCCESS;
 }
+
+KTX_error_code ktx::FromLut3DToKtx2(uint32_t size, const uint8_t *rgba8, size_t rgba8Size,
+                                    const std::string &destPath)
+{
+    ktxTextureCreateInfo info{};
+    info.vkFormat        = VK_FORMAT_R8G8B8A8_UNORM; // linear DFD: no sRGB decode on sample
+    info.baseWidth       = size;
+    info.baseHeight      = size;
+    info.baseDepth       = size;
+    info.numDimensions   = 3;     // volume texture
+    info.numLevels       = 1;     // LUTs are never mipmapped
+    info.numLayers       = 1;
+    info.numFaces        = 1;
+    info.generateMipmaps = KTX_FALSE;
+
+    ktxTexture2 *raw = nullptr;
+    auto err         = ktxTexture2_Create(&info, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &raw);
+    if (err != KTX_SUCCESS)
+    {
+        return err;
+    }
+    KtxTexture2Ptr tex(raw);
+
+    // Single level / layer / face 3D texture is laid out contiguously; copy the
+    // whole volume in one shot (x-fastest, matching .cube's red-fastest order).
+    if (rgba8Size != tex->dataSize)
+    {
+        return KTX_INVALID_OPERATION;
+    }
+    ktx_size_t offset = 0;
+    err               = ktxTexture_GetImageOffset(ktxTexture(tex.get()), 0, 0, 0, &offset);
+    if (err != KTX_SUCCESS)
+    {
+        return err;
+    }
+    std::memcpy(tex->pData + offset, rgba8, rgba8Size);
+
+    // Lossless Zstd; raw LUT values preserved exactly. (Never Basis/UASTC here.)
+    err = ktxTexture2_DeflateZstd(tex.get(), 18);
+    if (err != KTX_SUCCESS)
+    {
+        return err;
+    }
+
+    return ktxTexture_WriteToNamedFile(ktxTexture(tex.get()), destPath.c_str());
+}
