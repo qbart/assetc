@@ -14,6 +14,7 @@
 #include <map>
 #include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace assetc
 {
@@ -612,6 +613,128 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
 namespace
 {
 
+// --- Node transforms: bake glTF world matrices into vertices (combine mode) ----
+//
+// Column-major 4x4, matching glTF's node.matrix layout. m[col*4 + row].
+struct Mat4
+{
+    double m[16];
+};
+
+Mat4 Mat4Identity() noexcept
+{
+    Mat4 r{};
+    r.m[0] = r.m[5] = r.m[10] = r.m[15] = 1.0;
+    return r;
+}
+
+Mat4 Mat4Mul(const Mat4 &a, const Mat4 &b) noexcept // a * b
+{
+    Mat4 r{};
+    for (int c = 0; c < 4; ++c)
+        for (int row = 0; row < 4; ++row)
+        {
+            double s = 0.0;
+            for (int k = 0; k < 4; ++k)
+                s += a.m[k * 4 + row] * b.m[c * 4 + k];
+            r.m[c * 4 + row] = s;
+        }
+    return r;
+}
+
+Mat4 Mat4FromColMajor(const double *d) noexcept
+{
+    Mat4 r{};
+    for (int i = 0; i < 16; ++i)
+        r.m[i] = d[i];
+    return r;
+}
+
+// Compose T * R * S from glTF node TRS (rotation is a unit quaternion x,y,z,w).
+Mat4 Mat4FromTRS(const double t[3], const double q[4], const double s[3]) noexcept
+{
+    const double x = q[0], y = q[1], z = q[2], w = q[3];
+    const double xx = x * x, yy = y * y, zz = z * z;
+    const double xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
+    Mat4         r = Mat4Identity();
+    r.m[0]  = (1.0 - 2.0 * (yy + zz)) * s[0];
+    r.m[1]  = (2.0 * (xy + wz)) * s[0];
+    r.m[2]  = (2.0 * (xz - wy)) * s[0];
+    r.m[4]  = (2.0 * (xy - wz)) * s[1];
+    r.m[5]  = (1.0 - 2.0 * (xx + zz)) * s[1];
+    r.m[6]  = (2.0 * (yz + wx)) * s[1];
+    r.m[8]  = (2.0 * (xz + wy)) * s[2];
+    r.m[9]  = (2.0 * (yz - wx)) * s[2];
+    r.m[10] = (1.0 - 2.0 * (xx + yy)) * s[2];
+    r.m[12] = t[0];
+    r.m[13] = t[1];
+    r.m[14] = t[2];
+    return r;
+}
+
+Vec3 XformPoint(const Mat4 &M, const Vec3 &p) noexcept
+{
+    return Vec3{static_cast<float>(M.m[0] * p.x + M.m[4] * p.y + M.m[8] * p.z + M.m[12]),
+                static_cast<float>(M.m[1] * p.x + M.m[5] * p.y + M.m[9] * p.z + M.m[13]),
+                static_cast<float>(M.m[2] * p.x + M.m[6] * p.y + M.m[10] * p.z + M.m[14])};
+}
+
+Vec3 XformDir(const Mat4 &M, const Vec3 &v) noexcept // 3x3 linear part (tangents)
+{
+    return Vec3{static_cast<float>(M.m[0] * v.x + M.m[4] * v.y + M.m[8] * v.z),
+                static_cast<float>(M.m[1] * v.x + M.m[5] * v.y + M.m[9] * v.z),
+                static_cast<float>(M.m[2] * v.x + M.m[6] * v.y + M.m[10] * v.z)};
+}
+
+// Apply a world matrix to a flat triangle list, in place. Normals use the cofactor
+// matrix (det * inverse-transpose) so non-uniform scale stays correct; tangent
+// handedness flips when the transform mirrors (negative determinant).
+void TransformFlat(std::vector<FlatVertex> &flat, const Mat4 &world) noexcept
+{
+    const double a0[3] = {world.m[0], world.m[1], world.m[2]};
+    const double a1[3] = {world.m[4], world.m[5], world.m[6]};
+    const double a2[3] = {world.m[8], world.m[9], world.m[10]};
+    // Cofactor columns = cross products of the basis columns.
+    const Vec3 c0{static_cast<float>(a1[1] * a2[2] - a1[2] * a2[1]),
+                  static_cast<float>(a1[2] * a2[0] - a1[0] * a2[2]),
+                  static_cast<float>(a1[0] * a2[1] - a1[1] * a2[0])};
+    const Vec3 c1{static_cast<float>(a2[1] * a0[2] - a2[2] * a0[1]),
+                  static_cast<float>(a2[2] * a0[0] - a2[0] * a0[2]),
+                  static_cast<float>(a2[0] * a0[1] - a2[1] * a0[0])};
+    const Vec3 c2{static_cast<float>(a0[1] * a1[2] - a0[2] * a1[1]),
+                  static_cast<float>(a0[2] * a1[0] - a0[0] * a1[2]),
+                  static_cast<float>(a0[0] * a1[1] - a0[1] * a1[0])};
+    const double det   = a0[0] * c0.x + a0[1] * c0.y + a0[2] * c0.z;
+    const float  hflip = det < 0.0 ? -1.0f : 1.0f;
+
+    for (auto &v : flat)
+    {
+        v.pos = XformPoint(world, v.pos);
+
+        Vec3        n{c0.x * v.normal.x + c1.x * v.normal.y + c2.x * v.normal.z,
+                      c0.y * v.normal.x + c1.y * v.normal.y + c2.y * v.normal.z,
+                      c0.z * v.normal.x + c1.z * v.normal.y + c2.z * v.normal.z};
+        const float nl = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        if (nl > 0.0f)
+        {
+            n.x /= nl;
+            n.y /= nl;
+            n.z /= nl;
+        }
+        v.normal = n;
+
+        Vec3        t  = XformDir(world, Vec3{v.tangent.x, v.tangent.y, v.tangent.z});
+        const float tl = std::sqrt(t.x * t.x + t.y * t.y + t.z * t.z);
+        if (tl > 0.0f)
+        {
+            t.x /= tl;
+            t.y /= tl;
+            t.z /= tl;
+        }
+        v.tangent = Vec4{t.x, t.y, t.z, v.tangent.w * hflip};
+    }
+}
+
 // Extract one glTF primitive into a flat per-corner triangle list. Returns false
 // (with a logged warning) if the primitive can't be used, so the caller can skip
 // it without failing the whole mesh. Mode must be checked by the caller.
@@ -825,41 +948,93 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
     const auto &m = src.model;
     DumpGltfStructure(m);
 
-    if (m.meshes_count == 0 || m.meshes[0].primitives_count == 0)
+    if (m.meshes_count == 0)
     {
-        fmtx::Error("BuildFromGltf: no meshes/primitives");
+        fmtx::Error("BuildFromGltf: no meshes");
         return {};
     }
-    if (m.meshes_count > 1)
-        fmtx::Warn(fmt::format("BuildFromGltf: {} meshes; only mesh 0 is exported "
-                               "(others belong to a scene asset)",
-                               m.meshes_count));
 
-    const auto &mesh0 = m.meshes[0];
-
-    // Every primitive of mesh[0] becomes one submesh.
+    // Combine mode: every primitive of every mesh referenced by the node graph
+    // becomes a submesh, with the node's world transform baked into the vertices.
     std::vector<PrimitiveInput> prims;
-    prims.reserve(mesh0.primitives_count);
-    for (uint32_t pi = 0; pi < mesh0.primitives_count; ++pi)
-    {
-        const auto &prim = mesh0.primitives[pi];
-        const int   mode = prim.mode < 0 ? TG3_MODE_TRIANGLES : prim.mode;
-        if (mode != TG3_MODE_TRIANGLES)
-        {
-            fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] mode {} not TRIANGLES; skipped", pi,
-                                   mode));
-            continue;
-        }
 
-        std::vector<FlatVertex> flat;
-        if (!ExtractGltfPrimitive(m, prim, pi, flat))
-            continue;
-        prims.push_back(PrimitiveInput{std::move(flat), prim.material});
+    auto emitMesh = [&](uint32_t meshIdx, const Mat4 &world) {
+        if (meshIdx >= m.meshes_count)
+            return;
+        const auto &mesh = m.meshes[meshIdx];
+        for (uint32_t pi = 0; pi < mesh.primitives_count; ++pi)
+        {
+            const auto &prim = mesh.primitives[pi];
+            const int   mode = prim.mode < 0 ? TG3_MODE_TRIANGLES : prim.mode;
+            if (mode != TG3_MODE_TRIANGLES)
+            {
+                fmtx::Warn(fmt::format("BuildFromGltf: mesh[{}].prim[{}] mode {} not TRIANGLES; "
+                                       "skipped",
+                                       meshIdx, pi, mode));
+                continue;
+            }
+            std::vector<FlatVertex> flat;
+            if (!ExtractGltfPrimitive(m, prim, pi, flat))
+                continue;
+            TransformFlat(flat, world);
+            prims.push_back(PrimitiveInput{std::move(flat), prim.material});
+        }
+    };
+
+    if (m.nodes_count == 0)
+    {
+        // No scene graph: bake every mesh at identity.
+        for (uint32_t i = 0; i < m.meshes_count; ++i)
+            emitMesh(i, Mat4Identity());
+    }
+    else
+    {
+        // Roots = nodes that are nobody's child. Walk the forest depth-first,
+        // accumulating world = parent * local.
+        std::vector<uint8_t> isChild(m.nodes_count, 0);
+        for (uint32_t n = 0; n < m.nodes_count; ++n)
+            for (uint32_t c = 0; c < m.nodes[n].children_count; ++c)
+            {
+                const int ci = m.nodes[n].children[c];
+                if (ci >= 0 && static_cast<uint32_t>(ci) < m.nodes_count)
+                    isChild[ci] = 1;
+            }
+
+        std::vector<uint8_t>                    visited(m.nodes_count, 0);
+        std::vector<std::pair<uint32_t, Mat4>>  stack;
+        for (uint32_t n = 0; n < m.nodes_count; ++n)
+            if (!isChild[n])
+                stack.emplace_back(n, Mat4Identity());
+
+        while (!stack.empty())
+        {
+            const auto [ni, parentWorld] = stack.back();
+            stack.pop_back();
+            if (ni >= m.nodes_count || visited[ni])
+                continue;
+            visited[ni] = 1;
+
+            const auto &node  = m.nodes[ni];
+            const Mat4  local = node.has_matrix
+                                    ? Mat4FromColMajor(node.matrix)
+                                    : Mat4FromTRS(node.translation, node.rotation, node.scale);
+            const Mat4  world = Mat4Mul(parentWorld, local);
+
+            if (node.mesh >= 0)
+                emitMesh(static_cast<uint32_t>(node.mesh), world);
+
+            for (uint32_t c = 0; c < node.children_count; ++c)
+            {
+                const int ci = node.children[c];
+                if (ci >= 0)
+                    stack.emplace_back(static_cast<uint32_t>(ci), world);
+            }
+        }
     }
 
     if (prims.empty())
     {
-        fmtx::Error("BuildFromGltf: no usable primitives in mesh 0");
+        fmtx::Error("BuildFromGltf: no usable primitives");
         return {};
     }
 
