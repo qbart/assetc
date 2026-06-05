@@ -1,6 +1,6 @@
 .PHONY: run
 run: build
-	cd build && ./assetc || cd ..
+	cd build/debug && ./assetc || cd ../..
 
 .PHONY: build
 build:
@@ -8,7 +8,7 @@ build:
 
 .PHONY: install
 install: build
-	cp build/assetc ~/bin/assetc
+	cp build/debug/assetc ~/bin/assetc
 
 .PHONY: clean
 clean:

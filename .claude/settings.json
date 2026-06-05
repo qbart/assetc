@@ -3,7 +3,9 @@
   "permissions": {
     "deny": [
       "Read(./src/deps/tiny/**)",
-      "Read(./src/deps/stb/**)"
+      "Read(./src/deps/stb/**)",
+      "Bash(cmake *)",
+      "Bash(echo *)"
     ]
   },
   "env": {},
