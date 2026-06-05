@@ -22,9 +22,10 @@ namespace assetc
 
 struct CompiledMesh
 {
-    Mesh                  mesh;         // GpuVertex array + indices + meshlets
+    Mesh                  mesh;         // GpuVertex array + indices + meshlets (all submeshes concatenated)
     MeshBounds            bounds;       // mesh-wide AABB + sphere
-    std::vector<uint64_t> materialRefs; // FNV1a64 hashes, one per source material, in source-index order
+    std::vector<SubMesh>  submeshes;    // one per source primitive; index/meshlet ranges + material slot
+    std::vector<uint64_t> materialRefs; // FNV1a64 hashes, compact: only materials referenced by a submesh
 };
 
 // Build a runtime-ready mesh from a parsed OBJ.
@@ -38,19 +39,19 @@ struct CompiledMesh
 // Materials live in this same namespace, so engine-side dedupe works across
 // meshes from the same source.
 //
-// materialRefs is emitted in source-index order (one entry per material in
-// `src.materials`), so SUBM chunks (v2) can reference materials by index
-// directly without any remap.
+// materialRefs is compact: it contains only the materials actually referenced by
+// a submesh, in first-use order. SubMesh::materialSlot indexes into it (or is
+// kNoMaterial). Leaf-name disambiguation still uses the full source material set,
+// so refs stay stable across meshes from the same source.
 //
 // On failure, the returned CompiledMesh has empty vectors.
 CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef);
 
 // Build a runtime-ready mesh from a parsed glTF/GLB.
 //
-// v1 limitation: emits only the first primitive of the first mesh in the source.
-// Multi-mesh / multi-primitive support requires a SUBM chunk (v2). All materials
-// from the source are still hashed in source-index order so engine-side material
-// dedupe works correctly even though only one primitive's geometry is exported.
+// Exports every primitive of mesh[0] as a SubMesh (one material each). Multi-mesh
+// sources still export only mesh[0] (the remaining meshes belong to a scene asset);
+// a warning is logged when more meshes are present.
 //
 // Uses source TANGENT attribute if present; otherwise runs MikkTSpace if UVs
 // are present; otherwise emits zero tangents and warns. Synthesizes face normals

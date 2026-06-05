@@ -33,10 +33,14 @@ constexpr uint32_t MakeFourCC(char a, char b, char c, char d)
          | (static_cast<uint32_t>(static_cast<uint8_t>(d)) << 24);
 }
 
-constexpr uint32_t MeshMagic = MakeFourCC('H', 'M', 'S', 'H'); // 0x4853'4D48
+constexpr uint32_t MeshMagic   = MakeFourCC('H', 'M', 'S', 'H'); // 0x4853'4D48
+constexpr uint32_t MeshVersion = 2;                             // v2: submesh table + 28B vertex
+
+constexpr uint32_t kNoMaterial = 0xFFFFFFFFu; // SubMesh::materialSlot sentinel
 
 enum class ChunkId : uint32_t
 {
+    Desc             = MakeFourCC('D', 'E', 'S', 'C'),
     Bounds           = MakeFourCC('B', 'N', 'D', 'S'),
     Vertices         = MakeFourCC('V', 'T', 'X', 'S'),
     Indices          = MakeFourCC('I', 'D', 'X', 'S'),
@@ -45,6 +49,7 @@ enum class ChunkId : uint32_t
     MeshletTriangles = MakeFourCC('M', 'L', 'T', 'R'),
     MeshletBounds    = MakeFourCC('M', 'L', 'B', 'N'),
     Materials        = MakeFourCC('M', 'T', 'R', 'L'),
+    SubMeshes        = MakeFourCC('S', 'U', 'B', 'M'),
 };
 
 #pragma pack(push, 1)
@@ -52,13 +57,36 @@ enum class ChunkId : uint32_t
 struct FileHeader
 {
     uint32_t magic;      // == MeshMagic
-    uint32_t version;    // 1
+    uint32_t version;    // == MeshVersion
     uint32_t chunkCount; // entries in ChunkTable
     uint32_t flags;      // file-level flags, reserved
     uint64_t _reserved1; // (was contentHash; held for future use)
     uint64_t _reserved2;
 };
 static_assert(sizeof(FileHeader) == 32, "FileHeader must be 32 bytes");
+
+// DESC chunk: the single source of truth for the mesh's shape. Every data chunk
+// (VTXS/IDXS/MLET/...) is a *pure array* with no inline prelude, so the loader
+// reads counts/strides from here and mmap-casts each chunk directly.
+struct MeshDesc
+{
+    uint32_t vertexCount;
+    uint32_t indexCount;     // total indices across all submeshes (global into VTXS)
+    uint32_t meshletCount;   // MLET / MLBN element count
+    uint32_t submeshCount;   // SUBM element count (>= 1)
+    uint32_t materialCount;  // MTRL element count (compact: only referenced materials)
+    uint16_t vertexStride;   // == sizeof(GpuVertex)
+    uint8_t  indexWidth;     // 2 or 4 bytes per IDXS element
+    uint8_t  flags;          // bit0 = tangents present/valid
+    uint32_t meshletMaxVerts; // build param (verts per meshlet)
+    uint32_t meshletMaxTris;  // build param (tris per meshlet)
+};
+static_assert(sizeof(MeshDesc) == 32, "MeshDesc must be 32 bytes");
+
+enum MeshFlags : uint8_t
+{
+    MeshFlag_HasTangents = 1u << 0,
+};
 
 struct ChunkEntry
 {
@@ -88,11 +116,12 @@ struct CpuVertex
 
 struct GpuVertex
 {
-    float   position[3];
-    int16_t normal[4];  // [0..1] = octahedral normal; [2..3] reserved (0 in v1)
-    int16_t tangent[4]; // [0..1] = octahedral tangent + handedness bit; [2..3] reserved
+    float   position[3]; // object-space XYZ, raw float32
+    int16_t normal[2];   // octahedral normal (R16G16_SNORM)
+    int16_t tangent[2];  // octahedral tangent + handedness in bit 0 of x (R16G16_SINT)
     float   uv[2];
 };
+static_assert(sizeof(GpuVertex) == 28, "GpuVertex must be 28 bytes (v2)");
 
 struct MeshletBounds
 {
@@ -118,6 +147,23 @@ struct MeshletTriangle
     uint8_t i1;
     uint8_t i2;
 };
+
+// One drawable section = a contiguous index range and meshlet range sharing one
+// material. Submeshes are laid out contiguously and in order across IDXS and
+// MLET, so submesh[i].firstIndex == submesh[i-1].firstIndex + indexCount, etc.
+//   classic:     drawIndexed(indexCount, 1, firstIndex, /*vertexOffset=*/baseVertex)
+//   mesh-shader: dispatch meshlets [firstMeshlet, firstMeshlet + meshletCount)
+struct SubMesh
+{
+    uint32_t   firstIndex;   // offset into the global IDXS buffer
+    uint32_t   indexCount;   // indices in this submesh (multiple of 3)
+    uint32_t   firstMeshlet; // offset into MLET
+    uint32_t   meshletCount; // meshlets in this submesh
+    uint32_t   materialSlot; // index into MTRL, or kNoMaterial
+    uint32_t   baseVertex;   // 0 in v2 (indices are global); reserved for per-submesh u16
+    MeshBounds bounds;       // per-submesh AABB + sphere
+};
+static_assert(sizeof(SubMesh) == 64, "SubMesh must be 64 bytes");
 
 #pragma pack(pop)
 
@@ -150,25 +196,25 @@ struct ChunkPayload
 
 int WriteChunked(const std::string &path, std::span<const ChunkPayload> chunks);
 
-// Serialize a Mesh + bounds + material hashes to a v1 .hmesh file.
-// Builds 8 ChunkPayloads (BNDS, VTXS, IDXS, MLET, MLVR, MLTR, MLBN, MTRL) and
-// hands them to WriteChunked. Returns 0 on success, non-zero on failure.
+// Serialize a Mesh + bounds + submesh table + material hashes to a v2 .hmesh.
+// Emits DESC plus pure-array chunks (BNDS, VTXS, IDXS, MLET, MLVR, MLTR, MLBN,
+// MTRL, SUBM): every data chunk is a raw array with no inline prelude; counts and
+// strides live in DESC. Returns 0 on success, non-zero on failure.
 //
-// VTXS/IDXS/MTRL chunks carry small preludes (count + per-element metadata)
-// so the loader doesn't have to infer count from chunk size.
-//
-// Indices are written as uint16_t when vertexCount <= 65535, else uint32_t.
-// The IDXS prelude's `size` field tells the loader which.
+// Indices are written as uint16_t when vertexCount <= 65535, else uint32_t;
+// DESC.indexWidth records which.
 int WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds &bounds,
-               std::span<const uint64_t> materialHashes);
+               std::span<const SubMesh> submeshes, std::span<const uint64_t> materialHashes);
 
 // Read a written .hmesh and run structural + semantic checks:
 //   - magic, version, chunk table fits in file
 //   - every chunk's [offset, offset+size) fits in file
-//   - required chunks present (BNDS, VTXS, IDXS)
-//   - VTXS stride matches sizeof(GpuVertex); IDXS size is 2 or 4
-//   - prelude counts match chunk size for VTXS/IDXS
-//   - every vertex position is inside the BNDS AABB (within float epsilon)
+//   - required chunks present (DESC, BNDS, VTXS, IDXS, SUBM)
+//   - DESC.vertexStride == sizeof(GpuVertex); indexWidth is 2 or 4
+//   - VTXS/IDXS/MLET/MLBN/MTRL/SUBM chunk sizes match DESC counts
+//   - submeshes cover [0, indexCount) and [0, meshletCount) contiguously, in order
+//   - every materialSlot is kNoMaterial or < materialCount; every indexCount % 3 == 0
+//   - every vertex position is inside the BNDS AABB; every submesh AABB ⊆ mesh AABB
 // Returns 0 on success, non-zero with logged error on the first failure.
 int ValidateHMesh(const std::string &path);
 

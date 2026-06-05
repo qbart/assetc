@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <string>
 #include <unordered_map>
 
@@ -234,142 +235,202 @@ void DumpGltfStructure(const tg3_model &m)
     }
 }
 
-// --- Shared finalize: dedupe -> bounds -> oct pack -> meshlets -> materials --
+// One source primitive to be finalized into a submesh.
+struct PrimitiveInput
+{
+    std::vector<FlatVertex> flat;           // per-corner triangle list (size % 3 == 0)
+    int                     sourceMaterial; // index into the source material set, or -1
+};
 
-CompiledMesh FinalizeMesh(std::vector<FlatVertex> &&flat,
-                          std::span<const std::string_view> materialNames,
+// --- Shared finalize: per-primitive dedupe/optimize/meshletize -> submesh table ---
+//
+// Each primitive becomes one SubMesh: deduped into its own vertex range, appended
+// to the shared buffers, vertex-cache optimized, and meshletized independently so
+// no meshlet ever crosses a material boundary. Indices are global (offset by the
+// primitive's baseVertex). Materials are compacted: only referenced ones are
+// emitted, in first-use order, with SubMesh::materialSlot indexing into that list.
+CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
+                          std::span<const std::string_view> allMaterialNames,
                           std::string_view                  sourceRef)
 {
     CompiledMesh cm{};
 
-    // Dedupe.
-    std::vector<CpuVertex> cpuVerts;
-    cpuVerts.reserve(flat.size() / 2);
-    std::vector<uint32_t> indices;
-    indices.reserve(flat.size());
-    std::unordered_map<VertexKey, uint32_t, VertexKeyHash> seen;
-    seen.reserve(flat.size());
-    for (const auto &fv : flat)
-    {
-        VertexKey key{fv};
-        auto [it, inserted] = seen.emplace(key, static_cast<uint32_t>(cpuVerts.size()));
+    constexpr size_t MaxVerts   = 64;
+    constexpr size_t MaxTris    = 124;
+    constexpr float  ConeWeight = 0.25f;
+    constexpr float  Inf        = std::numeric_limits<float>::infinity();
+
+    // Compact material slots: source index -> dense slot, in first-use order.
+    std::vector<int>                  denseToSource;
+    std::unordered_map<int, uint32_t> sourceToDense;
+    auto materialSlotFor = [&](int src) -> uint32_t {
+        if (src < 0)
+            return kNoMaterial;
+        auto [it, inserted] =
+            sourceToDense.emplace(src, static_cast<uint32_t>(denseToSource.size()));
         if (inserted)
-            cpuVerts.push_back(CpuVertex{fv.pos, fv.normal, fv.tangent, fv.uv});
-        indices.push_back(it->second);
+            denseToSource.push_back(src);
+        return it->second;
+    };
+
+    for (auto &prim : prims)
+    {
+        if (prim.flat.empty())
+            continue;
+
+        // Dedupe within this primitive.
+        std::vector<CpuVertex> localVerts;
+        std::vector<uint32_t>  localIdx;
+        localVerts.reserve(prim.flat.size() / 2);
+        localIdx.reserve(prim.flat.size());
+        std::unordered_map<VertexKey, uint32_t, VertexKeyHash> seen;
+        seen.reserve(prim.flat.size());
+        for (const auto &fv : prim.flat)
+        {
+            VertexKey key{fv};
+            auto [it, inserted] = seen.emplace(key, static_cast<uint32_t>(localVerts.size()));
+            if (inserted)
+                localVerts.push_back(CpuVertex{fv.pos, fv.normal, fv.tangent, fv.uv});
+            localIdx.push_back(it->second);
+        }
+
+        meshopt_optimizeVertexCache(localIdx.data(), localIdx.data(), localIdx.size(),
+                                    localVerts.size());
+
+        // Per-submesh bounds (AABB + sphere) from local positions.
+        Vec3 mn{Inf, Inf, Inf};
+        Vec3 mx{-Inf, -Inf, -Inf};
+        for (const auto &v : localVerts)
+        {
+            mn.x = std::min(mn.x, v.pos.x);
+            mn.y = std::min(mn.y, v.pos.y);
+            mn.z = std::min(mn.z, v.pos.z);
+            mx.x = std::max(mx.x, v.pos.x);
+            mx.y = std::max(mx.y, v.pos.y);
+            mx.z = std::max(mx.z, v.pos.z);
+        }
+        const Vec3 center{0.5f * (mn.x + mx.x), 0.5f * (mn.y + mx.y), 0.5f * (mn.z + mx.z)};
+        float      r2 = 0.0f;
+        for (const auto &v : localVerts)
+        {
+            const float dx = v.pos.x - center.x, dy = v.pos.y - center.y, dz = v.pos.z - center.z;
+            r2             = std::max(r2, dx * dx + dy * dy + dz * dz);
+        }
+
+        const uint32_t baseVertex  = static_cast<uint32_t>(cm.mesh.vertices.size());
+        const uint32_t firstIndex  = static_cast<uint32_t>(cm.mesh.indices.size());
+
+        // Append vertices (oct pack) to the shared buffer.
+        cm.mesh.vertices.reserve(cm.mesh.vertices.size() + localVerts.size());
+        for (const auto &cv : localVerts)
+        {
+            GpuVertex gv{};
+            gv.position[0] = cv.pos.x;
+            gv.position[1] = cv.pos.y;
+            gv.position[2] = cv.pos.z;
+            const auto n   = OctEncode(cv.normal);
+            gv.normal[0]   = n[0];
+            gv.normal[1]   = n[1];
+            const auto t   = OctEncodeTangent(Vec3{cv.tangent.x, cv.tangent.y, cv.tangent.z},
+                                              cv.tangent.w);
+            gv.tangent[0]  = t[0];
+            gv.tangent[1]  = t[1];
+            gv.uv[0]       = cv.uv.x;
+            gv.uv[1]       = cv.uv.y;
+            cm.mesh.vertices.push_back(gv);
+        }
+
+        // Append global indices (offset into the shared vertex buffer).
+        cm.mesh.indices.reserve(cm.mesh.indices.size() + localIdx.size());
+        for (uint32_t li : localIdx)
+            cm.mesh.indices.push_back(li + baseVertex);
+
+        // Meshlets over THIS submesh only, built against local positions.
+        const size_t maxMeshlets = meshopt_buildMeshletsBound(localIdx.size(), MaxVerts, MaxTris);
+        std::vector<meshopt_Meshlet> mo(maxMeshlets);
+        std::vector<unsigned int>    mvi(maxMeshlets * MaxVerts);
+        std::vector<unsigned char>   mti(maxMeshlets * MaxTris * 3);
+        const size_t                 meshletCount = meshopt_buildMeshlets(
+            mo.data(), mvi.data(), mti.data(), localIdx.data(), localIdx.size(),
+            &localVerts[0].pos.x, localVerts.size(), sizeof(CpuVertex), MaxVerts, MaxTris,
+            ConeWeight);
+        if (meshletCount == 0)
+        {
+            fmtx::Error("FinalizeMesh: meshopt_buildMeshlets produced 0 meshlets");
+            return CompiledMesh{};
+        }
+
+        const uint32_t firstMeshlet = static_cast<uint32_t>(cm.mesh.meshlets.size());
+        for (size_t i = 0; i < meshletCount; ++i)
+        {
+            const auto    &srcM     = mo[i];
+            const uint32_t mlvrBase = static_cast<uint32_t>(cm.mesh.meshletVertices.size());
+            for (uint32_t v = 0; v < srcM.vertex_count; ++v)
+                cm.mesh.meshletVertices.push_back(mvi[srcM.vertex_offset + v] + baseVertex);
+
+            const uint32_t       triBase  = static_cast<uint32_t>(cm.mesh.meshletTriangles.size());
+            const unsigned char *triBytes = &mti[srcM.triangle_offset];
+            for (uint32_t t = 0; t < srcM.triangle_count; ++t)
+                cm.mesh.meshletTriangles.push_back(MeshletTriangle{
+                    triBytes[t * 3 + 0], triBytes[t * 3 + 1], triBytes[t * 3 + 2]});
+
+            cm.mesh.meshlets.push_back(
+                Meshlet{mlvrBase, srcM.vertex_count, triBase, srcM.triangle_count});
+
+            const meshopt_Bounds b = meshopt_computeMeshletBounds(
+                &mvi[srcM.vertex_offset], &mti[srcM.triangle_offset], srcM.triangle_count,
+                &localVerts[0].pos.x, localVerts.size(), sizeof(CpuVertex));
+            cm.mesh.meshletBounds.push_back(
+                MeshletBounds{Vec3{b.center[0], b.center[1], b.center[2]}, b.radius,
+                              Vec3{b.cone_axis[0], b.cone_axis[1], b.cone_axis[2]}, b.cone_cutoff});
+        }
+
+        SubMesh sm{};
+        sm.firstIndex   = firstIndex;
+        sm.indexCount   = static_cast<uint32_t>(localIdx.size());
+        sm.firstMeshlet = firstMeshlet;
+        sm.meshletCount = static_cast<uint32_t>(cm.mesh.meshlets.size()) - firstMeshlet;
+        sm.materialSlot = materialSlotFor(prim.sourceMaterial);
+        sm.baseVertex   = 0;
+        sm.bounds       = MeshBounds{mn, mx, center, std::sqrt(r2)};
+        cm.submeshes.push_back(sm);
     }
 
-    // Bounds (AABB + sphere).
-    Vec3 mn{std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity(),
-            std::numeric_limits<float>::infinity()};
-    Vec3 mx{-std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
-            -std::numeric_limits<float>::infinity()};
-    for (const auto &v : cpuVerts)
+    if (cm.submeshes.empty())
     {
-        mn.x = std::min(mn.x, v.pos.x);
-        mn.y = std::min(mn.y, v.pos.y);
-        mn.z = std::min(mn.z, v.pos.z);
-        mx.x = std::max(mx.x, v.pos.x);
-        mx.y = std::max(mx.y, v.pos.y);
-        mx.z = std::max(mx.z, v.pos.z);
+        fmtx::Error("FinalizeMesh: no usable primitives");
+        return CompiledMesh{};
+    }
+
+    // Mesh-wide bounds = union over all vertices.
+    Vec3 mn{Inf, Inf, Inf};
+    Vec3 mx{-Inf, -Inf, -Inf};
+    for (const auto &v : cm.mesh.vertices)
+    {
+        mn.x = std::min(mn.x, v.position[0]);
+        mn.y = std::min(mn.y, v.position[1]);
+        mn.z = std::min(mn.z, v.position[2]);
+        mx.x = std::max(mx.x, v.position[0]);
+        mx.y = std::max(mx.y, v.position[1]);
+        mx.z = std::max(mx.z, v.position[2]);
     }
     const Vec3 center{0.5f * (mn.x + mx.x), 0.5f * (mn.y + mx.y), 0.5f * (mn.z + mx.z)};
     float      r2 = 0.0f;
-    for (const auto &v : cpuVerts)
+    for (const auto &v : cm.mesh.vertices)
     {
-        const float dx = v.pos.x - center.x;
-        const float dy = v.pos.y - center.y;
-        const float dz = v.pos.z - center.z;
+        const float dx = v.position[0] - center.x, dy = v.position[1] - center.y,
+                    dz = v.position[2] - center.z;
         r2             = std::max(r2, dx * dx + dy * dy + dz * dz);
     }
     cm.bounds = MeshBounds{mn, mx, center, std::sqrt(r2)};
 
-    // CpuVertex -> GpuVertex (oct pack).
-    cm.mesh.vertices.resize(cpuVerts.size());
-    for (size_t i = 0; i < cpuVerts.size(); ++i)
-    {
-        const auto &cv = cpuVerts[i];
-        auto       &gv = cm.mesh.vertices[i];
-        gv.position[0] = cv.pos.x;
-        gv.position[1] = cv.pos.y;
-        gv.position[2] = cv.pos.z;
-        const auto n   = OctEncode(cv.normal);
-        gv.normal[0]   = n[0];
-        gv.normal[1]   = n[1];
-        gv.normal[2]   = 0;
-        gv.normal[3]   = 0;
-        const auto t   = OctEncodeTangent(Vec3{cv.tangent.x, cv.tangent.y, cv.tangent.z},
-                                          cv.tangent.w);
-        gv.tangent[0]  = t[0];
-        gv.tangent[1]  = t[1];
-        gv.tangent[2]  = 0;
-        gv.tangent[3]  = 0;
-        gv.uv[0]       = cv.uv.x;
-        gv.uv[1]       = cv.uv.y;
-    }
-    cm.mesh.indices = std::move(indices);
-
-    meshopt_optimizeVertexCache(cm.mesh.indices.data(), cm.mesh.indices.data(),
-                                cm.mesh.indices.size(), cm.mesh.vertices.size());
-
-    constexpr size_t MaxVerts    = 64;
-    constexpr size_t MaxTris     = 124;
-    constexpr float  ConeWeight  = 0.25f;
-    const size_t     maxMeshlets = meshopt_buildMeshletsBound(cm.mesh.indices.size(),
-                                                              MaxVerts, MaxTris);
-
-    std::vector<meshopt_Meshlet> mo(maxMeshlets);
-    std::vector<unsigned int>    mvi(maxMeshlets * MaxVerts);
-    std::vector<unsigned char>   mti(maxMeshlets * MaxTris * 3);
-
-    const size_t meshletCount = meshopt_buildMeshlets(
-        mo.data(), mvi.data(), mti.data(), cm.mesh.indices.data(), cm.mesh.indices.size(),
-        &cm.mesh.vertices[0].position[0], cm.mesh.vertices.size(), sizeof(GpuVertex), MaxVerts,
-        MaxTris, ConeWeight);
-
-    if (meshletCount == 0)
-    {
-        fmtx::Error("FinalizeMesh: meshopt_buildMeshlets produced 0 meshlets");
-        return CompiledMesh{};
-    }
-
-    const auto  &last    = mo[meshletCount - 1];
-    const size_t vtxUsed = last.vertex_offset + last.vertex_count;
-    size_t       totalTris = 0;
-    for (size_t i = 0; i < meshletCount; ++i)
-        totalTris += mo[i].triangle_count;
-
-    cm.mesh.meshletVertices.assign(mvi.begin(), mvi.begin() + vtxUsed);
-    cm.mesh.meshlets.resize(meshletCount);
-    cm.mesh.meshletTriangles.resize(totalTris);
-    cm.mesh.meshletBounds.resize(meshletCount);
-
-    size_t triCursor = 0;
-    for (size_t i = 0; i < meshletCount; ++i)
-    {
-        const auto          &src      = mo[i];
-        const unsigned char *triBytes = &mti[src.triangle_offset];
-        for (uint32_t t = 0; t < src.triangle_count; ++t)
-        {
-            cm.mesh.meshletTriangles[triCursor + t] = MeshletTriangle{
-                triBytes[t * 3 + 0], triBytes[t * 3 + 1], triBytes[t * 3 + 2]};
-        }
-        cm.mesh.meshlets[i] = Meshlet{src.vertex_offset, src.vertex_count,
-                                      static_cast<uint32_t>(triCursor), src.triangle_count};
-        const meshopt_Bounds b = meshopt_computeMeshletBounds(
-            &mvi[src.vertex_offset], &mti[src.triangle_offset], src.triangle_count,
-            &cm.mesh.vertices[0].position[0], cm.mesh.vertices.size(), sizeof(GpuVertex));
-        cm.mesh.meshletBounds[i] =
-            MeshletBounds{Vec3{b.center[0], b.center[1], b.center[2]}, b.radius,
-                          Vec3{b.cone_axis[0], b.cone_axis[1], b.cone_axis[2]}, b.cone_cutoff};
-        triCursor += src.triangle_count;
-    }
-
-    cm.materialRefs.reserve(materialNames.size());
-    for (size_t i = 0; i < materialNames.size(); ++i)
+    // Compact material refs, one per dense slot in first-use order.
+    cm.materialRefs.reserve(denseToSource.size());
+    for (int src : denseToSource)
     {
         std::string ref(sourceRef);
         ref.push_back('/');
-        ref.append(MaterialLeaf(materialNames[i], i, materialNames));
+        ref.append(MaterialLeaf(allMaterialNames[src], static_cast<size_t>(src), allMaterialNames));
         cm.materialRefs.push_back(HashAssetRef(ref));
     }
 
@@ -434,17 +495,19 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
         return cm;
     }
 
-    // 1) Expand shapes into a flat triangle list of FlatVertex.
+    // 1) Expand shapes into per-material buckets of FlatVertex. One bucket becomes
+    //    one submesh. std::map keeps a deterministic (material-id ordered) output.
     //    tinyobj's ObjReader triangulates by default, so every face is 3 verts.
-    size_t triangleCount = 0;
-    for (const auto &sh : src.shapes)
-        triangleCount += sh.mesh.num_face_vertices.size();
+    struct ObjBucket
+    {
+        std::vector<FlatVertex> flat;
+        bool                    missingNormal = false;
+    };
+    std::map<int, ObjBucket> buckets;
 
-    std::vector<FlatVertex> flat;
-    flat.reserve(triangleCount * 3);
-
-    bool warnedMissingUV     = false;
-    bool warnedMissingNormal = false;
+    bool      warnedMissingUV     = false;
+    bool      warnedMissingNormal = false;
+    const int materialCount       = static_cast<int>(src.materials.size());
 
     for (const auto &sh : src.shapes)
     {
@@ -459,6 +522,11 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
                 cursor += nv;
                 continue;
             }
+
+            int matId = f < sh.mesh.material_ids.size() ? sh.mesh.material_ids[f] : -1;
+            if (matId < 0 || matId >= materialCount)
+                matId = -1;
+            auto &bk = buckets[matId];
 
             for (int k = 0; k < 3; ++k)
             {
@@ -482,7 +550,8 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
                         fmtx::Warn("BuildFromObj: missing normals; using face normals");
                         warnedMissingNormal = true;
                     }
-                    v.normal = Vec3{0.0f, 0.0f, 0.0f};
+                    v.normal         = Vec3{0.0f, 0.0f, 0.0f};
+                    bk.missingNormal = true;
                 }
 
                 if (idx.texcoord_index >= 0)
@@ -502,25 +571,32 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
                     v.uv = Vec2{0.0f, 0.0f};
                 }
 
-                flat.push_back(v);
+                bk.flat.push_back(v);
             }
             cursor += 3;
         }
     }
 
-    if (flat.empty())
+    if (buckets.empty())
     {
         fmtx::Error("BuildFromObj: produced 0 triangles");
         return cm;
     }
 
-    if (warnedMissingNormal)
-        FillFaceNormals(flat);
-
-    if (!RunMikkTSpace(flat))
+    std::vector<PrimitiveInput> prims;
+    prims.reserve(buckets.size());
+    for (auto &[matId, bk] : buckets)
     {
-        fmtx::Error("BuildFromObj: MikkTSpace failed");
-        return cm;
+        if (bk.flat.empty())
+            continue;
+        if (bk.missingNormal)
+            FillFaceNormals(bk.flat);
+        if (!RunMikkTSpace(bk.flat))
+        {
+            fmtx::Error("BuildFromObj: MikkTSpace failed");
+            return cm;
+        }
+        prims.push_back(PrimitiveInput{std::move(bk.flat), matId});
     }
 
     std::vector<std::string_view> matNames;
@@ -528,42 +604,25 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
     for (const auto &mat : src.materials)
         matNames.emplace_back(mat.name);
 
-    return FinalizeMesh(std::move(flat), matNames, sourceRef);
+    return FinalizeMesh(std::move(prims), matNames, sourceRef);
 }
 
 // --- BuildFromGltf -----------------------------------------------------------
 
-CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
+namespace
 {
-    const auto &m = src.model;
-    DumpGltfStructure(m);
 
-    if (m.meshes_count == 0 || m.meshes[0].primitives_count == 0)
-    {
-        fmtx::Error("BuildFromGltf: no meshes/primitives");
-        return {};
-    }
-    if (m.meshes_count > 1)
-        fmtx::Warn(fmt::format("BuildFromGltf: {} meshes; only mesh 0 is exported (v1)",
-                               m.meshes_count));
-    if (m.meshes[0].primitives_count > 1)
-        fmtx::Warn(fmt::format("BuildFromGltf: {} primitives; only primitive 0 is exported (v1)",
-                               m.meshes[0].primitives_count));
-
-    fmtx::Info("BuildFromGltf: selecting mesh[0].primitive[0]");
-    const auto &prim = m.meshes[0].primitives[0];
-    const int   mode = prim.mode < 0 ? TG3_MODE_TRIANGLES : prim.mode;
-    if (mode != TG3_MODE_TRIANGLES)
-    {
-        fmtx::Error(fmt::format("BuildFromGltf: mode {} not supported (TRIANGLES only)", mode));
-        return {};
-    }
-
+// Extract one glTF primitive into a flat per-corner triangle list. Returns false
+// (with a logged warning) if the primitive can't be used, so the caller can skip
+// it without failing the whole mesh. Mode must be checked by the caller.
+bool ExtractGltfPrimitive(const tg3_model &m, const tg3_primitive &prim, uint32_t primIndex,
+                          std::vector<FlatVertex> &flat)
+{
     const int posIdx = FindAttr(prim, "POSITION");
     if (posIdx < 0 || static_cast<uint32_t>(posIdx) >= m.accessors_count)
     {
-        fmtx::Error("BuildFromGltf: missing POSITION");
-        return {};
+        fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] missing POSITION; skipped", primIndex));
+        return false;
     }
     const int normIdx = FindAttr(prim, "NORMAL");
     const int uvIdx   = FindAttr(prim, "TEXCOORD_0");
@@ -572,16 +631,18 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
     const auto &posAcc = m.accessors[posIdx];
     if (posAcc.component_type != TG3_COMPONENT_TYPE_FLOAT || posAcc.type != TG3_TYPE_VEC3)
     {
-        fmtx::Error("BuildFromGltf: POSITION must be FLOAT VEC3");
-        return {};
+        fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] POSITION not FLOAT VEC3; skipped",
+                               primIndex));
+        return false;
     }
-    const uint64_t   vc      = posAcc.count;
-    const uint8_t   *posData = AccessorPtr(m, posAcc);
-    const size_t     posStr  = AccessorStride(m, posAcc);
+    const uint64_t vc      = posAcc.count;
+    const uint8_t *posData = AccessorPtr(m, posAcc);
+    const size_t   posStr  = AccessorStride(m, posAcc);
     if (!posData)
     {
-        fmtx::Error("BuildFromGltf: POSITION accessor has no buffer view");
-        return {};
+        fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] POSITION has no buffer view; skipped",
+                               primIndex));
+        return false;
     }
 
     std::vector<Vec3> positions(vc);
@@ -666,15 +727,17 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
         const auto &a = m.accessors[prim.indices];
         if (a.type != TG3_TYPE_SCALAR)
         {
-            fmtx::Error("BuildFromGltf: indices accessor must be SCALAR");
-            return {};
+            fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] indices not SCALAR; skipped",
+                                   primIndex));
+            return false;
         }
         const uint8_t *d = AccessorPtr(m, a);
         const size_t   s = AccessorStride(m, a);
         if (!d)
         {
-            fmtx::Error("BuildFromGltf: indices accessor has no buffer view");
-            return {};
+            fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] indices have no buffer view; skipped",
+                                   primIndex));
+            return false;
         }
         indices.resize(a.count);
         switch (a.component_type)
@@ -692,9 +755,10 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
                 indices[i] = *reinterpret_cast<const uint8_t *>(d + i * s);
             break;
         default:
-            fmtx::Error(fmt::format("BuildFromGltf: indices component_type {} not supported",
-                                    a.component_type));
-            return {};
+            fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] indices component_type {} unsupported; "
+                                   "skipped",
+                                   primIndex, a.component_type));
+            return false;
         }
     }
     else
@@ -706,18 +770,20 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
 
     if (indices.size() % 3 != 0)
     {
-        fmtx::Error("BuildFromGltf: index count not divisible by 3");
-        return {};
+        fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] index count not divisible by 3; skipped",
+                               primIndex));
+        return false;
     }
 
-    std::vector<FlatVertex> flat;
+    flat.clear();
     flat.reserve(indices.size());
     for (uint32_t idx : indices)
     {
         if (idx >= vc)
         {
-            fmtx::Error(fmt::format("BuildFromGltf: index {} >= vertex count {}", idx, vc));
-            return {};
+            fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] index {} >= vertex count {}; skipped",
+                                   primIndex, idx, vc));
+            return false;
         }
         FlatVertex v{};
         v.pos     = positions[idx];
@@ -729,7 +795,8 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
 
     if (!hasNormals)
     {
-        fmtx::Warn("BuildFromGltf: missing NORMAL; using face normals");
+        fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] missing NORMAL; using face normals",
+                               primIndex));
         FillFaceNormals(flat);
     }
 
@@ -737,13 +804,63 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
     {
         if (!hasUVs)
         {
-            fmtx::Warn("BuildFromGltf: missing TANGENT and TEXCOORD_0; tangents will be zero");
+            fmtx::Warn(fmt::format(
+                "BuildFromGltf: prim[{}] missing TANGENT and TEXCOORD_0; tangents will be zero",
+                primIndex));
         }
         else if (!RunMikkTSpace(flat))
         {
-            fmtx::Error("BuildFromGltf: MikkTSpace failed");
-            return {};
+            fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] MikkTSpace failed; skipped", primIndex));
+            return false;
         }
+    }
+
+    return true;
+}
+
+} // namespace
+
+CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
+{
+    const auto &m = src.model;
+    DumpGltfStructure(m);
+
+    if (m.meshes_count == 0 || m.meshes[0].primitives_count == 0)
+    {
+        fmtx::Error("BuildFromGltf: no meshes/primitives");
+        return {};
+    }
+    if (m.meshes_count > 1)
+        fmtx::Warn(fmt::format("BuildFromGltf: {} meshes; only mesh 0 is exported "
+                               "(others belong to a scene asset)",
+                               m.meshes_count));
+
+    const auto &mesh0 = m.meshes[0];
+
+    // Every primitive of mesh[0] becomes one submesh.
+    std::vector<PrimitiveInput> prims;
+    prims.reserve(mesh0.primitives_count);
+    for (uint32_t pi = 0; pi < mesh0.primitives_count; ++pi)
+    {
+        const auto &prim = mesh0.primitives[pi];
+        const int   mode = prim.mode < 0 ? TG3_MODE_TRIANGLES : prim.mode;
+        if (mode != TG3_MODE_TRIANGLES)
+        {
+            fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] mode {} not TRIANGLES; skipped", pi,
+                                   mode));
+            continue;
+        }
+
+        std::vector<FlatVertex> flat;
+        if (!ExtractGltfPrimitive(m, prim, pi, flat))
+            continue;
+        prims.push_back(PrimitiveInput{std::move(flat), prim.material});
+    }
+
+    if (prims.empty())
+    {
+        fmtx::Error("BuildFromGltf: no usable primitives in mesh 0");
+        return {};
     }
 
     // Materials: need stable backing storage for the string_view spans we pass
@@ -759,7 +876,7 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
         names.emplace_back(nameStorage.back());
     }
 
-    return FinalizeMesh(std::move(flat), names, sourceRef);
+    return FinalizeMesh(std::move(prims), names, sourceRef);
 }
 
 } // namespace assetc

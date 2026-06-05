@@ -198,11 +198,12 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
             return 1;
         }
 
-        fmtx::Info(fmt::format("{} {} verts / {} tris / {} meshlets / {} mats -> {}",
+        fmtx::Info(fmt::format("{} {} verts / {} tris / {} meshlets / {} submeshes / {} mats -> {}",
                                asset.type, cm.mesh.vertices.size(),
                                cm.mesh.indices.size() / 3, cm.mesh.meshlets.size(),
-                               cm.materialRefs.size(), out));
-        if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.materialRefs); rc != 0)
+                               cm.submeshes.size(), cm.materialRefs.size(), out));
+        if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.submeshes, cm.materialRefs);
+            rc != 0)
             return rc;
         if (verify)
             return assetc::ValidateHMesh(out);

@@ -48,7 +48,7 @@ int assetc::WriteChunked(const std::string &path, std::span<const ChunkPayload> 
 
     FileHeader hdr{};
     hdr.magic      = MeshMagic;
-    hdr.version    = 1;
+    hdr.version    = MeshVersion;
     hdr.chunkCount = static_cast<uint32_t>(chunks.size());
     out.write(reinterpret_cast<const char *>(&hdr), sizeof(hdr));
     out.write(reinterpret_cast<const char *>(table.data()),
@@ -87,12 +87,13 @@ int assetc::WriteChunked(const std::string &path, std::span<const ChunkPayload> 
 //         return normalize(n);
 //     }
 //
-// Vertex input — two slots, two Vulkan formats:
+// Vertex input — GpuVertex is 28 bytes (v2), two packed slots, two Vulkan formats:
 //
-//   Normal  -> VK_FORMAT_R16G16_SNORM   (hardware divides by 32767 on fetch;
-//                                        shader receives float2 in [-1, 1])
-//   Tangent -> VK_FORMAT_R16G16_SINT    (shader needs raw integer to extract
-//                                        the handedness bit; divides manually)
+//   position -> VK_FORMAT_R32G32B32_SFLOAT  (offset 0)
+//   normal   -> VK_FORMAT_R16G16_SNORM      (offset 12; /32767 on fetch -> [-1,1])
+//   tangent  -> VK_FORMAT_R16G16_SINT       (offset 16; raw int to extract bit 0;
+//                                            shader divides by 32767 manually)
+//   uv       -> VK_FORMAT_R32G32_SFLOAT     (offset 20)
 //
 // Slang vertex input struct:
 //
@@ -175,6 +176,7 @@ std::span<const std::byte> VecBytes(const std::vector<T> &v) noexcept
 } // namespace
 
 int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds &bounds,
+                       std::span<const SubMesh> submeshes,
                        std::span<const uint64_t> materialHashes)
 {
     if (m.vertices.empty())
@@ -182,64 +184,58 @@ int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds 
         fmtx::Error(fmt::format("WriteHMesh: empty vertex buffer, refusing to write {}", path));
         return 1;
     }
-
-    // VTXS: u32 count, u32 stride, then count*stride bytes.
-    std::vector<std::byte> vtxBuf;
+    if (submeshes.empty())
     {
-        const uint32_t count  = static_cast<uint32_t>(m.vertices.size());
-        const uint32_t stride = sizeof(GpuVertex);
-        vtxBuf.reserve(8 + static_cast<size_t>(count) * stride);
-        AppendPod(vtxBuf, count);
-        AppendPod(vtxBuf, stride);
-        const auto bytes = VecBytes(m.vertices);
-        vtxBuf.insert(vtxBuf.end(), bytes.begin(), bytes.end());
+        fmtx::Error(fmt::format("WriteHMesh: no submeshes, refusing to write {}", path));
+        return 1;
     }
 
-    // IDXS: u32 count, u32 size (2 or 4), then bytes. Downcast to u16 if vertexCount fits.
+    const bool fits16 = m.vertices.size() <= 0xFFFFu;
+
+    // DESC: the single descriptor; every other chunk is a pure array.
+    MeshDesc desc{};
+    desc.vertexCount     = static_cast<uint32_t>(m.vertices.size());
+    desc.indexCount      = static_cast<uint32_t>(m.indices.size());
+    desc.meshletCount    = static_cast<uint32_t>(m.meshlets.size());
+    desc.submeshCount    = static_cast<uint32_t>(submeshes.size());
+    desc.materialCount   = static_cast<uint32_t>(materialHashes.size());
+    desc.vertexStride    = static_cast<uint16_t>(sizeof(GpuVertex));
+    desc.indexWidth      = fits16 ? 2u : 4u;
+    desc.flags           = MeshFlag_HasTangents;
+    desc.meshletMaxVerts = 64;  // mirror MaxVerts in encode_mesh.cpp
+    desc.meshletMaxTris  = 124; // mirror MaxTris in encode_mesh.cpp
+
+    // IDXS: pure index array, downcast to u16 when vertex count fits.
     std::vector<std::byte> idxBuf;
+    if (fits16)
     {
-        const uint32_t count  = static_cast<uint32_t>(m.indices.size());
-        const bool     fits16 = m.vertices.size() <= 0xFFFFu;
-        const uint32_t size   = fits16 ? 2u : 4u;
-        idxBuf.reserve(8 + static_cast<size_t>(count) * size);
-        AppendPod(idxBuf, count);
-        AppendPod(idxBuf, size);
-        if (fits16)
+        idxBuf.reserve(m.indices.size() * 2);
+        for (uint32_t v : m.indices)
         {
-            for (uint32_t v : m.indices)
-            {
-                const uint16_t v16 = static_cast<uint16_t>(v);
-                AppendPod(idxBuf, v16);
-            }
-        }
-        else
-        {
-            const auto bytes = VecBytes(m.indices);
-            idxBuf.insert(idxBuf.end(), bytes.begin(), bytes.end());
+            const uint16_t v16 = static_cast<uint16_t>(v);
+            AppendPod(idxBuf, v16);
         }
     }
-
-    // MTRL: u32 count, then count*u64.
-    std::vector<std::byte> mtrlBuf;
+    else
     {
-        const uint32_t count = static_cast<uint32_t>(materialHashes.size());
-        mtrlBuf.reserve(4 + static_cast<size_t>(count) * 8);
-        AppendPod(mtrlBuf, count);
-        const auto bytes = std::as_bytes(materialHashes);
-        mtrlBuf.insert(mtrlBuf.end(), bytes.begin(), bytes.end());
+        const auto bytes = VecBytes(m.indices);
+        idxBuf.assign(bytes.begin(), bytes.end());
     }
 
+    const auto descBytes   = std::as_bytes(std::span<const MeshDesc>(&desc, 1));
     const auto boundsBytes = std::as_bytes(std::span<const MeshBounds>(&bounds, 1));
 
     const ChunkPayload chunks[] = {
+        {ChunkId::Desc, descBytes},
         {ChunkId::Bounds, boundsBytes},
-        {ChunkId::Vertices, std::span<const std::byte>(vtxBuf.data(), vtxBuf.size())},
+        {ChunkId::Vertices, VecBytes(m.vertices)},
         {ChunkId::Indices, std::span<const std::byte>(idxBuf.data(), idxBuf.size())},
         {ChunkId::Meshlets, VecBytes(m.meshlets)},
         {ChunkId::MeshletVertices, VecBytes(m.meshletVertices)},
         {ChunkId::MeshletTriangles, VecBytes(m.meshletTriangles)},
         {ChunkId::MeshletBounds, VecBytes(m.meshletBounds)},
-        {ChunkId::Materials, std::span<const std::byte>(mtrlBuf.data(), mtrlBuf.size())},
+        {ChunkId::Materials, std::as_bytes(materialHashes)},
+        {ChunkId::SubMeshes, std::as_bytes(submeshes)},
     };
     return WriteChunked(path, chunks);
 }
@@ -278,9 +274,10 @@ int assetc::ValidateHMesh(const std::string &path)
         fmtx::Error(fmt::format("validate: {} bad magic 0x{:08x}", path, hdr.magic));
         return 1;
     }
-    if (hdr.version != 1)
+    if (hdr.version != MeshVersion)
     {
-        fmtx::Error(fmt::format("validate: {} unsupported version {}", path, hdr.version));
+        fmtx::Error(fmt::format("validate: {} unsupported version {} (expected {})", path,
+                                hdr.version, MeshVersion));
         return 1;
     }
 
@@ -314,14 +311,26 @@ int assetc::ValidateHMesh(const std::string &path)
         return nullptr;
     };
 
+    const auto *desc = findChunk(ChunkId::Desc);
     const auto *bnds = findChunk(ChunkId::Bounds);
     const auto *vtxs = findChunk(ChunkId::Vertices);
     const auto *idxs = findChunk(ChunkId::Indices);
-    if (!bnds || !vtxs || !idxs)
+    const auto *subm = findChunk(ChunkId::SubMeshes);
+    if (!desc || !bnds || !vtxs || !idxs || !subm)
     {
-        fmtx::Error(fmt::format("validate: {} missing required chunk (BNDS/VTXS/IDXS)", path));
+        fmtx::Error(fmt::format("validate: {} missing required chunk (DESC/BNDS/VTXS/IDXS/SUBM)",
+                                path));
         return 1;
     }
+
+    if (desc->size != sizeof(MeshDesc))
+    {
+        fmtx::Error(fmt::format("validate: {} DESC size {} != {}", path, desc->size,
+                                sizeof(MeshDesc)));
+        return 1;
+    }
+    MeshDesc d{};
+    std::memcpy(&d, buf.data() + desc->offset, sizeof(MeshDesc));
 
     if (bnds->size != sizeof(MeshBounds))
     {
@@ -332,58 +341,115 @@ int assetc::ValidateHMesh(const std::string &path)
     MeshBounds bounds{};
     std::memcpy(&bounds, buf.data() + bnds->offset, sizeof(MeshBounds));
 
-    if (vtxs->size < 8)
+    if (d.vertexStride != sizeof(GpuVertex))
     {
-        fmtx::Error(fmt::format("validate: {} VTXS truncated prelude", path));
+        fmtx::Error(fmt::format("validate: {} DESC.vertexStride {} != sizeof(GpuVertex)={}", path,
+                                d.vertexStride, sizeof(GpuVertex)));
         return 1;
     }
-    uint32_t vtxCount  = 0;
-    uint32_t vtxStride = 0;
-    std::memcpy(&vtxCount, buf.data() + vtxs->offset + 0, 4);
-    std::memcpy(&vtxStride, buf.data() + vtxs->offset + 4, 4);
-    if (vtxStride != sizeof(GpuVertex))
+    if (vtxs->size != static_cast<size_t>(d.vertexCount) * d.vertexStride)
     {
-        fmtx::Error(fmt::format("validate: {} VTXS stride {} != sizeof(GpuVertex)={}", path,
-                                vtxStride, sizeof(GpuVertex)));
+        fmtx::Error(fmt::format("validate: {} VTXS size {} != vertexCount*stride {}", path,
+                                vtxs->size, static_cast<size_t>(d.vertexCount) * d.vertexStride));
         return 1;
     }
-    if (8 + static_cast<size_t>(vtxCount) * vtxStride != vtxs->size)
+    if (d.indexWidth != 2 && d.indexWidth != 4)
     {
-        fmtx::Error(fmt::format("validate: {} VTXS size mismatch (prelude+data={} chunk={})",
-                                path, 8 + static_cast<size_t>(vtxCount) * vtxStride, vtxs->size));
+        fmtx::Error(fmt::format("validate: {} DESC.indexWidth {} not 2 or 4", path, d.indexWidth));
         return 1;
     }
-
-    if (idxs->size < 8)
+    if (idxs->size != static_cast<size_t>(d.indexCount) * d.indexWidth)
     {
-        fmtx::Error(fmt::format("validate: {} IDXS truncated prelude", path));
-        return 1;
-    }
-    uint32_t idxCount = 0;
-    uint32_t idxSize  = 0;
-    std::memcpy(&idxCount, buf.data() + idxs->offset + 0, 4);
-    std::memcpy(&idxSize, buf.data() + idxs->offset + 4, 4);
-    if (idxSize != 2 && idxSize != 4)
-    {
-        fmtx::Error(fmt::format("validate: {} IDXS size {} not 2 or 4", path, idxSize));
-        return 1;
-    }
-    if (8 + static_cast<size_t>(idxCount) * idxSize != idxs->size)
-    {
-        fmtx::Error(fmt::format("validate: {} IDXS size mismatch", path));
+        fmtx::Error(fmt::format("validate: {} IDXS size {} != indexCount*width {}", path,
+                                idxs->size, static_cast<size_t>(d.indexCount) * d.indexWidth));
         return 1;
     }
 
-    // AABB containment check on positions.
+    // Optional meshlet/material chunks must match DESC counts when present.
+    auto checkArray = [&](ChunkId id, const char *tag, size_t count, size_t elem) -> bool {
+        const auto *c = findChunk(id);
+        if (!c)
+            return count == 0; // absent is fine only if the count says so
+        if (c->size != count * elem)
+        {
+            fmtx::Error(fmt::format("validate: {} {} size {} != count*elem {}", path, tag, c->size,
+                                    count * elem));
+            return false;
+        }
+        return true;
+    };
+    if (!checkArray(ChunkId::Meshlets, "MLET", d.meshletCount, sizeof(Meshlet))
+        || !checkArray(ChunkId::MeshletBounds, "MLBN", d.meshletCount, sizeof(MeshletBounds))
+        || !checkArray(ChunkId::Materials, "MTRL", d.materialCount, sizeof(uint64_t)))
+        return 1;
+
+    if (d.submeshCount == 0 || subm->size != static_cast<size_t>(d.submeshCount) * sizeof(SubMesh))
+    {
+        fmtx::Error(fmt::format("validate: {} SUBM size {} != submeshCount {} * {}", path,
+                                subm->size, d.submeshCount, sizeof(SubMesh)));
+        return 1;
+    }
+    std::vector<SubMesh> submeshes(d.submeshCount);
+    std::memcpy(submeshes.data(), buf.data() + subm->offset, subm->size);
+
     const float range = std::max(
         {bounds.aabbMax.x - bounds.aabbMin.x, bounds.aabbMax.y - bounds.aabbMin.y,
          bounds.aabbMax.z - bounds.aabbMin.z, 1.0f});
-    const float        eps     = 1e-5f * range;
-    const std::byte   *vtxData = buf.data() + vtxs->offset + 8;
-    for (uint32_t i = 0; i < vtxCount; ++i)
+    const float eps = 1e-5f * range;
+
+    // Submeshes must cover [0,indexCount) and [0,meshletCount) contiguously, in order.
+    uint32_t idxCursor = 0, mletCursor = 0;
+    for (uint32_t s = 0; s < d.submeshCount; ++s)
+    {
+        const auto &sm = submeshes[s];
+        if (sm.firstIndex != idxCursor || sm.firstMeshlet != mletCursor)
+        {
+            fmtx::Error(fmt::format(
+                "validate: {} submesh {} not contiguous (firstIndex {} expected {}, "
+                "firstMeshlet {} expected {})",
+                path, s, sm.firstIndex, idxCursor, sm.firstMeshlet, mletCursor));
+            return 1;
+        }
+        if (sm.indexCount % 3 != 0)
+        {
+            fmtx::Error(fmt::format("validate: {} submesh {} indexCount {} not multiple of 3", path,
+                                    s, sm.indexCount));
+            return 1;
+        }
+        if (sm.materialSlot != kNoMaterial && sm.materialSlot >= d.materialCount)
+        {
+            fmtx::Error(fmt::format("validate: {} submesh {} materialSlot {} >= materialCount {}",
+                                    path, s, sm.materialSlot, d.materialCount));
+            return 1;
+        }
+        if (sm.bounds.aabbMin.x < bounds.aabbMin.x - eps
+            || sm.bounds.aabbMin.y < bounds.aabbMin.y - eps
+            || sm.bounds.aabbMin.z < bounds.aabbMin.z - eps
+            || sm.bounds.aabbMax.x > bounds.aabbMax.x + eps
+            || sm.bounds.aabbMax.y > bounds.aabbMax.y + eps
+            || sm.bounds.aabbMax.z > bounds.aabbMax.z + eps)
+        {
+            fmtx::Error(fmt::format("validate: {} submesh {} AABB not contained in mesh AABB", path,
+                                    s));
+            return 1;
+        }
+        idxCursor += sm.indexCount;
+        mletCursor += sm.meshletCount;
+    }
+    if (idxCursor != d.indexCount || mletCursor != d.meshletCount)
+    {
+        fmtx::Error(fmt::format(
+            "validate: {} submeshes cover {} idx / {} meshlets, expected {} / {}", path, idxCursor,
+            mletCursor, d.indexCount, d.meshletCount));
+        return 1;
+    }
+
+    // AABB containment check on positions (VTXS is now a pure array, no prelude).
+    const std::byte *vtxData = buf.data() + vtxs->offset;
+    for (uint32_t i = 0; i < d.vertexCount; ++i)
     {
         float pos[3]{};
-        std::memcpy(pos, vtxData + static_cast<size_t>(i) * vtxStride
+        std::memcpy(pos, vtxData + static_cast<size_t>(i) * d.vertexStride
                             + offsetof(GpuVertex, position),
                     sizeof(pos));
         if (pos[0] < bounds.aabbMin.x - eps || pos[0] > bounds.aabbMax.x + eps
@@ -398,7 +464,9 @@ int assetc::ValidateHMesh(const std::string &path)
         }
     }
 
-    fmtx::Success(fmt::format("validate: {} ok ({} verts, {} idx@{}B, {} chunks)", path,
-                              vtxCount, idxCount, idxSize, hdr.chunkCount));
+    fmtx::Success(fmt::format("validate: {} ok ({} verts, {} idx@{}B, {} submeshes, {} mats, {} "
+                              "chunks)",
+                              path, d.vertexCount, d.indexCount, d.indexWidth, d.submeshCount,
+                              d.materialCount, hdr.chunkCount));
     return 0;
 }
