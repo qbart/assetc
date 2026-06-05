@@ -218,6 +218,43 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         fmtx::Info(fmt::format("{} {} -> {}", asset.type, asset.path, out));
         return assetc::EncodeLutCube(asset.path, out);
     }
+    case AssetType::Cubemap:
+    {
+        // .env/ directory holds 6 face PNGs in libktx face order:
+        //   px.png nx.png py.png ny.png pz.png nz.png   (+X, -X, +Y, -Y, +Z, -Z)
+        static constexpr const char *kFaceNames[6] = {"px", "nx", "py", "ny", "pz", "nz"};
+        stb::Image faces[6];
+        int faceSize = 0;
+        for (int i = 0; i < 6; ++i)
+        {
+            const auto facePath =
+                (fs::path(asset.path) / fmt::format("{}.png", kFaceNames[i])).generic_string();
+            faces[i] = stb::Load(facePath);
+            if (!faces[i].pixels)
+            {
+                fmtx::Error(
+                    fmt::format("cubemap face load failed: {}: {}", facePath, stb::ImageError()));
+                return 1;
+            }
+            if (faces[i].w != faces[i].h)
+            {
+                fmtx::Error(fmt::format("cubemap face must be square: {} ({}x{})", facePath,
+                                        faces[i].w, faces[i].h));
+                return 1;
+            }
+            if (i == 0)
+                faceSize = faces[i].w;
+            else if (faces[i].w != faceSize)
+            {
+                fmtx::Error(fmt::format("cubemap face size mismatch: {} ({}x{} vs {}x{})", facePath,
+                                        faces[i].w, faces[i].h, faceSize, faceSize));
+                return 1;
+            }
+        }
+
+        fmtx::Info(fmt::format("{} {}x{}x6 -> {}", asset.type, faceSize, faceSize, out));
+        return ktx::FromCubemapToUASTC(faces, out, threadCount);
+    }
     default:
         fmtx::Info(fmt::format("skip {} ({} not yet supported)", asset.path, asset.type));
         return 0;
@@ -256,6 +293,16 @@ int main(int argc, char **argv)
 
     std::vector<Asset> assets;
 
+    auto insideContainerDir = [](const fs::path &p) {
+        for (auto cur = p.parent_path(); cur.has_relative_path(); cur = cur.parent_path())
+        {
+            auto fn = cur.filename().string();
+            if (fn.ends_with(".env") || fn.ends_with(".array") || fn.ends_with(".shader"))
+                return true;
+        }
+        return false;
+    };
+
     for (const auto &entry : iter)
     {
         auto name = entry.path().string();
@@ -263,20 +310,19 @@ int main(int argc, char **argv)
         if (entry.is_directory())
         {
             if (name.ends_with(".env"))
-            {
                 assets.emplace_back(Asset{.path = name, .type = AssetType::Cubemap});
-            }
             else if (name.ends_with(".array"))
-            {
                 assets.emplace_back(Asset{.path = name, .type = AssetType::Array});
-            }
             else if (name.ends_with(".shader"))
-            {
                 assets.emplace_back(Asset{.path = name, .type = AssetType::Shader});
-            }
-            else
-                continue;
+            continue;
         }
+
+        // Files inside .env/ .array/ .shader/ containers are consumed by the
+        // container's encoder; don't pick them up as standalone assets.
+        if (insideContainerDir(entry.path()))
+            continue;
+
         if (name.ends_with(".lut.cube"))
             assets.emplace_back(Asset{.path = name, .type = AssetType::LUT});
         else if (name.ends_with(".n.png"))

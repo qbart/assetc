@@ -28,6 +28,11 @@ enum class UASTCMode
 KTX_error_code FromImageToASTC(const stb::Image &img, const std::string &destPath, ASTCMode mode);
 KTX_error_code FromImageToUASTC(const stb::Image &img, const std::string &destPath, UASTCMode mode, unsigned threadCount);
 
+// Encode 6 face images as a UASTC-compressed KTX2 cubemap.
+// Faces must be passed in libktx/Vulkan face order: +X, -X, +Y, -Y, +Z, -Z.
+// All faces must be square and identically sized.
+KTX_error_code FromCubemapToUASTC(stb::Image (&faces)[6], const std::string &destPath, unsigned threadCount);
+
 // Write a 3D color-grading LUT as a KTX2 3D texture.
 //
 //   - format VK_FORMAT_R8G8B8A8_UNORM -> linear DFD, so the GPU does NOT apply

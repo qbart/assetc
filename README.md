@@ -2,6 +2,20 @@
 
 `assetc` compiles source assets under `assets/` (textures, meshes, shaders, materials) into runtime-friendly binary formats written to `runtime/`. Images become UASTC-encoded `.ktx2`, meshes become `.hmesh` with octahedral-packed normals/tangents and meshletized geometry; mesh files reference materials by stable 64-bit hashes so the engine can share resources across assets.
 
+## Supported inputs
+
+| Source pattern                         | Asset type | Output                                  |
+| -------------------------------------- | ---------- | --------------------------------------- |
+| `*.png` (default)                      | Color      | UASTC `.ktx2` (color mode)              |
+| `*.n.png`                              | Normal     | UASTC `.ktx2` (normal mode)             |
+| `*.ao.png`, `*.h.png`, `*.r.png`       | Grayscale  | UASTC `.ktx2` (grayscale mode)          |
+| `*.lut.cube`                           | LUT        | `.lut.ktx2` (3D LUT)                    |
+| `*.obj`, `*.gltf`, `*.glb`             | Mesh       | `.hmesh` (v1 container, see below)      |
+| `*.shader/` (directory)                | Shader     | folder with `vertex.spv` / `fragment.spv` |
+| `*.env/` (directory)                   | Cubemap    | UASTC `.env.ktx2` (6 faces: `px.png`, `nx.png`, `py.png`, `ny.png`, `pz.png`, `nz.png`) |
+| `*.array/` (directory)                 | Array      | `.arr.ktx2` *(planned)*                 |
+| `*.mat`                                | Material   | `.hmat` *(planned)*                     |
+
 ## .hmesh file format (v1)
 
 Little-endian, tagged-chunk container. Magic `"HMSH"` (`0x4853'4D48`).
