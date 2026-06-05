@@ -28,4 +28,4 @@ init.release:
 
 .PHONY: release
 release:
-    @cmake --build build/release
+	@cmake --build build/release
