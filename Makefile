@@ -6,6 +6,10 @@ run: build
 build:
 	@cmake --build build/debug
 
+.PHONY: test
+test: build
+	@cd build/debug && ctest --output-on-failure
+
 .PHONY: install
 install: build
 	cp build/debug/assetc ~/bin/assetc
