@@ -6,14 +6,70 @@
 #include "../deps/gltf.hpp"
 #include "../deps/stb.hpp"
 
+#include <array>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace assetc
 {
 
 namespace
 {
+
+// Decode standard base64 (RFC 4648) into raw bytes. Skips whitespace; stops at
+// '=' padding. Returns empty on malformed input.
+std::vector<uint8_t> Base64Decode(std::string_view in)
+{
+    static constexpr auto table = [] {
+        std::array<int8_t, 256> t{};
+        for (auto &v : t)
+            v = -1;
+        const char *alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for (int i = 0; i < 64; ++i)
+            t[static_cast<uint8_t>(alpha[i])] = static_cast<int8_t>(i);
+        return t;
+    }();
+
+    std::vector<uint8_t> out;
+    out.reserve(in.size() / 4 * 3);
+    uint32_t acc = 0;
+    int      bits = 0;
+    for (char c : in)
+    {
+        if (c == '=')
+            break;
+        const int8_t v = table[static_cast<uint8_t>(c)];
+        if (v < 0)
+            continue; // skip newlines / whitespace
+        acc = (acc << 6) | static_cast<uint32_t>(v);
+        bits += 6;
+        if (bits >= 8)
+        {
+            bits -= 8;
+            out.push_back(static_cast<uint8_t>((acc >> bits) & 0xFF));
+        }
+    }
+    return out;
+}
+
+// Extract the payload bytes of a "data:[<mime>][;base64],<data>" URI. Returns
+// empty if not a data URI or not base64-encoded.
+std::vector<uint8_t> DecodeDataUri(const tg3_str &uri)
+{
+    if (!uri.data || uri.len == 0)
+        return {};
+    std::string_view s(uri.data, uri.len);
+    if (!s.starts_with("data:"))
+        return {};
+    const auto comma = s.find(',');
+    if (comma == std::string_view::npos)
+        return {};
+    if (s.substr(0, comma).find(";base64") == std::string_view::npos)
+        return {}; // only base64 data URIs are supported
+    return Base64Decode(s.substr(comma + 1));
+}
 
 // Resolve a glTF texture index to its backing image index, or -1 if absent.
 int ImageOfTexture(const tg3_model &m, int textureIndex) noexcept
@@ -84,9 +140,21 @@ stb::Image LoadGltfImagePixels(const tg3_model &m, const tg3_image &img, uint32_
     if (img.image.data != nullptr && img.image.count > 0)
         return stb::LoadFromMemory(img.image.data, static_cast<int>(img.image.count));
 
-    fmtx::Error(fmt::format(
-        "EncodeGltfImageToKtx2: image {} has no embedded pixel data (unresolved external uri?)",
-        imageIndex));
+    // Path 4: an embedded "data:...;base64," URI (common in self-contained .gltf).
+    if (img.uri.data && img.uri.len > 0)
+    {
+        const std::vector<uint8_t> bytes = DecodeDataUri(img.uri);
+        if (!bytes.empty())
+            return stb::LoadFromMemory(bytes.data(), static_cast<int>(bytes.size()));
+        fmtx::Error(fmt::format(
+            "EncodeGltfImageToKtx2: image {} has an external/non-base64 uri (not supported; "
+            "use .glb or embed the image)",
+            imageIndex));
+        return stb::Image{};
+    }
+
+    fmtx::Error(
+        fmt::format("EncodeGltfImageToKtx2: image {} has no reachable pixel data", imageIndex));
     return stb::Image{};
 }
 

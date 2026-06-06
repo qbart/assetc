@@ -9,7 +9,11 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
-std::string stb::ImageError() { return stbi_failure_reason(); }
+std::string stb::ImageError()
+{
+    const char *reason = stbi_failure_reason();
+    return reason ? std::string(reason) : std::string("(no error)");
+}
 
 stb::Image stb::Load(const std::string &path)
 {
