@@ -50,6 +50,8 @@ enum class ChunkId : uint32_t
     MeshletBounds    = MakeFourCC('M', 'L', 'B', 'N'),
     Materials        = MakeFourCC('M', 'T', 'R', 'L'),
     SubMeshes        = MakeFourCC('S', 'U', 'B', 'M'),
+    Skin             = MakeFourCC('S', 'K', 'I', 'N'), // optional: per-vertex joints/weights
+    Skeleton         = MakeFourCC('S', 'K', 'E', 'L'), // optional: joint hierarchy + bind pose
 };
 
 #pragma pack(push, 1)
@@ -108,10 +110,12 @@ static_assert(sizeof(MeshBounds) == 40, "MeshBounds must be 40 bytes");
 
 struct CpuVertex
 {
-    Vec3 pos;
-    Vec3 normal;
-    Vec4 tangent;
-    Vec2 uv;
+    Vec3     pos;
+    Vec3     normal;
+    Vec4     tangent;
+    Vec2     uv;
+    uint16_t joints[4] = {0, 0, 0, 0}; // skinning: index into skeleton; 0 when static
+    float    weights[4] = {0, 0, 0, 0};
 };
 
 struct GpuVertex
@@ -122,6 +126,32 @@ struct GpuVertex
     float   uv[2];
 };
 static_assert(sizeof(GpuVertex) == 28, "GpuVertex must be 28 bytes (v2)");
+
+// Optional per-vertex skinning, parallel to the VTXS array (SKIN chunk, one per
+// vertex). Present only for skinned meshes; `joints` index into the SKEL array,
+// `weights` are normalized to sum 1. Suggested formats: joints ->
+// VK_FORMAT_R16G16B16A16_UINT, weights -> VK_FORMAT_R32G32B32A32_SFLOAT.
+struct GpuSkinVertex
+{
+    uint16_t joints[4];
+    float    weights[4];
+};
+static_assert(sizeof(GpuSkinVertex) == 24, "GpuSkinVertex must be 24 bytes");
+
+// One skeleton joint (SKEL chunk, pure array). `parent` indexes into this array
+// (-1 = root). `inverseBind` maps mesh space -> this joint's bind space (column
+// major). The bind TRS is the joint's local bind-pose transform that animation
+// channels override per node; the engine composes pose * inverseBind for skinning.
+struct GpuJoint
+{
+    float    inverseBind[16];
+    float    bindT[3];
+    float    bindR[4]; // unit quaternion x,y,z,w
+    float    bindS[3];
+    int32_t  parent;
+    uint32_t _pad;
+};
+static_assert(sizeof(GpuJoint) == 112, "GpuJoint must be 112 bytes");
 
 struct MeshletBounds
 {
@@ -186,6 +216,9 @@ struct Mesh
     std::vector<uint32_t>        meshletVertices;
     std::vector<MeshletTriangle> meshletTriangles;
     std::vector<MeshletBounds>   meshletBounds;
+
+    // Parallel to `vertices`, empty unless the mesh is skinned (SKIN chunk).
+    std::vector<GpuSkinVertex> skinVertices;
 };
 
 struct ChunkPayload
@@ -204,7 +237,8 @@ int WriteChunked(const std::string &path, std::span<const ChunkPayload> chunks);
 // Indices are written as uint16_t when vertexCount <= 65535, else uint32_t;
 // DESC.indexWidth records which.
 int WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds &bounds,
-               std::span<const SubMesh> submeshes, std::span<const uint64_t> materialHashes);
+               std::span<const SubMesh> submeshes, std::span<const uint64_t> materialHashes,
+               std::span<const GpuJoint> skeleton = {});
 
 // Read a written .hmesh and run structural + semantic checks:
 //   - magic, version, chunk table fits in file

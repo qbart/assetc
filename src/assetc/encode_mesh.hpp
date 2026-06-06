@@ -1,5 +1,6 @@
 #pragma once
 
+#include "runtime_anim.hpp"
 #include "runtime_mesh.hpp"
 
 #include <cstdint>
@@ -27,6 +28,8 @@ struct CompiledMesh
     std::vector<SubMesh>  submeshes;    // one per source primitive; index/meshlet ranges + material slot
     std::vector<uint64_t> materialRefs; // FNV1a64 hashes, compact: only materials referenced by a submesh
     std::vector<uint32_t> materialSourceIndex; // dense slot -> source material index (parallel to materialRefs)
+    std::vector<GpuJoint> skeleton;     // SKEL: empty unless the source is skinned
+    std::vector<AnimClip> animations;   // written to a companion .hanim; empty if none
 };
 
 // Build a runtime-ready mesh from a parsed OBJ.

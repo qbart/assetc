@@ -28,12 +28,14 @@ constexpr uint64_t FnvPrime  = 0x00000100000001b3ULL;
 // Flat per-corner vertex: one entry per triangle vertex, pre-dedupe.
 struct FlatVertex
 {
-    Vec3 pos;
-    Vec3 normal;
-    Vec2 uv;
-    Vec4 tangent; // MikkTSpace fills xyz + handedness sign in w
+    Vec3     pos;
+    Vec3     normal;
+    Vec2     uv;
+    Vec4     tangent;        // MikkTSpace fills xyz + handedness sign in w
+    uint16_t joints[4] = {0, 0, 0, 0}; // skinning (zero for static meshes)
+    float    weights[4] = {0, 0, 0, 0};
 };
-static_assert(sizeof(FlatVertex) == 48, "FlatVertex must have no padding");
+static_assert(sizeof(FlatVertex) == 72, "FlatVertex must have no padding");
 
 struct MikkCtx
 {
@@ -241,6 +243,7 @@ struct PrimitiveInput
 {
     std::vector<FlatVertex> flat;           // per-corner triangle list (size % 3 == 0)
     int                     sourceMaterial; // index into the source material set, or -1
+    bool                    skinned = false; // has JOINTS_0/WEIGHTS_0
 };
 
 // --- Shared finalize: per-primitive dedupe/optimize/meshletize -> submesh table ---
@@ -260,6 +263,12 @@ CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
     constexpr size_t MaxTris    = 124;
     constexpr float  ConeWeight = 0.25f;
     constexpr float  Inf        = std::numeric_limits<float>::infinity();
+
+    // If any primitive is skinned, the output carries a SKIN stream parallel to the
+    // vertex buffer (zero-weight entries for any non-skinned primitives mixed in).
+    bool anySkinned = false;
+    for (const auto &p : prims)
+        anySkinned |= p.skinned;
 
     // Compact material slots: source index -> dense slot, in first-use order.
     std::vector<int>                  denseToSource;
@@ -291,7 +300,15 @@ CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
             VertexKey key{fv};
             auto [it, inserted] = seen.emplace(key, static_cast<uint32_t>(localVerts.size()));
             if (inserted)
-                localVerts.push_back(CpuVertex{fv.pos, fv.normal, fv.tangent, fv.uv});
+            {
+                CpuVertex cv{fv.pos, fv.normal, fv.tangent, fv.uv, {}, {}};
+                for (int j = 0; j < 4; ++j)
+                {
+                    cv.joints[j]  = fv.joints[j];
+                    cv.weights[j] = fv.weights[j];
+                }
+                localVerts.push_back(cv);
+            }
             localIdx.push_back(it->second);
         }
 
@@ -339,6 +356,28 @@ CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
             gv.uv[0]       = cv.uv.x;
             gv.uv[1]       = cv.uv.y;
             cm.mesh.vertices.push_back(gv);
+
+            if (anySkinned)
+            {
+                // Normalize weights to sum 1; fall back to a rigid bind to joint 0
+                // when a vertex has no weights (non-skinned prim in a skinned mesh).
+                GpuSkinVertex sv{};
+                float         sum = cv.weights[0] + cv.weights[1] + cv.weights[2] + cv.weights[3];
+                if (sum <= 0.0f)
+                {
+                    sv.joints[0]  = 0;
+                    sv.weights[0] = 1.0f;
+                }
+                else
+                {
+                    for (int j = 0; j < 4; ++j)
+                    {
+                        sv.joints[j]  = cv.joints[j];
+                        sv.weights[j] = cv.weights[j] / sum;
+                    }
+                }
+                cm.mesh.skinVertices.push_back(sv);
+            }
         }
 
         // Append global indices (offset into the shared vertex buffer).
@@ -743,17 +782,20 @@ void TransformFlat(std::vector<FlatVertex> &flat, const Mat4 &world) noexcept
 // (with a logged warning) if the primitive can't be used, so the caller can skip
 // it without failing the whole mesh. Mode must be checked by the caller.
 bool ExtractGltfPrimitive(const tg3_model &m, const tg3_primitive &prim, uint32_t primIndex,
-                          std::vector<FlatVertex> &flat)
+                          std::vector<FlatVertex> &flat, bool &skinned)
 {
+    skinned          = false;
     const int posIdx = FindAttr(prim, "POSITION");
     if (posIdx < 0 || static_cast<uint32_t>(posIdx) >= m.accessors_count)
     {
         fmtx::Warn(fmt::format("BuildFromGltf: prim[{}] missing POSITION; skipped", primIndex));
         return false;
     }
-    const int normIdx = FindAttr(prim, "NORMAL");
-    const int uvIdx   = FindAttr(prim, "TEXCOORD_0");
-    const int tanIdx  = FindAttr(prim, "TANGENT");
+    const int normIdx   = FindAttr(prim, "NORMAL");
+    const int uvIdx     = FindAttr(prim, "TEXCOORD_0");
+    const int tanIdx    = FindAttr(prim, "TANGENT");
+    const int jointsIdx = FindAttr(prim, "JOINTS_0");
+    const int weightsIdx = FindAttr(prim, "WEIGHTS_0");
 
     const auto &posAcc = m.accessors[posIdx];
     if (posAcc.component_type != TG3_COMPONENT_TYPE_FLOAT || posAcc.type != TG3_TYPE_VEC3)
@@ -848,6 +890,72 @@ bool ExtractGltfPrimitive(const tg3_model &m, const tg3_primitive &prim, uint32_
         }
     }
 
+    // Skinning: JOINTS_0 (VEC4 of u8/u16) + WEIGHTS_0 (VEC4 of float or normalized
+    // u8/u16). Both must be present and well-formed for the primitive to be skinned.
+    std::vector<std::array<uint16_t, 4>> jnts;
+    std::vector<std::array<float, 4>>    wgts;
+    bool                                 hasJoints = false, hasWeights = false;
+    if (jointsIdx >= 0 && static_cast<uint32_t>(jointsIdx) < m.accessors_count)
+    {
+        const auto &a = m.accessors[jointsIdx];
+        const auto *d = AccessorPtr(m, a);
+        const size_t s = AccessorStride(m, a);
+        if (d && a.type == TG3_TYPE_VEC4 && a.count == vc)
+        {
+            jnts.resize(vc);
+            for (uint64_t i = 0; i < vc; ++i)
+            {
+                const uint8_t *e = d + i * s;
+                for (int k = 0; k < 4; ++k)
+                {
+                    if (a.component_type == TG3_COMPONENT_TYPE_UNSIGNED_BYTE)
+                        jnts[i][k] = e[k];
+                    else // UNSIGNED_SHORT
+                        jnts[i][k] = reinterpret_cast<const uint16_t *>(e)[k];
+                }
+            }
+            hasJoints = true;
+        }
+    }
+    if (weightsIdx >= 0 && static_cast<uint32_t>(weightsIdx) < m.accessors_count)
+    {
+        const auto &a = m.accessors[weightsIdx];
+        const auto *d = AccessorPtr(m, a);
+        const size_t s = AccessorStride(m, a);
+        if (d && a.type == TG3_TYPE_VEC4 && a.count == vc)
+        {
+            wgts.resize(vc);
+            for (uint64_t i = 0; i < vc; ++i)
+            {
+                const uint8_t *e = d + i * s;
+                for (int k = 0; k < 4; ++k)
+                {
+                    switch (a.component_type)
+                    {
+                    case TG3_COMPONENT_TYPE_FLOAT:
+                        wgts[i][k] = reinterpret_cast<const float *>(e)[k];
+                        break;
+                    case TG3_COMPONENT_TYPE_UNSIGNED_BYTE:
+                        wgts[i][k] = e[k] / 255.0f;
+                        break;
+                    case TG3_COMPONENT_TYPE_UNSIGNED_SHORT:
+                        wgts[i][k] = reinterpret_cast<const uint16_t *>(e)[k] / 65535.0f;
+                        break;
+                    default:
+                        wgts[i][k] = 0.0f;
+                        break;
+                    }
+                }
+            }
+            hasWeights = true;
+        }
+    }
+    skinned = hasJoints && hasWeights;
+    if ((hasJoints != hasWeights))
+        fmtx::Warn(fmt::format(
+            "BuildFromGltf: prim[{}] has only one of JOINTS_0/WEIGHTS_0; treated as static",
+            primIndex));
+
     std::vector<uint32_t> indices;
     if (prim.indices >= 0 && static_cast<uint32_t>(prim.indices) < m.accessors_count)
     {
@@ -917,6 +1025,14 @@ bool ExtractGltfPrimitive(const tg3_model &m, const tg3_primitive &prim, uint32_
         v.normal  = hasNormals ? normals[idx] : Vec3{0, 0, 0};
         v.uv      = hasUVs ? uvs[idx] : Vec2{0, 0};
         v.tangent = hasTangents ? tangents[idx] : Vec4{0, 0, 0, 0};
+        if (skinned)
+        {
+            for (int k = 0; k < 4; ++k)
+            {
+                v.joints[k]  = jnts[idx][k];
+                v.weights[k] = wgts[idx][k];
+            }
+        }
         flat.push_back(v);
     }
 
@@ -943,6 +1059,236 @@ bool ExtractGltfPrimitive(const tg3_model &m, const tg3_primitive &prim, uint32_
     }
 
     return true;
+}
+
+// --- Skeleton + animation extraction -----------------------------------------
+
+// Decompose a column-major 4x4 into translation/rotation(quat xyzw)/scale. Used
+// only for skeleton joints authored with a baked node.matrix instead of TRS.
+void DecomposeTRS(const double m[16], float T[3], float R[4], float S[3]) noexcept
+{
+    T[0] = static_cast<float>(m[12]);
+    T[1] = static_cast<float>(m[13]);
+    T[2] = static_cast<float>(m[14]);
+
+    double cx[3] = {m[0], m[1], m[2]};
+    double cy[3] = {m[4], m[5], m[6]};
+    double cz[3] = {m[8], m[9], m[10]};
+    double sx = std::sqrt(cx[0] * cx[0] + cx[1] * cx[1] + cx[2] * cx[2]);
+    double sy = std::sqrt(cy[0] * cy[0] + cy[1] * cy[1] + cy[2] * cy[2]);
+    double sz = std::sqrt(cz[0] * cz[0] + cz[1] * cz[1] + cz[2] * cz[2]);
+    S[0]      = static_cast<float>(sx);
+    S[1]      = static_cast<float>(sy);
+    S[2]      = static_cast<float>(sz);
+    if (sx > 0) { cx[0] /= sx; cx[1] /= sx; cx[2] /= sx; }
+    if (sy > 0) { cy[0] /= sy; cy[1] /= sy; cy[2] /= sy; }
+    if (sz > 0) { cz[0] /= sz; cz[1] /= sz; cz[2] /= sz; }
+
+    // Rotation matrix (columns cx,cy,cz) -> quaternion.
+    const double t = cx[0] + cy[1] + cz[2];
+    double       q[4];
+    if (t > 0.0)
+    {
+        double s = std::sqrt(t + 1.0) * 2.0;
+        q[3]     = 0.25 * s;
+        q[0]     = (cy[2] - cz[1]) / s;
+        q[1]     = (cz[0] - cx[2]) / s;
+        q[2]     = (cx[1] - cy[0]) / s;
+    }
+    else if (cx[0] > cy[1] && cx[0] > cz[2])
+    {
+        double s = std::sqrt(1.0 + cx[0] - cy[1] - cz[2]) * 2.0;
+        q[3]     = (cy[2] - cz[1]) / s;
+        q[0]     = 0.25 * s;
+        q[1]     = (cy[0] + cx[1]) / s;
+        q[2]     = (cz[0] + cx[2]) / s;
+    }
+    else if (cy[1] > cz[2])
+    {
+        double s = std::sqrt(1.0 + cy[1] - cx[0] - cz[2]) * 2.0;
+        q[3]     = (cz[0] - cx[2]) / s;
+        q[0]     = (cy[0] + cx[1]) / s;
+        q[1]     = 0.25 * s;
+        q[2]     = (cz[1] + cy[2]) / s;
+    }
+    else
+    {
+        double s = std::sqrt(1.0 + cz[2] - cx[0] - cy[1]) * 2.0;
+        q[3]     = (cx[1] - cy[0]) / s;
+        q[0]     = (cz[0] + cx[2]) / s;
+        q[1]     = (cz[1] + cy[2]) / s;
+        q[2]     = 0.25 * s;
+    }
+    for (int i = 0; i < 4; ++i)
+        R[i] = static_cast<float>(q[i]);
+}
+
+struct SkinBuild
+{
+    std::vector<GpuJoint>             skeleton;
+    std::vector<AnimClip>             animations;
+    std::unordered_map<int, uint32_t> nodeToJoint;
+};
+
+const float *AccessorFloats(const tg3_model &m, const tg3_accessor &a, size_t &strideOut) noexcept
+{
+    if (a.component_type != TG3_COMPONENT_TYPE_FLOAT)
+        return nullptr;
+    strideOut = AccessorStride(m, a);
+    return reinterpret_cast<const float *>(AccessorPtr(m, a));
+}
+
+SkinBuild BuildSkinAndAnimations(const tg3_model &m)
+{
+    SkinBuild out;
+    if (m.skins_count == 0)
+        return out;
+    if (m.skins_count > 1)
+        fmtx::Warn(fmt::format("BuildFromGltf: {} skins present; only skin[0] is exported",
+                               m.skins_count));
+    const tg3_skin &skin = m.skins[0];
+
+    // child node -> parent node, for joint hierarchy.
+    std::vector<int> parentOf(m.nodes_count, -1);
+    for (uint32_t n = 0; n < m.nodes_count; ++n)
+        for (uint32_t c = 0; c < m.nodes[n].children_count; ++c)
+        {
+            const int ci = m.nodes[n].children[c];
+            if (ci >= 0 && static_cast<uint32_t>(ci) < m.nodes_count)
+                parentOf[ci] = static_cast<int>(n);
+        }
+
+    for (uint32_t j = 0; j < skin.joints_count; ++j)
+        out.nodeToJoint[skin.joints[j]] = j;
+
+    // Inverse bind matrices (one mat4 per joint), or identity if absent.
+    const float *ibm       = nullptr;
+    size_t       ibmStride = 0;
+    if (skin.inverse_bind_matrices >= 0 &&
+        static_cast<uint32_t>(skin.inverse_bind_matrices) < m.accessors_count)
+    {
+        const auto &a = m.accessors[skin.inverse_bind_matrices];
+        if (a.type == TG3_TYPE_MAT4)
+            ibm = AccessorFloats(m, a, ibmStride);
+    }
+
+    out.skeleton.resize(skin.joints_count);
+    for (uint32_t j = 0; j < skin.joints_count; ++j)
+    {
+        GpuJoint  &gj   = out.skeleton[j];
+        const int  node = skin.joints[j];
+        gj._pad         = 0;
+
+        if (ibm)
+        {
+            const float *p = reinterpret_cast<const float *>(
+                reinterpret_cast<const uint8_t *>(ibm) + static_cast<size_t>(j) * ibmStride);
+            for (int i = 0; i < 16; ++i)
+                gj.inverseBind[i] = p[i];
+        }
+        else
+        {
+            for (int i = 0; i < 16; ++i)
+                gj.inverseBind[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+        }
+
+        const auto &nd = m.nodes[node];
+        if (nd.has_matrix)
+        {
+            DecomposeTRS(nd.matrix, gj.bindT, gj.bindR, gj.bindS);
+        }
+        else
+        {
+            for (int i = 0; i < 3; ++i)
+                gj.bindT[i] = static_cast<float>(nd.translation[i]);
+            for (int i = 0; i < 4; ++i)
+                gj.bindR[i] = static_cast<float>(nd.rotation[i]);
+            for (int i = 0; i < 3; ++i)
+                gj.bindS[i] = static_cast<float>(nd.scale[i]);
+        }
+
+        const int parentNode = parentOf[node];
+        auto      it = parentNode >= 0 ? out.nodeToJoint.find(parentNode) : out.nodeToJoint.end();
+        gj.parent = it != out.nodeToJoint.end() ? static_cast<int32_t>(it->second) : -1;
+    }
+
+    // Animation clips: one per glTF animation; channels targeting non-joint nodes
+    // or morph weights are skipped.
+    for (uint32_t ai = 0; ai < m.animations_count; ++ai)
+    {
+        const auto &anim = m.animations[ai];
+        AnimClip    clip;
+        clip.name = anim.name.data ? std::string(anim.name.data, anim.name.len)
+                                   : fmt::format("anim_{}", ai);
+
+        for (uint32_t ci = 0; ci < anim.channels_count; ++ci)
+        {
+            const auto &chan = anim.channels[ci];
+            auto        jit  = out.nodeToJoint.find(chan.target.node);
+            if (jit == out.nodeToJoint.end())
+                continue; // not a skeleton joint
+
+            AnimPath path;
+            if (tg3_str_equals_cstr(chan.target.path, "translation"))
+                path = AnimPath::Translation;
+            else if (tg3_str_equals_cstr(chan.target.path, "rotation"))
+                path = AnimPath::Rotation;
+            else if (tg3_str_equals_cstr(chan.target.path, "scale"))
+                path = AnimPath::Scale;
+            else
+                continue; // morph weights etc. unsupported
+
+            if (chan.sampler < 0 || static_cast<uint32_t>(chan.sampler) >= anim.samplers_count)
+                continue;
+            const auto &samp = anim.samplers[chan.sampler];
+            if (samp.input < 0 || static_cast<uint32_t>(samp.input) >= m.accessors_count ||
+                samp.output < 0 || static_cast<uint32_t>(samp.output) >= m.accessors_count)
+                continue;
+
+            const auto  &inAcc  = m.accessors[samp.input];
+            const auto  &outAcc = m.accessors[samp.output];
+            size_t       inStride = 0, outStride = 0;
+            const float *times  = AccessorFloats(m, inAcc, inStride);
+            const float *values = AccessorFloats(m, outAcc, outStride);
+            if (!times || !values)
+                continue;
+
+            const int comps      = path == AnimPath::Rotation ? 4 : 3;
+            const bool cubic     = tg3_str_equals_cstr(samp.interpolation, "CUBICSPLINE");
+            const bool step      = tg3_str_equals_cstr(samp.interpolation, "STEP");
+            const uint64_t nKeys = inAcc.count;
+
+            AnimChannel ach;
+            ach.joint  = jit->second;
+            ach.path   = path;
+            ach.interp = step ? AnimInterp::Step : AnimInterp::Linear;
+            ach.keys.resize(nKeys);
+            for (uint64_t k = 0; k < nKeys; ++k)
+            {
+                const float *t =
+                    reinterpret_cast<const float *>(reinterpret_cast<const uint8_t *>(times) +
+                                                    k * inStride);
+                ach.keys[k].time = t[0];
+                // CUBICSPLINE output is (inTangent, value, outTangent) triples; take
+                // the middle value and degrade to linear.
+                const uint64_t vIndex = cubic ? (3 * k + 1) : k;
+                const float   *v      = reinterpret_cast<const float *>(
+                    reinterpret_cast<const uint8_t *>(values) + vIndex * outStride);
+                for (int c = 0; c < 4; ++c)
+                    ach.keys[k].value[c] = c < comps ? v[c] : 0.0f;
+                clip.duration = std::max(clip.duration, ach.keys[k].time);
+            }
+            if (cubic)
+                fmtx::Warn(fmt::format(
+                    "BuildFromGltf: animation '{}' uses CUBICSPLINE; degraded to LINEAR",
+                    clip.name));
+            clip.channels.push_back(std::move(ach));
+        }
+        if (!clip.channels.empty())
+            out.animations.push_back(std::move(clip));
+    }
+
+    return out;
 }
 
 } // namespace
@@ -978,10 +1324,14 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
                 continue;
             }
             std::vector<FlatVertex> flat;
-            if (!ExtractGltfPrimitive(m, prim, pi, flat))
+            bool                    primSkinned = false;
+            if (!ExtractGltfPrimitive(m, prim, pi, flat, primSkinned))
                 continue;
-            TransformFlat(flat, world);
-            prims.push_back(PrimitiveInput{std::move(flat), prim.material});
+            // Skinned vertices are posed by joints; per glTF the skinned mesh node's
+            // transform is ignored, so don't bake the world matrix into them.
+            if (!primSkinned)
+                TransformFlat(flat, world);
+            prims.push_back(PrimitiveInput{std::move(flat), prim.material, primSkinned});
         }
     };
 
@@ -1055,7 +1405,16 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
         names.emplace_back(nameStorage.back());
     }
 
-    return FinalizeMesh(std::move(prims), names, sourceRef);
+    CompiledMesh cm = FinalizeMesh(std::move(prims), names, sourceRef);
+    if (!cm.mesh.vertices.empty())
+    {
+        SkinBuild sb  = BuildSkinAndAnimations(m);
+        cm.skeleton   = std::move(sb.skeleton);
+        cm.animations = std::move(sb.animations);
+        if (!cm.mesh.skinVertices.empty() && cm.skeleton.empty())
+            fmtx::Warn("BuildFromGltf: skinned vertices present but no skin/skeleton found");
+    }
+    return cm;
 }
 
 } // namespace assetc

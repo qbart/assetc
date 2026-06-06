@@ -177,7 +177,8 @@ std::span<const std::byte> VecBytes(const std::vector<T> &v) noexcept
 
 int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds &bounds,
                        std::span<const SubMesh> submeshes,
-                       std::span<const uint64_t> materialHashes)
+                       std::span<const uint64_t> materialHashes,
+                       std::span<const GpuJoint> skeleton)
 {
     if (m.vertices.empty())
     {
@@ -225,7 +226,7 @@ int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds 
     const auto descBytes   = std::as_bytes(std::span<const MeshDesc>(&desc, 1));
     const auto boundsBytes = std::as_bytes(std::span<const MeshBounds>(&bounds, 1));
 
-    const ChunkPayload chunks[] = {
+    std::vector<ChunkPayload> chunks = {
         {ChunkId::Desc, descBytes},
         {ChunkId::Bounds, boundsBytes},
         {ChunkId::Vertices, VecBytes(m.vertices)},
@@ -237,6 +238,12 @@ int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds 
         {ChunkId::Materials, std::as_bytes(materialHashes)},
         {ChunkId::SubMeshes, std::as_bytes(submeshes)},
     };
+    // Optional skinning chunks. SKIN is parallel to VTXS (one entry per vertex);
+    // SKEL is the joint array. Both absent for static meshes.
+    if (!m.skinVertices.empty())
+        chunks.push_back({ChunkId::Skin, VecBytes(m.skinVertices)});
+    if (!skeleton.empty())
+        chunks.push_back({ChunkId::Skeleton, std::as_bytes(skeleton)});
     return WriteChunked(path, chunks);
 }
 
@@ -382,6 +389,27 @@ int assetc::ValidateHMesh(const std::string &path)
         || !checkArray(ChunkId::MeshletBounds, "MLBN", d.meshletCount, sizeof(MeshletBounds))
         || !checkArray(ChunkId::Materials, "MTRL", d.materialCount, sizeof(uint64_t)))
         return 1;
+
+    // Optional skinning chunks: SKIN must be one entry per vertex; SKEL must be a
+    // whole number of joints.
+    if (const auto *skin = findChunk(ChunkId::Skin))
+    {
+        if (skin->size != static_cast<size_t>(d.vertexCount) * sizeof(GpuSkinVertex))
+        {
+            fmtx::Error(fmt::format("validate: {} SKIN size {} != vertexCount*{}", path, skin->size,
+                                    sizeof(GpuSkinVertex)));
+            return 1;
+        }
+    }
+    if (const auto *skel = findChunk(ChunkId::Skeleton))
+    {
+        if (skel->size == 0 || skel->size % sizeof(GpuJoint) != 0)
+        {
+            fmtx::Error(fmt::format("validate: {} SKEL size {} not a multiple of {}", path,
+                                    skel->size, sizeof(GpuJoint)));
+            return 1;
+        }
+    }
 
     if (d.submeshCount == 0 || subm->size != static_cast<size_t>(d.submeshCount) * sizeof(SubMesh))
     {

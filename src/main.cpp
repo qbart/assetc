@@ -209,11 +209,29 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
                                asset.type, cm.mesh.vertices.size(),
                                cm.mesh.indices.size() / 3, cm.mesh.meshlets.size(),
                                cm.submeshes.size(), cm.materialRefs.size(), out));
-        if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.submeshes, cm.materialRefs);
+        if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.submeshes, cm.materialRefs,
+                                        cm.skeleton);
             rc != 0)
             return rc;
         if (verify && assetc::ValidateHMesh(out) != 0)
             return 1;
+
+        // Companion animation clips (.hanim) when the source is animated.
+        if (!cm.animations.empty())
+        {
+            fs::path animPath = fs::path(out);
+            animPath.replace_extension(".hanim");
+            size_t channels = 0;
+            for (const auto &c : cm.animations)
+                channels += c.channels.size();
+            fmtx::Info(fmt::format("{} clips / {} joints / {} channels -> {}",
+                                   cm.animations.size(), cm.skeleton.size(), channels,
+                                   animPath.generic_string()));
+            if (assetc::WriteHAnim(animPath.generic_string(), cm.animations) != 0)
+                return 1;
+            if (verify && assetc::ValidateHAnim(animPath.generic_string()) != 0)
+                return 1;
+        }
 
         // Companion material table + textures (glTF only; OBJ materials are TODO).
         // One .hmat per source, indexed by slot (row i == SubMesh::materialSlot i);

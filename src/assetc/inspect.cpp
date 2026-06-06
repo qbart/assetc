@@ -1,5 +1,6 @@
 #include "inspect.hpp"
 
+#include "runtime_anim.hpp"
 #include "runtime_manifest.hpp"
 #include "runtime_material.hpp"
 #include "runtime_mesh.hpp"
@@ -63,6 +64,7 @@ struct Totals
              meshMaterials = 0;
     uint64_t matFiles = 0, materials = 0;
     uint64_t manFiles = 0, manEntries = 0;
+    uint64_t animFiles = 0, clips = 0, channels = 0;
     uint64_t texFiles = 0, texBytes = 0, texPixels = 0;
     uint64_t shaderFiles = 0;
     uint64_t totalBytes = 0;
@@ -108,7 +110,8 @@ void InspectHMesh(const fs::path &p, const std::string &rel, Totals &t, std::vec
     // Chunk table follows the 32B header; find DESC and BNDS by fourcc.
     assetc::MeshDesc  desc{};
     assetc::MeshBounds bnds{};
-    bool              haveDesc = false, haveBnds = false;
+    bool              haveDesc = false, haveBnds = false, haveSkin = false;
+    uint32_t          jointCount = 0;
     for (uint32_t i = 0; i < hdr.chunkCount; ++i)
     {
         assetc::ChunkEntry e{};
@@ -119,6 +122,10 @@ void InspectHMesh(const fs::path &p, const std::string &rel, Totals &t, std::vec
         else if (e.fourcc == static_cast<uint32_t>(assetc::ChunkId::Bounds) &&
                  e.size >= sizeof(bnds))
             haveBnds = ReadAt(in, e.offset, bnds);
+        else if (e.fourcc == static_cast<uint32_t>(assetc::ChunkId::Skin))
+            haveSkin = true;
+        else if (e.fourcc == static_cast<uint32_t>(assetc::ChunkId::Skeleton))
+            jointCount = static_cast<uint32_t>(e.size / sizeof(assetc::GpuJoint));
     }
     if (!haveDesc)
     {
@@ -139,6 +146,8 @@ void InspectHMesh(const fs::path &p, const std::string &rel, Totals &t, std::vec
         line += fmt::format(" | aabb {:.2f}x{:.2f}x{:.2f}, r={:.2f}",
                             bnds.aabbMax.x - bnds.aabbMin.x, bnds.aabbMax.y - bnds.aabbMin.y,
                             bnds.aabbMax.z - bnds.aabbMin.z, bnds.sphereRadius);
+    if (haveSkin || jointCount > 0)
+        line += fmt::format(" | skinned ({} joints)", jointCount);
     Emit(out, rel, line);
 
     ++t.meshFiles;
@@ -237,6 +246,37 @@ void InspectHMan(const fs::path &p, const std::string &rel, Totals &t, std::vect
     t.manEntries += count;
 }
 
+// ---- .hanim -----------------------------------------------------------------
+
+void InspectHAnim(const fs::path &p, const std::string &rel, Totals &t, std::vector<Line> &out)
+{
+    std::vector<assetc::AnimClip> clips;
+    if (assetc::ReadHAnim(p.string(), clips) != 0)
+    {
+        Emit(out, rel, fmt::format("{}bad/unreadable .hanim{}", fmtx::RED, fmtx::RESET));
+        ++t.errors;
+        return;
+    }
+    size_t channels = 0;
+    float  maxDur   = 0.0f;
+    for (const auto &c : clips)
+    {
+        channels += c.channels.size();
+        maxDur = std::max(maxDur, c.duration);
+    }
+    std::string names;
+    for (size_t i = 0; i < clips.size() && i < 4; ++i)
+        names += (i ? ", " : "") + clips[i].name;
+    if (clips.size() > 4)
+        names += ", ...";
+    Emit(out, rel,
+         fmt::format("{} clips | {} channels | up to {:.2f}s | [{}] | {}", clips.size(), channels,
+                     maxDur, names, HumanBytes(FileSize(p))));
+    ++t.animFiles;
+    t.clips += clips.size();
+    t.channels += channels;
+}
+
 // ---- .ktx2 ------------------------------------------------------------------
 
 const char *VkFormatName(uint32_t f)
@@ -314,7 +354,7 @@ int assetc::InspectRuntime(const std::string &dir)
     }
 
     Totals             t{};
-    std::vector<Line>  meshes, mats, mans, textures, shaders;
+    std::vector<Line>  meshes, mats, mans, textures, shaders, anims;
 
     std::error_code ec;
     for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec),
@@ -335,6 +375,8 @@ int assetc::InspectRuntime(const std::string &dir)
             InspectHMat(p, rel, t, mats);
         else if (name.ends_with(".hman"))
             InspectHMan(p, rel, t, mans);
+        else if (name.ends_with(".hanim"))
+            InspectHAnim(p, rel, t, anims);
         else if (name.ends_with(".ktx2")) // covers tex_*, .lut.ktx2, .env.ktx2
             InspectKtx2(p, rel, t, textures);
         else if (name.ends_with(".spv"))
@@ -348,6 +390,7 @@ int assetc::InspectRuntime(const std::string &dir)
     PrintSection("meshes (.hmesh)", meshes);
     PrintSection("materials (.hmat)", mats);
     PrintSection("manifests (.hman)", mans);
+    PrintSection("animations (.hanim)", anims);
     PrintSection("textures (.ktx2)", textures);
     PrintSection("shaders (.spv)", shaders);
 
@@ -357,6 +400,8 @@ int assetc::InspectRuntime(const std::string &dir)
     fmt::print("  materials: {} files | {} material rows ({} mesh-referenced slots)\n", t.matFiles,
                t.materials, t.meshMaterials);
     fmt::print("  manifests: {} files | {} entries\n", t.manFiles, t.manEntries);
+    fmt::print("  anims:     {} files | {} clips | {} channels\n", t.animFiles, t.clips,
+               t.channels);
     fmt::print("  textures:  {} files | {} | ~{} texels\n", t.texFiles, HumanBytes(t.texBytes),
                t.texPixels);
     fmt::print("  shaders:   {} .spv files\n", t.shaderFiles);

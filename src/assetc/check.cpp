@@ -1,6 +1,7 @@
 #include "check.hpp"
 
 #include "encode_mesh.hpp" // HashAssetRef
+#include "runtime_anim.hpp"
 #include "runtime_manifest.hpp"
 #include "runtime_material.hpp"
 #include "runtime_mesh.hpp"
@@ -182,6 +183,59 @@ void CheckHMesh(Ctx &c, const std::string &path, const std::string &rel)
     }
 }
 
+// Read the SKEL joint count from a .hmesh, or -1 if absent/unreadable.
+int64_t SkeletonJointCount(const std::string &meshPath)
+{
+    std::ifstream      in(meshPath, std::ios::binary);
+    assetc::FileHeader hdr{};
+    if (!in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr)) || hdr.magic != assetc::MeshMagic)
+        return -1;
+    for (uint32_t i = 0; i < hdr.chunkCount; ++i)
+    {
+        assetc::ChunkEntry e{};
+        if (!ReadAt(in, sizeof(assetc::FileHeader) + static_cast<uint64_t>(i) * sizeof(e), e))
+            break;
+        if (e.fourcc == static_cast<uint32_t>(assetc::ChunkId::Skeleton))
+            return static_cast<int64_t>(e.size / sizeof(assetc::GpuJoint));
+    }
+    return -1;
+}
+
+// ---- .hanim ----------------------------------------------------------------
+
+void CheckHAnim(Ctx &c, const std::string &path, const std::string &rel)
+{
+    if (assetc::ValidateHAnim(path) != 0)
+    {
+        Problem(c, rel, "structural validation failed");
+        return;
+    }
+    std::vector<assetc::AnimClip> clips;
+    if (assetc::ReadHAnim(path, clips) != 0)
+    {
+        Problem(c, rel, "could not parse");
+        return;
+    }
+
+    // The companion .hmesh must carry a skeleton the channels can target.
+    auto mesh = fs::path(path);
+    mesh.replace_extension(".hmesh");
+    const int64_t joints = fs::exists(mesh) ? SkeletonJointCount(mesh.string()) : -1;
+    if (joints < 0)
+    {
+        Problem(c, rel,
+                fmt::format("no companion skeleton ({} with a SKEL chunk)",
+                            mesh.filename().string()));
+        return;
+    }
+    for (size_t ci = 0; ci < clips.size(); ++ci)
+        for (const auto &ch : clips[ci].channels)
+            if (static_cast<int64_t>(ch.joint) >= joints)
+                Problem(c, rel,
+                        fmt::format("clip {} channel targets joint {} >= joint count {}", ci,
+                                    ch.joint, joints));
+}
+
 } // namespace
 
 int assetc::CheckRuntime(const std::string &dir)
@@ -197,7 +251,7 @@ int assetc::CheckRuntime(const std::string &dir)
 
     // Collect paths first so we can load every manifest before checking refs
     // against it (a .hmat may be walked before assets.hman).
-    std::vector<std::pair<std::string, std::string>> mans, mats, meshes; // (abs, rel)
+    std::vector<std::pair<std::string, std::string>> mans, mats, meshes, anims; // (abs, rel)
     std::error_code                                  ec;
     for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec),
          end;
@@ -214,6 +268,8 @@ int assetc::CheckRuntime(const std::string &dir)
             mats.emplace_back(p.string(), rel);
         else if (nm.ends_with(".hmesh"))
             meshes.emplace_back(p.string(), rel);
+        else if (nm.ends_with(".hanim"))
+            anims.emplace_back(p.string(), rel);
     }
 
     fmt::print("{}Checking {}{}\n", fmtx::BLUE, dir, fmtx::RESET);
@@ -226,11 +282,14 @@ int assetc::CheckRuntime(const std::string &dir)
         CheckHMat(c, p, rel);
     for (const auto &[p, rel] : meshes)
         CheckHMesh(c, p, rel);
+    for (const auto &[p, rel] : anims)
+        CheckHAnim(c, p, rel);
 
     if (c.problems == 0)
     {
-        fmtx::Success(fmt::format("integrity OK: {} manifest(s), {} material table(s), {} mesh(es)",
-                                  mans.size(), mats.size(), meshes.size()));
+        fmtx::Success(
+            fmt::format("integrity OK: {} manifest(s), {} material table(s), {} mesh(es), {} anim(s)",
+                        mans.size(), mats.size(), meshes.size(), anims.size()));
         return 0;
     }
     fmtx::Error(fmt::format("{} integrity problem(s) found", c.problems));

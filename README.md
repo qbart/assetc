@@ -49,8 +49,11 @@ For a glTF source `assets/models/chair.glb` the outputs are:
 runtime/models/chair.hmesh          geometry + submesh table
 runtime/models/chair.hmat           material table, row i == SubMesh::materialSlot i
 runtime/models/chair/tex_<i>.ktx2   one UASTC .ktx2 per referenced glTF image i
+runtime/models/chair.hanim          animation clips (only if the source is skinned + animated)
 runtime/assets.hman                 global hash -> file manifest (all assets, written once)
 ```
+
+Skinned glTF meshes also embed `SKIN` + `SKEL` chunks in the `.hmesh` (see below).
 
 ## .hmesh file format (v2)
 
@@ -108,6 +111,8 @@ All data chunks are **pure arrays** — element counts, the vertex stride, and t
 | `MLBN` | meshlet bounds     | `MeshletBounds[]`: per-meshlet center/radius + cone-cull axis/cutoff    |
 | `MTRL` | material refs      | `u64[materialCount]` (FNV1a64 of material runtime refs; see below)      |
 | `SUBM` | submesh table      | `SubMesh[submeshCount]` (64 B): index/meshlet ranges, `materialSlot`, per-submesh bounds |
+| `SKIN` | per-vertex skinning | *optional* `GpuSkinVertex[vertexCount]` (24 B): `u16 joints[4]` + `f32 weights[4]` (sum 1); parallel to `VTXS` |
+| `SKEL` | skeleton           | *optional* `GpuJoint[jointCount]` (112 B): inverse-bind matrix, bind-pose TRS, parent index |
 
 Each `SubMesh` is one drawable section sharing a material: a contiguous `[firstIndex, firstIndex+indexCount)` range into `IDXS` and `[firstMeshlet, firstMeshlet+meshletCount)` into `MLET`, plus a `materialSlot` (index into `MTRL`/`.hmat`, or `kNoMaterial = 0xFFFFFFFF`) and its own AABB+sphere. One glTF primitive → one submesh.
 
@@ -135,9 +140,40 @@ The hash input is a canonical runtime ref of the form `<sourceRef>/<leaf>` where
 
 Example: `assets/models/chair.glb` with source materials `["Wood", "", "Leather", "Wood"]`, where submeshes reference source materials `2` then `0` (first-use order), produces `MTRL = [hash("models/chair/leather"), hash("models/chair/material_0")]` — two entries, dense slots `0` and `1`.
 
+### Skinning (`SKIN` + `SKEL`)
+
+A skinned glTF (primitives with `JOINTS_0`/`WEIGHTS_0`, node with a `skin`) additionally emits two optional chunks. Static meshes omit both and are byte-identical to before.
+
+- `SKIN` is parallel to `VTXS` — one `GpuSkinVertex` (`u16 joints[4]`, `f32 weights[4]`) per vertex. `joints` index into `SKEL`; `weights` are renormalized to sum 1 (a weightless vertex falls back to a rigid bind to joint 0).
+- `SKEL` is the joint array. Each `GpuJoint` carries the inverse-bind matrix (mesh space → joint bind space, column-major), the joint's local bind-pose TRS (`bindT`/`bindR` quaternion `xyzw`/`bindS`), and a `parent` index (−1 for a root). Joint order follows the glTF skin's `joints` array, so `JOINTS_0` indices map directly.
+
+Per the glTF spec, a skinned mesh node's own transform is ignored — assetc does **not** bake the node world matrix into skinned vertices (only static meshes are baked). Only the first skin (`skin[0]`) is exported; additional skins are warned and ignored.
+
 ### Endianness
 
 Little-endian only. `src/assetc/runtime_mesh.cpp` enforces this with a `static_assert(std::endian::native == std::endian::little)`.
+
+## .hanim file format (v1)
+
+Little-endian. Magic `"HANM"`. A skinned, animated glTF emits a companion `.hanim` (`runtime/<name>.hanim`) alongside its `.hmesh`, holding every animation clip for that source. Channels index joints in the companion `.hmesh` `SKEL` array.
+
+```
+magic u32 'HANM' | version u32 1 | clipCount u32 | reserved u32
+per clip:
+    nameLen u16, name bytes
+    duration f32                      // seconds (max key time)
+    channelCount u32
+    per channel:
+        joint u32                     // index into SKEL
+        path u8        (0=translation vec3, 1=rotation vec4 xyzw, 2=scale vec3)
+        interp u8      (0=STEP, 1=LINEAR)
+        components u8  (3 or 4)
+        _pad u8
+        keyCount u32
+        per key: time f32, value[components] f32
+```
+
+Morph-target (`weights`) channels and channels targeting non-joint nodes are skipped. `CUBICSPLINE` samplers are degraded to `LINEAR` (the value keyframe of each tangent triple is kept) with a warning. `assetc info` lists clips/channels/duration; `assetc check` validates that every channel's joint index is within the companion skeleton.
 
 ## .hmat file format (v1)
 
