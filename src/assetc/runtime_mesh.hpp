@@ -52,6 +52,8 @@ enum class ChunkId : uint32_t
     SubMeshes        = MakeFourCC('S', 'U', 'B', 'M'),
     Skin             = MakeFourCC('S', 'K', 'I', 'N'), // optional: per-vertex joints/weights
     Skeleton         = MakeFourCC('S', 'K', 'E', 'L'), // optional: joint hierarchy + bind pose
+    LodIndices       = MakeFourCC('L', 'O', 'D', 'I'), // optional: u32 index data for reduced LODs
+    LodTable         = MakeFourCC('L', 'O', 'D', 'T'), // optional: per-submesh LOD ranges into LODI
 };
 
 #pragma pack(push, 1)
@@ -195,6 +197,26 @@ struct SubMesh
 };
 static_assert(sizeof(SubMesh) == 64, "SubMesh must be 64 bytes");
 
+// One reduced level-of-detail index range for a submesh, into the LODI buffer
+// (u32, global vertex indices, same VTXS as LOD0). indexCount == 0 means "no
+// simpler level available; reuse the previous LOD". LOD0 is the full-res mesh in
+// IDXS/SUBM and is not duplicated here.
+struct MeshLod
+{
+    uint32_t firstIndex; // into LODI
+    uint32_t indexCount; // multiple of 3
+};
+static_assert(sizeof(MeshLod) == 8, "MeshLod must be 8 bytes");
+
+// LODT chunk header, followed by MeshLod[submeshCount * lodCount], row-major
+// [submesh][lod] (lod 0 == LOD1, the first reduced level).
+struct LodTableHeader
+{
+    uint32_t lodCount;     // reduced levels per submesh (excludes full-res LOD0)
+    uint32_t submeshCount; // matches DESC.submeshCount
+};
+static_assert(sizeof(LodTableHeader) == 8, "LodTableHeader must be 8 bytes");
+
 #pragma pack(pop)
 
 struct EncoderMesh
@@ -219,6 +241,12 @@ struct Mesh
 
     // Parallel to `vertices`, empty unless the mesh is skinned (SKIN chunk).
     std::vector<GpuSkinVertex> skinVertices;
+
+    // Reduced LODs (LODI/LODT chunks). lodIndices holds the concatenated u32
+    // index data; lodTable has submeshCount*lodCount entries [submesh][lod].
+    std::vector<uint32_t> lodIndices;
+    std::vector<MeshLod>  lodTable;
+    uint32_t              lodCount = 0; // reduced levels per submesh (0 = none)
 };
 
 struct ChunkPayload

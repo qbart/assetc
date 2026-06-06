@@ -244,6 +244,20 @@ int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds 
         chunks.push_back({ChunkId::Skin, VecBytes(m.skinVertices)});
     if (!skeleton.empty())
         chunks.push_back({ChunkId::Skeleton, std::as_bytes(skeleton)});
+
+    // Optional LOD chunks: LODI (reduced-level index data) + LODT (header + per
+    // submesh ranges). Must outlive WriteChunked, so build the LODT buffer here.
+    std::vector<std::byte> lodtBuf;
+    if (m.lodCount > 0 && !m.lodTable.empty())
+    {
+        LodTableHeader lh{m.lodCount, static_cast<uint32_t>(submeshes.size())};
+        AppendPod(lodtBuf, lh);
+        const auto tb = VecBytes(m.lodTable);
+        lodtBuf.insert(lodtBuf.end(), tb.begin(), tb.end());
+        chunks.push_back({ChunkId::LodIndices, VecBytes(m.lodIndices)});
+        chunks.push_back({ChunkId::LodTable, std::span<const std::byte>(lodtBuf.data(),
+                                                                        lodtBuf.size())});
+    }
     return WriteChunked(path, chunks);
 }
 
@@ -408,6 +422,51 @@ int assetc::ValidateHMesh(const std::string &path)
             fmtx::Error(fmt::format("validate: {} SKEL size {} not a multiple of {}", path,
                                     skel->size, sizeof(GpuJoint)));
             return 1;
+        }
+    }
+
+    // Optional LOD chunks: LODT header must match DESC.submeshCount, and every
+    // MeshLod range must land inside the LODI index buffer.
+    if (const auto *lodt = findChunk(ChunkId::LodTable))
+    {
+        const auto  *lodi      = findChunk(ChunkId::LodIndices);
+        const size_t lodiCount = lodi ? lodi->size / sizeof(uint32_t) : 0;
+        if (lodi && lodi->size % sizeof(uint32_t) != 0)
+        {
+            fmtx::Error(fmt::format("validate: {} LODI size {} not u32-aligned", path, lodi->size));
+            return 1;
+        }
+        if (lodt->size < sizeof(LodTableHeader))
+        {
+            fmtx::Error(fmt::format("validate: {} LODT too small", path));
+            return 1;
+        }
+        LodTableHeader lh{};
+        std::memcpy(&lh, buf.data() + lodt->offset, sizeof(lh));
+        const size_t expect = sizeof(LodTableHeader) +
+                              static_cast<size_t>(lh.lodCount) * lh.submeshCount * sizeof(MeshLod);
+        if (lh.submeshCount != d.submeshCount || lodt->size != expect)
+        {
+            fmtx::Error(fmt::format("validate: {} LODT size {} != expected {} (submeshCount {})",
+                                    path, lodt->size, expect, lh.submeshCount));
+            return 1;
+        }
+        const auto *lods =
+            reinterpret_cast<const MeshLod *>(buf.data() + lodt->offset + sizeof(LodTableHeader));
+        const size_t n = static_cast<size_t>(lh.lodCount) * lh.submeshCount;
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto &lod = lods[i];
+            if (lod.indexCount == 0)
+                continue; // empty level: fall back to previous LOD
+            if (lod.indexCount % 3 != 0 ||
+                static_cast<size_t>(lod.firstIndex) + lod.indexCount > lodiCount)
+            {
+                fmtx::Error(fmt::format("validate: {} LOD {} range [{},{}) invalid (LODI {} idx)",
+                                        path, i, lod.firstIndex, lod.firstIndex + lod.indexCount,
+                                        lodiCount));
+                return 1;
+            }
         }
     }
 

@@ -425,6 +425,38 @@ CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
                               Vec3{b.cone_axis[0], b.cone_axis[1], b.cone_axis[2]}, b.cone_cutoff});
         }
 
+        // Reduced LODs: simplify this submesh's index set toward fractions of its
+        // triangle count. Each level is appended to the shared LOD index buffer as
+        // global indices; an empty range (count 0) means simplification stalled and
+        // the engine should fall back to the previous level.
+        constexpr uint32_t kExtraLods           = 2;
+        constexpr float    kLodRatios[kExtraLods] = {0.5f, 0.25f};
+        cm.mesh.lodCount                        = kExtraLods;
+        for (uint32_t l = 0; l < kExtraLods; ++l)
+        {
+            const size_t target =
+                std::max<size_t>(3, (static_cast<size_t>(localIdx.size() * kLodRatios[l]) / 3) * 3);
+            MeshLod lod{};
+            if (target < localIdx.size())
+            {
+                std::vector<unsigned int> simplified(localIdx.size());
+                float                     err = 0.0f;
+                const size_t              got = meshopt_simplify(
+                    simplified.data(), localIdx.data(), localIdx.size(), &localVerts[0].pos.x,
+                    localVerts.size(), sizeof(CpuVertex), target, /*target_error=*/0.05f,
+                    /*options=*/0, &err);
+                if (got >= 3 && got < localIdx.size())
+                {
+                    lod.firstIndex = static_cast<uint32_t>(cm.mesh.lodIndices.size());
+                    lod.indexCount = static_cast<uint32_t>(got);
+                    cm.mesh.lodIndices.reserve(cm.mesh.lodIndices.size() + got);
+                    for (size_t i = 0; i < got; ++i)
+                        cm.mesh.lodIndices.push_back(simplified[i] + baseVertex);
+                }
+            }
+            cm.mesh.lodTable.push_back(lod);
+        }
+
         SubMesh sm{};
         sm.firstIndex   = firstIndex;
         sm.indexCount   = static_cast<uint32_t>(localIdx.size());

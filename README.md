@@ -113,6 +113,8 @@ All data chunks are **pure arrays** — element counts, the vertex stride, and t
 | `SUBM` | submesh table      | `SubMesh[submeshCount]` (64 B): index/meshlet ranges, `materialSlot`, per-submesh bounds |
 | `SKIN` | per-vertex skinning | *optional* `GpuSkinVertex[vertexCount]` (24 B): `u16 joints[4]` + `f32 weights[4]` (sum 1); parallel to `VTXS` |
 | `SKEL` | skeleton           | *optional* `GpuJoint[jointCount]` (112 B): inverse-bind matrix, bind-pose TRS, parent index |
+| `LODI` | LOD index buffer   | *optional* `u32[]` global vertex indices for reduced levels (concatenated)     |
+| `LODT` | LOD table          | *optional* `LodTableHeader` (8 B) + `MeshLod[submeshCount*lodCount]` (8 B): per-submesh ranges into `LODI` |
 
 Each `SubMesh` is one drawable section sharing a material: a contiguous `[firstIndex, firstIndex+indexCount)` range into `IDXS` and `[firstMeshlet, firstMeshlet+meshletCount)` into `MLET`, plus a `materialSlot` (index into `MTRL`/`.hmat`, or `kNoMaterial = 0xFFFFFFFF`) and its own AABB+sphere. One glTF primitive → one submesh.
 
@@ -148,6 +150,10 @@ A skinned glTF (primitives with `JOINTS_0`/`WEIGHTS_0`, node with a `skin`) addi
 - `SKEL` is the joint array. Each `GpuJoint` carries the inverse-bind matrix (mesh space → joint bind space, column-major), the joint's local bind-pose TRS (`bindT`/`bindR` quaternion `xyzw`/`bindS`), and a `parent` index (−1 for a root). Joint order follows the glTF skin's `joints` array, so `JOINTS_0` indices map directly.
 
 Per the glTF spec, a skinned mesh node's own transform is ignored — assetc does **not** bake the node world matrix into skinned vertices (only static meshes are baked). Only the first skin (`skin[0]`) is exported; additional skins are warned and ignored.
+
+### Levels of detail (`LODI` + `LODT`)
+
+Every submesh additionally gets reduced LODs via meshoptimizer simplification (default 2 levels at ~50% and ~25% of the triangle count). They live in two optional chunks so the full-res path is untouched: `LODI` is a `u32` index buffer (global vertex indices, same `VTXS`) and `LODT` is a header plus a `MeshLod{firstIndex, indexCount}` per `[submesh][lod]` row. LOD0 is the full-resolution mesh in `IDXS`/`SUBM`/`MLET` (meshlets are LOD0-only); the reduced levels are for classic distance-based indexed draws. A `MeshLod` with `indexCount == 0` means simplification stalled at that level, so the engine should reuse the previous LOD. `ValidateHMesh` checks every range lands inside `LODI`.
 
 ### Endianness
 

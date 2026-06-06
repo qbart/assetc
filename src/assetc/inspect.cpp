@@ -111,7 +111,7 @@ void InspectHMesh(const fs::path &p, const std::string &rel, Totals &t, std::vec
     assetc::MeshDesc  desc{};
     assetc::MeshBounds bnds{};
     bool              haveDesc = false, haveBnds = false, haveSkin = false;
-    uint32_t          jointCount = 0;
+    uint32_t          jointCount = 0, lodCount = 0;
     for (uint32_t i = 0; i < hdr.chunkCount; ++i)
     {
         assetc::ChunkEntry e{};
@@ -126,6 +126,12 @@ void InspectHMesh(const fs::path &p, const std::string &rel, Totals &t, std::vec
             haveSkin = true;
         else if (e.fourcc == static_cast<uint32_t>(assetc::ChunkId::Skeleton))
             jointCount = static_cast<uint32_t>(e.size / sizeof(assetc::GpuJoint));
+        else if (e.fourcc == static_cast<uint32_t>(assetc::ChunkId::LodTable))
+        {
+            assetc::LodTableHeader lh{};
+            if (ReadAt(in, e.offset, lh))
+                lodCount = lh.lodCount;
+        }
     }
     if (!haveDesc)
     {
@@ -148,6 +154,8 @@ void InspectHMesh(const fs::path &p, const std::string &rel, Totals &t, std::vec
                             bnds.aabbMax.z - bnds.aabbMin.z, bnds.sphereRadius);
     if (haveSkin || jointCount > 0)
         line += fmt::format(" | skinned ({} joints)", jointCount);
+    if (lodCount > 0)
+        line += fmt::format(" | +{} LODs", lodCount);
     Emit(out, rel, line);
 
     ++t.meshFiles;
