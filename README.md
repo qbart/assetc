@@ -2,6 +2,8 @@
 
 `assetc` compiles source assets under `assets/` (textures, meshes, shaders, materials) into runtime-friendly binary formats written to `runtime/`. Images become UASTC-encoded `.ktx2`, meshes become `.hmesh` with octahedral-packed normals/tangents and meshletized geometry; mesh files reference materials by stable 64-bit hashes so the engine can share resources across assets.
 
+A glTF/GLB mesh additionally emits a **companion material table** (`.hmat`) plus one **`.ktx2` per referenced image**. The three layers are orthogonal: `.hmesh` is geometry, `.hmat` is the small per-source material descriptor table (PBR factors + texture refs), and `.ktx2` is the GPU-ready pixel payload. A submesh's `materialSlot` indexes straight into the `.hmat` table (`.hmat` row `i` ⇔ `SubMesh::materialSlot i`).
+
 ## Supported inputs
 
 | Source pattern                         | Asset type | Output                                  |
@@ -10,15 +12,25 @@
 | `*.n.png`                              | Normal     | UASTC `.ktx2` (normal mode)             |
 | `*.ao.png`, `*.h.png`, `*.r.png`       | Grayscale  | UASTC `.ktx2` (grayscale mode)          |
 | `*.lut.cube`                           | LUT        | `.lut.ktx2` (3D LUT)                    |
-| `*.obj`, `*.gltf`, `*.glb`             | Mesh       | `.hmesh` (v1 container, see below)      |
+| `*.obj`, `*.gltf`, `*.glb`             | Mesh       | `.hmesh` (container, see below); glTF also emits `.hmat` + `tex_<i>.ktx2` |
 | `*.shader/` (directory)                | Shader     | folder with `vertex.spv` / `fragment.spv` |
 | `*.env/` (directory)                   | Cubemap    | UASTC `.env.ktx2` (6 faces: `px.png`, `nx.png`, `py.png`, `ny.png`, `pz.png`, `nz.png`) |
 | `*.array/` (directory)                 | Array      | `.arr.ktx2` *(planned)*                 |
-| `*.mat`                                | Material   | `.hmat` *(planned)*                     |
+| `*.mat`                                | Material   | `.hmat` *(planned standalone; today `.hmat` is emitted as a glTF companion)* |
 
-## .hmesh file format (v1)
+For a glTF source `assets/models/chair.glb` the outputs are:
 
-Little-endian, tagged-chunk container. Magic `"HMSH"` (`0x4853'4D48`).
+```
+runtime/models/chair.hmesh          geometry + submesh table
+runtime/models/chair.hmat           material table, row i == SubMesh::materialSlot i
+runtime/models/chair/tex_<i>.ktx2   one UASTC .ktx2 per referenced glTF image i
+```
+
+## .hmesh file format (v2)
+
+Little-endian, tagged-chunk container. Magic `"HMSH"` (`0x4853'4D48`). v2 introduced the `DESC` + `SUBM` chunks, made every data chunk a *pure array* (no inline prelude), and shrank `GpuVertex` from 36 B to 28 B.
+
+The `DESC` chunk is the single source of truth for the mesh's shape: counts, strides, and the index width all live there, so every other data chunk (`VTXS`, `IDXS`, `MLET`, ...) is a bare array the loader can mmap-cast directly using `DESC`.
 
 ### Top-level layout
 
@@ -37,7 +49,7 @@ Little-endian, tagged-chunk container. Magic `"HMSH"` (`0x4853'4D48`).
 | Offset | Field        | Type | Notes                                  |
 | -----: | ------------ | ---- | -------------------------------------- |
 |      0 | `magic`      | u32  | `"HMSH"` (`0x4853'4D48`)               |
-|      4 | `version`    | u32  | `1`                                    |
+|      4 | `version`    | u32  | `2`                                    |
 |      8 | `chunkCount` | u32  | number of entries in ChunkTable        |
 |     12 | `flags`      | u32  | reserved                               |
 |     16 | `_reserved1` | u64  | reserved (was `contentHash`, held)     |
@@ -54,40 +66,117 @@ Little-endian, tagged-chunk container. Magic `"HMSH"` (`0x4853'4D48`).
 
 Chunks are written in any order, padded to 16-byte alignment between payloads. Unknown chunks are ignored by readers (forward compatibility).
 
-### Chunk catalogue (v1)
+### Chunk catalogue (v2)
+
+All data chunks are **pure arrays** — element counts, the vertex stride, and the index width live in `DESC`, not inline in the chunk.
 
 | FourCC | Purpose            | Payload                                                                 |
 | ------ | ------------------ | ----------------------------------------------------------------------- |
+| `DESC` | mesh descriptor    | `MeshDesc` (32 B): counts (vertex/index/meshlet/submesh/material), `vertexStride` (u16), `indexWidth` (u8, 2 or 4), `flags` (u8), meshlet build params |
 | `BNDS` | mesh bounds        | `MeshBounds` (40 B): AABB min/max (`vec3`) + sphere center/radius       |
-| `VTXS` | vertex stream      | `u32 count`, `u32 stride`, then `count * stride` bytes (`GpuVertex[]`)  |
-| `IDXS` | index stream       | `u32 count`, `u32 size`, then `count * size` bytes (`size` = 2 or 4)    |
+| `VTXS` | vertex stream      | `GpuVertex[vertexCount]` (28 B stride)                                  |
+| `IDXS` | index stream       | `u16[]` or `u32[]` per `DESC.indexWidth`; global indices, all submeshes |
 | `MLET` | meshlets           | `Meshlet[]`: per-meshlet vertex/triangle offsets and counts             |
 | `MLVR` | meshlet vertices   | `u32[]`: per-meshlet local-to-global vertex index remap                 |
 | `MLTR` | meshlet triangles  | `MeshletTriangle[]`: 3 × u8 per triangle, dense (no inter-meshlet pad)  |
 | `MLBN` | meshlet bounds     | `MeshletBounds[]`: per-meshlet center/radius + cone-cull axis/cutoff    |
-| `MTRL` | material refs      | `u32 count`, then `count * u64` (FNV1a64 of material runtime refs)      |
+| `MTRL` | material refs      | `u64[materialCount]` (FNV1a64 of material runtime refs; see below)      |
+| `SUBM` | submesh table      | `SubMesh[submeshCount]` (64 B): index/meshlet ranges, `materialSlot`, per-submesh bounds |
 
-### `GpuVertex` (36 B)
+Each `SubMesh` is one drawable section sharing a material: a contiguous `[firstIndex, firstIndex+indexCount)` range into `IDXS` and `[firstMeshlet, firstMeshlet+meshletCount)` into `MLET`, plus a `materialSlot` (index into `MTRL`/`.hmat`, or `kNoMaterial = 0xFFFFFFFF`) and its own AABB+sphere. One glTF primitive → one submesh.
+
+### `GpuVertex` (28 B)
 
 | Offset | Field      | Type      | Notes                                                  |
 | -----: | ---------- | --------- | ------------------------------------------------------ |
-|      0 | `position` | f32 × 3   | object-local position (no quantization in v1)          |
-|     12 | `normal`   | i16 × 4   | `[0..1]` octahedral normal (SNORM); `[2..3]` reserved  |
-|     20 | `tangent`  | i16 × 4   | `[0..1]` octahedral tangent + handedness in bit 0;     |
-|        |            |           | `[2..3]` reserved                                      |
-|     28 | `uv`       | f32 × 2   | UV0 (top-left origin, matches Vulkan)                  |
+|      0 | `position` | f32 × 3   | object-local position (unquantized)                    |
+|     12 | `normal`   | i16 × 2   | octahedral normal (SNORM)                              |
+|     16 | `tangent`  | i16 × 2   | octahedral tangent + handedness in bit 0 of x (SINT)   |
+|     20 | `uv`       | f32 × 2   | UV0 (top-left origin, matches Vulkan)                  |
+
+The v1 layout carried 8 bytes of reserved padding (two extra i16 per packed slot); v2 dropped them.
 
 Suggested Vulkan vertex input formats: normal → `VK_FORMAT_R16G16_SNORM`, tangent → `VK_FORMAT_R16G16_SINT` (shader needs raw integer access to extract the handedness bit).
 
 ### Material refs
 
-The `MTRL` chunk holds FNV1a64 hashes — one per material in the source file, in source-index order. The hash input is a canonical runtime ref of the form `<sourceRef>/<leaf>` where:
+The `MTRL` chunk holds FNV1a64 hashes — **compact**: only materials actually referenced by a submesh, in first-use (dense slot) order. `SubMesh::materialSlot` indexes into this list (or is `kNoMaterial`). The same dense slot order is shared by the companion `.hmat` table, so `MTRL[i]`, `.hmat` row `i`, and `materialSlot == i` all describe the same material.
+
+The hash input is a canonical runtime ref of the form `<sourceRef>/<leaf>` where:
 
 - `sourceRef` is the source asset's runtime path with `assets/` prefix stripped, extension dropped, lowercased, `/`-separated (e.g. `models/chair`).
-- `leaf` is the lowercased material name if non-empty AND unique within the source's material array; otherwise `material_<index>`.
+- `leaf` is the lowercased material name if non-empty AND unique within the source's material array; otherwise `material_<index>` (using the *source* index, so leaf names stay stable regardless of which materials are referenced).
 
-Example: `assets/models/chair.glb` with materials `["Wood", "", "Leather", "Wood"]` produces `MTRL = [hash("models/chair/material_0"), hash("models/chair/material_1"), hash("models/chair/leather"), hash("models/chair/material_3")]`.
+Example: `assets/models/chair.glb` with source materials `["Wood", "", "Leather", "Wood"]`, where submeshes reference source materials `2` then `0` (first-use order), produces `MTRL = [hash("models/chair/leather"), hash("models/chair/material_0")]` — two entries, dense slots `0` and `1`.
 
 ### Endianness
 
 Little-endian only. `src/assetc/runtime_mesh.cpp` enforces this with a `static_assert(std::endian::native == std::endian::little)`.
+
+## .hmat file format (v1)
+
+Little-endian flat material table. Magic `"HMAT"`. One `.hmat` is emitted per glTF source, alongside its `.hmesh`. It is a fixed-stride array of material rows in the **same dense slot order** as the mesh's `MTRL`/`SUBM` tables, so `SubMesh::materialSlot` indexes straight into it.
+
+### Layout
+
+```
++--------------------------------+
+| MatFileHeader (16 B)           |
++--------------------------------+
+| GpuMaterial[count] (96 B each) |
++--------------------------------+
+```
+
+The file is exactly `16 + count * 96` bytes — no chunk table, directly mmappable as a `GpuMaterial[]`.
+
+### MatFileHeader (16 B)
+
+| Offset | Field     | Type | Notes                                            |
+| -----: | --------- | ---- | ------------------------------------------------ |
+|      0 | `magic`   | u32  | `"HMAT"`                                          |
+|      4 | `version` | u32  | `1`                                              |
+|      8 | `count`   | u32  | material rows (matches the companion `.hmesh` material count) |
+|     12 | `flags`   | u32  | reserved                                         |
+
+### GpuMaterial (96 B)
+
+| Offset | Field                  | Type    | Notes                                                       |
+| -----: | ---------------------- | ------- | ----------------------------------------------------------- |
+|      0 | `baseColorFactor`      | f32 × 4 | linear RGBA multiplier                                       |
+|     16 | `emissiveFactor`       | f32 × 3 | linear RGB                                                   |
+|     28 | `metallicFactor`       | f32     |                                                             |
+|     32 | `roughnessFactor`      | f32     |                                                             |
+|     36 | `normalScale`          | f32     | glTF `normalTexture.scale`                                   |
+|     40 | `occlusionStrength`    | f32     | glTF `occlusionTexture.strength`                             |
+|     44 | `alphaCutoff`          | f32     | used when alpha mode == `MASK`                               |
+|     48 | `flags`                | u32     | bit 0 = double-sided; bits 1-2 = alpha mode                 |
+|     52 | `_pad`                 | u32     | aligns the texture refs to 8 bytes                          |
+|     56 | `baseColorTex`         | u64     | FNV1a64 runtime ref of the `.ktx2`, `0` = none              |
+|     64 | `metallicRoughnessTex` | u64     | ORM/MR packing: occlusion=R, roughness=G, metallic=B        |
+|     72 | `normalTex`            | u64     |                                                             |
+|     80 | `occlusionTex`         | u64     | equals `metallicRoughnessTex` when packed as ORM            |
+|     88 | `emissiveTex`          | u64     |                                                             |
+
+**Alpha mode** (flags bits 1-2): `0` = OPAQUE, `1` = MASK, `2` = BLEND.
+
+Factors carry glTF defaults when a field is absent in the source (base color `1,1,1,1`; metallic/roughness `1`; emissive `0,0,0`; `normalScale`/`occlusionStrength` `1`; `alphaCutoff` `0.5`; OPAQUE, single-sided).
+
+### Texture refs
+
+Each `*Tex` field is an FNV1a64 hash of the texture's runtime ref, or `0` when the material has no texture in that slot. The ref is `<sourceRef>/tex_<imageIndex>` (lowercased, like material refs), and the matching file is written to `runtime/<rel-no-ext>/tex_<imageIndex>.ktx2`. Textures are **deduplicated by glTF image index** — one `.ktx2` per source image, even when shared across materials or slots.
+
+### Texture color space & encoder mode
+
+Each image is transcoded to UASTC `.ktx2` with the color space / swizzle dictated by the slot it is first used in:
+
+| Slot                  | Mode          | OETF   | Swizzle | Notes                                  |
+| --------------------- | ------------- | ------ | ------- | -------------------------------------- |
+| baseColor, emissive   | `Color`       | sRGB   | none    | color data                             |
+| metallicRoughness, occlusion | `LinearColor` | linear | none    | keeps all channels (ORM: O=R, R=G, M=B) |
+| normal                | `Normal`      | linear | `rg01`  | X→R, Y→G; Z reconstructed in-shader     |
+
+If the same image is pulled into conflicting color spaces by different materials, the first use wins and a warning is logged.
+
+### Endianness
+
+Little-endian only, same as `.hmesh` (`src/assetc/runtime_material.cpp` carries the matching `static_assert`).
