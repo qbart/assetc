@@ -30,6 +30,28 @@ Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
 `assetc check` validates internal consistency: each `.hmesh`/`.hmat`/`.hman` is structurally valid; every nonzero texture ref in a `.hmat` resolves via `.hman` to a file that exists; every `.hman` entry points at an existing file with a hash matching `HashAssetRef(path-without-".ktx2")`; and each `.hmesh` material count matches its companion `.hmat` row count with all submesh material slots in range. Use it as a CI gate after a build.
 
+## Configuration (`assetc.yml`)
+
+On startup `assetc` looks for the nearest `assetc.yml`, searching the working directory and its ancestors (so it can live at the project root). All keys are optional and default to today's behavior; a CLI `-o/--output` overrides the config, and `--pack` is OR-ed with it.
+
+```yaml
+input: assets        # source directory (default: assets)
+output: runtime      # output directory (default: runtime; overridden by -o)
+pack: true           # bundle into <output>.hpack after building (default: false)
+
+mesh:
+  merge: true        # default for meshes: bake node transforms into one combined,
+                     # world-space mesh. false keeps geometry source-local.
+
+# Per-pattern overrides; the first matching rule wins. `match` is a glob over the
+# source path relative to `input` (* spans '/', ? matches one char).
+rules:
+  - match: "props/*.glb"
+    merge: false     # keep these props in their own local space
+```
+
+Today the rules expose `merge` (a mesh setting; it has no effect on skinned meshes, which are never baked, or on OBJ, which has no node graph). The schema is intentionally small — input/output/pack plus per-pattern mesh merge — and is the place to grow further per-asset processing knobs. Changing a mesh's effective `merge` invalidates just that mesh in the incremental cache.
+
 ## Supported inputs
 
 | Source pattern                         | Asset type | Output                                  |

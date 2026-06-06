@@ -2,6 +2,7 @@
 #include "assetc/encode_material.hpp"
 #include "assetc/cache.hpp"
 #include "assetc/check.hpp"
+#include "assetc/config.hpp"
 #include "assetc/encode_mesh.hpp"
 #include "assetc/inspect.hpp"
 #include "assetc/pack.hpp"
@@ -148,7 +149,8 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
 }
 
 int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount,
-                bool verify, std::vector<assetc::ManifestEntry> &outEntries)
+                bool verify, std::vector<assetc::ManifestEntry> &outEntries,
+                const assetc::Config &config)
 {
     const auto out = asset.RuntimePath(outputDir);
     fs::create_directories(fs::path(out).parent_path());
@@ -192,7 +194,11 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
             gltfSrc = gltf::Load(asset.path);
             if (!gltfSrc)
                 return 1;
-            cm = assetc::BuildFromGltf(*gltfSrc, sourceRef);
+            // Per-pattern merge override, keyed by the source path relative to input.
+            std::error_code  rec;
+            const std::string rel = fs::relative(asset.path, config.input, rec).generic_string();
+            const bool        merge = config.MergeFor(rel);
+            cm = assetc::BuildFromGltf(*gltfSrc, sourceRef, merge);
         }
         else
         {
@@ -343,7 +349,8 @@ int main(int argc, char **argv)
     bool        noCache   = false;
     bool        pack      = false;
     app.add_option("-j,--jobs", jobs, "Concurrent jobs")->check(CLI::PositiveNumber);
-    app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
+    auto       *outputOpt =
+        app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
     app.add_flag("--verify", verify, "Re-read each written .hmesh and check structural validity");
     app.add_flag("--no-cache", noCache, "Ignore the incremental build cache and rebuild everything");
     app.add_flag("--pack", pack, "After building, bundle the output dir into a single <output>.hpack");
@@ -357,6 +364,17 @@ int main(int argc, char **argv)
 
     CLI11_PARSE(app, argc, argv);
 
+    // Project config (nearest assetc.yml, searching upward). CLI flags win over it.
+    assetc::Config config;
+    std::string    configPath;
+    if (assetc::LoadConfig(fs::current_path().string(), config, configPath) != 0)
+        return 1;
+    if (!configPath.empty())
+        fmtx::Info(fmt::format("config: {}", configPath));
+    if (outputOpt->count() == 0)
+        outputDir = config.output; // config provides the output dir unless -o was given
+    pack = pack || config.pack;
+
     // `assetc info`: report on what's already in the output dir, don't recompile.
     if (infoCmd->parsed())
         return assetc::InspectRuntime(outputDir);
@@ -367,10 +385,10 @@ int main(int argc, char **argv)
 
     fmtx::Info(fmt::format("Running {} threads", jobs));
 
-    fs::path assetDir = "assets";
+    fs::path assetDir = config.input;
     if (!fs::exists(assetDir) || !fs::is_directory(assetDir))
     {
-        fmtx::Error("Asset dir does not exist (./assets)");
+        fmtx::Error(fmt::format("Asset dir does not exist ({})", assetDir.generic_string()));
         return 1;
     }
 
@@ -464,7 +482,16 @@ int main(int argc, char **argv)
             if (i >= assets.size()) return;
             const Asset &a   = assets[i];
             const auto   out = a.RuntimePath(outputDir);
-            const uint64_t inputHash = assetc::HashSource(a.path, static_cast<uint64_t>(a.type));
+            // Fold the resolved mesh merge setting into the cache seed so a config
+            // change (e.g. a rule flipping merge) invalidates the affected meshes.
+            uint64_t seed = static_cast<uint64_t>(a.type);
+            if (a.type == AssetType::Mesh)
+            {
+                std::error_code  sec;
+                const std::string rel = fs::relative(a.path, config.input, sec).generic_string();
+                seed = seed * 1000003u + (config.MergeFor(rel) ? 1u : 0u);
+            }
+            const uint64_t inputHash = assetc::HashSource(a.path, seed);
 
             if (!noCache && inputHash != 0)
             {
@@ -483,7 +510,7 @@ int main(int argc, char **argv)
             }
 
             std::vector<assetc::ManifestEntry> entries;
-            if (handleAsset(a, outputDir, innerThreads, verify, entries) != 0)
+            if (handleAsset(a, outputDir, innerThreads, verify, entries, config) != 0)
             {
                 std::lock_guard<std::mutex> lk(logMu);
                 fmtx::Error(fmt::format("failed: {}", a.path));

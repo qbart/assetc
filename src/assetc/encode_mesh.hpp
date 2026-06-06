@@ -62,7 +62,13 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef);
 // if NORMAL is absent.
 //
 // glTF UVs are top-left-origin (matches Vulkan), so no V flip applied.
-CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef);
+//
+// `mergeNodes` (default true) bakes each node's world transform into its vertices,
+// combining the scene graph into one world-space mesh. When false, geometry is
+// kept in its source-local space (node transforms are not baked); skinned meshes
+// are never baked regardless.
+CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef,
+                           bool mergeNodes = true);
 
 // FNV1a64 hash of a runtime-relative asset reference. Caller-side normalization
 // (lowercase, /-separated, no extension, no leading "runtime/" prefix) is the

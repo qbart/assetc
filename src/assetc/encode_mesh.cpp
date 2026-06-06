@@ -1325,7 +1325,7 @@ SkinBuild BuildSkinAndAnimations(const tg3_model &m)
 
 } // namespace
 
-CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
+CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef, bool mergeNodes)
 {
     const auto &m = src.model;
     DumpGltfStructure(m);
@@ -1360,8 +1360,9 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef)
             if (!ExtractGltfPrimitive(m, prim, pi, flat, primSkinned))
                 continue;
             // Skinned vertices are posed by joints; per glTF the skinned mesh node's
-            // transform is ignored, so don't bake the world matrix into them.
-            if (!primSkinned)
+            // transform is ignored, so don't bake the world matrix into them. With
+            // mergeNodes off, geometry is kept source-local (no node bake) too.
+            if (!primSkinned && mergeNodes)
                 TransformFlat(flat, world);
             prims.push_back(PrimitiveInput{std::move(flat), prim.material, primSkinned});
         }
