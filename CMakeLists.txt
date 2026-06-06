@@ -17,6 +17,7 @@ include(cli11)
 include(fmt)
 include(meshoptimizer)
 include(slang)
+include(yaml)
 
 # All compilation units except main.cpp live in a static core library so both the
 # `assetc` executable and the ctest binaries can link the same logic.
@@ -66,6 +67,7 @@ if(APPLE)
         ktx
         meshoptimizer
         slang
+        yaml-cpp::yaml-cpp
     )
 else()
     target_link_libraries(assetc_core PUBLIC
@@ -74,6 +76,7 @@ else()
         ktx
         meshoptimizer
         slang
+        yaml-cpp::yaml-cpp
     )
 endif()
 
