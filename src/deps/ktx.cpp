@@ -182,6 +182,10 @@ KTX_error_code ktx::FromImageToUASTC(const stb::Image &img, const std::string &d
     {
     case UASTCMode::Color:
         break;
+    case UASTCMode::LinearColor:
+        // Linear OETF (set via UNORM srcFormat above), all channels kept as-is.
+        // For glTF ORM packing: occlusion=R, roughness=G, metallic=B.
+        break;
     case UASTCMode::Normal:
         // Shader sampling (GLSL):
         //   vec3 n;

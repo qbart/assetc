@@ -26,6 +26,7 @@ struct CompiledMesh
     MeshBounds            bounds;       // mesh-wide AABB + sphere
     std::vector<SubMesh>  submeshes;    // one per source primitive; index/meshlet ranges + material slot
     std::vector<uint64_t> materialRefs; // FNV1a64 hashes, compact: only materials referenced by a submesh
+    std::vector<uint32_t> materialSourceIndex; // dense slot -> source material index (parallel to materialRefs)
 };
 
 // Build a runtime-ready mesh from a parsed OBJ.

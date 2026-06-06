@@ -21,7 +21,9 @@ add_executable(${PROJECT_NAME}
     src/deps/tiny/mikktspace.c
     src/assetc/shader.cpp
     src/assetc/runtime_mesh.cpp
+    src/assetc/runtime_material.cpp
     src/assetc/encode_mesh.cpp
+    src/assetc/encode_material.cpp
     src/assetc/encode_lut.cpp
     src/main.cpp
     )

@@ -1,5 +1,7 @@
 #include "assetc/encode_lut.hpp"
+#include "assetc/encode_material.hpp"
 #include "assetc/encode_mesh.hpp"
+#include "assetc/runtime_material.hpp"
 #include "assetc/runtime_mesh.hpp"
 #include "assetc/shader.hpp"
 #include "deps/fmt.hpp"
@@ -171,6 +173,7 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         const auto         ext       = fs::path(asset.path).extension();
         const auto         sourceRef = asset.SourceRef();
         assetc::CompiledMesh cm;
+        std::unique_ptr<gltf::GLTF> gltfSrc; // kept alive for companion .hmat + .ktx2 emission
 
         if (ext == ".obj")
         {
@@ -181,10 +184,10 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         }
         else if (ext == ".gltf" || ext == ".glb")
         {
-            auto src = gltf::Load(asset.path);
-            if (!src)
+            gltfSrc = gltf::Load(asset.path);
+            if (!gltfSrc)
                 return 1;
-            cm = assetc::BuildFromGltf(*src, sourceRef);
+            cm = assetc::BuildFromGltf(*gltfSrc, sourceRef);
         }
         else
         {
@@ -205,8 +208,41 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         if (int rc = assetc::WriteHMesh(out, cm.mesh, cm.bounds, cm.submeshes, cm.materialRefs);
             rc != 0)
             return rc;
-        if (verify)
-            return assetc::ValidateHMesh(out);
+        if (verify && assetc::ValidateHMesh(out) != 0)
+            return 1;
+
+        // Companion material table + textures (glTF only; OBJ materials are TODO).
+        // One .hmat per source, indexed by slot (row i == SubMesh::materialSlot i);
+        // each referenced glTF image becomes its own .ktx2 under <basename>/tex_<i>.ktx2.
+        if (gltfSrc && !cm.materialSourceIndex.empty())
+        {
+            const auto mats =
+                assetc::BuildMaterialsFromGltf(*gltfSrc, cm.materialSourceIndex, sourceRef);
+
+            fs::path hmatPath = fs::path(out);
+            hmatPath.replace_extension(".hmat");
+            fs::path texDir = fs::path(out);
+            texDir.replace_extension(); // <outputDir>/<rel-no-ext>/ holds tex_<i>.ktx2
+
+            fmtx::Info(fmt::format("{} {} materials / {} textures -> {}", AssetType::Material,
+                                   mats.rows.size(), mats.textures.size(),
+                                   hmatPath.generic_string()));
+
+            if (assetc::WriteHMat(hmatPath.generic_string(), mats.rows) != 0)
+                return 1;
+            if (verify && assetc::ValidateHMat(hmatPath.generic_string()) != 0)
+                return 1;
+
+            fs::create_directories(texDir);
+            for (const auto &t : mats.textures)
+            {
+                const auto texPath =
+                    (texDir / fmt::format("tex_{}.ktx2", t.imageIndex)).generic_string();
+                if (assetc::EncodeGltfImageToKtx2(*gltfSrc, t.imageIndex, t.mode, texPath,
+                                                  threadCount) != 0)
+                    return 1;
+            }
+        }
         return 0;
     }
     case AssetType::Shader:

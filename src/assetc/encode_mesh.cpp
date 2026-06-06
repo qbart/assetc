@@ -425,14 +425,18 @@ CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
     }
     cm.bounds = MeshBounds{mn, mx, center, std::sqrt(r2)};
 
-    // Compact material refs, one per dense slot in first-use order.
+    // Compact material refs, one per dense slot in first-use order. materialSourceIndex
+    // records the source material index for each dense slot, so the material-table
+    // encoder can build .hmat rows in the same slot order the submeshes index into.
     cm.materialRefs.reserve(denseToSource.size());
+    cm.materialSourceIndex.reserve(denseToSource.size());
     for (int src : denseToSource)
     {
         std::string ref(sourceRef);
         ref.push_back('/');
         ref.append(MaterialLeaf(allMaterialNames[src], static_cast<size_t>(src), allMaterialNames));
         cm.materialRefs.push_back(HashAssetRef(ref));
+        cm.materialSourceIndex.push_back(static_cast<uint32_t>(src));
     }
 
     return cm;

@@ -20,9 +20,10 @@ enum class ASTCMode
 
 enum class UASTCMode
 {
-    Color,     // sRGB OETF, no swizzle
-    Normal,    // linear OETF, input swizzle "rg01"
-    Grayscale, // linear OETF, input swizzle "r001"
+    Color,       // sRGB OETF, no swizzle
+    LinearColor, // linear OETF, no swizzle (e.g. glTF metallicRoughness / occlusion ORM)
+    Normal,      // linear OETF, input swizzle "rg01"
+    Grayscale,   // linear OETF, input swizzle "r001"
 };
 
 KTX_error_code FromImageToASTC(const stb::Image &img, const std::string &destPath, ASTCMode mode);
