@@ -20,6 +20,7 @@ Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 - `-j, --jobs <n>` — concurrent jobs.
 - `--verify` — re-read each written file and check structural validity.
 - `--no-cache` — ignore the incremental build cache and rebuild everything.
+- `--pack` — after building, bundle the whole output dir into a single `<output>.hpack`.
 
 ### Incremental builds
 
@@ -301,3 +302,24 @@ The `hash` is `HashAssetRef("<sourceRef>/tex_<imageIndex>")` — the same canoni
 ### Endianness
 
 Little-endian only (`src/assetc/runtime_manifest.cpp` carries the matching `static_assert`).
+
+## .hpack file format (v1)
+
+Little-endian. Magic `"HPAK"`. `assetc --pack` bundles every runtime file into a single `<output>.hpack` (e.g. `runtime.hpack`) written next to the output dir, so the engine opens one file instead of thousands. It is a table of contents followed by 16-byte-aligned payloads.
+
+```
+PackHeader (24 B):
+    magic    u32  'HPAK'
+    version  u32  1
+    count    u32  number of entries
+    flags    u32  reserved (0)
+    tocBytes u64  size of the TOC region after the header
+TOC: count entries, sorted by path ascending:
+    offset   u64  payload byte offset from file start (16-aligned)
+    size     u64  payload bytes
+    pathLen  u16
+    path     bytes  UTF-8, forward-slash, relative to the output root
+Payloads: each file's bytes at its offset, padded to 16-byte alignment.
+```
+
+The engine loads the TOC once into a `path → (offset, size)` map (or binary-searches the sorted TOC) and reads/mmaps each entry in place — `path` matches the runtime-relative paths used elsewhere (e.g. `.hman` entries, `models/court/tex_0.ktx2`). Excluded from the pack: the build cache (`.assetc-cache`) and any existing `.hpack`. Deterministic: the same output tree produces byte-identical pack bytes (entries sorted, alignment padding zeroed). `--verify` runs `ValidatePack` (every entry's range lies within the file).

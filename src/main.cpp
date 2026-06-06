@@ -4,6 +4,7 @@
 #include "assetc/check.hpp"
 #include "assetc/encode_mesh.hpp"
 #include "assetc/inspect.hpp"
+#include "assetc/pack.hpp"
 #include "assetc/runtime_manifest.hpp"
 #include "assetc/runtime_material.hpp"
 #include "assetc/runtime_mesh.hpp"
@@ -340,10 +341,12 @@ int main(int argc, char **argv)
     std::string outputDir = "runtime";
     bool        verify    = false;
     bool        noCache   = false;
+    bool        pack      = false;
     app.add_option("-j,--jobs", jobs, "Concurrent jobs")->check(CLI::PositiveNumber);
     app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
     app.add_flag("--verify", verify, "Re-read each written .hmesh and check structural validity");
     app.add_flag("--no-cache", noCache, "Ignore the incremental build cache and rebuild everything");
+    app.add_flag("--pack", pack, "After building, bundle the output dir into a single <output>.hpack");
     app.add_subcommand("init", "Initialize structure");
     auto *infoCmd =
         app.add_subcommand("info", "Inspect compiled output in the output dir and print stats");
@@ -523,6 +526,17 @@ int main(int argc, char **argv)
         return 1;
     if (verify && assetc::ValidateHMan(manPath) != 0)
         return 1;
+
+    // --pack: bundle the whole output dir into a single <output>.hpack sibling.
+    if (pack)
+    {
+        const fs::path od       = outputDir;
+        const fs::path packPath = od.parent_path() / (od.filename().string() + ".hpack");
+        if (assetc::WritePack(outputDir, packPath.generic_string()) != 0)
+            return 1;
+        if (verify && assetc::ValidatePack(packPath.generic_string()) != 0)
+            return 1;
+    }
 
     return 0;
 }
