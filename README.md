@@ -6,6 +6,21 @@ A glTF/GLB mesh additionally emits a **companion material table** (`.hmat`) plus
 
 Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A single global **manifest** (`runtime/assets.hman`) maps each hash back to the `.ktx2` file on disk, so the runtime can content-address textures (load the manifest once into a `hash → path` map, then resolve any `baseColorTex` etc.). See [.hman file format](#hman-file-format-v1).
 
+## Commands
+
+| Command       | What it does                                                                          |
+| ------------- | ------------------------------------------------------------------------------------- |
+| `assetc`      | Compile everything under `assets/` into the output dir (default `runtime/`).          |
+| `assetc info` | Inspect the *compiled* output dir and print per-file stats + aggregate totals (no recompile). |
+
+Common flags (apply to `assetc`; `-o` also applies to `info`):
+
+- `-o, --output <dir>` — output directory (default `runtime`).
+- `-j, --jobs <n>` — concurrent jobs.
+- `--verify` — re-read each written file and check structural validity.
+
+`assetc info` reports geometry stats per `.hmesh` (verts / triangles / indices / meshlets / submeshes / materials / bounds), material-table breakdowns per `.hmat` (texture-slot usage, alpha modes, double-sided count), `.hman` manifest entry counts by kind/colorspace, and `.ktx2` dimensions / mips / format / supercompression — then a totals summary across the whole output tree.
+
 ## Supported inputs
 
 | Source pattern                         | Asset type | Output                                  |

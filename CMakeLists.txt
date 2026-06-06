@@ -23,6 +23,7 @@ add_executable(${PROJECT_NAME}
     src/assetc/runtime_mesh.cpp
     src/assetc/runtime_material.cpp
     src/assetc/runtime_manifest.cpp
+    src/assetc/inspect.cpp
     src/assetc/encode_mesh.cpp
     src/assetc/encode_material.cpp
     src/assetc/encode_lut.cpp

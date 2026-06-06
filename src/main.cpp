@@ -1,6 +1,7 @@
 #include "assetc/encode_lut.hpp"
 #include "assetc/encode_material.hpp"
 #include "assetc/encode_mesh.hpp"
+#include "assetc/inspect.hpp"
 #include "assetc/runtime_manifest.hpp"
 #include "assetc/runtime_material.hpp"
 #include "assetc/runtime_mesh.hpp"
@@ -322,8 +323,15 @@ int main(int argc, char **argv)
     app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
     app.add_flag("--verify", verify, "Re-read each written .hmesh and check structural validity");
     app.add_subcommand("init", "Initialize structure");
+    auto *infoCmd =
+        app.add_subcommand("info", "Inspect compiled output in the output dir and print stats");
+    infoCmd->fallthrough(); // let `info -o <dir>` reach the parent's --output option
 
     CLI11_PARSE(app, argc, argv);
+
+    // `assetc info`: report on what's already in the output dir, don't recompile.
+    if (infoCmd->parsed())
+        return assetc::InspectRuntime(outputDir);
 
     fmtx::Info(fmt::format("Running {} threads", jobs));
 
