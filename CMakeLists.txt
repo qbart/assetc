@@ -32,6 +32,7 @@ add_library(assetc_core STATIC
     src/assetc/runtime_material.cpp
     src/assetc/runtime_manifest.cpp
     src/assetc/inspect.cpp
+    src/assetc/cache.cpp
     src/assetc/encode_mesh.cpp
     src/assetc/encode_material.cpp
     src/assetc/encode_lut.cpp

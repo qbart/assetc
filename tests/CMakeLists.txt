@@ -10,3 +10,4 @@ endfunction()
 
 assetc_test(test_hash)
 assetc_test(test_manifest)
+assetc_test(test_cache)

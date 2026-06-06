@@ -1,5 +1,6 @@
 #include "assetc/encode_lut.hpp"
 #include "assetc/encode_material.hpp"
+#include "assetc/cache.hpp"
 #include "assetc/encode_mesh.hpp"
 #include "assetc/inspect.hpp"
 #include "assetc/runtime_manifest.hpp"
@@ -145,7 +146,7 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
 }
 
 int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount,
-                bool verify, assetc::ManifestSink &manifest)
+                bool verify, std::vector<assetc::ManifestEntry> &outEntries)
 {
     const auto out = asset.RuntimePath(outputDir);
     fs::create_directories(fs::path(out).parent_path());
@@ -250,8 +251,8 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
                 // sRGB only for the color slot; ORM/normal/grayscale are sampled linear.
                 const auto cs = t.mode == ktx::UASTCMode::Color ? assetc::ManColorSpace::Srgb
                                                                 : assetc::ManColorSpace::Linear;
-                manifest.Add(assetc::ManifestEntry{t.refHash, assetc::ManKind::Texture, cs,
-                                                   relPath});
+                outEntries.push_back(assetc::ManifestEntry{t.refHash, assetc::ManKind::Texture, cs,
+                                                           relPath});
             }
         }
         return 0;
@@ -319,9 +320,11 @@ int main(int argc, char **argv)
 
     std::string outputDir = "runtime";
     bool        verify    = false;
+    bool        noCache   = false;
     app.add_option("-j,--jobs", jobs, "Concurrent jobs")->check(CLI::PositiveNumber);
     app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
     app.add_flag("--verify", verify, "Re-read each written .hmesh and check structural validity");
+    app.add_flag("--no-cache", noCache, "Ignore the incremental build cache and rebuild everything");
     app.add_subcommand("init", "Initialize structure");
     auto *infoCmd =
         app.add_subcommand("info", "Inspect compiled output in the output dir and print stats");
@@ -415,18 +418,55 @@ int main(int argc, char **argv)
     std::mutex logMu;
     std::atomic<size_t> next{0};
     std::atomic<int> failures{0};
+    std::atomic<int> cached{0};
     assetc::ManifestSink manifest;
+
+    // Incremental build: skip an asset whose source bytes + settings are unchanged
+    // and whose primary output still exists, replaying its cached manifest entries.
+    const auto cachePath = (fs::path(outputDir) / ".assetc-cache").generic_string();
+    const assetc::CacheTable oldCache = noCache ? assetc::CacheTable{} : assetc::LoadCache(cachePath);
+    std::mutex                    cacheMu;
+    std::vector<assetc::CacheEntry> newCache;
 
     auto worker = [&] {
         for (;;)
         {
             size_t i = next.fetch_add(1, std::memory_order_relaxed);
             if (i >= assets.size()) return;
-            if (handleAsset(assets[i], outputDir, innerThreads, verify, manifest) != 0)
+            const Asset &a   = assets[i];
+            const auto   out = a.RuntimePath(outputDir);
+            const uint64_t inputHash = assetc::HashSource(a.path, static_cast<uint64_t>(a.type));
+
+            if (!noCache && inputHash != 0)
+            {
+                auto it = oldCache.find(a.path);
+                if (it != oldCache.end() && it->second.inputHash == inputHash && fs::exists(out))
+                {
+                    for (const auto &m : it->second.manifest)
+                        manifest.Add(m);
+                    {
+                        std::lock_guard<std::mutex> lk(cacheMu);
+                        newCache.push_back(it->second);
+                    }
+                    cached.fetch_add(1, std::memory_order_relaxed);
+                    continue;
+                }
+            }
+
+            std::vector<assetc::ManifestEntry> entries;
+            if (handleAsset(a, outputDir, innerThreads, verify, entries) != 0)
             {
                 std::lock_guard<std::mutex> lk(logMu);
-                fmtx::Error(fmt::format("failed: {}", assets[i].path));
+                fmtx::Error(fmt::format("failed: {}", a.path));
                 failures.fetch_add(1, std::memory_order_relaxed);
+                continue;
+            }
+            for (const auto &m : entries)
+                manifest.Add(m);
+            if (inputHash != 0)
+            {
+                std::lock_guard<std::mutex> lk(cacheMu);
+                newCache.push_back(assetc::CacheEntry{inputHash, a.path, std::move(entries)});
             }
         }
     };
@@ -437,6 +477,13 @@ int main(int argc, char **argv)
         workers.emplace_back(worker);
     for (auto &t : workers)
         t.join();
+
+    // Persist the cache for all assets we trust this run (hits + fresh successes);
+    // failed assets are absent so they retry next time.
+    assetc::WriteCache(cachePath, newCache);
+    if (cached.load() > 0)
+        fmtx::Info(fmt::format("incremental: {} cached, {} built", cached.load(),
+                               static_cast<int>(assets.size()) - cached.load() - failures.load()));
 
     if (failures.load() != 0)
         return 1;

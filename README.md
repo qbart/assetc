@@ -18,6 +18,11 @@ Common flags (apply to `assetc`; `-o` also applies to `info`):
 - `-o, --output <dir>` — output directory (default `runtime`).
 - `-j, --jobs <n>` — concurrent jobs.
 - `--verify` — re-read each written file and check structural validity.
+- `--no-cache` — ignore the incremental build cache and rebuild everything.
+
+### Incremental builds
+
+`assetc` keeps a content cache (`<output>/.assetc-cache`) keyed by each source's bytes + asset type + encoder version. On the next run an asset is skipped when its inputs are unchanged and its primary output still exists; the asset's manifest contributions are replayed from the cache so `assets.hman` stays complete without re-encoding. Bump `kEncoderVersion` (in `src/assetc/cache.hpp`) to invalidate the whole cache when an output format changes; delete the cache file or pass `--no-cache` to force a full rebuild.
 
 `assetc info` reports geometry stats per `.hmesh` (verts / triangles / indices / meshlets / submeshes / materials / bounds), material-table breakdowns per `.hmat` (texture-slot usage, alpha modes, double-sided count), `.hman` manifest entry counts by kind/colorspace, and `.ktx2` dimensions / mips / format / supercompression — then a totals summary across the whole output tree.
 
