@@ -1,6 +1,7 @@
 #include "assetc/encode_lut.hpp"
 #include "assetc/encode_material.hpp"
 #include "assetc/cache.hpp"
+#include "assetc/check.hpp"
 #include "assetc/encode_mesh.hpp"
 #include "assetc/inspect.hpp"
 #include "assetc/runtime_manifest.hpp"
@@ -329,12 +330,19 @@ int main(int argc, char **argv)
     auto *infoCmd =
         app.add_subcommand("info", "Inspect compiled output in the output dir and print stats");
     infoCmd->fallthrough(); // let `info -o <dir>` reach the parent's --output option
+    auto *checkCmd =
+        app.add_subcommand("check", "Verify cross-file integrity of the compiled output dir");
+    checkCmd->fallthrough();
 
     CLI11_PARSE(app, argc, argv);
 
     // `assetc info`: report on what's already in the output dir, don't recompile.
     if (infoCmd->parsed())
         return assetc::InspectRuntime(outputDir);
+
+    // `assetc check`: validate the compiled output's internal consistency.
+    if (checkCmd->parsed())
+        return assetc::CheckRuntime(outputDir);
 
     fmtx::Info(fmt::format("Running {} threads", jobs));
 

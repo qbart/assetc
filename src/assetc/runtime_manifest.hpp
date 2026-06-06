@@ -92,4 +92,8 @@ int WriteHMan(const std::string &path, std::vector<ManifestEntry> entries);
 // the bytes are consumed exactly. Returns 0 on success.
 int ValidateHMan(const std::string &path);
 
+// Parse a `.hman` into `out` (cleared first). Returns 0 on success, non-zero with
+// a logged error on bad magic/version or truncation.
+int ReadHMan(const std::string &path, std::vector<ManifestEntry> &out);
+
 } // namespace assetc

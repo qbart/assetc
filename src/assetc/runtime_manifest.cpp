@@ -146,3 +146,48 @@ int assetc::ValidateHMan(const std::string &path)
     }
     return 0;
 }
+
+int assetc::ReadHMan(const std::string &path, std::vector<ManifestEntry> &out)
+{
+    out.clear();
+    std::ifstream in(path, std::ios::binary);
+    uint32_t      magic = 0, version = 0, count = 0, reserved = 0;
+    if (!in || !Get(in, magic) || !Get(in, version) || !Get(in, count) || !Get(in, reserved))
+    {
+        fmtx::Error(fmt::format("hman too small: {}", path));
+        return 1;
+    }
+    if (magic != ManMagic)
+    {
+        fmtx::Error(fmt::format("hman bad magic: {}", path));
+        return 1;
+    }
+    if (version != ManVersion)
+    {
+        fmtx::Error(fmt::format("hman bad version {} (want {}): {}", version, ManVersion, path));
+        return 1;
+    }
+
+    out.reserve(count);
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        ManifestEntry e;
+        uint8_t       kind = 0, cs = 0;
+        uint16_t      pathLen = 0;
+        if (!Get(in, e.hash) || !Get(in, kind) || !Get(in, cs) || !Get(in, pathLen))
+        {
+            fmtx::Error(fmt::format("hman truncated header for entry {}: {}", i, path));
+            return 1;
+        }
+        e.path.resize(pathLen);
+        if (pathLen && !in.read(e.path.data(), pathLen))
+        {
+            fmtx::Error(fmt::format("hman truncated path for entry {}: {}", i, path));
+            return 1;
+        }
+        e.kind       = static_cast<ManKind>(kind);
+        e.colorspace = static_cast<ManColorSpace>(cs);
+        out.push_back(std::move(e));
+    }
+    return 0;
+}

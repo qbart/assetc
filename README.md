@@ -10,10 +10,11 @@ Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A singl
 
 | Command       | What it does                                                                          |
 | ------------- | ------------------------------------------------------------------------------------- |
-| `assetc`      | Compile everything under `assets/` into the output dir (default `runtime/`).          |
-| `assetc info` | Inspect the *compiled* output dir and print per-file stats + aggregate totals (no recompile). |
+| `assetc`       | Compile everything under `assets/` into the output dir (default `runtime/`).          |
+| `assetc info`  | Inspect the *compiled* output dir and print per-file stats + aggregate totals (no recompile). |
+| `assetc check` | Verify cross-file integrity of the compiled output dir (exit non-zero on any problem). |
 
-Common flags (apply to `assetc`; `-o` also applies to `info`):
+Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
 - `-o, --output <dir>` — output directory (default `runtime`).
 - `-j, --jobs <n>` — concurrent jobs.
@@ -25,6 +26,8 @@ Common flags (apply to `assetc`; `-o` also applies to `info`):
 `assetc` keeps a content cache (`<output>/.assetc-cache`) keyed by each source's bytes + asset type + encoder version. On the next run an asset is skipped when its inputs are unchanged and its primary output still exists; the asset's manifest contributions are replayed from the cache so `assets.hman` stays complete without re-encoding. Bump `kEncoderVersion` (in `src/assetc/cache.hpp`) to invalidate the whole cache when an output format changes; delete the cache file or pass `--no-cache` to force a full rebuild.
 
 `assetc info` reports geometry stats per `.hmesh` (verts / triangles / indices / meshlets / submeshes / materials / bounds), material-table breakdowns per `.hmat` (texture-slot usage, alpha modes, double-sided count), `.hman` manifest entry counts by kind/colorspace, and `.ktx2` dimensions / mips / format / supercompression — then a totals summary across the whole output tree.
+
+`assetc check` validates internal consistency: each `.hmesh`/`.hmat`/`.hman` is structurally valid; every nonzero texture ref in a `.hmat` resolves via `.hman` to a file that exists; every `.hman` entry points at an existing file with a hash matching `HashAssetRef(path-without-".ktx2")`; and each `.hmesh` material count matches its companion `.hmat` row count with all submesh material slots in range. Use it as a CI gate after a build.
 
 ## Supported inputs
 
