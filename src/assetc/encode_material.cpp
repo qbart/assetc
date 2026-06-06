@@ -181,18 +181,21 @@ CompiledMaterials BuildMaterialsFromGltf(const gltf::GLTF &src,
                 "BuildMaterialsFromGltf: texture uses TEXCOORD_{}, but only UV0 is exported",
                 texCoord));
         const uint32_t ui = static_cast<uint32_t>(img);
+
+        std::string ref(sourceRef);
+        ref += "/tex_";
+        ref += std::to_string(ui);
+        const uint64_t h = HashAssetRef(ref);
+
         auto [it, inserted] = seenImages.emplace(ui, mode);
         if (inserted)
-            out.textures.push_back(TextureExport{ui, mode});
+            out.textures.push_back(TextureExport{ui, mode, h});
         else if (it->second != mode)
             fmtx::Warn(fmt::format(
                 "BuildMaterialsFromGltf: image {} used in conflicting color spaces; keeping first",
                 ui));
 
-        std::string ref(sourceRef);
-        ref += "/tex_";
-        ref += std::to_string(ui);
-        return HashAssetRef(ref);
+        return h;
     };
 
     for (uint32_t slot = 0; slot < denseSourceIndices.size(); ++slot)

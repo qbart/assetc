@@ -25,6 +25,7 @@ struct TextureExport
 {
     uint32_t       imageIndex; // index into tg3_model.images
     ktx::UASTCMode mode;
+    uint64_t       refHash;    // FNV1a64 of "<sourceRef>/tex_<imageIndex>" (manifest parity)
 };
 
 struct CompiledMaterials

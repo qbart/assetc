@@ -1,6 +1,7 @@
 #include "assetc/encode_lut.hpp"
 #include "assetc/encode_material.hpp"
 #include "assetc/encode_mesh.hpp"
+#include "assetc/runtime_manifest.hpp"
 #include "assetc/runtime_material.hpp"
 #include "assetc/runtime_mesh.hpp"
 #include "assetc/shader.hpp"
@@ -143,7 +144,7 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
 }
 
 int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount,
-                bool verify)
+                bool verify, assetc::ManifestSink &manifest)
 {
     const auto out = asset.RuntimePath(outputDir);
     fs::create_directories(fs::path(out).parent_path());
@@ -241,6 +242,15 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
                 if (assetc::EncodeGltfImageToKtx2(*gltfSrc, t.imageIndex, t.mode, texPath,
                                                   threadCount) != 0)
                     return 1;
+
+                // Runtime-relative path so the engine resolves root + "/" + path.
+                const auto relPath =
+                    fs::path(texPath).lexically_relative(outputDir).generic_string();
+                // sRGB only for the color slot; ORM/normal/grayscale are sampled linear.
+                const auto cs = t.mode == ktx::UASTCMode::Color ? assetc::ManColorSpace::Srgb
+                                                                : assetc::ManColorSpace::Linear;
+                manifest.Add(assetc::ManifestEntry{t.refHash, assetc::ManKind::Texture, cs,
+                                                   relPath});
             }
         }
         return 0;
@@ -397,13 +407,14 @@ int main(int argc, char **argv)
     std::mutex logMu;
     std::atomic<size_t> next{0};
     std::atomic<int> failures{0};
+    assetc::ManifestSink manifest;
 
     auto worker = [&] {
         for (;;)
         {
             size_t i = next.fetch_add(1, std::memory_order_relaxed);
             if (i >= assets.size()) return;
-            if (handleAsset(assets[i], outputDir, innerThreads, verify) != 0)
+            if (handleAsset(assets[i], outputDir, innerThreads, verify, manifest) != 0)
             {
                 std::lock_guard<std::mutex> lk(logMu);
                 fmtx::Error(fmt::format("failed: {}", assets[i].path));
@@ -419,5 +430,18 @@ int main(int argc, char **argv)
     for (auto &t : workers)
         t.join();
 
-    return failures.load() == 0 ? 0 : 1;
+    if (failures.load() != 0)
+        return 1;
+
+    // Single global hash -> file manifest, written only after every asset succeeded
+    // so we never emit a partial/ambiguous table.
+    const auto manPath = (fs::path(outputDir) / "assets.hman").generic_string();
+    auto       entries = manifest.Take();
+    fmtx::Info(fmt::format("{} texture refs -> {}", entries.size(), manPath));
+    if (assetc::WriteHMan(manPath, std::move(entries)) != 0)
+        return 1;
+    if (verify && assetc::ValidateHMan(manPath) != 0)
+        return 1;
+
+    return 0;
 }

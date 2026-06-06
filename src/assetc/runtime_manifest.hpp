@@ -1,0 +1,95 @@
+#pragma once
+
+#include "runtime_mesh.hpp" // MakeFourCC
+
+#include <cstdint>
+#include <mutex>
+#include <string>
+#include <vector>
+
+namespace assetc
+{
+
+constexpr uint32_t ManMagic   = MakeFourCC('H', 'M', 'A', 'N');
+constexpr uint32_t ManVersion = 1;
+
+// `runtime/assets.hman` is the global hash -> file table the runtime uses to
+// resolve an asset reference (e.g. GpuMaterial::baseColorTex) to bytes on disk.
+//
+// The hash is the SAME FNV1a64 already stored in .hmat/.hmesh for that ref: it is
+// HashAssetRef of the canonical runtime ref string, which for a texture is
+//
+//     "<sourceRef>/tex_<imageIndex>"   (lowercase, forward-slash, NO extension)
+//
+// where sourceRef is the asset path relative to `assets/`, extension stripped and
+// lowercased (see Asset::SourceRef). For textures the on-disk path equals that ref
+// plus ".ktx2" (relative to the runtime root).
+//
+// On-disk layout (little-endian), entries sorted by hash ascending:
+//
+//     magic       u32   == ManMagic
+//     version     u32   == ManVersion
+//     count       u32
+//     reserved    u32   == 0
+//     count entries:
+//         hash        u64
+//         kind        u8    ManKind
+//         colorspace  u8    ManColorSpace
+//         pathLen     u16
+//         path        pathLen bytes, UTF-8, forward-slash, relative to runtime root
+enum class ManKind : uint8_t
+{
+    Texture  = 0,
+    Mesh     = 1, // reserved, not emitted
+    Material = 2, // reserved, not emitted
+    Lut      = 3, // reserved, not emitted
+};
+
+enum class ManColorSpace : uint8_t
+{
+    Linear = 0,
+    Srgb   = 1,
+};
+
+// In-memory manifest record; serialized field-by-field (variable length).
+struct ManifestEntry
+{
+    uint64_t      hash;
+    ManKind       kind;
+    ManColorSpace colorspace;
+    std::string   path; // runtime-relative, forward-slash
+};
+
+// Thread-safe accumulator: assets compile on a worker pool, so entries arrive
+// concurrently and in nondeterministic order. WriteHMan sorts before writing.
+class ManifestSink
+{
+public:
+    void Add(ManifestEntry e)
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        entries_.push_back(std::move(e));
+    }
+
+    // Move out the accumulated entries (call after all workers have joined).
+    std::vector<ManifestEntry> Take()
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        return std::move(entries_);
+    }
+
+private:
+    std::mutex                 mu_;
+    std::vector<ManifestEntry> entries_;
+};
+
+// Sort by hash, collapse identical (hash, path) duplicates to one entry, and fail
+// loud if two distinct paths share a hash. Then serialize to `path`. Returns 0 on
+// success, non-zero with a logged error.
+int WriteHMan(const std::string &path, std::vector<ManifestEntry> entries);
+
+// Re-read a written `.hman`: check magic/version and that every entry parses and
+// the bytes are consumed exactly. Returns 0 on success.
+int ValidateHMan(const std::string &path);
+
+} // namespace assetc
