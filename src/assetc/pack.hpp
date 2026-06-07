@@ -52,4 +52,9 @@ int ReadPackToc(const std::string &packPath, std::vector<PackEntry> &out);
 // [offset, offset+size) lies within the file. Returns 0 on success.
 int ValidatePack(const std::string &packPath);
 
+// Print what's inside a `.hpack`: a per-kind summary (meshes/textures/...) and a
+// path-sorted entry listing with sizes. Returns 0 on success, non-zero if the
+// pack can't be read.
+int InspectPack(const std::string &packPath);
+
 } // namespace assetc

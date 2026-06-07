@@ -184,6 +184,70 @@ int assetc::ReadPackToc(const std::string &packPath, std::vector<PackEntry> &out
     return 0;
 }
 
+namespace
+{
+std::string HumanBytes(uint64_t n)
+{
+    const char *u[] = {"B", "KB", "MB", "GB"};
+    double      v   = static_cast<double>(n);
+    int         i   = 0;
+    while (v >= 1024.0 && i < 3)
+    {
+        v /= 1024.0;
+        ++i;
+    }
+    return i == 0 ? fmt::format("{} B", n) : fmt::format("{:.1f} {}", v, u[i]);
+}
+
+// Map a packed path to a human kind for the summary, in display order.
+int KindIndex(const std::string &path)
+{
+    if (path.ends_with(".hmesh")) return 0;
+    if (path.ends_with(".hmat")) return 1;
+    if (path.ends_with(".hman")) return 2;
+    if (path.ends_with(".hanim")) return 3;
+    if (path.ends_with(".ktx2")) return 4;
+    if (path.ends_with(".spv")) return 5;
+    return 6;
+}
+const char *kKindLabels[] = {"meshes (.hmesh)",    "materials (.hmat)", "manifests (.hman)",
+                             "animations (.hanim)", "textures (.ktx2)",  "shaders (.spv)",
+                             "other"};
+constexpr int kKindCount = 7;
+} // namespace
+
+int assetc::InspectPack(const std::string &packPath)
+{
+    std::vector<PackEntry> toc;
+    if (ReadPackToc(packPath, toc) != 0)
+        return 1;
+
+    uint64_t total = 0;
+    uint64_t kindCount[kKindCount]{};
+    uint64_t kindBytes[kKindCount]{};
+    for (const auto &e : toc)
+    {
+        total += e.size;
+        const int k = KindIndex(e.path);
+        ++kindCount[k];
+        kindBytes[k] += e.size;
+    }
+
+    fmt::print("{}== {} (HPAK v{}) — {} entries, {}{}\n", fmtx::CYAN, packPath, PackVersion,
+               toc.size(), HumanBytes(total), fmtx::RESET);
+    for (int k = 0; k < kKindCount; ++k)
+        if (kindCount[k] > 0)
+            fmt::print("  {:<20} {:>4}  {}\n", kKindLabels[k], kindCount[k],
+                       HumanBytes(kindBytes[k]));
+
+    // Entries (already path-sorted in the TOC).
+    fmt::print("\n{}== entries{}\n", fmtx::CYAN, fmtx::RESET);
+    for (const auto &e : toc)
+        fmt::print("  {:<44} {:>10}  @{}\n", e.path, HumanBytes(e.size), e.offset);
+
+    return 0;
+}
+
 int assetc::ValidatePack(const std::string &packPath)
 {
     std::vector<PackEntry> toc;

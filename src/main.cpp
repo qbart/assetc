@@ -377,6 +377,12 @@ int main(int argc, char **argv)
     auto *checkCmd =
         app.add_subcommand("check", "Verify cross-file integrity of the compiled output dir");
     checkCmd->fallthrough();
+    auto       *packCmd = app.add_subcommand("pack", "Pack operations");
+    std::string packInfoFile;
+    auto       *packInfoCmd = packCmd->add_subcommand("info", "Inspect a .hpack and list its contents");
+    packInfoCmd->add_option("file", packInfoFile, "Path to the .hpack (default: <output>.hpack)");
+    packInfoCmd->fallthrough();
+    packCmd->require_subcommand(1); // bare `pack` -> show its subcommands
 
     CLI11_PARSE(app, argc, argv);
 
@@ -438,6 +444,18 @@ int main(int argc, char **argv)
     // `assetc check`: validate the compiled output's internal consistency.
     if (checkCmd->parsed())
         return assetc::CheckRuntime(outputDir);
+
+    // `assetc pack info`: inspect a .hpack (defaults to the output's sibling pack).
+    if (packInfoCmd->parsed())
+    {
+        std::string pp = packInfoFile;
+        if (pp.empty())
+        {
+            const fs::path od = outputDir;
+            pp = (od.parent_path() / (od.filename().string() + ".hpack")).generic_string();
+        }
+        return assetc::InspectPack(pp);
+    }
 
     fmtx::Info(fmt::format("Running {} threads", jobs));
 

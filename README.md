@@ -14,6 +14,7 @@ Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A singl
 | `assetc init`  | Write a starter `assetc.yml` in the current directory (won't overwrite an existing one). |
 | `assetc info`  | Inspect the *compiled* output dir and print per-file stats + aggregate totals (no recompile). |
 | `assetc check` | Verify cross-file integrity of the compiled output dir (exit non-zero on any problem). |
+| `assetc pack info [file]` | Inspect a `.hpack` (default `<output>.hpack`): per-kind summary + entry listing. |
 
 Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
@@ -385,3 +386,5 @@ Payloads: each file's bytes at its offset, padded to 16-byte alignment.
 ```
 
 The engine loads the TOC once into a `path → (offset, size)` map (or binary-searches the sorted TOC) and reads/mmaps each entry in place — `path` matches the runtime-relative paths used elsewhere (e.g. `.hman` entries, `models/court/tex_0.ktx2`). Excluded from the pack: the build cache (`.assetc-cache`) and any existing `.hpack`. Deterministic: the same output tree produces byte-identical pack bytes (entries sorted, alignment padding zeroed). `--verify` runs `ValidatePack` (every entry's range lies within the file).
+
+Inspect a pack without unpacking it with `assetc pack info [file]` (defaults to `<output>.hpack`): it prints a per-kind summary (meshes / materials / manifests / animations / textures / shaders) and a path-sorted entry listing with sizes and byte offsets.

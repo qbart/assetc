@@ -49,6 +49,9 @@ int main()
     // 3 files; .assetc-cache excluded.
     CHECK_EQ(toc.size(), 3u);
 
+    // pack info reads a valid pack; fails on garbage.
+    CHECK_EQ(InspectPack(packPath), 0);
+
     // Sorted by path ascending.
     for (size_t i = 1; i < toc.size(); ++i)
         CHECK(toc[i - 1].path < toc[i].path);
@@ -85,6 +88,7 @@ int main()
     // Corrupt magic -> read fails.
     Write(root / "bad.hpack", "not a pack");
     CHECK(ReadPackToc((root / "bad.hpack").string(), toc) != 0);
+    CHECK(InspectPack((root / "bad.hpack").string()) != 0);
 
     fs::remove_all(root);
     return test::summary();
