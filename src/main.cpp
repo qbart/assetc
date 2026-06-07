@@ -472,6 +472,13 @@ int main(int argc, char **argv)
             assets.emplace_back(Asset{.path = name, .type = AssetType::Material});
     }
 
+    if (assets.empty())
+        fmtx::Warn(fmt::format("no compilable assets found under {} (writing empty manifest)",
+                               assetDir.generic_string()));
+    else
+        fmtx::Info(fmt::format("found {} asset(s) under {}", assets.size(),
+                               assetDir.generic_string()));
+
     // Split the `jobs` thread budget between outer (across assets) and inner
     // (within each ktx encode), based on how much real work there is.
     //
@@ -563,11 +570,17 @@ int main(int argc, char **argv)
     // Persist the cache for all assets we trust this run (hits + fresh successes);
     // failed assets are absent so they retry next time.
     assetc::WriteCache(cachePath, newCache);
-    if (cached.load() > 0)
-        fmtx::Info(fmt::format("incremental: {} cached, {} built", cached.load(),
-                               static_cast<int>(assets.size()) - cached.load() - failures.load()));
 
-    if (failures.load() != 0)
+    // Always summarize the run so a no-op (nothing matched / all cached) is never
+    // mistaken for real work.
+    const int total  = static_cast<int>(assets.size());
+    const int failed = failures.load();
+    const int hit    = cached.load();
+    const int built  = total - hit - failed;
+    fmtx::Info(fmt::format("done: {} asset(s) -> {} built, {} cached, {} failed -> {}", total, built,
+                           hit, failed, outputDir));
+
+    if (failed != 0)
         return 1;
 
     // Single global hash -> file manifest, written only after every asset succeeded
