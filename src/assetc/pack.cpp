@@ -34,10 +34,21 @@ template <typename T> bool Get(std::ifstream &in, T &v)
 // Per-entry on-disk TOC record size for a given path length.
 uint64_t TocRecordBytes(size_t pathLen) noexcept
 {
-    return sizeof(uint64_t) /*offset*/ + sizeof(uint64_t) /*size*/ + sizeof(uint16_t) /*pathLen*/ +
-           pathLen;
+    return sizeof(uint64_t) /*offset*/ + sizeof(uint64_t) /*size*/ + sizeof(uint8_t) /*kind*/ +
+           sizeof(uint16_t) /*pathLen*/ + pathLen;
 }
 } // namespace
+
+assetc::PackKind assetc::PackKindOf(const std::string &path) noexcept
+{
+    if (path.ends_with(".hmesh")) return PackKind::Mesh;
+    if (path.ends_with(".hmat")) return PackKind::Material;
+    if (path.ends_with(".hman")) return PackKind::Manifest;
+    if (path.ends_with(".hanim")) return PackKind::Animation;
+    if (path.ends_with(".ktx2")) return PackKind::Texture;
+    if (path.ends_with(".spv")) return PackKind::Shader;
+    return PackKind::Other;
+}
 
 int assetc::WritePack(const std::string &outputDir, const std::string &packPath)
 {
@@ -111,6 +122,7 @@ int assetc::WritePack(const std::string &outputDir, const std::string &packPath)
         }
         Put(out, offsets[i]);
         Put(out, items[i].size);
+        Put(out, static_cast<uint8_t>(PackKindOf(items[i].rel)));
         Put(out, static_cast<uint16_t>(items[i].rel.size()));
         out.write(items[i].rel.data(), static_cast<std::streamsize>(items[i].rel.size()));
     }
@@ -167,12 +179,14 @@ int assetc::ReadPackToc(const std::string &packPath, std::vector<PackEntry> &out
     for (uint32_t i = 0; i < count; ++i)
     {
         PackEntry e;
+        uint8_t   kind    = 0;
         uint16_t  pathLen = 0;
-        if (!Get(in, e.offset) || !Get(in, e.size) || !Get(in, pathLen))
+        if (!Get(in, e.offset) || !Get(in, e.size) || !Get(in, kind) || !Get(in, pathLen))
         {
             fmtx::Error(fmt::format("pack: truncated TOC entry {}: {}", i, packPath));
             return 1;
         }
+        e.kind = static_cast<PackKind>(kind);
         e.path.resize(pathLen);
         if (pathLen && !in.read(e.path.data(), pathLen))
         {
@@ -199,21 +213,16 @@ std::string HumanBytes(uint64_t n)
     return i == 0 ? fmt::format("{} B", n) : fmt::format("{:.1f} {}", v, u[i]);
 }
 
-// Map a packed path to a human kind for the summary, in display order.
-int KindIndex(const std::string &path)
-{
-    if (path.ends_with(".hmesh")) return 0;
-    if (path.ends_with(".hmat")) return 1;
-    if (path.ends_with(".hman")) return 2;
-    if (path.ends_with(".hanim")) return 3;
-    if (path.ends_with(".ktx2")) return 4;
-    if (path.ends_with(".spv")) return 5;
-    return 6;
-}
-const char *kKindLabels[] = {"meshes (.hmesh)",    "materials (.hmat)", "manifests (.hman)",
-                             "animations (.hanim)", "textures (.ktx2)",  "shaders (.spv)",
-                             "other"};
+// Labels indexed by PackKind value (Other=0, Mesh=1, ... Shader=6).
+const char *kKindLabels[] = {"other",               "meshes (.hmesh)",  "materials (.hmat)",
+                             "manifests (.hman)",    "animations (.hanim)", "textures (.ktx2)",
+                             "shaders (.spv)"};
 constexpr int kKindCount = 7;
+// Summary display order: assets first, "other" last.
+constexpr assetc::PackKind kKindOrder[] = {
+    assetc::PackKind::Mesh,    assetc::PackKind::Material,  assetc::PackKind::Manifest,
+    assetc::PackKind::Animation, assetc::PackKind::Texture, assetc::PackKind::Shader,
+    assetc::PackKind::Other};
 } // namespace
 
 int assetc::InspectPack(const std::string &packPath)
@@ -228,17 +237,20 @@ int assetc::InspectPack(const std::string &packPath)
     for (const auto &e : toc)
     {
         total += e.size;
-        const int k = KindIndex(e.path);
+        const int k = static_cast<int>(e.kind);
         ++kindCount[k];
         kindBytes[k] += e.size;
     }
 
     fmt::print("{}== {} (HPAK v{}) — {} entries, {}{}\n", fmtx::CYAN, packPath, PackVersion,
                toc.size(), HumanBytes(total), fmtx::RESET);
-    for (int k = 0; k < kKindCount; ++k)
+    for (PackKind pk : kKindOrder)
+    {
+        const int k = static_cast<int>(pk);
         if (kindCount[k] > 0)
             fmt::print("  {:<20} {:>4}  {}\n", kKindLabels[k], kindCount[k],
                        HumanBytes(kindBytes[k]));
+    }
 
     // Entries (already path-sorted in the TOC).
     fmt::print("\n{}== entries{}\n", fmtx::CYAN, fmtx::RESET);

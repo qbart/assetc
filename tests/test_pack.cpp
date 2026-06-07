@@ -66,12 +66,18 @@ int main()
         if (e.path == "assets.hman")
         {
             CHECK_EQ(bytes, std::string("MANIFEST"));
+            CHECK(e.kind == PackKind::Manifest); // kind by extension
             sawHman = true;
         }
         else if (e.path == "models/b.ktx2")
         {
             CHECK_EQ(bytes, std::string(40, 'B'));
+            CHECK(e.kind == PackKind::Texture);
             sawKtx = true;
+        }
+        else if (e.path == "a.hmesh")
+        {
+            CHECK(e.kind == PackKind::Mesh);
         }
     }
     CHECK(sawHman);
