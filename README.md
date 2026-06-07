@@ -17,8 +17,10 @@ Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A singl
 
 Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
-- `-o, --output <dir>` — output directory (default `runtime`).
+- `-o, --output <dir>` — output directory (default `runtime`; overrides config/preset).
 - `-j, --jobs <n>` — concurrent jobs.
+- `--preset <name>` — use a named preset from `assetc.yml` (see Configuration).
+- `--list-presets` — print the presets defined in `assetc.yml` and exit.
 - `--verify` — re-read each written file and check structural validity.
 - `--no-cache` — ignore the incremental build cache and rebuild everything.
 - `--pack` — after building, bundle the whole output dir into a single `<output>.hpack`.
@@ -33,25 +35,62 @@ Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
 ## Configuration (`assetc.yml`)
 
-On startup `assetc` looks for the nearest `assetc.yml`, searching the working directory and its ancestors (so it can live at the project root). All keys are optional and default to today's behavior; a CLI `-o/--output` overrides the config, and `--pack` is OR-ed with it. Run `assetc init` to drop a starter file (every key present, only `input`/`output` active):
+On startup `assetc` looks for the nearest `assetc.yml`, searching the working directory and its ancestors (so it can live at the project root). All keys are optional and fall back to built-in defaults. Run `assetc init` to drop a starter file.
 
 ```yaml
-input: assets        # source directory (default: assets)
-output: runtime      # output directory (default: runtime; overridden by -o)
-pack: true           # bundle into <output>.hpack after building (default: false)
+# Top-level: project-wide, not part of the layering.
+input: assets            # source tree — same for every preset (default: assets)
+output: runtime          # base output dir (default: runtime; overridden by -o)
+pack: false              # bundle into <output>.hpack after building
+preset: desktop          # preset used when --preset is omitted
 
-mesh:
-  merge: true        # default for meshes: bake node transforms into one combined,
-                     # world-space mesh. false keeps geometry source-local.
+# Base layer applied to every build.
+default:
+  mesh:
+    merge: true          # bake glTF node transforms into one combined, world-space
+                         # mesh; false keeps geometry source-local
+  texture:
+    compress: true       # UASTC-encode (default); false = raw R8G8B8A8 + Zstd
+  rules:                 # cascading: later matches override earlier; `match` is a
+                         # glob over the source-relative path (* spans '/', ? one char)
+    - match: "ui/*"
+      texture:
+        compress: false  # keep UI / data textures pixel-exact
 
-# Per-pattern overrides; the first matching rule wins. `match` is a glob over the
-# source path relative to `input` (* spans '/', ? matches one char).
-rules:
-  - match: "props/*.glb"
-    merge: false     # keep these props in their own local space
+# Named presets overlay `default` when selected with --preset <name>.
+presets:
+  desktop:
+    output: runtime/desktop
+  mobile:
+    output: runtime/mobile
+    rules:
+      - match: "decals/*"
+        texture:
+          compress: false
 ```
 
-Today the rules expose `merge` (a mesh setting; it has no effect on skinned meshes, which are never baked, or on OBJ, which has no node graph). The schema is intentionally small — input/output/pack plus per-pattern mesh merge — and is the place to grow further per-asset processing knobs. Changing a mesh's effective `merge` invalidates just that mesh in the incremental cache.
+### Layering & precedence
+
+Settings are resolved by **overlaying** layers from least to most specific; each layer only overrides the fields it sets:
+
+1. built-in defaults
+2. `default:` globals (`mesh` / `texture`)
+3. selected preset's globals
+4. `default.rules` (cascading, in file order)
+5. preset's `rules` (cascading — preset rules win)
+
+`input` and `pack` are read only at the top level. `output` is the base, and a **preset may redirect it** (`outputFor` = preset's `output` if set, else the base) so `--preset mobile` and `--preset desktop` build into separate dirs that never clobber. A CLI `-o/--output` overrides everything; `--pack` is OR-ed with the config.
+
+### Presets
+
+`--preset <name>` selects a preset (overriding the config's `preset:`); `--list-presets` prints the defined names; an unknown preset is a hard error listing the available ones. The active preset and resolved settings are folded into the incremental cache, so switching preset or editing a rule rebuilds exactly the affected assets.
+
+### Settings (v1)
+
+- **`mesh.merge`** — bake glTF node transforms into one combined mesh (true) vs keep source-local (false). No effect on skinned meshes (never baked) or OBJ (no node graph).
+- **`texture.compress`** — `true` (default) UASTC-encodes; `false` writes a raw `R8G8B8A8` KTX2 (sRGB/linear per slot) with lossless Zstd — pixel-exact, for UI atlases, sprite sheets, and sRGB/data textures you want untouched. Applies to both standalone images and glTF-embedded textures.
+
+Unknown keys are warned (typo protection). The schema is intentionally small — it's the place to grow further per-asset knobs (e.g. texture `max_size`, `channels`, mesh `lods`).
 
 ## Supported inputs
 
