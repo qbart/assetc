@@ -4,3 +4,7 @@ tmp/
 .DS_Store
 .cache/
 Testing/
+# for assetc project alone we dont want assets to be committed 
+assets/
+runtime/
+assetc.yml
