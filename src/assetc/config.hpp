@@ -1,50 +1,82 @@
 #pragma once
 
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace assetc
 {
 
-// One pattern-based processing rule. `match` is a glob (`*` matches any run of
-// characters including `/`, `?` matches one) tested against a source file's path
-// relative to the input dir, forward-slash, e.g. "models/court.glb".
-struct AssetRule
+// Per-asset settings are optional at every layer and overlaid by specificity
+// (built-in defaults < default block < preset < default rules < preset rules).
+// A layer only overrides the fields it actually sets.
+struct TextureSettings
 {
-    std::string match;
-    bool        hasMerge = false; // whether `merge` was specified
-    bool        merge    = true;  // mesh: bake node transforms into one combined mesh
+    std::optional<bool> compress; // false = store raw R8G8B8A8 (no UASTC)
+    void                overlay(const TextureSettings &o);
 };
 
-// Minimal project config, loaded from the nearest `assetc.yml` searching upward
-// from the working directory. Everything has a sensible default so a missing
-// config reproduces today's behavior.
+struct MeshSettings
+{
+    std::optional<bool> merge; // bake glTF node transforms into one combined mesh
+    void                overlay(const MeshSettings &o);
+};
+
+// A pattern-based override. `match` is a glob (`*` spans `/`, `?` one char) tested
+// against the source path relative to `input`, e.g. "models/court.glb".
+struct Rule
+{
+    std::string     match;
+    TextureSettings tex;
+    MeshSettings    mesh;
+};
+
+// `default:` and each entry of `presets:` share this shape.
+struct Layer
+{
+    std::optional<std::string> output; // only meaningful for presets (overrides base)
+    TextureSettings            tex;
+    MeshSettings               mesh;
+    std::vector<Rule>          rules;
+};
+
+// Project config from the nearest assetc.yml (searched upward). Everything is
+// optional; built-in defaults reproduce today's behavior.
 struct Config
 {
-    std::string input  = "assets";
-    std::string output = "runtime";
-    bool        pack   = false; // bundle the output into <output>.hpack after build
+    std::string input  = "assets";   // top-level: source tree (same for every preset)
+    std::string output = "runtime";  // top-level base output (a preset may override)
+    bool        pack   = false;      // top-level
+    std::string preset;              // top-level `preset:` (default when --preset absent)
 
-    bool                   meshMerge = true; // default merge for meshes
-    std::vector<AssetRule> rules;            // first matching rule wins
+    Layer                        defaultLayer; // `default:` (mesh/texture/rules; output ignored)
+    std::map<std::string, Layer> presets;      // `presets:`
 
-    // Resolve the effective mesh `merge` for a source file (path relative to the
-    // input dir): first matching rule's `merge`, else the global default.
-    bool MergeFor(const std::string &relPath) const;
+    // Fully-resolved per-file settings under the active preset ("" = none).
+    struct Resolved
+    {
+        bool compress;
+        bool merge;
+    };
+    Resolved resolve(const std::string &relPath, const std::string &preset) const;
+
+    // Output dir for the active preset: preset.output ?: base output.
+    std::string outputFor(const std::string &preset) const;
+
+    bool                     hasPreset(const std::string &name) const;
+    std::vector<std::string> presetNames() const;
 };
 
 // Glob match: `*` matches any run (incl. `/`), `?` matches exactly one char.
 bool GlobMatch(const std::string &pattern, const std::string &str) noexcept;
 
-// Search `startDir` and its ancestors for `assetc.yml`. On success fills `cfg`,
-// sets `foundPath` to the file used, and returns 0. Returns 0 with defaults (and
-// empty `foundPath`) when no config exists; returns non-zero only on a malformed
-// config (logged).
+// Search `startDir` and ancestors for assetc.yml. Fills `cfg`, sets `foundPath`,
+// returns 0. Returns 0 with defaults (empty `foundPath`) when none exists;
+// non-zero only on malformed YAML (logged). Unknown keys are warned, not fatal.
 int LoadConfig(const std::string &startDir, Config &cfg, std::string &foundPath);
 
-// Write a starter `assetc.yml` to `path`: input/output set to their defaults and
-// active, every other key present but commented out. Overwrites unconditionally
-// (callers guard against clobbering). Returns 0 on success.
+// Write a starter assetc.yml to `path` (overwrites). Returns 0 on success.
 int WriteDefaultConfig(const std::string &path);
 
 } // namespace assetc

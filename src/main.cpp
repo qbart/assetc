@@ -197,7 +197,7 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
             // Per-pattern merge override, keyed by the source path relative to input.
             std::error_code  rec;
             const std::string rel = fs::relative(asset.path, config.input, rec).generic_string();
-            const bool        merge = config.MergeFor(rel);
+            const bool        merge = config.resolve(rel, config.preset).merge;
             cm = assetc::BuildFromGltf(*gltfSrc, sourceRef, merge);
         }
         else
@@ -522,7 +522,7 @@ int main(int argc, char **argv)
             {
                 std::error_code  sec;
                 const std::string rel = fs::relative(a.path, config.input, sec).generic_string();
-                seed = seed * 1000003u + (config.MergeFor(rel) ? 1u : 0u);
+                seed = seed * 1000003u + (config.resolve(rel, config.preset).merge ? 1u : 0u);
             }
             const uint64_t inputHash = assetc::HashSource(a.path, seed);
 
