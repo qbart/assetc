@@ -11,6 +11,7 @@ Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A singl
 | Command       | What it does                                                                          |
 | ------------- | ------------------------------------------------------------------------------------- |
 | `assetc`       | Compile everything under `assets/` into the output dir (default `runtime/`).          |
+| `assetc init`  | Write a starter `assetc.yml` in the current directory (won't overwrite an existing one). |
 | `assetc info`  | Inspect the *compiled* output dir and print per-file stats + aggregate totals (no recompile). |
 | `assetc check` | Verify cross-file integrity of the compiled output dir (exit non-zero on any problem). |
 
@@ -32,7 +33,7 @@ Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
 ## Configuration (`assetc.yml`)
 
-On startup `assetc` looks for the nearest `assetc.yml`, searching the working directory and its ancestors (so it can live at the project root). All keys are optional and default to today's behavior; a CLI `-o/--output` overrides the config, and `--pack` is OR-ed with it.
+On startup `assetc` looks for the nearest `assetc.yml`, searching the working directory and its ancestors (so it can live at the project root). All keys are optional and default to today's behavior; a CLI `-o/--output` overrides the config, and `--pack` is OR-ed with it. Run `assetc init` to drop a starter file (every key present, only `input`/`output` active):
 
 ```yaml
 input: assets        # source directory (default: assets)

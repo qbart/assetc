@@ -76,6 +76,25 @@ rules:
         CHECK(cfg.MergeFor("crate.obj") == false);
     }
 
+    // --- `init` template: active input/output, everything else commented -------
+    const auto initDir = base / "init";
+    fs::create_directories(initDir);
+    const auto initCfg = (initDir / "assetc.yml").string();
+    CHECK_EQ(WriteDefaultConfig(initCfg), 0);
+    CHECK(fs::exists(initCfg));
+    {
+        Config      cfg;
+        std::string found;
+        CHECK_EQ(LoadConfig(initDir.string(), cfg, found), 0);
+        CHECK(!found.empty());
+        // input/output are active at their defaults; the rest stay commented out.
+        CHECK_EQ(cfg.input, std::string("assets"));
+        CHECK_EQ(cfg.output, std::string("runtime"));
+        CHECK(cfg.pack == false);
+        CHECK(cfg.meshMerge == true);
+        CHECK(cfg.rules.empty());
+    }
+
     // --- malformed YAML is reported as an error --------------------------------
     const auto bad = base / "bad";
     Write(bad / "assetc.yml", "input: [unterminated\n  : :");

@@ -5,6 +5,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <filesystem>
+#include <fstream>
 
 namespace fs = std::filesystem;
 
@@ -105,5 +106,48 @@ int assetc::LoadConfig(const std::string &startDir, Config &cfg, std::string &fo
     }
 
     foundPath = cfgPath.string();
+    return 0;
+}
+
+int assetc::WriteDefaultConfig(const std::string &path)
+{
+    // input/output are active (at their defaults); every other knob is shown but
+    // commented out so it stays opt-in.
+    static constexpr const char *kTemplate = R"(# assetc.yml — asset compiler configuration.
+# Searched for in the working directory and its ancestors, so it can live at the
+# project root. All keys are optional; CLI flags override them.
+
+# Source and output directories.
+input: assets
+output: runtime
+
+# Bundle the whole output dir into a single <output>.hpack after building.
+# pack: false
+
+# Default mesh processing.
+# mesh:
+#   merge: true   # bake node transforms into one combined, world-space mesh;
+#                 # false keeps geometry in its source-local space. (Skinned
+#                 # meshes are never baked; OBJ has no node graph.)
+
+# Per-pattern overrides; the first matching rule wins. `match` is a glob over the
+# source path relative to `input` (* spans '/', ? matches one character).
+# rules:
+#   - match: "props/*.glb"
+#     merge: false
+)";
+
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out)
+    {
+        fmtx::Error(fmt::format("config: open failed: {}", path));
+        return 1;
+    }
+    out << kTemplate;
+    if (!out.good())
+    {
+        fmtx::Error(fmt::format("config: write failed: {}", path));
+        return 1;
+    }
     return 0;
 }

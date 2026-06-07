@@ -354,7 +354,7 @@ int main(int argc, char **argv)
     app.add_flag("--verify", verify, "Re-read each written .hmesh and check structural validity");
     app.add_flag("--no-cache", noCache, "Ignore the incremental build cache and rebuild everything");
     app.add_flag("--pack", pack, "After building, bundle the output dir into a single <output>.hpack");
-    app.add_subcommand("init", "Initialize structure");
+    auto *initCmd = app.add_subcommand("init", "Write a starter assetc.yml in the current directory");
     auto *infoCmd =
         app.add_subcommand("info", "Inspect compiled output in the output dir and print stats");
     infoCmd->fallthrough(); // let `info -o <dir>` reach the parent's --output option
@@ -363,6 +363,21 @@ int main(int argc, char **argv)
     checkCmd->fallthrough();
 
     CLI11_PARSE(app, argc, argv);
+
+    // `assetc init`: drop a starter assetc.yml in the current dir (never clobber).
+    if (initCmd->parsed())
+    {
+        const std::string cfgPath = "assetc.yml";
+        if (fs::exists(cfgPath))
+        {
+            fmtx::Error(fmt::format("{} already exists; not overwriting", cfgPath));
+            return 1;
+        }
+        if (assetc::WriteDefaultConfig(cfgPath) != 0)
+            return 1;
+        fmtx::Success(fmt::format("wrote {}", cfgPath));
+        return 0;
+    }
 
     // Project config (nearest assetc.yml, searching upward). CLI flags win over it.
     assetc::Config config;

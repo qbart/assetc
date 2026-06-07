@@ -42,4 +42,9 @@ bool GlobMatch(const std::string &pattern, const std::string &str) noexcept;
 // config (logged).
 int LoadConfig(const std::string &startDir, Config &cfg, std::string &foundPath);
 
+// Write a starter `assetc.yml` to `path`: input/output set to their defaults and
+// active, every other key present but commented out. Overwrites unconditionally
+// (callers guard against clobbering). Returns 0 on success.
+int WriteDefaultConfig(const std::string &path);
+
 } // namespace assetc
