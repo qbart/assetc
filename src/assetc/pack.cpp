@@ -223,6 +223,21 @@ constexpr assetc::PackKind kKindOrder[] = {
     assetc::PackKind::Mesh,    assetc::PackKind::Material,  assetc::PackKind::Manifest,
     assetc::PackKind::Animation, assetc::PackKind::Texture, assetc::PackKind::Shader,
     assetc::PackKind::Other};
+
+// Short per-entry tag.
+const char *KindTag(assetc::PackKind k)
+{
+    switch (k)
+    {
+    case assetc::PackKind::Mesh: return "mesh";
+    case assetc::PackKind::Material: return "material";
+    case assetc::PackKind::Manifest: return "manifest";
+    case assetc::PackKind::Animation: return "anim";
+    case assetc::PackKind::Texture: return "texture";
+    case assetc::PackKind::Shader: return "shader";
+    default: return "other";
+    }
+}
 } // namespace
 
 int assetc::InspectPack(const std::string &packPath)
@@ -231,19 +246,29 @@ int assetc::InspectPack(const std::string &packPath)
     if (ReadPackToc(packPath, toc) != 0)
         return 1;
 
-    uint64_t total = 0;
+    uint64_t payload = 0;
+    uint64_t tocBytes = 0;
     uint64_t kindCount[kKindCount]{};
     uint64_t kindBytes[kKindCount]{};
     for (const auto &e : toc)
     {
-        total += e.size;
+        payload += e.size;
+        tocBytes += TocRecordBytes(e.path.size());
         const int k = static_cast<int>(e.kind);
         ++kindCount[k];
         kindBytes[k] += e.size;
     }
+    std::error_code ec;
+    const uint64_t  fileSize = static_cast<uint64_t>(fs::file_size(packPath, ec));
+    const uint64_t  headerBytes = sizeof(uint32_t) * 4 + sizeof(uint64_t); // 24
+    const uint64_t  padding =
+        fileSize >= headerBytes + tocBytes + payload ? fileSize - headerBytes - tocBytes - payload : 0;
 
     fmt::print("{}== {} (HPAK v{}) — {} entries, {}{}\n", fmtx::CYAN, packPath, PackVersion,
-               toc.size(), HumanBytes(total), fmtx::RESET);
+               toc.size(), HumanBytes(fileSize), fmtx::RESET);
+    fmt::print("  layout: {} header + {} toc + {} payload ({} alignment padding)\n",
+               HumanBytes(headerBytes), HumanBytes(tocBytes), HumanBytes(payload),
+               HumanBytes(padding));
     for (PackKind pk : kKindOrder)
     {
         const int k = static_cast<int>(pk);
@@ -252,10 +277,11 @@ int assetc::InspectPack(const std::string &packPath)
                        HumanBytes(kindBytes[k]));
     }
 
-    // Entries (already path-sorted in the TOC).
+    // Entries (already path-sorted in the TOC): kind | path | size | offset.
     fmt::print("\n{}== entries{}\n", fmtx::CYAN, fmtx::RESET);
     for (const auto &e : toc)
-        fmt::print("  {:<44} {:>10}  @{}\n", e.path, HumanBytes(e.size), e.offset);
+        fmt::print("  {:<9} {:<44} {:>10}  @{}\n", KindTag(e.kind), e.path, HumanBytes(e.size),
+                   e.offset);
 
     return 0;
 }
