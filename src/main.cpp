@@ -407,6 +407,17 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // Ensure the output dir exists up front: assets create their own subdirs
+    // lazily, but the cache and manifest are written at the top level even when no
+    // asset produced output there (e.g. an empty asset tree).
+    std::error_code mkdirEc;
+    fs::create_directories(outputDir, mkdirEc);
+    if (mkdirEc)
+    {
+        fmtx::Error(fmt::format("cannot create output dir {}: {}", outputDir, mkdirEc.message()));
+        return 1;
+    }
+
     std::filesystem::recursive_directory_iterator iter(
         assetDir, std::filesystem::directory_options::skip_permission_denied
     );
