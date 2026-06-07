@@ -268,13 +268,19 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
             if (verify && assetc::ValidateHMat(hmatPath.generic_string()) != 0)
                 return 1;
 
+            // texture.compress for this source (a UI/data glTF can opt all its
+            // images out of block compression via a rule on the .glb path).
+            std::error_code   trec;
+            const std::string trel = fs::relative(asset.path, config.input, trec).generic_string();
+            const bool        texCompress = config.resolve(trel, preset).compress;
+
             fs::create_directories(texDir);
             for (const auto &t : mats.textures)
             {
                 const auto texPath =
                     (texDir / fmt::format("tex_{}.ktx2", t.imageIndex)).generic_string();
                 if (assetc::EncodeGltfImageToKtx2(*gltfSrc, t.imageIndex, t.mode, texPath,
-                                                  threadCount) != 0)
+                                                  threadCount, texCompress) != 0)
                     return 1;
 
                 // Runtime-relative path so the engine resolves root + "/" + path.

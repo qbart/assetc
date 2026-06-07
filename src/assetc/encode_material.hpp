@@ -48,8 +48,9 @@ CompiledMaterials BuildMaterialsFromGltf(const gltf::GLTF &src,
 
 // Transcode one glTF image to a `.ktx2` at `destPath`. Handles images the loader
 // already decoded (raw pixels) as well as still-encoded bytes in a buffer view or
-// the image span. Returns 0 on success, non-zero with a logged error.
+// the image span. `compress` false writes a raw R8G8B8A8 KTX2 instead of UASTC.
+// Returns 0 on success, non-zero with a logged error.
 int EncodeGltfImageToKtx2(const gltf::GLTF &src, uint32_t imageIndex, ktx::UASTCMode mode,
-                          const std::string &destPath, unsigned threadCount);
+                          const std::string &destPath, unsigned threadCount, bool compress = true);
 
 } // namespace assetc

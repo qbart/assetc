@@ -243,7 +243,7 @@ CompiledMaterials BuildMaterialsFromGltf(const gltf::GLTF &src,
 }
 
 int EncodeGltfImageToKtx2(const gltf::GLTF &src, uint32_t imageIndex, ktx::UASTCMode mode,
-                          const std::string &destPath, unsigned threadCount)
+                          const std::string &destPath, unsigned threadCount, bool compress)
 {
     const tg3_model &m = src.model;
     if (imageIndex >= m.images_count)
@@ -261,7 +261,9 @@ int EncodeGltfImageToKtx2(const gltf::GLTF &src, uint32_t imageIndex, ktx::UASTC
         return 1;
     }
 
-    const KTX_error_code rc = ktx::FromImageToUASTC(pixels, destPath, mode, threadCount);
+    // `compress: false` -> raw R8G8B8A8 (pixel-exact), else UASTC.
+    const KTX_error_code rc = compress ? ktx::FromImageToUASTC(pixels, destPath, mode, threadCount)
+                                       : ktx::FromImageToRawKtx2(pixels, destPath, mode, threadCount);
     if (rc != KTX_SUCCESS)
     {
         fmtx::Error(fmt::format("EncodeGltfImageToKtx2: ktx encode failed ({}) for {}",
