@@ -150,7 +150,7 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
 
 int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount,
                 bool verify, std::vector<assetc::ManifestEntry> &outEntries,
-                const assetc::Config &config)
+                const assetc::Config &config, const std::string &preset)
 {
     const auto out = asset.RuntimePath(outputDir);
     fs::create_directories(fs::path(out).parent_path());
@@ -197,7 +197,7 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
             // Per-pattern merge override, keyed by the source path relative to input.
             std::error_code  rec;
             const std::string rel = fs::relative(asset.path, config.input, rec).generic_string();
-            const bool        merge = config.resolve(rel, config.preset).merge;
+            const bool        merge = config.resolve(rel, preset).merge;
             cm = assetc::BuildFromGltf(*gltfSrc, sourceRef, merge);
         }
         else
@@ -345,12 +345,16 @@ int main(int argc, char **argv)
     argv = app.ensure_utf8(argv);
 
     std::string outputDir = "runtime";
-    bool        verify    = false;
-    bool        noCache   = false;
-    bool        pack      = false;
+    bool        verify     = false;
+    bool        noCache     = false;
+    bool        pack        = false;
+    bool        listPresets = false;
+    std::string presetArg;
     app.add_option("-j,--jobs", jobs, "Concurrent jobs")->check(CLI::PositiveNumber);
     auto       *outputOpt =
         app.add_option("-o,--output", outputDir, "Output directory")->capture_default_str();
+    app.add_option("--preset", presetArg, "Use a named preset from assetc.yml");
+    app.add_flag("--list-presets", listPresets, "List presets defined in assetc.yml and exit");
     app.add_flag("--verify", verify, "Re-read each written .hmesh and check structural validity");
     app.add_flag("--no-cache", noCache, "Ignore the incremental build cache and rebuild everything");
     app.add_flag("--pack", pack, "After building, bundle the output dir into a single <output>.hpack");
@@ -386,8 +390,33 @@ int main(int argc, char **argv)
         return 1;
     if (!configPath.empty())
         fmtx::Info(fmt::format("config: {}", configPath));
+
+    // Effective preset: --preset wins over the config's `preset:`.
+    const std::string preset = !presetArg.empty() ? presetArg : config.preset;
+
+    auto presetList = [&] {
+        const auto names = config.presetNames();
+        std::string s;
+        for (size_t i = 0; i < names.size(); ++i)
+            s += (i ? ", " : "") + names[i];
+        return s.empty() ? std::string("(none)") : s;
+    };
+
+    if (listPresets)
+    {
+        fmtx::Info(fmt::format("presets: {}", presetList()));
+        return 0;
+    }
+    if (!preset.empty() && !config.hasPreset(preset))
+    {
+        fmtx::Error(fmt::format("unknown preset '{}' (available: {})", preset, presetList()));
+        return 1;
+    }
+    if (!preset.empty())
+        fmtx::Info(fmt::format("preset: {}", preset));
+
     if (outputOpt->count() == 0)
-        outputDir = config.output; // config provides the output dir unless -o was given
+        outputDir = config.outputFor(preset); // config/preset output unless -o was given
     pack = pack || config.pack;
 
     // `assetc info`: report on what's already in the output dir, don't recompile.
@@ -515,15 +544,16 @@ int main(int argc, char **argv)
             if (i >= assets.size()) return;
             const Asset &a   = assets[i];
             const auto   out = a.RuntimePath(outputDir);
-            // Fold the resolved mesh merge setting into the cache seed so a config
-            // change (e.g. a rule flipping merge) invalidates the affected meshes.
-            uint64_t seed = static_cast<uint64_t>(a.type);
-            if (a.type == AssetType::Mesh)
-            {
-                std::error_code  sec;
-                const std::string rel = fs::relative(a.path, config.input, sec).generic_string();
-                seed = seed * 1000003u + (config.resolve(rel, config.preset).merge ? 1u : 0u);
-            }
+            // Fold the resolved settings + active preset into the cache seed so a
+            // config/preset change (merge or compress flip) rebuilds affected assets.
+            std::error_code   sec;
+            const std::string rel = fs::relative(a.path, config.input, sec).generic_string();
+            const auto        rs  = config.resolve(rel, preset);
+            uint64_t          seed = static_cast<uint64_t>(a.type);
+            seed = seed * 1000003u + (rs.merge ? 1u : 0u);
+            seed = seed * 1000003u + (rs.compress ? 2u : 0u);
+            for (char c : preset)
+                seed = seed * 131u + static_cast<uint8_t>(c);
             const uint64_t inputHash = assetc::HashSource(a.path, seed);
 
             if (!noCache && inputHash != 0)
@@ -543,7 +573,7 @@ int main(int argc, char **argv)
             }
 
             std::vector<assetc::ManifestEntry> entries;
-            if (handleAsset(a, outputDir, innerThreads, verify, entries, config) != 0)
+            if (handleAsset(a, outputDir, innerThreads, verify, entries, config, preset) != 0)
             {
                 std::lock_guard<std::mutex> lk(logMu);
                 fmtx::Error(fmt::format("failed: {}", a.path));
