@@ -29,6 +29,12 @@ enum class UASTCMode
 KTX_error_code FromImageToASTC(const stb::Image &img, const std::string &destPath, ASTCMode mode);
 KTX_error_code FromImageToUASTC(const stb::Image &img, const std::string &destPath, UASTCMode mode, unsigned threadCount);
 
+// Write an image as a raw (uncompressed) R8G8B8A8 KTX2 — sRGB for the Color mode,
+// linear UNORM otherwise — with a full mip chain and lossless Zstd
+// supercompression. No Basis/UASTC and no swizzle: pixels are preserved exactly.
+// For UI atlases and sRGB/data textures that must stay untouched.
+KTX_error_code FromImageToRawKtx2(const stb::Image &img, const std::string &destPath, UASTCMode mode, unsigned threadCount);
+
 // Encode 6 face images as a UASTC-compressed KTX2 cubemap.
 // Faces must be passed in libktx/Vulkan face order: +X, -X, +Y, -Y, +Z, -Z.
 // All faces must be square and identically sized.

@@ -286,6 +286,53 @@ KTX_error_code ktx::FromCubemapToUASTC(stb::Image (&faces)[6], const std::string
     return ktxTexture_WriteToNamedFile(ktxTexture(tex.get()), destPath.c_str());
 }
 
+KTX_error_code ktx::FromImageToRawKtx2(const stb::Image &img, const std::string &destPath,
+                                       UASTCMode mode, unsigned /*threadCount*/)
+{
+    // sRGB for colour, linear UNORM otherwise — same colour-space rule as the
+    // UASTC path, but no block compression and no swizzle (raw means raw).
+    const VkFormat srcFormat =
+        (mode == UASTCMode::Color) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+
+    ktxTextureCreateInfo info{};
+    info.vkFormat        = srcFormat;
+    info.baseWidth       = img.w;
+    info.baseHeight      = img.h;
+    info.baseDepth       = 1;
+    info.numDimensions   = 2;
+    info.numLevels       = std::bit_width(static_cast<unsigned>(std::max(img.w, img.h)));
+    info.numLayers       = 1;
+    info.numFaces        = 1;
+    info.generateMipmaps = KTX_FALSE;
+
+    ktxTexture2 *raw = nullptr;
+    auto         err = ktxTexture2_Create(&info, KTX_TEXTURE_CREATE_ALLOC_STORAGE, &raw);
+    if (err != KTX_SUCCESS)
+        return err;
+    KtxTexture2Ptr tex(raw);
+
+    err = ktxTexture_SetImageFromMemory(ktxTexture(tex.get()), 0, 0, 0, img.pixels, img.Size());
+    if (err != KTX_SUCCESS)
+        return err;
+
+    for (uint32_t lvl = 1; lvl < info.numLevels; ++lvl)
+    {
+        int  lw  = std::max(1, img.w >> lvl);
+        int  lh  = std::max(1, img.h >> lvl);
+        auto mip = stb::Resize(img, lw, lh);
+        err = ktxTexture_SetImageFromMemory(ktxTexture(tex.get()), lvl, 0, 0, mip->pixels, mip->Size());
+        if (err != KTX_SUCCESS)
+            return err;
+    }
+
+    // Lossless Zstd: shrink the raw bytes without changing any pixel value.
+    err = ktxTexture2_DeflateZstd(tex.get(), 18);
+    if (err != KTX_SUCCESS)
+        return err;
+
+    return ktxTexture_WriteToNamedFile(ktxTexture(tex.get()), destPath.c_str());
+}
+
 KTX_error_code ktx::FromLut3DToKtx2(uint32_t size, const uint8_t *rgba8, size_t rgba8Size,
                                     const std::string &destPath)
 {

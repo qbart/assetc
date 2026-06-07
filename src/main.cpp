@@ -173,6 +173,12 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         ktx::UASTCMode mode = ktx::UASTCMode::Color;
         if (asset.type == AssetType::Normal)    mode = ktx::UASTCMode::Normal;
         if (asset.type == AssetType::Grayscale) mode = ktx::UASTCMode::Grayscale;
+
+        // `texture.compress: false` (e.g. UI/data textures) -> raw, pixel-exact.
+        std::error_code   rec;
+        const std::string rel = fs::relative(asset.path, config.input, rec).generic_string();
+        if (!config.resolve(rel, preset).compress)
+            return ktx::FromImageToRawKtx2(img, out, mode, threadCount);
         return ktx::FromImageToUASTC(img, out, mode, threadCount);
     }
     case AssetType::Mesh:
