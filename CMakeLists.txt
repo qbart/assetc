@@ -12,6 +12,7 @@ project(assetc)
 
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
+find_package(Vulkan)
 include(ktx)
 include(cli11)
 include(fmt)
@@ -70,6 +71,7 @@ if(APPLE)
         meshoptimizer
         slang
         yaml-cpp::yaml-cpp
+        Vulkan::Vulkan
     )
 else()
     target_link_libraries(assetc_core PUBLIC
@@ -79,6 +81,7 @@ else()
         meshoptimizer
         slang
         yaml-cpp::yaml-cpp
+        Vulkan::Vulkan
     )
 endif()
 
