@@ -4,7 +4,7 @@ run: build
 
 .PHONY: build
 build:
-	@cmake --build build/debug
+	@cmake --build build/debug --parallel
 
 .PHONY: test
 test: build
