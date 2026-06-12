@@ -416,7 +416,8 @@ int main(int argc, char **argv)
 
     CLI11_PARSE(app, argc, argv);
 
-    // `assetc init`: drop a starter assetc.yml in the current dir (never clobber).
+    // `assetc init`: drop a starter assetc.yml in the current dir (never clobber)
+    // and scaffold the source tree so the first build has somewhere to look.
     if (initCmd->parsed())
     {
         const std::string cfgPath = "assetc.yml";
@@ -428,6 +429,20 @@ int main(int argc, char **argv)
         if (assetc::WriteDefaultConfig(cfgPath) != 0)
             return 1;
         fmtx::Success(fmt::format("wrote {}", cfgPath));
+
+        // Create the source tree (the starter config's `input:`) if it's missing.
+        const std::string inputDir = assetc::Config{}.input;
+        if (!fs::exists(inputDir))
+        {
+            std::error_code ec;
+            fs::create_directories(inputDir, ec);
+            if (ec)
+            {
+                fmtx::Error(fmt::format("cannot create input dir {}: {}", inputDir, ec.message()));
+                return 1;
+            }
+            fmtx::Success(fmt::format("created {}/", inputDir));
+        }
         return 0;
     }
 

@@ -13,7 +13,7 @@ Every output format has a detailed binary spec under [`docs/`](#file-formats).
 | Command       | What it does                                                                          |
 | ------------- | ------------------------------------------------------------------------------------- |
 | `assetc`       | Compile everything under `assets/` into the output dir (default `runtime/`).          |
-| `assetc init`  | Write a starter `assetc.yml` in the current directory (won't overwrite an existing one). |
+| `assetc init`  | Write a starter `assetc.yml` in the current directory (won't overwrite an existing one) and create the `assets/` source dir if missing. |
 | `assetc info`  | Inspect the *compiled* output dir and print per-file stats + aggregate totals (no recompile). |
 | `assetc check` | Verify cross-file integrity of the compiled output dir (exit non-zero on any problem). |
 | `assetc pack info [file]` | Inspect a `.hpack` (default `<output>.hpack`): per-kind summary + entry listing. |
