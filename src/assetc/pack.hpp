@@ -23,6 +23,7 @@ enum class PackKind : uint8_t
     Animation = 4, // .hanim
     Texture   = 5, // .ktx2
     Shader    = 6, // .spv
+    Font      = 7, // .hfont
 };
 
 // A `.hpack` bundles every runtime file from the output directory into one blob so

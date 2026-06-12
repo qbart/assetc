@@ -1,9 +1,11 @@
 #include "assetc/encode_lut.hpp"
 #include "assetc/encode_material.hpp"
+#include "assetc/encode_font.hpp"
 #include "assetc/cache.hpp"
 #include "assetc/check.hpp"
 #include "assetc/config.hpp"
 #include "assetc/encode_mesh.hpp"
+#include "assetc/runtime_font.hpp"
 #include "assetc/inspect.hpp"
 #include "assetc/pack.hpp"
 #include "assetc/runtime_manifest.hpp"
@@ -44,7 +46,8 @@ enum class AssetType
     Shader,
     Mesh,
     Material,
-    LUT
+    LUT,
+    Font
 };
 
 constexpr std::string_view to_string(AssetType t)
@@ -69,6 +72,8 @@ constexpr std::string_view to_string(AssetType t)
         return "Material";
     case AssetType::LUT:
         return "LUT";
+    case AssetType::Font:
+        return "Font";
     }
     return "???"; // unreachable if enum is exhaustive
 }
@@ -139,6 +144,10 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
     case AssetType::LUT:
         // foo.lut.cube -> foo.lut.ktx2 (the .cube is stripped below, .ktx2 added)
         ext = ".ktx2";
+        break;
+    case AssetType::Font:
+        // foo.ttf -> foo.hfont (+ companion foo.ktx2 SDF atlas written alongside)
+        ext = ".hfont";
         break;
     }
 
@@ -304,6 +313,27 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
     {
         fmtx::Info(fmt::format("{} {} -> {}", asset.type, asset.path, out));
         return assetc::EncodeLutCube(asset.path, out);
+    }
+    case AssetType::Font:
+    {
+        // foo.ttf -> foo.hfont (metrics) + foo.ktx2 (SDF atlas). The atlas is hashed
+        // by the font's source ref and registered in the manifest so the .hfont's
+        // atlasTex resolves the same way a material's texture ref does.
+        const auto sourceRef = asset.SourceRef();
+        fs::path   atlas     = fs::path(out);
+        atlas.replace_extension(".ktx2");
+
+        fmtx::Info(fmt::format("{} {} -> {}", asset.type, asset.path, out));
+        if (assetc::EncodeFont(asset.path, out, atlas.generic_string(), sourceRef, threadCount) != 0)
+            return 1;
+        if (verify && assetc::ValidateHFont(out) != 0)
+            return 1;
+
+        const auto relPath = fs::path(atlas).lexically_relative(outputDir).generic_string();
+        outEntries.push_back(assetc::ManifestEntry{assetc::HashAssetRef(sourceRef),
+                                                   assetc::ManKind::Texture,
+                                                   assetc::ManColorSpace::Linear, relPath});
+        return 0;
     }
     case AssetType::Cubemap:
     {
@@ -529,6 +559,8 @@ int main(int argc, char **argv)
             assets.emplace_back(Asset{.path = name, .type = AssetType::Mesh});
         else if (ext == ".mat")
             assets.emplace_back(Asset{.path = name, .type = AssetType::Material});
+        else if (ext == ".ttf" || ext == ".otf")
+            assets.emplace_back(Asset{.path = name, .type = AssetType::Font});
     }
 
     if (assets.empty())
@@ -546,7 +578,7 @@ int main(int argc, char **argv)
     //   24 jobs, 1 image asset   -> 1 outer * 24 inner = 24 threads used
     const size_t imageCount = std::count_if(assets.begin(), assets.end(), [](const Asset &a) {
         return a.type == AssetType::Color || a.type == AssetType::Normal ||
-               a.type == AssetType::Grayscale;
+               a.type == AssetType::Grayscale || a.type == AssetType::Font;
     });
 
     const unsigned outerWorkers = std::min<unsigned>(jobs, std::max<size_t>(1, imageCount));

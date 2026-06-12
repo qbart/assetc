@@ -47,6 +47,7 @@ assetc::PackKind assetc::PackKindOf(const std::string &path) noexcept
     if (path.ends_with(".hanim")) return PackKind::Animation;
     if (path.ends_with(".ktx2")) return PackKind::Texture;
     if (path.ends_with(".spv")) return PackKind::Shader;
+    if (path.ends_with(".hfont")) return PackKind::Font;
     return PackKind::Other;
 }
 
@@ -216,13 +217,13 @@ std::string HumanBytes(uint64_t n)
 // Labels indexed by PackKind value (Other=0, Mesh=1, ... Shader=6).
 const char *kKindLabels[] = {"other",               "meshes (.hmesh)",  "materials (.hmat)",
                              "manifests (.hman)",    "animations (.hanim)", "textures (.ktx2)",
-                             "shaders (.spv)"};
-constexpr int kKindCount = 7;
+                             "shaders (.spv)",       "fonts (.hfont)"};
+constexpr int kKindCount = 8;
 // Summary display order: assets first, "other" last.
 constexpr assetc::PackKind kKindOrder[] = {
     assetc::PackKind::Mesh,    assetc::PackKind::Material,  assetc::PackKind::Manifest,
     assetc::PackKind::Animation, assetc::PackKind::Texture, assetc::PackKind::Shader,
-    assetc::PackKind::Other};
+    assetc::PackKind::Font,    assetc::PackKind::Other};
 
 // Short per-entry tag.
 const char *KindTag(assetc::PackKind k)
@@ -235,6 +236,7 @@ const char *KindTag(assetc::PackKind k)
     case assetc::PackKind::Animation: return "anim";
     case assetc::PackKind::Texture: return "texture";
     case assetc::PackKind::Shader: return "shader";
+    case assetc::PackKind::Font: return "font";
     default: return "other";
     }
 }
