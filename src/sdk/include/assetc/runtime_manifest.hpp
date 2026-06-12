@@ -25,6 +25,14 @@ constexpr uint32_t ManVersion = 1;
 // lowercased (see Asset::SourceRef). For textures the on-disk path equals that ref
 // plus ".ktx2" (relative to the runtime root).
 //
+// A shader entry point follows the same shape: its canonical ref is
+//
+//     "<sourceRef>/<entryPoint>"       (e.g. "shaders/bloom/down")
+//
+// where sourceRef is the `.shader` folder relative to `assets/` with its `.shader`
+// suffix stripped, and <entryPoint> is the Slang entry-point name. The on-disk path
+// is that ref plus ".spv". Entry-point names are unique within a folder.
+//
 // On-disk layout (little-endian), entries sorted by hash ascending:
 //
 //     magic       u32   == ManMagic
@@ -43,6 +51,7 @@ enum class ManKind : uint8_t
     Mesh     = 1, // reserved, not emitted
     Material = 2, // reserved, not emitted
     Lut      = 3, // reserved, not emitted
+    Shader   = 4, // SPIR-V entry point: ref "<sourceRef>/<entryPoint>", path + ".spv"
 };
 
 enum class ManColorSpace : uint8_t

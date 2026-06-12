@@ -2,8 +2,11 @@
 
 #include "../deps/fmt.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <set>
+#include <vector>
 
 #include <slang-com-ptr.h>
 #include <slang.h>
@@ -25,35 +28,18 @@ void reportDiagnostics(std::string_view what, slang::IBlob *diagnostics)
             "slang {}: {}", what, static_cast<const char *>(diagnostics->getBufferPointer())));
 }
 
-// Compile one stage. `moduleName` resolves to `<moduleName>.slang` on the
-// session search path; the `main` entry point is compiled for `stage` and the
-// resulting SPIR-V is written to `outFile`.
-int compileStage(slang::ISession *session, const char *moduleName, SlangStage stage,
-                 const std::string &outFile)
+// Compose `module` with a single `entryPoint`, link, reflect the entry point's
+// name, and write its SPIR-V to `<outDir>/<name>.spv`. `used` tracks names
+// already emitted in this folder so collisions fail loud (one folder = one
+// pipeline, so duplicate entry-point names would clobber each other). On success
+// the emitted name is appended to `emitted`.
+int compileEntryPoint(slang::ISession *session, slang::IModule *module,
+                      slang::IEntryPoint *entryPoint, const std::string &outDir,
+                      std::set<std::string> &used, std::vector<std::string> &emitted)
 {
-    ComPtr<slang::IBlob> diagnostics;
-
-    slang::IModule *module = session->loadModule(moduleName, diagnostics.writeRef());
-    reportDiagnostics("load", diagnostics.get());
-    if (!module)
-    {
-        fmtx::Error(fmt::format("shader: failed to load {}.slang", moduleName));
-        return 1;
-    }
-
-    ComPtr<slang::IEntryPoint> entryPoint;
-    diagnostics.setNull();
-    if (SLANG_FAILED(module->findAndCheckEntryPoint("main", stage, entryPoint.writeRef(),
-                                                    diagnostics.writeRef())))
-    {
-        reportDiagnostics("entry", diagnostics.get());
-        fmtx::Error(fmt::format("shader: no 'main' entry point in {}.slang", moduleName));
-        return 1;
-    }
-
-    slang::IComponentType        *components[] = {module, entryPoint.get()};
+    slang::IComponentType        *components[] = {module, entryPoint};
     ComPtr<slang::IComponentType> program;
-    diagnostics.setNull();
+    ComPtr<slang::IBlob>          diagnostics;
     if (SLANG_FAILED(session->createCompositeComponentType(components, 2, program.writeRef(),
                                                            diagnostics.writeRef())))
     {
@@ -69,6 +55,27 @@ int compileStage(slang::ISession *session, const char *moduleName, SlangStage st
         return 1;
     }
 
+    // Reflect the composed program to recover the entry point's source name; that
+    // name (not the stage) becomes the `.spv` stem, so the engine references each
+    // entry point by the name it was declared with.
+    diagnostics.setNull();
+    slang::ProgramLayout *layout = linked->getLayout(0, diagnostics.writeRef());
+    if (!layout || layout->getEntryPointCount() == 0)
+    {
+        reportDiagnostics("reflect", diagnostics.get());
+        fmtx::Error("shader: failed to reflect entry point");
+        return 1;
+    }
+    const std::string name = layout->getEntryPointByIndex(0)->getName();
+
+    if (!used.insert(name).second)
+    {
+        fmtx::Error(fmt::format(
+            "shader: duplicate entry-point name '{}' in {} (names must be unique per folder)",
+            name, outDir));
+        return 1;
+    }
+
     ComPtr<slang::IBlob> spirv;
     diagnostics.setNull();
     if (SLANG_FAILED(linked->getEntryPointCode(0, 0, spirv.writeRef(), diagnostics.writeRef())))
@@ -77,7 +84,8 @@ int compileStage(slang::ISession *session, const char *moduleName, SlangStage st
         return 1;
     }
 
-    std::ofstream f(outFile, std::ios::binary);
+    const std::string outFile = (fs::path(outDir) / (name + ".spv")).string();
+    std::ofstream     f(outFile, std::ios::binary);
     if (!f)
     {
         fmtx::Error(fmt::format("shader: cannot write {}", outFile));
@@ -85,24 +93,42 @@ int compileStage(slang::ISession *session, const char *moduleName, SlangStage st
     }
     f.write(static_cast<const char *>(spirv->getBufferPointer()),
             static_cast<std::streamsize>(spirv->getBufferSize()));
+
+    emitted.push_back(name);
     return 0;
 }
 
 } // namespace
 
-int CompileShaderFolder(const std::string &shaderDir, const std::string &outDir)
+int CompileShaderFolder(const std::string &shaderDir, const std::string &outDir,
+                        std::vector<std::string> *outEntryPoints)
 {
-    if (!fs::exists(fs::path(shaderDir) / "vertex.slang") ||
-        !fs::exists(fs::path(shaderDir) / "fragment.slang"))
+    // Collect the `.slang` files up front and sort them so emission order (and any
+    // diagnostics) is deterministic regardless of directory iteration order.
+    std::vector<std::string> modules; // module names (stems)
     {
-        fmtx::Error(
-            fmt::format("shader: {} must contain vertex.slang and fragment.slang", shaderDir));
+        std::error_code ec;
+        for (const auto &e : fs::directory_iterator(shaderDir, ec))
+        {
+            if (e.is_regular_file() && e.path().extension() == ".slang")
+                modules.push_back(e.path().stem().string());
+        }
+        if (ec)
+        {
+            fmtx::Error(fmt::format("shader: cannot read {}: {}", shaderDir, ec.message()));
+            return 1;
+        }
+    }
+    if (modules.empty())
+    {
+        fmtx::Error(fmt::format("shader: {} contains no .slang files", shaderDir));
         return 1;
     }
+    std::sort(modules.begin(), modules.end());
 
-    // A global session is not thread-safe to share, so each call owns one.
-    // This matches the worker-per-asset model in main(): shaders are few and
-    // the embedded core module keeps creation cheap.
+    // A global session is not thread-safe to share, so each call owns one. This
+    // matches the worker-per-asset model in main(): shaders are few and the
+    // embedded core module keeps creation cheap.
     ComPtr<slang::IGlobalSession> globalSession;
     if (SLANG_FAILED(slang::createGlobalSession(globalSession.writeRef())))
     {
@@ -131,14 +157,46 @@ int CompileShaderFolder(const std::string &shaderDir, const std::string &outDir)
     }
 
     fs::create_directories(outDir);
-    if (int rc = compileStage(session.get(), "vertex", SLANG_STAGE_VERTEX,
-                              (fs::path(outDir) / "vertex.spv").string());
-        rc != 0)
-        return rc;
-    if (int rc = compileStage(session.get(), "fragment", SLANG_STAGE_FRAGMENT,
-                              (fs::path(outDir) / "fragment.spv").string());
-        rc != 0)
-        return rc;
+
+    std::set<std::string>    used;    // entry-point names already emitted (uniqueness)
+    std::vector<std::string> emitted; // emitted names, in order
+    for (const std::string &moduleName : modules)
+    {
+        ComPtr<slang::IBlob> diagnostics;
+        slang::IModule *module = session->loadModule(moduleName.c_str(), diagnostics.writeRef());
+        reportDiagnostics("load", diagnostics.get());
+        if (!module)
+        {
+            fmtx::Error(fmt::format("shader: failed to load {}.slang", moduleName));
+            return 1;
+        }
+
+        const SlangInt32 count = module->getDefinedEntryPointCount();
+        for (SlangInt32 i = 0; i < count; ++i)
+        {
+            ComPtr<slang::IEntryPoint> entryPoint;
+            if (SLANG_FAILED(module->getDefinedEntryPoint(i, entryPoint.writeRef())))
+            {
+                fmtx::Error(
+                    fmt::format("shader: cannot get entry point {} of {}.slang", i, moduleName));
+                return 1;
+            }
+            if (int rc = compileEntryPoint(session.get(), module, entryPoint.get(), outDir, used,
+                                           emitted);
+                rc != 0)
+                return rc;
+        }
+    }
+
+    if (emitted.empty())
+    {
+        fmtx::Error(fmt::format(
+            "shader: no entry points found in {} (mark them with [shader(\"...\")])", shaderDir));
+        return 1;
+    }
+
+    if (outEntryPoints)
+        *outEntryPoints = std::move(emitted);
     return 0;
 }
 

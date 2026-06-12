@@ -16,7 +16,9 @@ namespace assetc
 // lowercases ASCII A-Z for belt-and-braces consistency.
 //
 // For a texture the canonical ref is "<sourceRef>/tex_<imageIndex>" and the file
-// on disk is that ref plus ".ktx2" (see runtime_manifest.hpp for the full rule).
+// on disk is that ref plus ".ktx2"; for a shader entry point it is
+// "<sourceRef>/<entryPoint>" plus ".spv" (see runtime_manifest.hpp for the full
+// rules).
 uint64_t HashAssetRef(std::string_view runtimeRefNoExt) noexcept;
 
 } // namespace assetc

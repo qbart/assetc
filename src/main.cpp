@@ -115,10 +115,14 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
 {
     fs::path rel = fs::path(path).lexically_relative("assets");
 
-    // A shader mirrors its source `.shader` directory: the runtime path is the
-    // folder itself (extension kept), into which vertex.spv / fragment.spv go.
+    // A shader mirrors its source `.shader` directory with the `.shader` suffix
+    // stripped, into which one `<entryPoint>.spv` per Slang entry point is written.
+    // e.g. assets/shaders/bloom.shader/ -> runtime/shaders/bloom/{vert,down,up}.spv
     if (type == AssetType::Shader)
+    {
+        rel.replace_extension();
         return (fs::path(outputDir) / rel).generic_string();
+    }
 
     std::string_view ext;
     switch (type)
@@ -308,7 +312,22 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
     case AssetType::Shader:
     {
         fmtx::Info(fmt::format("{} {} -> {}", asset.type, asset.path, out));
-        return assetc::CompileShaderFolder(asset.path, out);
+        std::vector<std::string> entryPoints;
+        if (int rc = assetc::CompileShaderFolder(asset.path, out, &entryPoints); rc != 0)
+            return rc;
+
+        // Register each emitted entry point so the engine can resolve it by hash
+        // like a texture: ref "<sourceRef>/<entryPoint>", on-disk path that + ".spv".
+        const auto sourceRef = asset.SourceRef();
+        for (const auto &name : entryPoints)
+        {
+            const auto ref     = sourceRef + "/" + name;
+            const auto relPath = ref + ".spv";
+            outEntries.push_back(assetc::ManifestEntry{assetc::HashAssetRef(ref),
+                                                       assetc::ManKind::Shader,
+                                                       assetc::ManColorSpace::Linear, relPath});
+        }
+        return 0;
     }
     case AssetType::LUT:
     {
@@ -719,7 +738,7 @@ int main(int argc, char **argv)
     // so we never emit a partial/ambiguous table.
     const auto manPath = (fs::path(outputDir) / "assets.hman").generic_string();
     auto       entries = manifest.Take();
-    fmtx::Info(fmt::format("{} texture refs -> {}", entries.size(), manPath));
+    fmtx::Info(fmt::format("{} asset refs -> {}", entries.size(), manPath));
     if (assetc::WriteHMan(manPath, std::move(entries)) != 0)
         return 1;
     if (verify && assetc::ValidateHMan(manPath) != 0)

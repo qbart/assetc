@@ -105,7 +105,7 @@ Unknown keys are warned (typo protection). The schema is intentionally small —
 | `*.ao.png`, `*.h.png`, `*.r.png`       | Grayscale  | UASTC `.ktx2` (grayscale mode)          |
 | `*.lut.cube`                           | LUT        | `.lut.ktx2` (3D LUT)                    |
 | `*.obj`, `*.gltf`, `*.glb`             | Mesh       | [`.hmesh`](docs/hmesh.md) (container); glTF also emits [`.hmat`](docs/hmat.md) + `tex_<i>.ktx2` |
-| `*.shader/` (directory)                | Shader     | folder with `vertex.spv` / `fragment.spv` |
+| `*.shader/` (directory)                | Shader     | `<entryPoint>.spv` per Slang entry point (stage from `[shader(...)]`; names unique per folder) |
 | `*.env/` (directory)                   | Cubemap    | UASTC `.env.ktx2` (6 faces: `px.png`, `nx.png`, `py.png`, `ny.png`, `pz.png`, `nz.png`) |
 | `*.array/` (directory)                 | Array      | `.arr.ktx2` *(planned)*                 |
 | `*.mat`                                | Material   | [`.hmat`](docs/hmat.md) *(planned standalone; today `.hmat` is emitted as a glTF companion)* |
