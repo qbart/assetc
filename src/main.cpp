@@ -12,6 +12,7 @@
 #include "assetc/runtime_material.hpp"
 #include "assetc/runtime_mesh.hpp"
 #include "assetc/shader.hpp"
+#include "viewer/viewer.hpp"
 #include "deps/fmt.hpp"
 #include "deps/gltf.hpp"
 #include "deps/ktx.hpp"
@@ -407,6 +408,11 @@ int main(int argc, char **argv)
     auto *checkCmd =
         app.add_subcommand("check", "Verify cross-file integrity of the compiled output dir");
     checkCmd->fallthrough();
+    auto       *uiCmd =
+        app.add_subcommand("ui", "Open the ImGui asset inspector on a .hpack or output dir");
+    std::string uiPath;
+    uiCmd->add_option("path", uiPath, "Path to a .hpack or compiled output dir (default: <output>)");
+    uiCmd->fallthrough();
     auto       *packCmd = app.add_subcommand("pack", "Pack operations");
     std::string packInfoFile;
     auto       *packInfoCmd = packCmd->add_subcommand("info", "Inspect a .hpack and list its contents");
@@ -489,6 +495,25 @@ int main(int argc, char **argv)
     // `assetc check`: validate the compiled output's internal consistency.
     if (checkCmd->parsed())
         return assetc::CheckRuntime(outputDir);
+
+    // `assetc ui`: open the ImGui inspector. Default target is the output dir;
+    // if that's absent but a sibling <output>.hpack exists, view the pack instead.
+    if (uiCmd->parsed())
+    {
+        std::string target = uiPath;
+        if (target.empty())
+        {
+            target = outputDir;
+            if (!fs::exists(target))
+            {
+                const fs::path od   = outputDir;
+                const auto      pack = (od.parent_path() / (od.filename().string() + ".hpack"));
+                if (fs::exists(pack))
+                    target = pack.generic_string();
+            }
+        }
+        return assetc::RunViewer(target);
+    }
 
     // `assetc pack info`: inspect a .hpack (defaults to the output's sibling pack).
     if (packInfoCmd->parsed())

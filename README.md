@@ -17,6 +17,7 @@ Every output format has a detailed binary spec under [`docs/`](#file-formats).
 | `assetc info`  | Inspect the *compiled* output dir and print per-file stats + aggregate totals (no recompile). |
 | `assetc check` | Verify cross-file integrity of the compiled output dir (exit non-zero on any problem). |
 | `assetc pack info [file]` | Inspect a `.hpack` (default `<output>.hpack`): per-kind summary + entry listing. |
+| `assetc ui [path]` | Open a Dear ImGui (Vulkan + GLFW) inspector on a `.hpack` or output dir: browse entries, **view every `.ktx2` mip level** (UASTC/Basis transcoded to RGBA on the fly, cube faces + array layers selectable), plus header info for the other formats. Defaults to the output dir, falling back to its sibling `<output>.hpack`. |
 
 Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 

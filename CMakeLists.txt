@@ -19,6 +19,8 @@ include(fmt)
 include(meshoptimizer)
 include(slang)
 include(yaml)
+include(glfw)
+include(imgui)
 
 # Set the Apple stdlib flag before add_subdirectory so the SDK subdirectory builds
 # with the same standard library this project uses (libc++, needed for std::format).
@@ -93,12 +95,24 @@ else()
     )
 endif()
 
+# The `assetc ui` inspector (Vulkan + GLFW + Dear ImGui). Kept in its own static
+# lib so the windowing/GPU deps don't leak into the ctest binaries.
+add_library(assetc_viewer STATIC
+    src/viewer/gpu.cpp
+    src/viewer/viewer.cpp
+    )
+set_target_properties(assetc_viewer PROPERTIES
+            CXX_STANDARD 23
+            CXX_EXTENSIONS OFF
+            )
+target_link_libraries(assetc_viewer PUBLIC assetc_core imgui glfw)
+
 add_executable(${PROJECT_NAME} src/main.cpp)
 set_target_properties(${PROJECT_NAME} PROPERTIES
             CXX_STANDARD 23
             CXX_EXTENSIONS OFF
             )
-target_link_libraries(${PROJECT_NAME} PRIVATE assetc_core)
+target_link_libraries(${PROJECT_NAME} PRIVATE assetc_core assetc_viewer)
 
 enable_testing()
 add_subdirectory(tests)
