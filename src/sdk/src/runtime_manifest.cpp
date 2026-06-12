@@ -1,9 +1,10 @@
-#include "runtime_manifest.hpp"
+#include "assetc/runtime_manifest.hpp"
 
-#include "../deps/fmt.hpp"
+#include "diag.hpp"
 
 #include <algorithm>
 #include <bit>
+#include <format>
 #include <fstream>
 #include <ios>
 
@@ -42,7 +43,7 @@ int assetc::WriteHMan(const std::string &path, std::vector<ManifestEntry> entrie
         {
             if (deduped.back().path == e.path)
                 continue; // same ref emitted from multiple slots/assets: collapse
-            fmtx::Error(fmt::format(
+            assetc::diag::Error(std::format(
                 "hman hash collision: 0x{:016x} maps to both \"{}\" and \"{}\"", e.hash,
                 deduped.back().path, e.path));
             return 1;
@@ -53,7 +54,7 @@ int assetc::WriteHMan(const std::string &path, std::vector<ManifestEntry> entrie
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out)
     {
-        fmtx::Error(fmt::format("open failed: {}", path));
+        assetc::diag::Error(std::format("open failed: {}", path));
         return 1;
     }
 
@@ -66,7 +67,7 @@ int assetc::WriteHMan(const std::string &path, std::vector<ManifestEntry> entrie
     {
         if (e.path.size() > 0xFFFF)
         {
-            fmtx::Error(fmt::format("hman path too long ({} bytes): {}", e.path.size(), e.path));
+            assetc::diag::Error(std::format("hman path too long ({} bytes): {}", e.path.size(), e.path));
             return 1;
         }
         Put(out, e.hash);
@@ -78,7 +79,7 @@ int assetc::WriteHMan(const std::string &path, std::vector<ManifestEntry> entrie
 
     if (!out.good())
     {
-        fmtx::Error(fmt::format("write failed: {}", path));
+        assetc::diag::Error(std::format("write failed: {}", path));
         return 1;
     }
     return 0;
@@ -89,7 +90,7 @@ int assetc::ValidateHMan(const std::string &path)
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in)
     {
-        fmtx::Error(fmt::format("open failed: {}", path));
+        assetc::diag::Error(std::format("open failed: {}", path));
         return 1;
     }
     const auto size = static_cast<uint64_t>(in.tellg());
@@ -98,18 +99,18 @@ int assetc::ValidateHMan(const std::string &path)
     uint32_t magic = 0, version = 0, count = 0, reserved = 0;
     if (size < 16 || !Get(in, magic) || !Get(in, version) || !Get(in, count) || !Get(in, reserved))
     {
-        fmtx::Error(fmt::format("hman too small: {}", path));
+        assetc::diag::Error(std::format("hman too small: {}", path));
         return 1;
     }
     if (magic != ManMagic)
     {
-        fmtx::Error(fmt::format("hman bad magic: {}", path));
+        assetc::diag::Error(std::format("hman bad magic: {}", path));
         return 1;
     }
     if (version != ManVersion)
     {
-        fmtx::Error(
-            fmt::format("hman bad version {} (want {}): {}", version, ManVersion, path));
+        assetc::diag::Error(
+            std::format("hman bad version {} (want {}): {}", version, ManVersion, path));
         return 1;
     }
 
@@ -122,26 +123,26 @@ int assetc::ValidateHMan(const std::string &path)
         uint16_t pathLen = 0;
         if (!Get(in, hash) || !Get(in, kind) || !Get(in, colorsp) || !Get(in, pathLen))
         {
-            fmtx::Error(fmt::format("hman truncated header for entry {}: {}", i, path));
+            assetc::diag::Error(std::format("hman truncated header for entry {}: {}", i, path));
             return 1;
         }
         if (i > 0 && hash < prevHash)
         {
-            fmtx::Error(fmt::format("hman not sorted by hash at entry {}: {}", i, path));
+            assetc::diag::Error(std::format("hman not sorted by hash at entry {}: {}", i, path));
             return 1;
         }
         prevHash = hash;
         in.seekg(pathLen, std::ios::cur);
         if (!in.good())
         {
-            fmtx::Error(fmt::format("hman truncated path for entry {}: {}", i, path));
+            assetc::diag::Error(std::format("hman truncated path for entry {}: {}", i, path));
             return 1;
         }
     }
 
     if (static_cast<uint64_t>(in.tellg()) != size)
     {
-        fmtx::Error(fmt::format("hman trailing bytes after {} entries: {}", count, path));
+        assetc::diag::Error(std::format("hman trailing bytes after {} entries: {}", count, path));
         return 1;
     }
     return 0;
@@ -154,17 +155,17 @@ int assetc::ReadHMan(const std::string &path, std::vector<ManifestEntry> &out)
     uint32_t      magic = 0, version = 0, count = 0, reserved = 0;
     if (!in || !Get(in, magic) || !Get(in, version) || !Get(in, count) || !Get(in, reserved))
     {
-        fmtx::Error(fmt::format("hman too small: {}", path));
+        assetc::diag::Error(std::format("hman too small: {}", path));
         return 1;
     }
     if (magic != ManMagic)
     {
-        fmtx::Error(fmt::format("hman bad magic: {}", path));
+        assetc::diag::Error(std::format("hman bad magic: {}", path));
         return 1;
     }
     if (version != ManVersion)
     {
-        fmtx::Error(fmt::format("hman bad version {} (want {}): {}", version, ManVersion, path));
+        assetc::diag::Error(std::format("hman bad version {} (want {}): {}", version, ManVersion, path));
         return 1;
     }
 
@@ -176,13 +177,13 @@ int assetc::ReadHMan(const std::string &path, std::vector<ManifestEntry> &out)
         uint16_t      pathLen = 0;
         if (!Get(in, e.hash) || !Get(in, kind) || !Get(in, cs) || !Get(in, pathLen))
         {
-            fmtx::Error(fmt::format("hman truncated header for entry {}: {}", i, path));
+            assetc::diag::Error(std::format("hman truncated header for entry {}: {}", i, path));
             return 1;
         }
         e.path.resize(pathLen);
         if (pathLen && !in.read(e.path.data(), pathLen))
         {
-            fmtx::Error(fmt::format("hman truncated path for entry {}: {}", i, path));
+            assetc::diag::Error(std::format("hman truncated path for entry {}: {}", i, path));
             return 1;
         }
         e.kind       = static_cast<ManKind>(kind);

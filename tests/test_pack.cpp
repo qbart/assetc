@@ -1,5 +1,6 @@
 #include "check.hpp"
 
+#include "assetc/inspect.hpp" // InspectPack (tool-side reporter, not in the SDK)
 #include "assetc/pack.hpp"
 
 #include <cstdint>

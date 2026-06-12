@@ -1,12 +1,13 @@
-#include "runtime_mesh.hpp"
+#include "assetc/runtime_mesh.hpp"
 
-#include "../deps/fmt.hpp"
+#include "diag.hpp"
 
 #include <algorithm>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <ios>
 #include <type_traits>
@@ -42,7 +43,7 @@ int assetc::WriteChunked(const std::string &path, std::span<const ChunkPayload> 
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out)
     {
-        fmtx::Error(fmt::format("open failed: {}", path));
+        assetc::diag::Error(std::format("open failed: {}", path));
         return 1;
     }
 
@@ -68,7 +69,7 @@ int assetc::WriteChunked(const std::string &path, std::span<const ChunkPayload> 
 
     if (!out.good())
     {
-        fmtx::Error(fmt::format("write failed: {}", path));
+        assetc::diag::Error(std::format("write failed: {}", path));
         return 1;
     }
     return 0;
@@ -182,12 +183,12 @@ int assetc::WriteHMesh(const std::string &path, const Mesh &m, const MeshBounds 
 {
     if (m.vertices.empty())
     {
-        fmtx::Error(fmt::format("WriteHMesh: empty vertex buffer, refusing to write {}", path));
+        assetc::diag::Error(std::format("WriteHMesh: empty vertex buffer, refusing to write {}", path));
         return 1;
     }
     if (submeshes.empty())
     {
-        fmtx::Error(fmt::format("WriteHMesh: no submeshes, refusing to write {}", path));
+        assetc::diag::Error(std::format("WriteHMesh: no submeshes, refusing to write {}", path));
         return 1;
     }
 
@@ -268,7 +269,7 @@ int assetc::ValidateHMesh(const std::string &path)
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in)
     {
-        fmtx::Error(fmt::format("validate: cannot open {}", path));
+        assetc::diag::Error(std::format("validate: cannot open {}", path));
         return 1;
     }
     const auto fileSize = static_cast<size_t>(in.tellg());
@@ -278,13 +279,13 @@ int assetc::ValidateHMesh(const std::string &path)
     in.read(reinterpret_cast<char *>(buf.data()), static_cast<std::streamsize>(fileSize));
     if (!in)
     {
-        fmtx::Error(fmt::format("validate: read failed {}", path));
+        assetc::diag::Error(std::format("validate: read failed {}", path));
         return 1;
     }
 
     if (fileSize < sizeof(FileHeader))
     {
-        fmtx::Error(fmt::format("validate: {} too small ({} B)", path, fileSize));
+        assetc::diag::Error(std::format("validate: {} too small ({} B)", path, fileSize));
         return 1;
     }
 
@@ -292,12 +293,12 @@ int assetc::ValidateHMesh(const std::string &path)
     std::memcpy(&hdr, buf.data(), sizeof(FileHeader));
     if (hdr.magic != MeshMagic)
     {
-        fmtx::Error(fmt::format("validate: {} bad magic 0x{:08x}", path, hdr.magic));
+        assetc::diag::Error(std::format("validate: {} bad magic 0x{:08x}", path, hdr.magic));
         return 1;
     }
     if (hdr.version != MeshVersion)
     {
-        fmtx::Error(fmt::format("validate: {} unsupported version {} (expected {})", path,
+        assetc::diag::Error(std::format("validate: {} unsupported version {} (expected {})", path,
                                 hdr.version, MeshVersion));
         return 1;
     }
@@ -306,7 +307,7 @@ int assetc::ValidateHMesh(const std::string &path)
     const size_t tableBytes  = static_cast<size_t>(hdr.chunkCount) * sizeof(ChunkEntry);
     if (tableOffset + tableBytes > fileSize)
     {
-        fmtx::Error(fmt::format("validate: {} chunk table truncated", path));
+        assetc::diag::Error(std::format("validate: {} chunk table truncated", path));
         return 1;
     }
 
@@ -318,7 +319,7 @@ int assetc::ValidateHMesh(const std::string &path)
         const auto &e = table[i];
         if (e.offset > fileSize || e.size > fileSize - e.offset)
         {
-            fmtx::Error(fmt::format("validate: {} chunk {} (fourcc 0x{:08x}) extends past EOF",
+            assetc::diag::Error(std::format("validate: {} chunk {} (fourcc 0x{:08x}) extends past EOF",
                                     path, i, e.fourcc));
             return 1;
         }
@@ -339,14 +340,14 @@ int assetc::ValidateHMesh(const std::string &path)
     const auto *subm = findChunk(ChunkId::SubMeshes);
     if (!desc || !bnds || !vtxs || !idxs || !subm)
     {
-        fmtx::Error(fmt::format("validate: {} missing required chunk (DESC/BNDS/VTXS/IDXS/SUBM)",
+        assetc::diag::Error(std::format("validate: {} missing required chunk (DESC/BNDS/VTXS/IDXS/SUBM)",
                                 path));
         return 1;
     }
 
     if (desc->size != sizeof(MeshDesc))
     {
-        fmtx::Error(fmt::format("validate: {} DESC size {} != {}", path, desc->size,
+        assetc::diag::Error(std::format("validate: {} DESC size {} != {}", path, desc->size,
                                 sizeof(MeshDesc)));
         return 1;
     }
@@ -355,7 +356,7 @@ int assetc::ValidateHMesh(const std::string &path)
 
     if (bnds->size != sizeof(MeshBounds))
     {
-        fmtx::Error(fmt::format("validate: {} BNDS size {} != {}", path, bnds->size,
+        assetc::diag::Error(std::format("validate: {} BNDS size {} != {}", path, bnds->size,
                                 sizeof(MeshBounds)));
         return 1;
     }
@@ -364,24 +365,24 @@ int assetc::ValidateHMesh(const std::string &path)
 
     if (d.vertexStride != sizeof(GpuVertex))
     {
-        fmtx::Error(fmt::format("validate: {} DESC.vertexStride {} != sizeof(GpuVertex)={}", path,
+        assetc::diag::Error(std::format("validate: {} DESC.vertexStride {} != sizeof(GpuVertex)={}", path,
                                 d.vertexStride, sizeof(GpuVertex)));
         return 1;
     }
     if (vtxs->size != static_cast<size_t>(d.vertexCount) * d.vertexStride)
     {
-        fmtx::Error(fmt::format("validate: {} VTXS size {} != vertexCount*stride {}", path,
+        assetc::diag::Error(std::format("validate: {} VTXS size {} != vertexCount*stride {}", path,
                                 vtxs->size, static_cast<size_t>(d.vertexCount) * d.vertexStride));
         return 1;
     }
     if (d.indexWidth != 2 && d.indexWidth != 4)
     {
-        fmtx::Error(fmt::format("validate: {} DESC.indexWidth {} not 2 or 4", path, d.indexWidth));
+        assetc::diag::Error(std::format("validate: {} DESC.indexWidth {} not 2 or 4", path, d.indexWidth));
         return 1;
     }
     if (idxs->size != static_cast<size_t>(d.indexCount) * d.indexWidth)
     {
-        fmtx::Error(fmt::format("validate: {} IDXS size {} != indexCount*width {}", path,
+        assetc::diag::Error(std::format("validate: {} IDXS size {} != indexCount*width {}", path,
                                 idxs->size, static_cast<size_t>(d.indexCount) * d.indexWidth));
         return 1;
     }
@@ -393,7 +394,7 @@ int assetc::ValidateHMesh(const std::string &path)
             return count == 0; // absent is fine only if the count says so
         if (c->size != count * elem)
         {
-            fmtx::Error(fmt::format("validate: {} {} size {} != count*elem {}", path, tag, c->size,
+            assetc::diag::Error(std::format("validate: {} {} size {} != count*elem {}", path, tag, c->size,
                                     count * elem));
             return false;
         }
@@ -410,7 +411,7 @@ int assetc::ValidateHMesh(const std::string &path)
     {
         if (skin->size != static_cast<size_t>(d.vertexCount) * sizeof(GpuSkinVertex))
         {
-            fmtx::Error(fmt::format("validate: {} SKIN size {} != vertexCount*{}", path, skin->size,
+            assetc::diag::Error(std::format("validate: {} SKIN size {} != vertexCount*{}", path, skin->size,
                                     sizeof(GpuSkinVertex)));
             return 1;
         }
@@ -419,7 +420,7 @@ int assetc::ValidateHMesh(const std::string &path)
     {
         if (skel->size == 0 || skel->size % sizeof(GpuJoint) != 0)
         {
-            fmtx::Error(fmt::format("validate: {} SKEL size {} not a multiple of {}", path,
+            assetc::diag::Error(std::format("validate: {} SKEL size {} not a multiple of {}", path,
                                     skel->size, sizeof(GpuJoint)));
             return 1;
         }
@@ -433,12 +434,12 @@ int assetc::ValidateHMesh(const std::string &path)
         const size_t lodiCount = lodi ? lodi->size / sizeof(uint32_t) : 0;
         if (lodi && lodi->size % sizeof(uint32_t) != 0)
         {
-            fmtx::Error(fmt::format("validate: {} LODI size {} not u32-aligned", path, lodi->size));
+            assetc::diag::Error(std::format("validate: {} LODI size {} not u32-aligned", path, lodi->size));
             return 1;
         }
         if (lodt->size < sizeof(LodTableHeader))
         {
-            fmtx::Error(fmt::format("validate: {} LODT too small", path));
+            assetc::diag::Error(std::format("validate: {} LODT too small", path));
             return 1;
         }
         LodTableHeader lh{};
@@ -447,7 +448,7 @@ int assetc::ValidateHMesh(const std::string &path)
                               static_cast<size_t>(lh.lodCount) * lh.submeshCount * sizeof(MeshLod);
         if (lh.submeshCount != d.submeshCount || lodt->size != expect)
         {
-            fmtx::Error(fmt::format("validate: {} LODT size {} != expected {} (submeshCount {})",
+            assetc::diag::Error(std::format("validate: {} LODT size {} != expected {} (submeshCount {})",
                                     path, lodt->size, expect, lh.submeshCount));
             return 1;
         }
@@ -462,7 +463,7 @@ int assetc::ValidateHMesh(const std::string &path)
             if (lod.indexCount % 3 != 0 ||
                 static_cast<size_t>(lod.firstIndex) + lod.indexCount > lodiCount)
             {
-                fmtx::Error(fmt::format("validate: {} LOD {} range [{},{}) invalid (LODI {} idx)",
+                assetc::diag::Error(std::format("validate: {} LOD {} range [{},{}) invalid (LODI {} idx)",
                                         path, i, lod.firstIndex, lod.firstIndex + lod.indexCount,
                                         lodiCount));
                 return 1;
@@ -472,7 +473,7 @@ int assetc::ValidateHMesh(const std::string &path)
 
     if (d.submeshCount == 0 || subm->size != static_cast<size_t>(d.submeshCount) * sizeof(SubMesh))
     {
-        fmtx::Error(fmt::format("validate: {} SUBM size {} != submeshCount {} * {}", path,
+        assetc::diag::Error(std::format("validate: {} SUBM size {} != submeshCount {} * {}", path,
                                 subm->size, d.submeshCount, sizeof(SubMesh)));
         return 1;
     }
@@ -491,7 +492,7 @@ int assetc::ValidateHMesh(const std::string &path)
         const auto &sm = submeshes[s];
         if (sm.firstIndex != idxCursor || sm.firstMeshlet != mletCursor)
         {
-            fmtx::Error(fmt::format(
+            assetc::diag::Error(std::format(
                 "validate: {} submesh {} not contiguous (firstIndex {} expected {}, "
                 "firstMeshlet {} expected {})",
                 path, s, sm.firstIndex, idxCursor, sm.firstMeshlet, mletCursor));
@@ -499,13 +500,13 @@ int assetc::ValidateHMesh(const std::string &path)
         }
         if (sm.indexCount % 3 != 0)
         {
-            fmtx::Error(fmt::format("validate: {} submesh {} indexCount {} not multiple of 3", path,
+            assetc::diag::Error(std::format("validate: {} submesh {} indexCount {} not multiple of 3", path,
                                     s, sm.indexCount));
             return 1;
         }
         if (sm.materialSlot != kNoMaterial && sm.materialSlot >= d.materialCount)
         {
-            fmtx::Error(fmt::format("validate: {} submesh {} materialSlot {} >= materialCount {}",
+            assetc::diag::Error(std::format("validate: {} submesh {} materialSlot {} >= materialCount {}",
                                     path, s, sm.materialSlot, d.materialCount));
             return 1;
         }
@@ -516,7 +517,7 @@ int assetc::ValidateHMesh(const std::string &path)
             || sm.bounds.aabbMax.y > bounds.aabbMax.y + eps
             || sm.bounds.aabbMax.z > bounds.aabbMax.z + eps)
         {
-            fmtx::Error(fmt::format("validate: {} submesh {} AABB not contained in mesh AABB", path,
+            assetc::diag::Error(std::format("validate: {} submesh {} AABB not contained in mesh AABB", path,
                                     s));
             return 1;
         }
@@ -525,7 +526,7 @@ int assetc::ValidateHMesh(const std::string &path)
     }
     if (idxCursor != d.indexCount || mletCursor != d.meshletCount)
     {
-        fmtx::Error(fmt::format(
+        assetc::diag::Error(std::format(
             "validate: {} submeshes cover {} idx / {} meshlets, expected {} / {}", path, idxCursor,
             mletCursor, d.indexCount, d.meshletCount));
         return 1;
@@ -543,7 +544,7 @@ int assetc::ValidateHMesh(const std::string &path)
             || pos[1] < bounds.aabbMin.y - eps || pos[1] > bounds.aabbMax.y + eps
             || pos[2] < bounds.aabbMin.z - eps || pos[2] > bounds.aabbMax.z + eps)
         {
-            fmtx::Error(fmt::format(
+            assetc::diag::Error(std::format(
                 "validate: {} vertex {} ({},{},{}) outside AABB [({},{},{})-({},{},{})]", path, i,
                 pos[0], pos[1], pos[2], bounds.aabbMin.x, bounds.aabbMin.y, bounds.aabbMin.z,
                 bounds.aabbMax.x, bounds.aabbMax.y, bounds.aabbMax.z));
@@ -551,7 +552,7 @@ int assetc::ValidateHMesh(const std::string &path)
         }
     }
 
-    fmtx::Success(fmt::format("validate: {} ok ({} verts, {} idx@{}B, {} submeshes, {} mats, {} "
+    assetc::diag::Success(std::format("validate: {} ok ({} verts, {} idx@{}B, {} submeshes, {} mats, {} "
                               "chunks)",
                               path, d.vertexCount, d.indexCount, d.indexWidth, d.submeshCount,
                               d.materialCount, hdr.chunkCount));

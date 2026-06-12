@@ -1,8 +1,9 @@
-#include "runtime_anim.hpp"
+#include "assetc/runtime_anim.hpp"
 
-#include "../deps/fmt.hpp"
+#include "diag.hpp"
 
 #include <bit>
+#include <format>
 #include <fstream>
 
 static_assert(std::endian::native == std::endian::little,
@@ -29,7 +30,7 @@ int assetc::WriteHAnim(const std::string &path, const std::vector<AnimClip> &cli
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out)
     {
-        fmtx::Error(fmt::format("open failed: {}", path));
+        assetc::diag::Error(std::format("open failed: {}", path));
         return 1;
     }
     Put(out, AnimMagic);
@@ -62,7 +63,7 @@ int assetc::WriteHAnim(const std::string &path, const std::vector<AnimClip> &cli
     }
     if (!out.good())
     {
-        fmtx::Error(fmt::format("write failed: {}", path));
+        assetc::diag::Error(std::format("write failed: {}", path));
         return 1;
     }
     return 0;
@@ -75,17 +76,17 @@ int assetc::ReadHAnim(const std::string &path, std::vector<AnimClip> &out)
     uint32_t      magic = 0, version = 0, clipCount = 0, reserved = 0;
     if (!in || !Get(in, magic) || !Get(in, version) || !Get(in, clipCount) || !Get(in, reserved))
     {
-        fmtx::Error(fmt::format("hanim too small: {}", path));
+        assetc::diag::Error(std::format("hanim too small: {}", path));
         return 1;
     }
     if (magic != AnimMagic)
     {
-        fmtx::Error(fmt::format("hanim bad magic: {}", path));
+        assetc::diag::Error(std::format("hanim bad magic: {}", path));
         return 1;
     }
     if (version != AnimVersion)
     {
-        fmtx::Error(fmt::format("hanim bad version {} (want {}): {}", version, AnimVersion, path));
+        assetc::diag::Error(std::format("hanim bad version {} (want {}): {}", version, AnimVersion, path));
         return 1;
     }
 
@@ -148,7 +149,7 @@ int assetc::ValidateHAnim(const std::string &path)
     }
     if (consumed != fileSize)
     {
-        fmtx::Error(fmt::format("hanim size {} != parsed {}: {}", fileSize, consumed, path));
+        assetc::diag::Error(std::format("hanim size {} != parsed {}: {}", fileSize, consumed, path));
         return 1;
     }
     return 0;

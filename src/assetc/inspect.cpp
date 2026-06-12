@@ -1,9 +1,10 @@
 #include "inspect.hpp"
 
-#include "runtime_anim.hpp"
-#include "runtime_manifest.hpp"
-#include "runtime_material.hpp"
-#include "runtime_mesh.hpp"
+#include "assetc/pack.hpp"
+#include "assetc/runtime_anim.hpp"
+#include "assetc/runtime_manifest.hpp"
+#include "assetc/runtime_material.hpp"
+#include "assetc/runtime_mesh.hpp"
 
 #include "../deps/fmt.hpp"
 
@@ -351,7 +352,88 @@ void InspectKtx2(const fs::path &p, const std::string &rel, Totals &t, std::vect
     t.texPixels += static_cast<uint64_t>(h.w) * h.h * std::max(1u, h.d) * faces * layers;
 }
 
+// ---- .hpack -----------------------------------------------------------------
+
+// Per-entry on-disk TOC record size for a given path length (mirrors the layout
+// written by WritePack: offset u64 + size u64 + kind u8 + pathLen u16 + path).
+uint64_t PackTocRecordBytes(size_t pathLen) noexcept
+{
+    return sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint8_t) + sizeof(uint16_t) + pathLen;
+}
+
+// Labels indexed by PackKind value (Other=0, Mesh=1, ... Font=7).
+const char *kPackKindLabels[] = {"other",                "meshes (.hmesh)",   "materials (.hmat)",
+                                 "manifests (.hman)",     "animations (.hanim)", "textures (.ktx2)",
+                                 "shaders (.spv)",        "fonts (.hfont)"};
+constexpr int kPackKindCount = 8;
+// Summary display order: assets first, "other" last.
+constexpr assetc::PackKind kPackKindOrder[] = {
+    assetc::PackKind::Mesh,      assetc::PackKind::Material, assetc::PackKind::Manifest,
+    assetc::PackKind::Animation, assetc::PackKind::Texture,  assetc::PackKind::Shader,
+    assetc::PackKind::Font,      assetc::PackKind::Other};
+
+const char *PackKindTag(assetc::PackKind k)
+{
+    switch (k)
+    {
+    case assetc::PackKind::Mesh: return "mesh";
+    case assetc::PackKind::Material: return "material";
+    case assetc::PackKind::Manifest: return "manifest";
+    case assetc::PackKind::Animation: return "anim";
+    case assetc::PackKind::Texture: return "texture";
+    case assetc::PackKind::Shader: return "shader";
+    case assetc::PackKind::Font: return "font";
+    default: return "other";
+    }
+}
+
 } // namespace
+
+int assetc::InspectPack(const std::string &packPath)
+{
+    std::vector<assetc::PackEntry> toc;
+    if (assetc::ReadPackToc(packPath, toc) != 0)
+        return 1;
+
+    uint64_t payload  = 0;
+    uint64_t tocBytes = 0;
+    uint64_t kindCount[kPackKindCount]{};
+    uint64_t kindBytes[kPackKindCount]{};
+    for (const auto &e : toc)
+    {
+        payload += e.size;
+        tocBytes += PackTocRecordBytes(e.path.size());
+        const int k = static_cast<int>(e.kind);
+        ++kindCount[k];
+        kindBytes[k] += e.size;
+    }
+    std::error_code ec;
+    const uint64_t  fileSize    = static_cast<uint64_t>(fs::file_size(packPath, ec));
+    const uint64_t  headerBytes = sizeof(uint32_t) * 4 + sizeof(uint64_t); // 24
+    const uint64_t  padding =
+        fileSize >= headerBytes + tocBytes + payload ? fileSize - headerBytes - tocBytes - payload : 0;
+
+    fmt::print("{}== {} (HPAK v{}) — {} entries, {}{}\n", fmtx::CYAN, packPath, assetc::PackVersion,
+               toc.size(), HumanBytes(fileSize), fmtx::RESET);
+    fmt::print("  layout: {} header + {} toc + {} payload ({} alignment padding)\n",
+               HumanBytes(headerBytes), HumanBytes(tocBytes), HumanBytes(payload),
+               HumanBytes(padding));
+    for (assetc::PackKind pk : kPackKindOrder)
+    {
+        const int k = static_cast<int>(pk);
+        if (kindCount[k] > 0)
+            fmt::print("  {:<20} {:>4}  {}\n", kPackKindLabels[k], kindCount[k],
+                       HumanBytes(kindBytes[k]));
+    }
+
+    // Entries (already path-sorted in the TOC): kind | path | size | offset.
+    fmt::print("\n{}== entries{}\n", fmtx::CYAN, fmtx::RESET);
+    for (const auto &e : toc)
+        fmt::print("  {:<9} {:<44} {:>10}  @{}\n", PackKindTag(e.kind), e.path, HumanBytes(e.size),
+                   e.offset);
+
+    return 0;
+}
 
 int assetc::InspectRuntime(const std::string &dir)
 {

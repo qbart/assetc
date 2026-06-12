@@ -1,6 +1,6 @@
 #pragma once
 
-#include "runtime_manifest.hpp" // ManifestEntry
+#include "assetc/runtime_manifest.hpp" // ManifestEntry
 
 #include <cstdint>
 #include <string>

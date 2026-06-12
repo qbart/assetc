@@ -20,8 +20,20 @@ include(meshoptimizer)
 include(slang)
 include(yaml)
 
+# Set the Apple stdlib flag before add_subdirectory so the SDK subdirectory builds
+# with the same standard library this project uses (libc++, needed for std::format).
+if(APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+endif()
+
+# The runtime loaders + binary format definitions live in a standalone,
+# dependency-free SDK (src/sdk) that an engine can FetchContent on its own. Both
+# this project and the SDK share that one definition of every on-disk format.
+add_subdirectory(src/sdk)
+
 # All compilation units except main.cpp live in a static core library so both the
-# `assetc` executable and the ctest binaries can link the same logic.
+# `assetc` executable and the ctest binaries can link the same logic. The runtime
+# loaders are NOT listed here — they come from assetc_sdk below.
 add_library(assetc_core STATIC
     src/deps/fmt.cpp
     src/deps/stb.cpp
@@ -30,15 +42,9 @@ add_library(assetc_core STATIC
     src/deps/obj.cpp
     src/deps/tiny/mikktspace.c
     src/assetc/shader.cpp
-    src/assetc/runtime_mesh.cpp
-    src/assetc/runtime_material.cpp
-    src/assetc/runtime_manifest.cpp
-    src/assetc/runtime_anim.cpp
-    src/assetc/runtime_font.cpp
     src/assetc/inspect.cpp
     src/assetc/check.cpp
     src/assetc/cache.cpp
-    src/assetc/pack.cpp
     src/assetc/config.cpp
     src/assetc/encode_mesh.cpp
     src/assetc/encode_material.cpp
@@ -55,8 +61,6 @@ set_target_properties(assetc_core PROPERTIES
 target_include_directories(assetc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 if(APPLE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-
     find_library(COCOA_LIBRARY Cocoa REQUIRED)
     find_library(IOKIT_LIBRARY IOKit REQUIRED)
     find_library(COREVIDEO_LIBRARY CoreVideo REQUIRED)
@@ -67,6 +71,7 @@ if(APPLE)
         ${IOKIT_LIBRARY}
         ${COREVIDEO_LIBRARY}
         ${CARBON_LIBRARY}
+        assetc::sdk
         fmt::fmt
         CLI11::CLI11
         ktx
@@ -77,6 +82,7 @@ if(APPLE)
     )
 else()
     target_link_libraries(assetc_core PUBLIC
+        assetc::sdk
         fmt::fmt
         CLI11::CLI11
         ktx

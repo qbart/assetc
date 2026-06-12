@@ -1,6 +1,6 @@
 #pragma once
 
-#include "runtime_material.hpp"
+#include "assetc/runtime_material.hpp"
 
 #include "../deps/ktx.hpp"
 

@@ -1,7 +1,8 @@
 #pragma once
 
-#include "runtime_anim.hpp"
-#include "runtime_mesh.hpp"
+#include "assetc/hash.hpp" // HashAssetRef (SDK)
+#include "assetc/runtime_anim.hpp"
+#include "assetc/runtime_mesh.hpp"
 
 #include <cstdint>
 #include <string>
@@ -70,11 +71,8 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef);
 CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef,
                            bool mergeNodes = true);
 
-// FNV1a64 hash of a runtime-relative asset reference. Caller-side normalization
-// (lowercase, /-separated, no extension, no leading "runtime/" prefix) is the
-// authoritative format; this function additionally lowercases ASCII A-Z for
-// belt-and-braces consistency.
-uint64_t HashAssetRef(std::string_view runtimeRefNoExt) noexcept;
+// HashAssetRef now lives in the SDK (assetc/hash.hpp, included above) so the
+// engine and the encoder compute refs the same way.
 
 // Derive the leaf segment of a material's runtime ref, format-agnostic.
 //   - If `name` is non-empty AND its lowercased form is unique within

@@ -1,8 +1,9 @@
-#include "runtime_material.hpp"
+#include "assetc/runtime_material.hpp"
 
-#include "../deps/fmt.hpp"
+#include "diag.hpp"
 
 #include <bit>
+#include <format>
 #include <fstream>
 #include <ios>
 
@@ -14,7 +15,7 @@ int assetc::WriteHMat(const std::string &path, std::span<const GpuMaterial> rows
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     if (!out)
     {
-        fmtx::Error(fmt::format("open failed: {}", path));
+        assetc::diag::Error(std::format("open failed: {}", path));
         return 1;
     }
 
@@ -29,7 +30,7 @@ int assetc::WriteHMat(const std::string &path, std::span<const GpuMaterial> rows
 
     if (!out.good())
     {
-        fmtx::Error(fmt::format("write failed: {}", path));
+        assetc::diag::Error(std::format("write failed: {}", path));
         return 1;
     }
     return 0;
@@ -40,7 +41,7 @@ int assetc::ValidateHMat(const std::string &path)
     std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in)
     {
-        fmtx::Error(fmt::format("open failed: {}", path));
+        assetc::diag::Error(std::format("open failed: {}", path));
         return 1;
     }
     const auto size = static_cast<uint64_t>(in.tellg());
@@ -49,24 +50,24 @@ int assetc::ValidateHMat(const std::string &path)
     MatFileHeader hdr{};
     if (size < sizeof(hdr) || !in.read(reinterpret_cast<char *>(&hdr), sizeof(hdr)))
     {
-        fmtx::Error(fmt::format("hmat too small: {}", path));
+        assetc::diag::Error(std::format("hmat too small: {}", path));
         return 1;
     }
     if (hdr.magic != MatMagic)
     {
-        fmtx::Error(fmt::format("hmat bad magic: {}", path));
+        assetc::diag::Error(std::format("hmat bad magic: {}", path));
         return 1;
     }
     if (hdr.version != MatVersion)
     {
-        fmtx::Error(fmt::format("hmat bad version {} (want {}): {}", hdr.version, MatVersion, path));
+        assetc::diag::Error(std::format("hmat bad version {} (want {}): {}", hdr.version, MatVersion, path));
         return 1;
     }
     const uint64_t expect = sizeof(MatFileHeader) +
                             static_cast<uint64_t>(hdr.count) * sizeof(GpuMaterial);
     if (size != expect)
     {
-        fmtx::Error(fmt::format("hmat size {} != expected {} ({} rows): {}", size, expect,
+        assetc::diag::Error(std::format("hmat size {} != expected {} ({} rows): {}", size, expect,
                                 hdr.count, path));
         return 1;
     }

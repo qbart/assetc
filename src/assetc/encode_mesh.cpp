@@ -515,17 +515,8 @@ CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
 
 } // namespace
 
-uint64_t HashAssetRef(std::string_view runtimeRefNoExt) noexcept
-{
-    uint64_t h = FnvOffset;
-    for (char c : runtimeRefNoExt)
-    {
-        const auto b = static_cast<uint8_t>(AsciiLower(c));
-        h ^= b;
-        h *= FnvPrime;
-    }
-    return h;
-}
+// HashAssetRef is defined in the SDK (assetc/hash.hpp + sdk/src/hash.cpp); the
+// encoder uses that single definition so on-disk refs match the engine's lookups.
 
 std::string MaterialLeaf(std::string_view name, size_t index,
                          std::span<const std::string_view> allNames)

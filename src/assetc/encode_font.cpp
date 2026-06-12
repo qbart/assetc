@@ -1,7 +1,7 @@
 #include "encode_font.hpp"
 
-#include "encode_mesh.hpp" // HashAssetRef
-#include "runtime_font.hpp"
+#include "assetc/hash.hpp" // HashAssetRef
+#include "assetc/runtime_font.hpp"
 
 #include "../deps/fmt.hpp"
 #include "../deps/ktx.hpp"

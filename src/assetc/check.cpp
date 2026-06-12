@@ -1,10 +1,10 @@
 #include "check.hpp"
 
-#include "encode_mesh.hpp" // HashAssetRef
-#include "runtime_anim.hpp"
-#include "runtime_manifest.hpp"
-#include "runtime_material.hpp"
-#include "runtime_mesh.hpp"
+#include "assetc/hash.hpp" // HashAssetRef
+#include "assetc/runtime_anim.hpp"
+#include "assetc/runtime_manifest.hpp"
+#include "assetc/runtime_material.hpp"
+#include "assetc/runtime_mesh.hpp"
 
 #include "../deps/fmt.hpp"
 

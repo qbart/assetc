@@ -1,11 +1,12 @@
-#include "pack.hpp"
+#include "assetc/pack.hpp"
 
-#include "../deps/fmt.hpp"
+#include "diag.hpp"
 
 #include <algorithm>
 #include <array>
 #include <bit>
 #include <filesystem>
+#include <format>
 #include <fstream>
 
 namespace fs = std::filesystem;
@@ -55,7 +56,7 @@ int assetc::WritePack(const std::string &outputDir, const std::string &packPath)
 {
     if (!fs::exists(outputDir) || !fs::is_directory(outputDir))
     {
-        fmtx::Error(fmt::format("pack: output dir does not exist: {}", outputDir));
+        assetc::diag::Error(std::format("pack: output dir does not exist: {}", outputDir));
         return 1;
     }
 
@@ -105,7 +106,7 @@ int assetc::WritePack(const std::string &outputDir, const std::string &packPath)
     std::ofstream out(packPath, std::ios::binary | std::ios::trunc);
     if (!out)
     {
-        fmtx::Error(fmt::format("pack: open failed: {}", packPath));
+        assetc::diag::Error(std::format("pack: open failed: {}", packPath));
         return 1;
     }
 
@@ -118,7 +119,7 @@ int assetc::WritePack(const std::string &outputDir, const std::string &packPath)
     {
         if (items[i].rel.size() > 0xFFFF)
         {
-            fmtx::Error(fmt::format("pack: path too long: {}", items[i].rel));
+            assetc::diag::Error(std::format("pack: path too long: {}", items[i].rel));
             return 1;
         }
         Put(out, offsets[i]);
@@ -138,7 +139,7 @@ int assetc::WritePack(const std::string &outputDir, const std::string &packPath)
         std::ifstream in(items[i].abs, std::ios::binary);
         if (!in)
         {
-            fmtx::Error(fmt::format("pack: read failed: {}", items[i].abs));
+            assetc::diag::Error(std::format("pack: read failed: {}", items[i].abs));
             return 1;
         }
         out << in.rdbuf();
@@ -147,10 +148,10 @@ int assetc::WritePack(const std::string &outputDir, const std::string &packPath)
 
     if (!out.good())
     {
-        fmtx::Error(fmt::format("pack: write failed: {}", packPath));
+        assetc::diag::Error(std::format("pack: write failed: {}", packPath));
         return 1;
     }
-    fmtx::Info(fmt::format("packed {} files -> {}", items.size(), packPath));
+    assetc::diag::Info(std::format("packed {} files -> {}", items.size(), packPath));
     return 0;
 }
 
@@ -163,17 +164,17 @@ int assetc::ReadPackToc(const std::string &packPath, std::vector<PackEntry> &out
     if (!in || !Get(in, magic) || !Get(in, version) || !Get(in, count) || !Get(in, flags) ||
         !Get(in, tocBytes))
     {
-        fmtx::Error(fmt::format("pack: too small: {}", packPath));
+        assetc::diag::Error(std::format("pack: too small: {}", packPath));
         return 1;
     }
     if (magic != PackMagic)
     {
-        fmtx::Error(fmt::format("pack: bad magic: {}", packPath));
+        assetc::diag::Error(std::format("pack: bad magic: {}", packPath));
         return 1;
     }
     if (version != PackVersion)
     {
-        fmtx::Error(fmt::format("pack: bad version {} (want {}): {}", version, PackVersion, packPath));
+        assetc::diag::Error(std::format("pack: bad version {} (want {}): {}", version, PackVersion, packPath));
         return 1;
     }
     out.reserve(count);
@@ -184,107 +185,18 @@ int assetc::ReadPackToc(const std::string &packPath, std::vector<PackEntry> &out
         uint16_t  pathLen = 0;
         if (!Get(in, e.offset) || !Get(in, e.size) || !Get(in, kind) || !Get(in, pathLen))
         {
-            fmtx::Error(fmt::format("pack: truncated TOC entry {}: {}", i, packPath));
+            assetc::diag::Error(std::format("pack: truncated TOC entry {}: {}", i, packPath));
             return 1;
         }
         e.kind = static_cast<PackKind>(kind);
         e.path.resize(pathLen);
         if (pathLen && !in.read(e.path.data(), pathLen))
         {
-            fmtx::Error(fmt::format("pack: truncated path {}: {}", i, packPath));
+            assetc::diag::Error(std::format("pack: truncated path {}: {}", i, packPath));
             return 1;
         }
         out.push_back(std::move(e));
     }
-    return 0;
-}
-
-namespace
-{
-std::string HumanBytes(uint64_t n)
-{
-    const char *u[] = {"B", "KB", "MB", "GB"};
-    double      v   = static_cast<double>(n);
-    int         i   = 0;
-    while (v >= 1024.0 && i < 3)
-    {
-        v /= 1024.0;
-        ++i;
-    }
-    return i == 0 ? fmt::format("{} B", n) : fmt::format("{:.1f} {}", v, u[i]);
-}
-
-// Labels indexed by PackKind value (Other=0, Mesh=1, ... Shader=6).
-const char *kKindLabels[] = {"other",               "meshes (.hmesh)",  "materials (.hmat)",
-                             "manifests (.hman)",    "animations (.hanim)", "textures (.ktx2)",
-                             "shaders (.spv)",       "fonts (.hfont)"};
-constexpr int kKindCount = 8;
-// Summary display order: assets first, "other" last.
-constexpr assetc::PackKind kKindOrder[] = {
-    assetc::PackKind::Mesh,    assetc::PackKind::Material,  assetc::PackKind::Manifest,
-    assetc::PackKind::Animation, assetc::PackKind::Texture, assetc::PackKind::Shader,
-    assetc::PackKind::Font,    assetc::PackKind::Other};
-
-// Short per-entry tag.
-const char *KindTag(assetc::PackKind k)
-{
-    switch (k)
-    {
-    case assetc::PackKind::Mesh: return "mesh";
-    case assetc::PackKind::Material: return "material";
-    case assetc::PackKind::Manifest: return "manifest";
-    case assetc::PackKind::Animation: return "anim";
-    case assetc::PackKind::Texture: return "texture";
-    case assetc::PackKind::Shader: return "shader";
-    case assetc::PackKind::Font: return "font";
-    default: return "other";
-    }
-}
-} // namespace
-
-int assetc::InspectPack(const std::string &packPath)
-{
-    std::vector<PackEntry> toc;
-    if (ReadPackToc(packPath, toc) != 0)
-        return 1;
-
-    uint64_t payload = 0;
-    uint64_t tocBytes = 0;
-    uint64_t kindCount[kKindCount]{};
-    uint64_t kindBytes[kKindCount]{};
-    for (const auto &e : toc)
-    {
-        payload += e.size;
-        tocBytes += TocRecordBytes(e.path.size());
-        const int k = static_cast<int>(e.kind);
-        ++kindCount[k];
-        kindBytes[k] += e.size;
-    }
-    std::error_code ec;
-    const uint64_t  fileSize = static_cast<uint64_t>(fs::file_size(packPath, ec));
-    const uint64_t  headerBytes = sizeof(uint32_t) * 4 + sizeof(uint64_t); // 24
-    const uint64_t  padding =
-        fileSize >= headerBytes + tocBytes + payload ? fileSize - headerBytes - tocBytes - payload : 0;
-
-    fmt::print("{}== {} (HPAK v{}) — {} entries, {}{}\n", fmtx::CYAN, packPath, PackVersion,
-               toc.size(), HumanBytes(fileSize), fmtx::RESET);
-    fmt::print("  layout: {} header + {} toc + {} payload ({} alignment padding)\n",
-               HumanBytes(headerBytes), HumanBytes(tocBytes), HumanBytes(payload),
-               HumanBytes(padding));
-    for (PackKind pk : kKindOrder)
-    {
-        const int k = static_cast<int>(pk);
-        if (kindCount[k] > 0)
-            fmt::print("  {:<20} {:>4}  {}\n", kKindLabels[k], kindCount[k],
-                       HumanBytes(kindBytes[k]));
-    }
-
-    // Entries (already path-sorted in the TOC): kind | path | size | offset.
-    fmt::print("\n{}== entries{}\n", fmtx::CYAN, fmtx::RESET);
-    for (const auto &e : toc)
-        fmt::print("  {:<9} {:<44} {:>10}  @{}\n", KindTag(e.kind), e.path, HumanBytes(e.size),
-                   e.offset);
-
     return 0;
 }
 
@@ -301,7 +213,7 @@ int assetc::ValidatePack(const std::string &packPath)
     {
         if (e.offset > fileSize || e.size > fileSize - e.offset)
         {
-            fmtx::Error(fmt::format("pack: entry \"{}\" [{},{}) past EOF {}: {}", e.path, e.offset,
+            assetc::diag::Error(std::format("pack: entry \"{}\" [{},{}) past EOF {}: {}", e.path, e.offset,
                                     e.offset + e.size, fileSize, packPath));
             return 1;
         }
