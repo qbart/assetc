@@ -102,4 +102,4 @@ Every submesh additionally gets reduced LODs via meshoptimizer simplification (d
 
 ## Endianness
 
-Little-endian only. `src/assetc/runtime_mesh.cpp` enforces this with a `static_assert(std::endian::native == std::endian::little)`.
+Little-endian only. `src/sdk/src/runtime_mesh.cpp` enforces this with a `static_assert(std::endian::native == std::endian::little)`.

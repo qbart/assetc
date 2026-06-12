@@ -93,4 +93,4 @@ Outlines, glow, and soft shadows come free by thresholding `sd` away from `edgeV
 
 ## Endianness
 
-Little-endian only (`src/assetc/runtime_font.cpp` carries the matching `static_assert`).
+Little-endian only (`src/sdk/src/runtime_font.cpp` carries the matching `static_assert`).

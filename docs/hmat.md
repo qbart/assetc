@@ -64,4 +64,4 @@ If the same image is pulled into conflicting color spaces by different materials
 
 ## Endianness
 
-Little-endian only, same as `.hmesh` (`src/assetc/runtime_material.cpp` carries the matching `static_assert`).
+Little-endian only, same as `.hmesh` (`src/sdk/src/runtime_material.cpp` carries the matching `static_assert`).

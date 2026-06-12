@@ -49,4 +49,4 @@ The `hash` is `HashAssetRef("<sourceRef>/tex_<imageIndex>")` — the same canoni
 
 ## Endianness
 
-Little-endian only (`src/assetc/runtime_manifest.cpp` carries the matching `static_assert`).
+Little-endian only (`src/sdk/src/runtime_manifest.cpp` carries the matching `static_assert`).
