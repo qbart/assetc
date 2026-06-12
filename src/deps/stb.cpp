@@ -9,6 +9,9 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb/stb_image_write.h"
 
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb/stb_truetype.h"
+
 std::string stb::ImageError()
 {
     const char *reason = stbi_failure_reason();
