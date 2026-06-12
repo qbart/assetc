@@ -136,3 +136,46 @@ All runtime formats are little-endian and versioned by a 4-byte magic in their h
 | `.hpack` | `HPAK` | [docs/hpack.md](docs/hpack.md) | Optional bundle (`--pack`) of the whole output dir into one TOC + payload blob so the engine opens a single file. |
 
 The resolution chain across formats: load `assets.hman` once into a `hash → path` map; load a mesh by its known path (`.hmesh`/`.hmat`/`.hanim` are siblings); a material's or font's texture hash resolves through the manifest to a `.ktx2` path (and, if bundled, through the `.hpack` TOC to the bytes).
+
+## Using as a library (SDK)
+
+The runtime-side loaders and format definitions live in a standalone **SDK** under
+[`src/sdk/`](src/sdk/) so an engine can read `assetc` output without re-implementing
+any parser. The SDK depends on **nothing but the C++23 standard library** — pulling
+it in does *not* drag in slang, ktx, meshoptimizer, fmt, yaml-cpp, or Vulkan. The
+`assetc` tool links this same SDK, so the encoder and your engine agree byte-for-byte
+on every format.
+
+It ships the format structs plus ready-made readers/validators: `ReadHMan`,
+`ReadHAnim`, `ReadHFont`, `ReadPackToc`, the `Validate*` checks, the `.hmesh`/`.hmat`
+struct layouts for zero-copy mmap, and `HashAssetRef` to resolve refs through the
+manifest. Include everything via `<assetc/sdk.hpp>` or the individual headers.
+
+### Integrate via CMake FetchContent
+
+Point `FetchContent` at the `src/sdk` subdirectory with `SOURCE_SUBDIR` so it
+configures only the standalone SDK and skips the rest of this repo (which fetches
+slang, ktx, …):
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(assetc_sdk
+    GIT_REPOSITORY https://github.com/qbart/assetc.git
+    GIT_TAG        <tag-or-commit>
+    SOURCE_SUBDIR  src/sdk)
+FetchContent_MakeAvailable(assetc_sdk)
+
+target_link_libraries(my_engine PRIVATE assetc::sdk)
+```
+
+```cpp
+#include <assetc/sdk.hpp>
+
+std::vector<assetc::ManifestEntry> manifest;
+assetc::ReadHMan("runtime/assets.hman", manifest);     // hash -> path table
+uint64_t id = assetc::HashAssetRef("models/chair/tex_0"); // resolve a ref
+// ...then mmap the .hmesh / .hmat and cast the structs in <assetc/runtime_mesh.hpp>.
+```
+
+See [`src/sdk/README.md`](src/sdk/README.md) for the full header/entry-point table
+and an `add_subdirectory` / install alternative.
