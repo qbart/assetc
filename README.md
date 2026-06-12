@@ -4,7 +4,9 @@
 
 A glTF/GLB mesh additionally emits a **companion material table** (`.hmat`) plus one **`.ktx2` per referenced image**. The three layers are orthogonal: `.hmesh` is geometry, `.hmat` is the small per-source material descriptor table (PBR factors + texture refs), and `.ktx2` is the GPU-ready pixel payload. A submesh's `materialSlot` indexes straight into the `.hmat` table (`.hmat` row `i` ⇔ `SubMesh::materialSlot i`).
 
-Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A single global **manifest** (`runtime/assets.hman`) maps each hash back to the `.ktx2` file on disk, so the runtime can content-address textures (load the manifest once into a `hash → path` map, then resolve any `baseColorTex` etc.). See [.hman file format](#hman-file-format-v1).
+Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A single global **manifest** (`runtime/assets.hman`) maps each hash back to the `.ktx2` file on disk, so the runtime can content-address textures (load the manifest once into a `hash → path` map, then resolve any `baseColorTex` etc.). See [docs/hman.md](docs/hman.md).
+
+Every output format has a detailed binary spec under [`docs/`](#file-formats).
 
 ## Commands
 
@@ -101,12 +103,12 @@ Unknown keys are warned (typo protection). The schema is intentionally small —
 | `*.n.png`                              | Normal     | UASTC `.ktx2` (normal mode)             |
 | `*.ao.png`, `*.h.png`, `*.r.png`       | Grayscale  | UASTC `.ktx2` (grayscale mode)          |
 | `*.lut.cube`                           | LUT        | `.lut.ktx2` (3D LUT)                    |
-| `*.obj`, `*.gltf`, `*.glb`             | Mesh       | `.hmesh` (container, see below); glTF also emits `.hmat` + `tex_<i>.ktx2` |
+| `*.obj`, `*.gltf`, `*.glb`             | Mesh       | [`.hmesh`](docs/hmesh.md) (container); glTF also emits [`.hmat`](docs/hmat.md) + `tex_<i>.ktx2` |
 | `*.shader/` (directory)                | Shader     | folder with `vertex.spv` / `fragment.spv` |
 | `*.env/` (directory)                   | Cubemap    | UASTC `.env.ktx2` (6 faces: `px.png`, `nx.png`, `py.png`, `ny.png`, `pz.png`, `nz.png`) |
 | `*.array/` (directory)                 | Array      | `.arr.ktx2` *(planned)*                 |
-| `*.mat`                                | Material   | `.hmat` *(planned standalone; today `.hmat` is emitted as a glTF companion)* |
-| `*.ttf`, `*.otf`                       | Font       | `.hfont` (glyph metrics + kerning) + a single-channel SDF `.ktx2` atlas |
+| `*.mat`                                | Material   | [`.hmat`](docs/hmat.md) *(planned standalone; today `.hmat` is emitted as a glTF companion)* |
+| `*.ttf`, `*.otf`                       | Font       | [`.hfont`](docs/hfont.md) (glyph metrics + kerning) + a single-channel SDF `.ktx2` atlas |
 
 For a glTF source `assets/models/chair.glb` the outputs are:
 
@@ -118,385 +120,19 @@ runtime/models/chair.hanim          animation clips (only if the source is skinn
 runtime/assets.hman                 global hash -> file manifest (all assets, written once)
 ```
 
-Skinned glTF meshes also embed `SKIN` + `SKEL` chunks in the `.hmesh` (see below).
+Skinned glTF meshes also embed `SKIN` + `SKEL` chunks in the `.hmesh` (see [docs/hmesh.md](docs/hmesh.md#skinning-skin--skel)).
 
-## .hmesh file format (v2)
+## File formats
 
-Little-endian, tagged-chunk container. Magic `"HMSH"` (`0x4853'4D48`). v2 introduced the `DESC` + `SUBM` chunks, made every data chunk a *pure array* (no inline prelude), and shrank `GpuVertex` from 36 B to 28 B.
+All runtime formats are little-endian and versioned by a 4-byte magic in their header. Each has a full binary spec — field offsets, layout diagrams, and reader notes — under [`docs/`](docs/):
 
-The `DESC` chunk is the single source of truth for the mesh's shape: counts, strides, and the index width all live there, so every other data chunk (`VTXS`, `IDXS`, `MLET`, ...) is a bare array the loader can mmap-cast directly using `DESC`.
+| Format | Magic | Spec | Summary |
+| ------ | ----- | ---- | ------- |
+| `.hmesh` | `HMSH` | [docs/hmesh.md](docs/hmesh.md) | Tagged-chunk geometry container: `DESC` + pure-array chunks (vertices, indices, meshlets, submeshes, material refs), optional skinning / LODs. |
+| `.hanim` | `HANM` | [docs/hanim.md](docs/hanim.md) | Animation clips for a skinned `.hmesh`: per-joint TRS channels with keyframes. |
+| `.hmat`  | `HMAT` | [docs/hmat.md](docs/hmat.md)   | Flat per-source PBR material table; fixed-stride `GpuMaterial[]`, textures referenced by hash. |
+| `.hman`  | `HMAN` | [docs/hman.md](docs/hman.md)   | Single global hash → file manifest the runtime uses to content-address textures. |
+| `.hfont` | `HFNT` | [docs/hfont.md](docs/hfont.md) | Font metadata (em-unit glyph metrics + kerning) beside a single-channel SDF `.ktx2` atlas for smooth, scalable text in 2D or 3D. |
+| `.hpack` | `HPAK` | [docs/hpack.md](docs/hpack.md) | Optional bundle (`--pack`) of the whole output dir into one TOC + payload blob so the engine opens a single file. |
 
-### Top-level layout
-
-```
-+--------------------------------+
-| FileHeader     (32 B)          |
-+--------------------------------+
-| ChunkTable     (24 B * N)      |
-+--------------------------------+
-| Chunk payloads (16 B aligned)  |
-+--------------------------------+
-```
-
-### FileHeader (32 B)
-
-| Offset | Field        | Type | Notes                                  |
-| -----: | ------------ | ---- | -------------------------------------- |
-|      0 | `magic`      | u32  | `"HMSH"` (`0x4853'4D48`)               |
-|      4 | `version`    | u32  | `2`                                    |
-|      8 | `chunkCount` | u32  | number of entries in ChunkTable        |
-|     12 | `flags`      | u32  | reserved                               |
-|     16 | `_reserved1` | u64  | reserved (was `contentHash`, held)     |
-|     24 | `_reserved2` | u64  | reserved                               |
-
-### ChunkEntry (24 B each)
-
-| Offset | Field    | Type | Notes                                |
-| -----: | -------- | ---- | ------------------------------------ |
-|      0 | `fourcc` | u32  | `ChunkId` value (see below)          |
-|      4 | `flags`  | u32  | per-chunk flags (compression hint)   |
-|      8 | `offset` | u64  | byte offset from file start          |
-|     16 | `size`   | u64  | payload bytes                        |
-
-Chunks are written in any order, padded to 16-byte alignment between payloads. Unknown chunks are ignored by readers (forward compatibility).
-
-### Chunk catalogue (v2)
-
-All data chunks are **pure arrays** — element counts, the vertex stride, and the index width live in `DESC`, not inline in the chunk.
-
-| FourCC | Purpose            | Payload                                                                 |
-| ------ | ------------------ | ----------------------------------------------------------------------- |
-| `DESC` | mesh descriptor    | `MeshDesc` (32 B): counts (vertex/index/meshlet/submesh/material), `vertexStride` (u16), `indexWidth` (u8, 2 or 4), `flags` (u8), meshlet build params |
-| `BNDS` | mesh bounds        | `MeshBounds` (40 B): AABB min/max (`vec3`) + sphere center/radius       |
-| `VTXS` | vertex stream      | `GpuVertex[vertexCount]` (28 B stride)                                  |
-| `IDXS` | index stream       | `u16[]` or `u32[]` per `DESC.indexWidth`; global indices, all submeshes |
-| `MLET` | meshlets           | `Meshlet[]`: per-meshlet vertex/triangle offsets and counts             |
-| `MLVR` | meshlet vertices   | `u32[]`: per-meshlet local-to-global vertex index remap                 |
-| `MLTR` | meshlet triangles  | `MeshletTriangle[]`: 3 × u8 per triangle, dense (no inter-meshlet pad)  |
-| `MLBN` | meshlet bounds     | `MeshletBounds[]`: per-meshlet center/radius + cone-cull axis/cutoff    |
-| `MTRL` | material refs      | `u64[materialCount]` (FNV1a64 of material runtime refs; see below)      |
-| `SUBM` | submesh table      | `SubMesh[submeshCount]` (64 B): index/meshlet ranges, `materialSlot`, per-submesh bounds |
-| `SKIN` | per-vertex skinning | *optional* `GpuSkinVertex[vertexCount]` (24 B): `u16 joints[4]` + `f32 weights[4]` (sum 1); parallel to `VTXS` |
-| `SKEL` | skeleton           | *optional* `GpuJoint[jointCount]` (112 B): inverse-bind matrix, bind-pose TRS, parent index |
-| `LODI` | LOD index buffer   | *optional* `u32[]` global vertex indices for reduced levels (concatenated)     |
-| `LODT` | LOD table          | *optional* `LodTableHeader` (8 B) + `MeshLod[submeshCount*lodCount]` (8 B): per-submesh ranges into `LODI` |
-
-Each `SubMesh` is one drawable section sharing a material: a contiguous `[firstIndex, firstIndex+indexCount)` range into `IDXS` and `[firstMeshlet, firstMeshlet+meshletCount)` into `MLET`, plus a `materialSlot` (index into `MTRL`/`.hmat`, or `kNoMaterial = 0xFFFFFFFF`) and its own AABB+sphere. One glTF primitive → one submesh.
-
-### `GpuVertex` (28 B)
-
-| Offset | Field      | Type      | Notes                                                  |
-| -----: | ---------- | --------- | ------------------------------------------------------ |
-|      0 | `position` | f32 × 3   | object-local position (unquantized)                    |
-|     12 | `normal`   | i16 × 2   | octahedral normal (SNORM)                              |
-|     16 | `tangent`  | i16 × 2   | octahedral tangent + handedness in bit 0 of x (SINT)   |
-|     20 | `uv`       | f32 × 2   | UV0 (top-left origin, matches Vulkan)                  |
-
-The v1 layout carried 8 bytes of reserved padding (two extra i16 per packed slot); v2 dropped them.
-
-Suggested Vulkan vertex input formats: normal → `VK_FORMAT_R16G16_SNORM`, tangent → `VK_FORMAT_R16G16_SINT` (shader needs raw integer access to extract the handedness bit).
-
-### Material refs
-
-The `MTRL` chunk holds FNV1a64 hashes — **compact**: only materials actually referenced by a submesh, in first-use (dense slot) order. `SubMesh::materialSlot` indexes into this list (or is `kNoMaterial`). The same dense slot order is shared by the companion `.hmat` table, so `MTRL[i]`, `.hmat` row `i`, and `materialSlot == i` all describe the same material.
-
-The hash input is a canonical runtime ref of the form `<sourceRef>/<leaf>` where:
-
-- `sourceRef` is the source asset's runtime path with `assets/` prefix stripped, extension dropped, lowercased, `/`-separated (e.g. `models/chair`).
-- `leaf` is the lowercased material name if non-empty AND unique within the source's material array; otherwise `material_<index>` (using the *source* index, so leaf names stay stable regardless of which materials are referenced).
-
-Example: `assets/models/chair.glb` with source materials `["Wood", "", "Leather", "Wood"]`, where submeshes reference source materials `2` then `0` (first-use order), produces `MTRL = [hash("models/chair/leather"), hash("models/chair/material_0")]` — two entries, dense slots `0` and `1`.
-
-### Skinning (`SKIN` + `SKEL`)
-
-A skinned glTF (primitives with `JOINTS_0`/`WEIGHTS_0`, node with a `skin`) additionally emits two optional chunks. Static meshes omit both and are byte-identical to before.
-
-- `SKIN` is parallel to `VTXS` — one `GpuSkinVertex` (`u16 joints[4]`, `f32 weights[4]`) per vertex. `joints` index into `SKEL`; `weights` are renormalized to sum 1 (a weightless vertex falls back to a rigid bind to joint 0).
-- `SKEL` is the joint array. Each `GpuJoint` carries the inverse-bind matrix (mesh space → joint bind space, column-major), the joint's local bind-pose TRS (`bindT`/`bindR` quaternion `xyzw`/`bindS`), and a `parent` index (−1 for a root). Joint order follows the glTF skin's `joints` array, so `JOINTS_0` indices map directly.
-
-Per the glTF spec, a skinned mesh node's own transform is ignored — assetc does **not** bake the node world matrix into skinned vertices (only static meshes are baked). Only the first skin (`skin[0]`) is exported; additional skins are warned and ignored.
-
-### Levels of detail (`LODI` + `LODT`)
-
-Every submesh additionally gets reduced LODs via meshoptimizer simplification (default 2 levels at ~50% and ~25% of the triangle count). They live in two optional chunks so the full-res path is untouched: `LODI` is a `u32` index buffer (global vertex indices, same `VTXS`) and `LODT` is a header plus a `MeshLod{firstIndex, indexCount}` per `[submesh][lod]` row. LOD0 is the full-resolution mesh in `IDXS`/`SUBM`/`MLET` (meshlets are LOD0-only); the reduced levels are for classic distance-based indexed draws. A `MeshLod` with `indexCount == 0` means simplification stalled at that level, so the engine should reuse the previous LOD. `ValidateHMesh` checks every range lands inside `LODI`.
-
-### Endianness
-
-Little-endian only. `src/assetc/runtime_mesh.cpp` enforces this with a `static_assert(std::endian::native == std::endian::little)`.
-
-## .hanim file format (v1)
-
-Little-endian. Magic `"HANM"`. A skinned, animated glTF emits a companion `.hanim` (`runtime/<name>.hanim`) alongside its `.hmesh`, holding every animation clip for that source. Channels index joints in the companion `.hmesh` `SKEL` array.
-
-```
-magic u32 'HANM' | version u32 1 | clipCount u32 | reserved u32
-per clip:
-    nameLen u16, name bytes
-    duration f32                      // seconds (max key time)
-    channelCount u32
-    per channel:
-        joint u32                     // index into SKEL
-        path u8        (0=translation vec3, 1=rotation vec4 xyzw, 2=scale vec3)
-        interp u8      (0=STEP, 1=LINEAR)
-        components u8  (3 or 4)
-        _pad u8
-        keyCount u32
-        per key: time f32, value[components] f32
-```
-
-Morph-target (`weights`) channels and channels targeting non-joint nodes are skipped. `CUBICSPLINE` samplers are degraded to `LINEAR` (the value keyframe of each tangent triple is kept) with a warning. `assetc info` lists clips/channels/duration; `assetc check` validates that every channel's joint index is within the companion skeleton.
-
-## .hmat file format (v1)
-
-Little-endian flat material table. Magic `"HMAT"`. One `.hmat` is emitted per glTF source, alongside its `.hmesh`. It is a fixed-stride array of material rows in the **same dense slot order** as the mesh's `MTRL`/`SUBM` tables, so `SubMesh::materialSlot` indexes straight into it.
-
-### Layout
-
-```
-+--------------------------------+
-| MatFileHeader (16 B)           |
-+--------------------------------+
-| GpuMaterial[count] (96 B each) |
-+--------------------------------+
-```
-
-The file is exactly `16 + count * 96` bytes — no chunk table, directly mmappable as a `GpuMaterial[]`.
-
-### MatFileHeader (16 B)
-
-| Offset | Field     | Type | Notes                                            |
-| -----: | --------- | ---- | ------------------------------------------------ |
-|      0 | `magic`   | u32  | `"HMAT"`                                          |
-|      4 | `version` | u32  | `1`                                              |
-|      8 | `count`   | u32  | material rows (matches the companion `.hmesh` material count) |
-|     12 | `flags`   | u32  | reserved                                         |
-
-### GpuMaterial (96 B)
-
-| Offset | Field                  | Type    | Notes                                                       |
-| -----: | ---------------------- | ------- | ----------------------------------------------------------- |
-|      0 | `baseColorFactor`      | f32 × 4 | linear RGBA multiplier                                       |
-|     16 | `emissiveFactor`       | f32 × 3 | linear RGB                                                   |
-|     28 | `metallicFactor`       | f32     |                                                             |
-|     32 | `roughnessFactor`      | f32     |                                                             |
-|     36 | `normalScale`          | f32     | glTF `normalTexture.scale`                                   |
-|     40 | `occlusionStrength`    | f32     | glTF `occlusionTexture.strength`                             |
-|     44 | `alphaCutoff`          | f32     | used when alpha mode == `MASK`                               |
-|     48 | `flags`                | u32     | bit 0 = double-sided; bits 1-2 = alpha mode                 |
-|     52 | `_pad`                 | u32     | aligns the texture refs to 8 bytes                          |
-|     56 | `baseColorTex`         | u64     | FNV1a64 runtime ref of the `.ktx2`, `0` = none              |
-|     64 | `metallicRoughnessTex` | u64     | ORM/MR packing: occlusion=R, roughness=G, metallic=B        |
-|     72 | `normalTex`            | u64     |                                                             |
-|     80 | `occlusionTex`         | u64     | equals `metallicRoughnessTex` when packed as ORM            |
-|     88 | `emissiveTex`          | u64     |                                                             |
-
-**Alpha mode** (flags bits 1-2): `0` = OPAQUE, `1` = MASK, `2` = BLEND.
-
-Factors carry glTF defaults when a field is absent in the source (base color `1,1,1,1`; metallic/roughness `1`; emissive `0,0,0`; `normalScale`/`occlusionStrength` `1`; `alphaCutoff` `0.5`; OPAQUE, single-sided).
-
-### Texture refs
-
-Each `*Tex` field is an FNV1a64 hash of the texture's runtime ref, or `0` when the material has no texture in that slot. The ref is `<sourceRef>/tex_<imageIndex>` (lowercased, like material refs), and the matching file is written to `runtime/<rel-no-ext>/tex_<imageIndex>.ktx2`. Textures are **deduplicated by glTF image index** — one `.ktx2` per source image, even when shared across materials or slots.
-
-### Texture color space & encoder mode
-
-Each image is transcoded to UASTC `.ktx2` with the color space / swizzle dictated by the slot it is first used in:
-
-| Slot                  | Mode          | OETF   | Swizzle | Notes                                  |
-| --------------------- | ------------- | ------ | ------- | -------------------------------------- |
-| baseColor, emissive   | `Color`       | sRGB   | none    | color data                             |
-| metallicRoughness, occlusion | `LinearColor` | linear | none    | keeps all channels (ORM: O=R, R=G, M=B) |
-| normal                | `Normal`      | linear | `rg01`  | X→R, Y→G; Z reconstructed in-shader     |
-
-If the same image is pulled into conflicting color spaces by different materials, the first use wins and a warning is logged.
-
-### Endianness
-
-Little-endian only, same as `.hmesh` (`src/assetc/runtime_material.cpp` carries the matching `static_assert`).
-
-## .hman file format (v1)
-
-Little-endian. Magic `"HMAN"`. A **single global** `runtime/assets.hman` is written once per build (not per source), after every asset has compiled successfully. It maps each texture's FNV1a64 runtime ref — the exact hash already stored in `.hmat`/`.hmesh` — to its `.ktx2` path, so the runtime can resolve `baseColorTex` and friends to bytes on disk.
-
-The engine loads it once into a `hash → path` map and does `root + "/" + path` to open each texture. Entries are sorted by hash ascending, so a reader may `lower_bound` instead of building a map.
-
-### Layout
-
-```
-+-------------------------------------+
-| ManHeader (16 B)                    |
-+-------------------------------------+
-| ManEntry[count] (variable length)   |
-+-------------------------------------+
-```
-
-### ManHeader (16 B)
-
-| Offset | Field      | Type | Notes                       |
-| -----: | ---------- | ---- | --------------------------- |
-|      0 | `magic`    | u32  | `"HMAN"`                    |
-|      4 | `version`  | u32  | `1`                         |
-|      8 | `count`    | u32  | number of entries           |
-|     12 | `reserved` | u32  | `0`                         |
-
-### ManEntry (variable length)
-
-| Field        | Type           | Notes                                                          |
-| ------------ | -------------- | -------------------------------------------------------------- |
-| `hash`       | u64            | FNV1a64 ref — byte-identical to the `.hmat`/`.hmesh` ref hash  |
-| `kind`       | u8             | `0` = texture (`1` mesh, `2` material, `3` lut reserved)       |
-| `colorspace` | u8             | `0` = linear, `1` = sRGB                                       |
-| `pathLen`    | u16            | byte length of `path`                                          |
-| `path`       | `u8[pathLen]`  | UTF-8, forward-slash, **relative to the runtime root**         |
-
-Entries are streamed (not a fixed stride), so the file is parsed sequentially rather than mmap-cast.
-
-### Canonical hashed string
-
-The `hash` is `HashAssetRef("<sourceRef>/tex_<imageIndex>")` — the same canonical ref documented under [.hmat texture refs](#texture-refs): `sourceRef` is the source path relative to `assets/`, extension stripped, lowercased, `/`-separated; no extension and no `runtime/` prefix. For a texture the on-disk `path` equals that ref plus `.ktx2`, so `hash == HashAssetRef(path-without-".ktx2")`.
-
-### Scope and guarantees
-
-- **Textures only.** Only `.ktx2` images referenced by an emitted `.hmat`, plus **font SDF atlases** referenced by an emitted `.hfont`, appear. The standalone `*.png`-compiled textures (Color/Normal/Grayscale) and LUTs are not listed; `kind` reserves room to add them later.
-- **Colorspace** mirrors what `assetc` baked into the `.ktx2` (sRGB for the `Color` slot, linear otherwise) — authoritative, so the runtime need not re-derive it from the material slot.
-- **Deduplicated.** A ref reachable from multiple slots/assets appears once; identical `(hash, path)` pairs collapse.
-- **Collision-checked.** If two distinct paths hash equal the build fails loudly rather than emit an ambiguous entry.
-- **Deterministic.** Same inputs → byte-identical `assets.hman` (sorted output, no timestamps).
-
-### Endianness
-
-Little-endian only (`src/assetc/runtime_manifest.cpp` carries the matching `static_assert`).
-
-## .hfont file format (v1)
-
-Little-endian. Magic `"HFNT"`. A TrueType/OpenType font (`*.ttf`/`*.otf`) compiles to a `.hfont` metadata sidecar plus a companion **single-channel SDF atlas** `.ktx2`. The `.hfont` carries glyph metrics, atlas UV rects, and kerning; the atlas holds the signed-distance-field pixels. Together they render resolution-independent, smoothly-antialiased text from one atlas at any size — in screen space (HUD/UI) or in the 3D world (labels, signage, billboards) — without the aliasing of a fixed-size bitmap font.
-
-For a source `assets/ui/inter.ttf` the outputs are:
-
-```
-runtime/ui/inter.hfont    glyph metrics + kerning
-runtime/ui/inter.ktx2     single-channel SDF atlas (lossless R8G8B8A8 + Zstd)
-runtime/assets.hman       the atlas is registered here (Texture kind), keyed by HashAssetRef("ui/inter")
-```
-
-The atlas is referenced from the header by `atlasTex` — the same FNV1a64 hash space as material texture refs — and resolved through `assets.hman` exactly like a material's `baseColorTex`, so the engine reuses its existing texture-loading path.
-
-### Charset & SDF parameters
-
-The charset is ASCII printable (U+0020–U+007E) plus Latin-1 (U+00A0–U+00FF). Codepoints the font lacks are skipped; the font's `.notdef` glyph is emitted as the **codepoint-0 fallback** so a lookup miss always has a glyph to draw. Glyphs are rasterized at 48 px/em with a ~6-texel SDF spread (via `stb_truetype`'s `stbtt_GetGlyphSDF`) and shelf-packed into the atlas. The SDF is stored **losslessly** — block compression would shred the distance field — which Zstd keeps small.
-
-### Layout
-
-```
-+-----------------------------------+
-| FontFileHeader (52 B)             |
-+-----------------------------------+
-| GpuGlyph[glyphCount]  (40 B each) |  sorted by codepoint ascending
-+-----------------------------------+
-| KerningPair[kerningCount] (12 B)  |  sorted by (left, right)
-+-----------------------------------+
-```
-
-The file is exactly `52 + glyphCount * 40 + kerningCount * 12` bytes — directly mmappable.
-
-### FontFileHeader (52 B)
-
-| Offset | Field          | Type | Notes                                                       |
-| -----: | -------------- | ---- | ----------------------------------------------------------- |
-|      0 | `magic`        | u32  | `"HFNT"`                                                    |
-|      4 | `version`      | u32  | `1`                                                         |
-|      8 | `glyphCount`   | u32  | ≥ 1 (`glyph[0].codepoint == 0` is the `.notdef` fallback)   |
-|     12 | `kerningCount` | u32  | `0` if the font has no legacy `kern` table                  |
-|     16 | `atlasTex`     | u64  | FNV1a64 runtime ref of the companion SDF `.ktx2`            |
-|     24 | `ascent`       | f32  | em, above baseline                                          |
-|     28 | `descent`      | f32  | em, below baseline (negative)                               |
-|     32 | `lineGap`      | f32  | em; line advance = `ascent - descent + lineGap`             |
-|     36 | `distanceRange`| f32  | SDF spread in atlas texels (drives screen-space AA)         |
-|     40 | `edgeValue`    | f32  | normalized atlas value at the glyph edge (~0.502)           |
-|     44 | `atlasWidth`   | u16  | atlas texels                                                |
-|     46 | `atlasHeight`  | u16  | atlas texels                                                |
-|     48 | `flags`        | u32  | bit 0 = MSDF (reserved; v1 is single-channel SDF)           |
-
-All glyph/line metrics are in **em units** (font-size independent): multiply by the target pixel size (screen) or world size (3D) at draw time.
-
-### GpuGlyph (40 B)
-
-| Offset | Field         | Type | Notes                                                      |
-| -----: | ------------- | ---- | ---------------------------------------------------------- |
-|      0 | `codepoint`   | u32  | Unicode scalar; `0` = `.notdef` fallback                   |
-|      4 | `advance`     | f32  | em, pen advance after this glyph                           |
-|      8 | `planeLeft`   | f32  | em, quad bounds, **y-up**, origin at the pen on the baseline |
-|     12 | `planeBottom` | f32  |                                                            |
-|     16 | `planeRight`  | f32  |                                                            |
-|     20 | `planeTop`    | f32  |                                                            |
-|     24 | `uvLeft`      | f32  | normalized atlas UV (top-left origin)                      |
-|     28 | `uvTop`       | f32  |                                                            |
-|     32 | `uvRight`     | f32  |                                                            |
-|     36 | `uvBottom`    | f32  |                                                            |
-
-A whitespace glyph (e.g. space) has a zero-area plane and uv and contributes only `advance`. Glyphs are sorted by `codepoint`, so a reader may binary-search.
-
-### KerningPair (12 B)
-
-| Offset | Field     | Type | Notes                                                       |
-| -----: | --------- | ---- | ----------------------------------------------------------- |
-|      0 | `left`    | u32  | codepoint                                                   |
-|      4 | `right`   | u32  | codepoint                                                   |
-|      8 | `advance` | f32  | em, added to `left`'s advance when followed by `right`      |
-
-`stb_truetype` reads the legacy `kern` table only; fonts that kern exclusively via GPOS produce `kerningCount == 0`.
-
-### Rendering (SDF decode)
-
-Build one quad per glyph from its `plane*`/`uv*` rects, advancing the pen by `advance` (plus any `KerningPair`). Place quads in pixel coords under an orthographic projection for HUD/UI, or in world units under the MVP (optionally billboarded) for in-world text — the asset is placement-agnostic. The atlas stores signed distance in `.r`; sample with **linear filtering + mips**, then convert distance to coverage. `distanceRange`/`edgeValue` make the antialiasing correct at any scale (`fwidth` handles perspective, so the same shader serves 2D and 3D):
-
-```glsl
-// distanceRange, edgeValue from FontFileHeader; uAtlas sampled linear + mips
-float sd   = texture(uAtlas, uv).r;
-vec2  unit = vec2(distanceRange) / vec2(textureSize(uAtlas, 0));
-float pxr  = max(0.5 * dot(unit, vec2(1.0) / fwidth(uv)), 1.0);  // screen-px range
-float cov  = clamp(pxr * (sd - edgeValue) + 0.5, 0.0, 1.0);       // text coverage / alpha
-```
-
-Outlines, glow, and soft shadows come free by thresholding `sd` away from `edgeValue` (the spread gives ~6 texels of room). Single-channel SDF rounds very sharp corners under extreme magnification; the `flags` MSDF bit is reserved to add a 3-channel atlas later without a format break.
-
-### Endianness
-
-Little-endian only (`src/assetc/runtime_font.cpp` carries the matching `static_assert`).
-
-## .hpack file format (v2)
-
-Little-endian. Magic `"HPAK"`. `assetc --pack` bundles every runtime file into a single `<output>.hpack` (e.g. `runtime.hpack`) written next to the output dir, so the engine opens one file instead of thousands. It is a table of contents followed by 16-byte-aligned payloads.
-
-```
-PackHeader (24 B):
-    magic    u32  'HPAK'
-    version  u32  2
-    count    u32  number of entries
-    flags    u32  reserved (0)
-    tocBytes u64  size of the TOC region after the header
-TOC: count entries, sorted by path ascending:
-    offset   u64  payload byte offset from file start (16-aligned)
-    size     u64  payload bytes
-    kind     u8   PackKind (asset type, see below)
-    pathLen  u16
-    path     bytes  UTF-8, forward-slash, relative to the output root
-Payloads: each file's bytes at its offset, padded to 16-byte alignment.
-```
-
-`kind` is derived from the path extension at pack time so the engine can filter/dispatch by type without string-sniffing:
-
-| Value | `PackKind` | Extension |
-| ----: | ---------- | --------- |
-| 0 | `Other`     | (anything else) |
-| 1 | `Mesh`      | `.hmesh` |
-| 2 | `Material`  | `.hmat` |
-| 3 | `Manifest`  | `.hman` |
-| 4 | `Animation` | `.hanim` |
-| 5 | `Texture`   | `.ktx2` |
-| 6 | `Shader`    | `.spv` |
-| 7 | `Font`      | `.hfont` |
-
-The engine loads the TOC once into a `path → (offset, size, kind)` map (or binary-searches the sorted TOC) and reads/mmaps each entry in place — `path` matches the runtime-relative paths used elsewhere (e.g. `.hman` entries, `models/court/tex_0.ktx2`). Resolution chain: load `assets.hman` from the pack → `hash → path` map; load a mesh by its known path (`<stem>.hmesh`/`.hmat`/`.hanim` are siblings); a material's texture hash resolves via the manifest to a path, then via the TOC to the `.ktx2` bytes. Excluded from the pack: the build cache (`.assetc-cache`) and any existing `.hpack`. Deterministic: the same output tree produces byte-identical pack bytes (entries sorted, alignment padding zeroed). `--verify` runs `ValidatePack` (every entry's range lies within the file).
-
-Inspect a pack without unpacking it with `assetc pack info [file]` (defaults to `<output>.hpack`): it prints a layout breakdown (header / TOC / payload / alignment padding), a per-kind summary (meshes / materials / manifests / animations / textures / shaders / fonts), and a path-sorted entry listing where each row is tagged with its `PackKind`, size, and byte offset.
+The resolution chain across formats: load `assets.hman` once into a `hash → path` map; load a mesh by its known path (`.hmesh`/`.hmat`/`.hanim` are siblings); a material's or font's texture hash resolves through the manifest to a `.ktx2` path (and, if bundled, through the `.hpack` TOC to the bytes).
