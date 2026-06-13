@@ -50,6 +50,11 @@ struct Config
     bool        pack   = false;      // top-level
     std::string preset;              // top-level `preset:` (default when --preset absent)
 
+    // `embed:` — top-level glob patterns (over the source path relative to `input`)
+    // of raw files to copy verbatim into the output tree and register in the manifest
+    // (ManKind::Embed) by HashEmbedRef(runtime-relative path). Path + extension matter.
+    std::vector<std::string> embed;
+
     Layer                        defaultLayer; // `default:` (mesh/texture/rules; output ignored)
     std::map<std::string, Layer> presets;      // `presets:`
 

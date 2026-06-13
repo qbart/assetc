@@ -51,6 +51,9 @@ input: src_assets
 output: out
 pack: true
 preset: desktop
+embed:
+  - "scene/*.json"
+  - "config/*.xml"
 default:
   mesh:
     merge: false
@@ -88,6 +91,13 @@ presets:
     CHECK_EQ(cfg.output, std::string("out"));
     CHECK(cfg.pack == true);
     CHECK_EQ(cfg.preset, std::string("desktop"));
+
+    // embed: top-level list of glob patterns, parsed in order.
+    CHECK_EQ(cfg.embed.size(), 2u);
+    CHECK_EQ(cfg.embed[0], std::string("scene/*.json"));
+    CHECK_EQ(cfg.embed[1], std::string("config/*.xml"));
+    // default config has no embeds.
+    CHECK(Config{}.embed.empty());
 
     // outputFor: preset overrides base; unknown/empty falls back.
     CHECK_EQ(cfg.outputFor(""), std::string("out"));

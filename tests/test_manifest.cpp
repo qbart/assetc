@@ -36,6 +36,30 @@ int main()
     CHECK_EQ(WriteHMan(path, entries), 0);
     CHECK_EQ(ValidateHMan(path), 0);
 
+    // Embed entries (path WITH extension) round-trip alongside textures and read back
+    // with kind/path intact.
+    {
+        const auto epath = (dir / "embed.hman").string();
+        std::vector<ManifestEntry> emb = {
+            {0x11, ManKind::Texture, ManColorSpace::Srgb, "models/a/tex_0.ktx2"},
+            {0x22, ManKind::Embed, ManColorSpace::Linear, "scene/level.json"},
+            {0x33, ManKind::Embed, ManColorSpace::Linear, "config/path.xml"},
+        };
+        CHECK_EQ(WriteHMan(epath, emb), 0);
+        CHECK_EQ(ValidateHMan(epath), 0);
+        std::vector<ManifestEntry> back;
+        CHECK_EQ(ReadHMan(epath, back), 0);
+        CHECK_EQ(back.size(), 3u);
+        int embeds = 0;
+        for (const auto &e : back)
+            if (e.kind == ManKind::Embed)
+            {
+                ++embeds;
+                CHECK(e.path == "scene/level.json" || e.path == "config/path.xml");
+            }
+        CHECK_EQ(embeds, 2);
+    }
+
     // Parse it back and assert structure: 3 entries, sorted ascending by hash.
     auto bytes = ReadAll(path);
     CHECK(bytes.size() >= 16);

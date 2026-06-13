@@ -116,6 +116,16 @@ void CheckManifest(Ctx &c, const std::string &path, const std::string &rel)
                                     e.path, e.hash, ref, expected));
             }
         }
+        // Embed parity: an embed keeps its extension, so the hash is over the full
+        // runtime-relative path (HashEmbedRef), not the extension-stripped ref.
+        else if (e.kind == assetc::ManKind::Embed)
+        {
+            const uint64_t expected = assetc::HashEmbedRef(e.path);
+            if (expected != e.hash)
+                Problem(c, rel,
+                        fmt::format("entry \"{}\" hash 0x{:016x} != HashEmbedRef(\"{}\")=0x{:016x}",
+                                    e.path, e.hash, e.path, expected));
+        }
     }
 }
 

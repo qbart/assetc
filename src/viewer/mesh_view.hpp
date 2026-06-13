@@ -9,6 +9,8 @@
 // selector swaps which index set is drawn, so you literally watch the triangle
 // budget collapse.
 
+#include "viewer/gpu.hpp" // GpuContext + GpuTexture for the rasterized preview
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -82,8 +84,32 @@ struct MeshCamera
     int   mode        = MeshMode_Solid; // one of MeshMode
 };
 
-// Draw the LOD selector, render-mode toggles, and the interactive orbit preview
+// Persistent preview state owned by the caller. Filled modes are drawn by a CPU
+// z-buffer rasterizer into `tex` (uploaded RGBA8), so depth/occlusion are correct;
+// the texture is only re-rendered when the view signature below changes. Call
+// Reset (which frees `tex`) when the previewed mesh changes or on shutdown.
+struct MeshRender
+{
+    GpuTexture            tex;   // uploaded framebuffer; tex.valid == has an image
+    std::vector<uint32_t> color; // CPU scratch: packed RGBA8 framebuffer
+    std::vector<float>    depth; // CPU scratch: per-pixel 1/z (0 == far)
+
+    // Signature of the last render; a mismatch triggers a re-raster + re-upload.
+    bool  has = false;
+    float yaw = 0, pitch = 0, dist = 0;
+    int   lod = -1, mode = -1, w = 0, h = 0;
+
+    void Reset(GpuContext &gpu)
+    {
+        if (tex.valid)
+            gpu.DestroyTexture(tex);
+        has = false;
+    }
+};
+
+// Draw the LOD selector, render-mode combo, and the interactive orbit preview
 // inside the current ImGui window. Consumes mouse drag/wheel over the canvas.
-void DrawMeshPreview(const MeshCpu &mesh, MeshCamera &cam);
+// Filled modes rasterize through `render` (z-buffered); wireframe uses ImGui lines.
+void DrawMeshPreview(GpuContext &gpu, const MeshCpu &mesh, MeshCamera &cam, MeshRender &render);
 
 } // namespace viewer

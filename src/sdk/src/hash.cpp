@@ -11,16 +11,27 @@ constexpr char AsciiLower(char c) noexcept
 {
     return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
 }
+
+constexpr uint64_t Fnv1aLower(std::string_view s) noexcept
+{
+    uint64_t h = FnvOffset;
+    for (char c : s)
+    {
+        h ^= static_cast<uint8_t>(AsciiLower(c));
+        h *= FnvPrime;
+    }
+    return h;
+}
 } // namespace
 
 uint64_t assetc::HashAssetRef(std::string_view runtimeRefNoExt) noexcept
 {
-    uint64_t h = FnvOffset;
-    for (char c : runtimeRefNoExt)
-    {
-        const auto b = static_cast<uint8_t>(AsciiLower(c));
-        h ^= b;
-        h *= FnvPrime;
-    }
-    return h;
+    return Fnv1aLower(runtimeRefNoExt);
+}
+
+uint64_t assetc::HashEmbedRef(std::string_view runtimeRefWithExt) noexcept
+{
+    // Identical hashing to HashAssetRef; the only difference is the caller keeps the
+    // extension in the ref string, so the extension contributes to the id.
+    return Fnv1aLower(runtimeRefWithExt);
 }

@@ -237,10 +237,12 @@ V3 Normalize(const V3 &v)
     return l > 0.0f ? V3{v.x / l, v.y / l, v.z / l} : V3{0, 0, 0};
 }
 
-// Past these counts the painter's-sort / per-edge cost stops being interactive,
-// so we degrade rather than stall the UI. LODs exist precisely to stay under them.
-constexpr size_t kMaxSolidTris = 150000;
+// Past these counts the rasterizer / per-edge cost stops being interactive, so we
+// degrade rather than stall the UI. LODs exist precisely to stay under them.
+constexpr size_t kMaxSolidTris = 400000;
 constexpr size_t kMaxWireTris  = 300000;
+constexpr float  kFov          = 0.78f; // ~45 deg vertical field of view
+constexpr int    kMaxDim       = 2048;  // cap the rasterized framebuffer dimension
 
 // Material factors are stored linear; the rest of the inspector shows sRGB-ish
 // pixels, so encode for display before drawing.
@@ -264,9 +266,87 @@ V3 MaterialColor(uint32_t key)
     return kPalette[key % n];
 }
 
+// Z-buffered flat-shaded software rasterizer. Renders the triangle set into a
+// packed RGBA8 framebuffer with correct per-pixel occlusion: depth is 1/z (linear
+// in screen space, so perspective-correct) and nearest wins. Two-sided lighting so
+// open-mesh back faces aren't black. This replaces the painter's-algorithm sort,
+// which mis-ordered interpenetrating triangles/submeshes.
+void Rasterize(const MeshCpu &m, const std::vector<uint32_t> &idx, size_t triCount,
+               const std::vector<float> &vx, const std::vector<float> &vy,
+               const std::vector<float> &vz, const std::vector<uint8_t> &ok, bool colorFill,
+               const std::vector<V3> &triColor, const V3 &fwd, int W, int H,
+               std::vector<uint32_t> &color, std::vector<float> &depth)
+{
+    color.assign(static_cast<size_t>(W) * H, IM_COL32(26, 26, 32, 255));
+    depth.assign(static_cast<size_t>(W) * H, 0.0f); // 1/z; 0 == infinitely far
+    const float focal = (0.5f * H) / std::tan(kFov * 0.5f);
+    const float cx = W * 0.5f, cy = H * 0.5f;
+
+    auto edge = [](float x0, float y0, float x1, float y1, float px, float py) {
+        return (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
+    };
+
+    for (size_t t = 0; t < triCount; ++t)
+    {
+        const uint32_t a = idx[t * 3 + 0], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
+        if (!ok[a] || !ok[b] || !ok[c])
+            continue;
+        const float ax = cx + (vx[a] / vz[a]) * focal, ay = cy - (vy[a] / vz[a]) * focal;
+        const float bx = cx + (vx[b] / vz[b]) * focal, by = cy - (vy[b] / vz[b]) * focal;
+        const float dx = cx + (vx[c] / vz[c]) * focal, dy = cy - (vy[c] / vz[c]) * focal;
+
+        const float area = edge(ax, ay, bx, by, dx, dy);
+        if (std::fabs(area) < 1e-6f)
+            continue;
+        const float invArea = 1.0f / area;
+        const float iza = 1.0f / vz[a], izb = 1.0f / vz[b], izc = 1.0f / vz[c];
+
+        int minx = std::max(0, (int)std::floor(std::min({ax, bx, dx})));
+        int maxx = std::min(W - 1, (int)std::ceil(std::max({ax, bx, dx})));
+        int miny = std::max(0, (int)std::floor(std::min({ay, by, dy})));
+        int maxy = std::min(H - 1, (int)std::ceil(std::max({ay, by, dy})));
+        if (minx > maxx || miny > maxy)
+            continue;
+
+        // Flat shade from the object-space face normal, lit along the view axis and
+        // two-sided so a back face seen through an opening still reads.
+        const V3 pa{m.positions[a * 3], m.positions[a * 3 + 1], m.positions[a * 3 + 2]};
+        const V3 pb{m.positions[b * 3], m.positions[b * 3 + 1], m.positions[b * 3 + 2]};
+        const V3 pc{m.positions[c * 3], m.positions[c * 3 + 1], m.positions[c * 3 + 2]};
+        const V3    n      = Normalize(Cross(Sub(pb, pa), Sub(pc, pa)));
+        const float facing = std::clamp(std::fabs(Dot(n, fwd)), 0.0f, 1.0f);
+        const float shade  = 0.18f + 0.82f * facing;
+        const V3    base   = colorFill ? triColor[t] : V3{0.92f, 0.92f, 0.94f};
+        const int   rr     = (int)(std::clamp(base.x * shade, 0.0f, 1.0f) * 255.0f);
+        const int   gg     = (int)(std::clamp(base.y * shade, 0.0f, 1.0f) * 255.0f);
+        const int   bb     = (int)(std::clamp(base.z * shade, 0.0f, 1.0f) * 255.0f);
+        const uint32_t col = IM_COL32(rr, gg, bb, 255);
+
+        for (int py = miny; py <= maxy; ++py)
+        {
+            for (int px = minx; px <= maxx; ++px)
+            {
+                const float fx = px + 0.5f, fy = py + 0.5f;
+                const float w0 = edge(bx, by, dx, dy, fx, fy) * invArea; // weight for A
+                const float w1 = edge(dx, dy, ax, ay, fx, fy) * invArea; // weight for B
+                const float w2 = edge(ax, ay, bx, by, fx, fy) * invArea; // weight for C
+                if (w0 < -1e-5f || w1 < -1e-5f || w2 < -1e-5f)
+                    continue;
+                const float iz = w0 * iza + w1 * izb + w2 * izc; // perspective-correct 1/z
+                const size_t p = static_cast<size_t>(py) * W + px;
+                if (iz > depth[p])
+                {
+                    depth[p] = iz;
+                    color[p] = col;
+                }
+            }
+        }
+    }
+}
+
 } // namespace
 
-void DrawMeshPreview(const MeshCpu &m, MeshCamera &cam)
+void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRender &render)
 {
     const int levels = static_cast<int>(m.lodIndices.size());
     if (levels == 0)
@@ -362,16 +442,15 @@ void DrawMeshPreview(const MeshCpu &m, MeshCamera &cam)
         right = V3{1, 0, 0};
     const V3 up = Cross(right, fwd);
 
-    const float fov   = 0.78f; // ~45 deg vertical
-    const float focal = (0.5f * size.y) / std::tan(fov * 0.5f);
-    const ImVec2 mid(p0.x + size.x * 0.5f, p0.y + size.y * 0.5f);
-    const float near = std::max(m.radius * 1e-3f, 1e-4f);
+    const float zNear = std::max(m.radius * 1e-3f, 1e-4f);
 
-    // Project every vertex once into screen space; mark those behind the near plane.
-    static std::vector<float> sx, sy, vz;
+    // Project every vertex once into camera space (vx,vy on the view plane, vz along
+    // the look axis); mark those behind the near plane. Both the rasterizer and the
+    // wireframe path derive their pixel coords from these.
+    static std::vector<float> vx, vy, vz;
     static std::vector<uint8_t> ok;
-    sx.resize(m.vertexCount);
-    sy.resize(m.vertexCount);
+    vx.resize(m.vertexCount);
+    vy.resize(m.vertexCount);
     vz.resize(m.vertexCount);
     ok.resize(m.vertexCount);
     for (uint32_t i = 0; i < m.vertexCount; ++i)
@@ -380,12 +459,9 @@ void DrawMeshPreview(const MeshCpu &m, MeshCamera &cam)
         const V3 rel = Sub(p, eye);
         const float z = Dot(rel, fwd);
         vz[i]         = z;
-        ok[i]         = z > near;
-        if (ok[i])
-        {
-            sx[i] = mid.x + (Dot(rel, right) / z) * focal;
-            sy[i] = mid.y - (Dot(rel, up) / z) * focal;
-        }
+        ok[i]         = z > zNear;
+        vx[i]         = Dot(rel, right);
+        vy[i]         = Dot(rel, up);
     }
 
     const std::vector<uint32_t> &idx = m.lodIndices[cam.lod];
@@ -395,108 +471,105 @@ void DrawMeshPreview(const MeshCpu &m, MeshCamera &cam)
                           cam.mode == MeshMode_Material;
     const bool colorFill  = cam.mode == MeshMode_DebugMaterial || cam.mode == MeshMode_Material;
     const bool realColors = cam.mode == MeshMode_Material; // else debug palette
-    const bool drawSolid  = wantFill && triCount > 0 && triCount <= kMaxSolidTris;
+    const bool drawFill   = wantFill && triCount > 0 && triCount <= kMaxSolidTris;
     const bool drawWire   = cam.mode == MeshMode_Wire && triCount > 0 && triCount <= kMaxWireTris;
 
-    // For the colored fills, resolve each triangle's base color from its submesh's
-    // material slot. "material" mode uses the real .hmat baseColorFactor when
-    // available; "debug material" always uses a distinct palette color (offset past
-    // the slot range for unmaterialed submeshes so they stay distinguishable), and
-    // it is also the fallback when a real color is missing. Submeshes are contiguous
-    // in `idx`, so walk the per-submesh counts to assign ranges.
-    static std::vector<V3> triColor;
-    if (drawSolid && colorFill && cam.lod < (int)m.lodSubmeshCount.size())
+    if (drawFill)
     {
-        triColor.assign(triCount, V3{0.8f, 0.8f, 0.8f});
-        const auto &counts = m.lodSubmeshCount[cam.lod];
-        size_t      tri    = 0;
-        for (uint32_t s = 0; s < counts.size(); ++s)
+        // For the colored fills, resolve each triangle's base color from its
+        // submesh's material slot. "material" uses the real .hmat baseColorFactor
+        // when present; "debug material" always uses a distinct palette color (and
+        // is the fallback for unmaterialed submeshes). Submeshes are contiguous in
+        // `idx`, so walk the per-submesh counts to assign ranges.
+        static std::vector<V3> triColor;
+        if (colorFill && cam.lod < (int)m.lodSubmeshCount.size())
         {
-            const uint32_t slot = m.submeshMaterial[s];
-            V3             base;
-            if (realColors && slot != assetc::kNoMaterial && slot < m.materialColors.size())
+            triColor.assign(triCount, V3{0.8f, 0.8f, 0.8f});
+            const auto &counts = m.lodSubmeshCount[cam.lod];
+            size_t      tri    = 0;
+            for (uint32_t s = 0; s < counts.size(); ++s)
             {
-                const auto &c = m.materialColors[slot];
-                base = V3{LinToSrgb(c[0]), LinToSrgb(c[1]), LinToSrgb(c[2])};
+                const uint32_t slot = m.submeshMaterial[s];
+                V3             base;
+                if (realColors && slot != assetc::kNoMaterial && slot < m.materialColors.size())
+                {
+                    const auto &c = m.materialColors[slot];
+                    base = V3{LinToSrgb(c[0]), LinToSrgb(c[1]), LinToSrgb(c[2])};
+                }
+                else
+                {
+                    const uint32_t key =
+                        (slot != assetc::kNoMaterial) ? slot : (m.materialCount + s);
+                    base = MaterialColor(key);
+                }
+                for (uint32_t k = 0; k < counts[s] / 3 && tri < triCount; ++k, ++tri)
+                    triColor[tri] = base;
             }
-            else
-            {
-                const uint32_t key = (slot != assetc::kNoMaterial) ? slot : (m.materialCount + s);
-                base               = MaterialColor(key);
-            }
-            for (uint32_t k = 0; k < counts[s] / 3 && tri < triCount; ++k, ++tri)
-                triColor[tri] = base;
         }
-    }
 
-    if (drawSolid)
-    {
-        // Painter's algorithm: gather front-facing, fully-visible triangles, sort
-        // far-to-near by mean view depth, then fill with flat lambert shading.
-        static std::vector<std::pair<float, uint32_t>> order; // (depth, tri)
-        order.clear();
-        order.reserve(triCount);
-        for (uint32_t t = 0; t < triCount; ++t)
+        // Render target tracks the canvas size (in framebuffer pixels for crispness),
+        // capped. Re-raster + re-upload only when the view signature changes, so an
+        // idle preview costs nothing beyond drawing the cached image.
+        const float scale = std::max(1.0f, io.DisplayFramebufferScale.x);
+        const int   W = std::clamp((int)(size.x * scale), 16, kMaxDim);
+        const int   H = std::clamp((int)(size.y * scale), 16, kMaxDim);
+        const bool  dirty = !render.has || render.lod != cam.lod || render.mode != cam.mode ||
+                           render.w != W || render.h != H || render.yaw != cam.yaw ||
+                           render.pitch != cam.pitch || render.dist != cam.distScale;
+        if (dirty)
         {
-            const uint32_t a = idx[t * 3 + 0], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
-            if (!ok[a] || !ok[b] || !ok[c])
-                continue;
-            order.emplace_back((vz[a] + vz[b] + vz[c]) * (1.0f / 3.0f), t);
-        }
-        std::sort(order.begin(), order.end(),
-                  [](const auto &l, const auto &r) { return l.first > r.first; });
+            Rasterize(m, idx, triCount, vx, vy, vz, ok, colorFill, triColor, fwd, W, H,
+                      render.color, render.depth);
 
-        const V3 lightDir{-fwd.x, -fwd.y, -fwd.z}; // headlight: toward the camera
-        for (const auto &[depth, t] : order)
-        {
-            const uint32_t a = idx[t * 3 + 0], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
-            const V3       pa{m.positions[a * 3], m.positions[a * 3 + 1], m.positions[a * 3 + 2]};
-            const V3       pb{m.positions[b * 3], m.positions[b * 3 + 1], m.positions[b * 3 + 2]};
-            const V3       pc{m.positions[c * 3], m.positions[c * 3 + 1], m.positions[c * 3 + 2]};
-            const V3       n     = Normalize(Cross(Sub(pb, pa), Sub(pc, pa)));
-            const float    facing = Dot(n, lightDir);
-            if (facing <= 0.0f)
-                continue; // back-facing
-            const float shade = 0.18f + 0.82f * std::clamp(facing, 0.0f, 1.0f);
-            ImU32       col;
-            if (colorFill)
-            {
-                const V3  base = triColor[t];
-                const int r    = static_cast<int>(std::clamp(base.x * shade, 0.0f, 1.0f) * 255.0f);
-                const int gc   = static_cast<int>(std::clamp(base.y * shade, 0.0f, 1.0f) * 255.0f);
-                const int bc   = static_cast<int>(std::clamp(base.z * shade, 0.0f, 1.0f) * 255.0f);
-                col            = IM_COL32(r, gc, bc, 255);
-            }
-            else
-            {
-                const int g = static_cast<int>(shade * 235.0f);
-                col         = IM_COL32(g, g, static_cast<int>(g * 0.96f) + 6, 255);
-            }
-            dl->AddTriangleFilled(ImVec2(sx[a], sy[a]), ImVec2(sx[b], sy[b]),
-                                  ImVec2(sx[c], sy[c]), col);
+            std::vector<MipPixels> mip(1);
+            mip[0].width  = (uint32_t)W;
+            mip[0].height = (uint32_t)H;
+            mip[0].rgba.resize(static_cast<size_t>(W) * H * 4);
+            std::memcpy(mip[0].rgba.data(), render.color.data(),
+                        static_cast<size_t>(W) * H * 4);
+            if (render.tex.valid)
+                gpu.DestroyTexture(render.tex);
+            render.tex   = gpu.CreateTexture(mip);
+            render.has   = render.tex.valid;
+            render.lod   = cam.lod;
+            render.mode  = cam.mode;
+            render.w     = W;
+            render.h     = H;
+            render.yaw   = cam.yaw;
+            render.pitch = cam.pitch;
+            render.dist  = cam.distScale;
         }
+        if (render.tex.valid && !render.tex.mipIds.empty())
+            dl->AddImage((ImTextureID)(uintptr_t)render.tex.mipIds[0], p0, p1);
     }
     else if (wantFill && triCount > kMaxSolidTris)
     {
-        const ImVec2 tp(p0.x + 8, p0.y + 8);
-        dl->AddText(tp, IM_COL32(255, 210, 120, 255),
-                    "LOD too dense for solid fill — showing wireframe");
+        dl->AddText(ImVec2(p0.x + 8, p0.y + 8), IM_COL32(255, 210, 120, 255),
+                    "LOD too dense to rasterize — pick a lower LOD");
     }
 
-    if (drawWire || (wantFill && triCount > kMaxSolidTris && triCount <= kMaxWireTris))
+    if (drawWire)
     {
-        const ImU32 wcol = drawSolid ? IM_COL32(150, 170, 210, 90) : IM_COL32(150, 200, 255, 200);
+        // Wireframe needs no depth buffer; draw edges straight through ImGui. Derive
+        // screen coords from camera space using the canvas (point) dimensions.
+        const float  focal = (0.5f * size.y) / std::tan(kFov * 0.5f);
+        const ImVec2 mid(p0.x + size.x * 0.5f, p0.y + size.y * 0.5f);
+        const ImU32  wcol = IM_COL32(150, 200, 255, 200);
+        auto         project = [&](uint32_t i) {
+            return ImVec2(mid.x + (vx[i] / vz[i]) * focal, mid.y - (vy[i] / vz[i]) * focal);
+        };
         for (uint32_t t = 0; t < triCount; ++t)
         {
             const uint32_t a = idx[t * 3 + 0], b = idx[t * 3 + 1], c = idx[t * 3 + 2];
             if (!ok[a] || !ok[b] || !ok[c])
                 continue;
-            dl->AddLine(ImVec2(sx[a], sy[a]), ImVec2(sx[b], sy[b]), wcol);
-            dl->AddLine(ImVec2(sx[b], sy[b]), ImVec2(sx[c], sy[c]), wcol);
-            dl->AddLine(ImVec2(sx[c], sy[c]), ImVec2(sx[a], sy[a]), wcol);
+            const ImVec2 pa = project(a), pb = project(b), pc = project(c);
+            dl->AddLine(pa, pb, wcol);
+            dl->AddLine(pb, pc, wcol);
+            dl->AddLine(pc, pa, wcol);
         }
     }
-    else if (triCount > kMaxWireTris)
+    else if (cam.mode == MeshMode_Wire && triCount > kMaxWireTris)
     {
         dl->AddText(ImVec2(p0.x + 8, p0.y + 8), IM_COL32(255, 150, 150, 255),
                     "mesh too dense to preview at this LOD");

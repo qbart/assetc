@@ -809,6 +809,53 @@ int main(int argc, char **argv)
     if (failed != 0)
         return 1;
 
+    // embed: copy raw files matched by the config's glob patterns from the source
+    // tree into the output dir (preserving their relative path, so --pack bundles
+    // them too) and register each in the manifest by HashEmbedRef(path). The engine
+    // resolves e.g. HashEmbedRef("scene/level.json") -> bytes, loose or in a .hpack.
+    if (!config.embed.empty())
+    {
+        int embedded = 0;
+        std::error_code eec;
+        for (fs::recursive_directory_iterator it(assetDir,
+                                                 fs::directory_options::skip_permission_denied, eec),
+             end;
+             it != end; it.increment(eec))
+        {
+            if (eec || !it->is_regular_file())
+                continue;
+            std::error_code rec;
+            const std::string rel = fs::relative(it->path(), assetDir, rec).generic_string();
+            if (rel.empty())
+                continue;
+            bool match = false;
+            for (const auto &pat : config.embed)
+                if (assetc::GlobMatch(pat, rel))
+                {
+                    match = true;
+                    break;
+                }
+            if (!match)
+                continue;
+
+            const fs::path dst = fs::path(outputDir) / rel;
+            std::error_code cec;
+            fs::create_directories(dst.parent_path(), cec);
+            fs::copy_file(it->path(), dst, fs::copy_options::overwrite_existing, cec);
+            if (cec)
+            {
+                fmtx::Error(fmt::format("embed: copy failed: {} -> {}: {}", it->path().string(),
+                                        dst.generic_string(), cec.message()));
+                return 1;
+            }
+            fmtx::Info(fmt::format("embed {} -> {}", rel, dst.generic_string()));
+            manifest.Add(assetc::ManifestEntry{assetc::HashEmbedRef(rel), assetc::ManKind::Embed,
+                                               assetc::ManColorSpace::Linear, rel});
+            ++embedded;
+        }
+        fmtx::Info(fmt::format("embedded {} file(s)", embedded));
+    }
+
     // Single global hash -> file manifest, written only after every asset succeeded
     // so we never emit a partial/ambiguous table.
     const auto manPath = (fs::path(outputDir) / "assets.hman").generic_string();

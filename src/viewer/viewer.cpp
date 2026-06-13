@@ -326,6 +326,7 @@ struct View
     bool               isMesh = false;
     viewer::MeshCpu    mesh;
     viewer::MeshCamera meshCam;
+    viewer::MeshRender meshRender;
     std::string        details; // non-texture pane text
     int                mip = 0, face = 0, layer = 0;
     float              zoom = 1.0f;
@@ -336,6 +337,7 @@ void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
 {
     if (v.tex.valid)
         gpu.DestroyTexture(v.tex);
+    v.meshRender.Reset(gpu);
     v.isTexture = false;
     v.isMesh    = false;
     v.mesh      = viewer::MeshCpu{};
@@ -524,7 +526,7 @@ void DrawInspector(viewer::GpuContext &gpu, const Source &src, View &v)
     }
     else if (v.isMesh)
     {
-        viewer::DrawMeshPreview(v.mesh, v.meshCam);
+        viewer::DrawMeshPreview(gpu, v.mesh, v.meshCam, v.meshRender);
     }
     else
     {
@@ -582,6 +584,7 @@ int RunViewer(const std::string &path)
 
     if (v.tex.valid)
         gpu.DestroyTexture(v.tex);
+    v.meshRender.Reset(gpu);
     gpu.Shutdown();
     return 0;
 }

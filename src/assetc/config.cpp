@@ -239,6 +239,20 @@ int assetc::LoadConfig(const std::string &startDir, Config &cfg, std::string &fo
         if (root["preset"])
             cfg.preset = root["preset"].as<std::string>();
 
+        if (root["embed"])
+        {
+            if (root["embed"].IsSequence())
+            {
+                for (const auto &en : root["embed"])
+                    cfg.embed.push_back(en.as<std::string>());
+            }
+            else
+            {
+                fmtx::Warn(fmt::format(
+                    "config {}: 'embed' must be a list of glob patterns; ignored", file));
+            }
+        }
+
         if (root["default"])
             cfg.defaultLayer = ParseLayer(root["default"], /*isPreset=*/false, "default", file);
 
@@ -252,7 +266,7 @@ int assetc::LoadConfig(const std::string &startDir, Config &cfg, std::string &fo
             }
         }
 
-        WarnUnknownKeys(root, {"input", "output", "pack", "preset", "default", "presets"},
+        WarnUnknownKeys(root, {"input", "output", "pack", "preset", "embed", "default", "presets"},
                         "(top level)", file);
     }
     catch (const YAML::Exception &e)
@@ -280,6 +294,15 @@ output: runtime
 
 # Preset used when --preset is not passed.
 # preset: desktop
+
+# Raw files to embed verbatim into the build. Each entry is a glob (over the source
+# path relative to `input`, * spans '/', ? one char). Matched files are copied into
+# the output tree at the same relative path (so they land in <output>.hpack too) and
+# registered in assets.hman by HashEmbedRef(<that path>) — path AND extension matter,
+# so the engine reads e.g. assets/scene/level.json back via HashEmbedRef("scene/level.json").
+# embed:
+#   - "scene/*.json"
+#   - "config/*.xml"
 
 # Base layer applied to every build: per-asset defaults + pattern rules.
 # default:

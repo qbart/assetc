@@ -35,7 +35,7 @@ Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
 `assetc info` reports geometry stats per `.hmesh` (verts / triangles / indices / meshlets / submeshes / materials / bounds), material-table breakdowns per `.hmat` (texture-slot usage, alpha modes, double-sided count), `.hman` manifest entry counts by kind/colorspace, and `.ktx2` dimensions / mips / format / supercompression — then a totals summary across the whole output tree.
 
-`assetc check` validates internal consistency: each `.hmesh`/`.hmat`/`.hman` is structurally valid; every nonzero texture ref in a `.hmat` resolves via `.hman` to a file that exists; every `.hman` entry points at an existing file with a hash matching `HashAssetRef(path-without-".ktx2")`; and each `.hmesh` material count matches its companion `.hmat` row count with all submesh material slots in range. Use it as a CI gate after a build.
+`assetc check` validates internal consistency: each `.hmesh`/`.hmat`/`.hman` is structurally valid; every nonzero texture ref in a `.hmat` resolves via `.hman` to a file that exists; every `.hman` entry points at an existing file whose hash matches its kind's rule (content-store stem for `tex/<hash>.ktx2`, `HashAssetRef(path-without-ext)` for name-addressed textures, `HashEmbedRef(path)` for embeds); and each `.hmesh` material count matches its companion `.hmat` row count with all submesh material slots in range. Use it as a CI gate after a build.
 
 ## Configuration (`assetc.yml`)
 
@@ -47,6 +47,12 @@ input: assets            # source tree — same for every preset (default: asset
 output: runtime          # base output dir (default: runtime; overridden by -o)
 pack: false              # bundle into <output>.hpack after building
 preset: desktop          # preset used when --preset is omitted
+
+# Raw files to embed verbatim into the build (copied into the output tree at the
+# same relative path, so --pack bundles them too) and registered in assets.hman.
+embed:                   # globs over the source path relative to `input`
+  - "scene/*.json"
+  - "config/*.xml"
 
 # Base layer applied to every build.
 default:
@@ -83,7 +89,7 @@ Settings are resolved by **overlaying** layers from least to most specific; each
 4. `default.rules` (cascading, in file order)
 5. preset's `rules` (cascading — preset rules win)
 
-`input` and `pack` are read only at the top level. `output` is the base, and a **preset may redirect it** (`outputFor` = preset's `output` if set, else the base) so `--preset mobile` and `--preset desktop` build into separate dirs that never clobber. A CLI `-o/--output` overrides everything; `--pack` is OR-ed with the config.
+`input`, `pack`, and `embed` are read only at the top level. `output` is the base, and a **preset may redirect it** (`outputFor` = preset's `output` if set, else the base) so `--preset mobile` and `--preset desktop` build into separate dirs that never clobber. A CLI `-o/--output` overrides everything; `--pack` is OR-ed with the config.
 
 ### Presets
 
@@ -95,6 +101,21 @@ Settings are resolved by **overlaying** layers from least to most specific; each
 - **`texture.compress`** — `true` (default) UASTC-encodes; `false` writes a raw `R8G8B8A8` KTX2 (sRGB/linear per slot) with lossless Zstd — pixel-exact, for UI atlases, sprite sheets, and sRGB/data textures you want untouched. Applies to both standalone images and glTF-embedded textures.
 
 Unknown keys are warned (typo protection). The schema is intentionally small — it's the place to grow further per-asset knobs (e.g. texture `max_size`, `channels`, mesh `lods`).
+
+### Embeds
+
+`embed:` is a top-level list of glob patterns (over the source path relative to `input`, `*` spans `/`, `?` one char) selecting **raw files to ship as-is** — scene descriptions, config, level data, anything the engine wants to read but `assetc` shouldn't transcode. Each matched file is:
+
+1. **copied verbatim** into the output tree at the same relative path (`assets/scene/level.json` → `runtime/scene/level.json`), so a `--pack` build bundles it into `<output>.hpack` like any other artifact, and
+2. **registered in `assets.hman`** (`kind = embed`) under `HashEmbedRef(<runtime-relative path>)`.
+
+Unlike compiled refs, an embed's **path and extension are both significant** — the id is hashed over the full path *with* its extension, so `scene/level.json` and `scene/level.xml` are distinct. The engine reads one back with the SDK's `HashEmbedRef`:
+
+```cpp
+uint64_t id = assetc::HashEmbedRef("scene/level.json"); // look up in assets.hman -> path -> bytes
+```
+
+Embeds participate in the same manifest guarantees as everything else (deduplicated, collision-checked, deterministic), and `assetc check` verifies `hash == HashEmbedRef(path)` for each. See [docs/hman.md](docs/hman.md).
 
 ## Supported inputs
 
@@ -149,8 +170,9 @@ on every format.
 
 It ships the format structs plus ready-made readers/validators: `ReadHMan`,
 `ReadHAnim`, `ReadHFont`, `ReadPackToc`, the `Validate*` checks, the `.hmesh`/`.hmat`
-struct layouts for zero-copy mmap, and `HashAssetRef` to resolve refs through the
-manifest. Include everything via `<assetc/sdk.hpp>` or the individual headers.
+struct layouts for zero-copy mmap, and `HashAssetRef` / `HashEmbedRef` to resolve
+refs through the manifest. Include everything via `<assetc/sdk.hpp>` or the
+individual headers.
 
 ### Integrate via CMake FetchContent
 

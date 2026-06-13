@@ -35,6 +35,11 @@ constexpr uint32_t ManVersion = 1;
 // suffix stripped, and <entryPoint> is the Slang entry-point name. The on-disk path
 // is that ref plus ".spv". Entry-point names are unique within a folder.
 //
+// An embed (assetc.yml `embed:`) is a raw file copied verbatim into the runtime
+// tree. Its `kind` is Embed, its `path` is the runtime-relative path WITH extension
+// (e.g. "scene/level.json"), and its hash is HashEmbedRef(path) — i.e. the same
+// FNV1a64, but the extension is part of the ref so path and extension both matter.
+//
 // On-disk layout (little-endian), entries sorted by hash ascending:
 //
 //     magic       u32   == ManMagic
@@ -54,6 +59,7 @@ enum class ManKind : uint8_t
     Material = 2, // reserved, not emitted
     Lut      = 3, // reserved, not emitted
     Shader   = 4, // SPIR-V entry point: ref "<sourceRef>/<entryPoint>", path + ".spv"
+    Embed    = 5, // `embed:`-ed raw file: hash == HashEmbedRef(path), path kept verbatim
 };
 
 enum class ManColorSpace : uint8_t
