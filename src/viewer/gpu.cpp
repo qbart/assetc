@@ -89,10 +89,17 @@ bool SetupVulkan(const char **exts, uint32_t extCount)
     app.pApplicationName = "assetc ui";
     app.apiVersion       = VK_API_VERSION_1_1;
 
+    std::vector<const char *> instExts(exts, exts + extCount);
     VkInstanceCreateInfo ci{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
-    ci.pApplicationInfo        = &app;
-    ci.enabledExtensionCount   = extCount;
-    ci.ppEnabledExtensionNames = exts;
+    ci.pApplicationInfo = &app;
+#ifdef __APPLE__
+    // MoltenVK is a "portability" driver: the enumerate flag is only legal when the
+    // VK_KHR_portability_enumeration instance extension is also enabled.
+    instExts.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    ci.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+    ci.enabledExtensionCount   = (uint32_t)instExts.size();
+    ci.ppEnabledExtensionNames = instExts.data();
     if (vkCreateInstance(&ci, g_Allocator, &g_Instance) != VK_SUCCESS)
     {
         fmtx::Error("vkCreateInstance failed");
@@ -113,7 +120,20 @@ bool SetupVulkan(const char **exts, uint32_t extCount)
         return false;
     }
 
-    const char     *devExt[]  = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    std::vector<const char *> devExt = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+#ifdef __APPLE__
+    // The spec requires VK_KHR_portability_subset to be enabled whenever the device
+    // advertises it, which MoltenVK always does.
+    {
+        uint32_t n = 0;
+        vkEnumerateDeviceExtensionProperties(g_PhysicalDevice, nullptr, &n, nullptr);
+        std::vector<VkExtensionProperties> avail(n);
+        vkEnumerateDeviceExtensionProperties(g_PhysicalDevice, nullptr, &n, avail.data());
+        for (const auto &e : avail)
+            if (std::strcmp(e.extensionName, "VK_KHR_portability_subset") == 0)
+                devExt.push_back("VK_KHR_portability_subset");
+    }
+#endif
     const float     prio       = 1.0f;
     VkDeviceQueueCreateInfo q{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     q.queueFamilyIndex = g_QueueFamily;
@@ -122,8 +142,8 @@ bool SetupVulkan(const char **exts, uint32_t extCount)
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     dci.queueCreateInfoCount    = 1;
     dci.pQueueCreateInfos       = &q;
-    dci.enabledExtensionCount   = 1;
-    dci.ppEnabledExtensionNames = devExt;
+    dci.enabledExtensionCount   = (uint32_t)devExt.size();
+    dci.ppEnabledExtensionNames = devExt.data();
     if (vkCreateDevice(g_PhysicalDevice, &dci, g_Allocator, &g_Device) != VK_SUCCESS)
     {
         fmtx::Error("vkCreateDevice failed");
