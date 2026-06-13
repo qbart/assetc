@@ -370,7 +370,24 @@ void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
         v.mesh   = viewer::ParseHMesh(bytes.data(), bytes.size());
         v.isMesh = v.mesh.valid;
         if (!v.isMesh)
+        {
             v.details = fmt::format("mesh parse failed: {}", v.mesh.error);
+            return;
+        }
+        // Pull real material colors from the companion .hmat (same path, .hmat
+        // extension), if one exists in this source. Slot order matches the mesh.
+        if (e.path.size() > 6 && e.path.compare(e.path.size() - 6, 6, ".hmesh") == 0)
+        {
+            const std::string matPath = e.path.substr(0, e.path.size() - 6) + ".hmat";
+            for (int i = 0; i < (int)src.entries.size(); ++i)
+                if (src.entries[i].path == matPath)
+                {
+                    const std::vector<uint8_t> mb = ReadEntryBytes(src, i);
+                    if (!mb.empty())
+                        v.mesh.materialColors = viewer::ParseHMatColors(mb.data(), mb.size());
+                    break;
+                }
+        }
         return;
     }
 

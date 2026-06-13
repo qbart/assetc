@@ -9,6 +9,7 @@
 // selector swaps which index set is drawn, so you literally watch the triangle
 // budget collapse.
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -30,6 +31,18 @@ struct MeshCpu
     uint32_t                           vertexCount = 0;
     std::vector<std::vector<uint32_t>> lodIndices; // [level] -> global vertex indices
 
+    // Submesh boundaries within each level's concatenated index list, so the flat
+    // list can be split back into material groups for the material-colored view.
+    // lodSubmeshCount[level][submesh] is that submesh's index count at that level;
+    // submeshes appear in order, so their offsets are running sums of these counts.
+    std::vector<std::vector<uint32_t>> lodSubmeshCount;
+    std::vector<uint32_t>              submeshMaterial; // [submesh] -> material slot or kNoMaterial
+
+    // Real material base colors (linear RGBA), one per material slot, read from the
+    // companion .hmat by the caller. Empty when there is no .hmat; material view
+    // then falls back to a distinct-per-slot palette.
+    std::vector<std::array<float, 4>> materialColors;
+
     uint32_t submeshCount = 0;
     uint32_t materialCount = 0;
 
@@ -43,6 +56,21 @@ struct MeshCpu
 // result has valid=false and `error` set.
 MeshCpu ParseHMesh(const uint8_t *data, size_t size);
 
+// Decode the per-row baseColorFactor (linear RGBA) from a companion .hmat blob,
+// in material-slot order. Returns empty on any parse failure (so the caller just
+// falls back to the palette). Feed into MeshCpu::materialColors.
+std::vector<std::array<float, 4>> ParseHMatColors(const uint8_t *data, size_t size);
+
+// Render mode (single choice, shown as a combo in the UI).
+enum MeshMode
+{
+    MeshMode_Wire = 0,     // triangle edges only
+    MeshMode_Solid,        // flat gray lambert fill
+    MeshMode_DebugMaterial, // fill tinted by a distinct palette color per material/submesh
+    MeshMode_Material,     // fill tinted by the real .hmat base color (palette fallback)
+    MeshMode_Count
+};
+
 // Orbit camera + render settings, persisted across frames by the caller.
 struct MeshCamera
 {
@@ -51,8 +79,7 @@ struct MeshCamera
     float pitch       = 0.5f; // radians, clamped away from the poles
     float distScale   = 1.0f; // multiple of the auto-fit distance
     int   lod         = 0;    // selected LOD level (index into MeshCpu::lodIndices)
-    bool  solid       = true; // filled, flat-shaded triangles
-    bool  wire        = true; // triangle edges
+    int   mode        = MeshMode_Solid; // one of MeshMode
 };
 
 // Draw the LOD selector, render-mode toggles, and the interactive orbit preview

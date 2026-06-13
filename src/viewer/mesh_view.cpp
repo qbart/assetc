@@ -1,5 +1,6 @@
 #include "viewer/mesh_view.hpp"
 
+#include "assetc/runtime_material.hpp"
 #include "assetc/runtime_mesh.hpp"
 
 #include <algorithm>
@@ -151,6 +152,10 @@ MeshCpu ParseHMesh(const uint8_t *data, size_t size)
     // previous level for that submesh, matching the format's semantics.
     const uint32_t levels = lodCount + 1;
     out.lodIndices.assign(levels, {});
+    out.lodSubmeshCount.assign(levels, std::vector<uint32_t>(d.submeshCount, 0));
+    out.submeshMaterial.resize(d.submeshCount);
+    for (uint32_t s = 0; s < d.submeshCount; ++s)
+        out.submeshMaterial[s] = submeshes[s].materialSlot;
     std::vector<std::vector<uint32_t>> prevSlices(d.submeshCount); // per-submesh, previous level
 
     for (uint32_t s = 0; s < d.submeshCount; ++s)
@@ -159,6 +164,7 @@ MeshCpu ParseHMesh(const uint8_t *data, size_t size)
         std::vector<uint32_t> slice;
         if (static_cast<size_t>(sm.firstIndex) + sm.indexCount <= idx0.size())
             slice.assign(idx0.begin() + sm.firstIndex, idx0.begin() + sm.firstIndex + sm.indexCount);
+        out.lodSubmeshCount[0][s] = static_cast<uint32_t>(slice.size());
         out.lodIndices[0].insert(out.lodIndices[0].end(), slice.begin(), slice.end());
         prevSlices[s] = std::move(slice);
     }
@@ -175,12 +181,38 @@ MeshCpu ParseHMesh(const uint8_t *data, size_t size)
                              lodData.begin() + ml.firstIndex + ml.indexCount);
             else
                 slice = prevSlices[s]; // stalled simplification: reuse the previous level
+            out.lodSubmeshCount[l][s] = static_cast<uint32_t>(slice.size());
             out.lodIndices[l].insert(out.lodIndices[l].end(), slice.begin(), slice.end());
             prevSlices[s] = std::move(slice);
         }
     }
 
     out.valid = true;
+    return out;
+}
+
+std::vector<std::array<float, 4>> ParseHMatColors(const uint8_t *data, size_t size)
+{
+    using assetc::GpuMaterial;
+    using assetc::MatFileHeader;
+    std::vector<std::array<float, 4>> out;
+    if (size < sizeof(MatFileHeader))
+        return out;
+    MatFileHeader h{};
+    std::memcpy(&h, data, sizeof(h));
+    if (h.magic != assetc::MatMagic || h.version != assetc::MatVersion)
+        return out;
+    if (sizeof(MatFileHeader) + static_cast<size_t>(h.count) * sizeof(GpuMaterial) != size)
+        return out;
+    out.resize(h.count);
+    for (uint32_t i = 0; i < h.count; ++i)
+    {
+        GpuMaterial mat{};
+        std::memcpy(&mat, data + sizeof(MatFileHeader) + static_cast<size_t>(i) * sizeof(GpuMaterial),
+                    sizeof(GpuMaterial));
+        out[i] = {mat.baseColorFactor[0], mat.baseColorFactor[1], mat.baseColorFactor[2],
+                  mat.baseColorFactor[3]};
+    }
     return out;
 }
 
@@ -209,6 +241,28 @@ V3 Normalize(const V3 &v)
 // so we degrade rather than stall the UI. LODs exist precisely to stay under them.
 constexpr size_t kMaxSolidTris = 150000;
 constexpr size_t kMaxWireTris  = 300000;
+
+// Material factors are stored linear; the rest of the inspector shows sRGB-ish
+// pixels, so encode for display before drawing.
+float LinToSrgb(float c)
+{
+    c = std::clamp(c, 0.0f, 1.0f);
+    return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
+}
+
+// Distinct base hues for the material-colored view, used only as a fallback when a
+// submesh has no real material color (no .hmat / kNoMaterial). Picked for separation.
+V3 MaterialColor(uint32_t key)
+{
+    static const V3 kPalette[] = {
+        {0.90f, 0.49f, 0.45f}, {0.45f, 0.74f, 0.90f}, {0.62f, 0.84f, 0.45f},
+        {0.86f, 0.74f, 0.42f}, {0.74f, 0.55f, 0.88f}, {0.42f, 0.83f, 0.78f},
+        {0.92f, 0.62f, 0.78f}, {0.66f, 0.69f, 0.50f}, {0.50f, 0.62f, 0.86f},
+        {0.83f, 0.58f, 0.42f},
+    };
+    constexpr uint32_t n = sizeof(kPalette) / sizeof(kPalette[0]);
+    return kPalette[key % n];
+}
 
 } // namespace
 
@@ -255,9 +309,11 @@ void DrawMeshPreview(const MeshCpu &m, MeshCamera &cam)
         ImGui::Text("%zu triangles  (%.0f%% of LOD0)", curTris,
                     100.0 * static_cast<double>(curTris) / static_cast<double>(baseTris));
 
-    ImGui::Checkbox("solid", &cam.solid);
-    ImGui::SameLine();
-    ImGui::Checkbox("wireframe", &cam.wire);
+    static const char *kModeNames[MeshMode_Count] = {"wireframe", "solid", "debug material",
+                                                      "material"};
+    cam.mode = std::clamp(cam.mode, 0, (int)MeshMode_Count - 1);
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::Combo("mode", &cam.mode, kModeNames, MeshMode_Count);
     ImGui::SameLine();
     if (ImGui::SmallButton("reset view"))
     {
@@ -335,8 +391,43 @@ void DrawMeshPreview(const MeshCpu &m, MeshCamera &cam)
     const std::vector<uint32_t> &idx = m.lodIndices[cam.lod];
     const size_t                 triCount = idx.size() / 3;
 
-    const bool drawSolid = cam.solid && triCount > 0 && triCount <= kMaxSolidTris;
-    const bool drawWire  = cam.wire && triCount > 0 && triCount <= kMaxWireTris;
+    const bool wantFill   = cam.mode == MeshMode_Solid || cam.mode == MeshMode_DebugMaterial ||
+                          cam.mode == MeshMode_Material;
+    const bool colorFill  = cam.mode == MeshMode_DebugMaterial || cam.mode == MeshMode_Material;
+    const bool realColors = cam.mode == MeshMode_Material; // else debug palette
+    const bool drawSolid  = wantFill && triCount > 0 && triCount <= kMaxSolidTris;
+    const bool drawWire   = cam.mode == MeshMode_Wire && triCount > 0 && triCount <= kMaxWireTris;
+
+    // For the colored fills, resolve each triangle's base color from its submesh's
+    // material slot. "material" mode uses the real .hmat baseColorFactor when
+    // available; "debug material" always uses a distinct palette color (offset past
+    // the slot range for unmaterialed submeshes so they stay distinguishable), and
+    // it is also the fallback when a real color is missing. Submeshes are contiguous
+    // in `idx`, so walk the per-submesh counts to assign ranges.
+    static std::vector<V3> triColor;
+    if (drawSolid && colorFill && cam.lod < (int)m.lodSubmeshCount.size())
+    {
+        triColor.assign(triCount, V3{0.8f, 0.8f, 0.8f});
+        const auto &counts = m.lodSubmeshCount[cam.lod];
+        size_t      tri    = 0;
+        for (uint32_t s = 0; s < counts.size(); ++s)
+        {
+            const uint32_t slot = m.submeshMaterial[s];
+            V3             base;
+            if (realColors && slot != assetc::kNoMaterial && slot < m.materialColors.size())
+            {
+                const auto &c = m.materialColors[slot];
+                base = V3{LinToSrgb(c[0]), LinToSrgb(c[1]), LinToSrgb(c[2])};
+            }
+            else
+            {
+                const uint32_t key = (slot != assetc::kNoMaterial) ? slot : (m.materialCount + s);
+                base               = MaterialColor(key);
+            }
+            for (uint32_t k = 0; k < counts[s] / 3 && tri < triCount; ++k, ++tri)
+                triColor[tri] = base;
+        }
+    }
 
     if (drawSolid)
     {
@@ -367,20 +458,32 @@ void DrawMeshPreview(const MeshCpu &m, MeshCamera &cam)
             if (facing <= 0.0f)
                 continue; // back-facing
             const float shade = 0.18f + 0.82f * std::clamp(facing, 0.0f, 1.0f);
-            const int   g     = static_cast<int>(shade * 235.0f);
-            const ImU32 col   = IM_COL32(g, g, static_cast<int>(g * 0.96f) + 6, 255);
+            ImU32       col;
+            if (colorFill)
+            {
+                const V3  base = triColor[t];
+                const int r    = static_cast<int>(std::clamp(base.x * shade, 0.0f, 1.0f) * 255.0f);
+                const int gc   = static_cast<int>(std::clamp(base.y * shade, 0.0f, 1.0f) * 255.0f);
+                const int bc   = static_cast<int>(std::clamp(base.z * shade, 0.0f, 1.0f) * 255.0f);
+                col            = IM_COL32(r, gc, bc, 255);
+            }
+            else
+            {
+                const int g = static_cast<int>(shade * 235.0f);
+                col         = IM_COL32(g, g, static_cast<int>(g * 0.96f) + 6, 255);
+            }
             dl->AddTriangleFilled(ImVec2(sx[a], sy[a]), ImVec2(sx[b], sy[b]),
                                   ImVec2(sx[c], sy[c]), col);
         }
     }
-    else if (cam.solid && triCount > kMaxSolidTris)
+    else if (wantFill && triCount > kMaxSolidTris)
     {
         const ImVec2 tp(p0.x + 8, p0.y + 8);
         dl->AddText(tp, IM_COL32(255, 210, 120, 255),
                     "LOD too dense for solid fill — showing wireframe");
     }
 
-    if (drawWire || (cam.solid && triCount > kMaxSolidTris && triCount <= kMaxWireTris))
+    if (drawWire || (wantFill && triCount > kMaxSolidTris && triCount <= kMaxWireTris))
     {
         const ImU32 wcol = drawSolid ? IM_COL32(150, 170, 210, 90) : IM_COL32(150, 200, 255, 200);
         for (uint32_t t = 0; t < triCount; ++t)
