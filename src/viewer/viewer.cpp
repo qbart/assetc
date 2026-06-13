@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <imgui.h>
+#include <imgui_internal.h> // DockBuilder API for the default layout
 #include <ktx.h>
 
 namespace fs = std::filesystem;
@@ -370,10 +371,31 @@ void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
     v.details = std::move(d);
 }
 
+// Full-window dockspace. Builds a default layout the first time it runs: the
+// "Assets" tree pinned to the left, "Inspector" filling the rest.
+void DrawDockspace()
+{
+    const ImGuiID dockspace_id = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
+    static bool built = false;
+    if (built)
+        return;
+    built = true;
+
+    ImGui::DockBuilderRemoveNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+
+    ImGuiID main = dockspace_id;
+    ImGuiID left = ImGui::DockBuilderSplitNode(main, ImGuiDir_Left, 0.28f, nullptr, &main);
+
+    ImGui::DockBuilderDockWindow("Assets", left);
+    ImGui::DockBuilderDockWindow("Inspector", main);
+    ImGui::DockBuilderFinish(dockspace_id);
+}
+
 void DrawBrowser(Source &src, View &v)
 {
-    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(360, 720), ImGuiCond_FirstUseEver);
     ImGui::Begin("Assets");
 
     ImGui::TextUnformatted(src.isPack ? src.packPath.c_str() : src.rootDir.c_str());
@@ -407,8 +429,6 @@ void DrawBrowser(Source &src, View &v)
 
 void DrawInspector(viewer::GpuContext &gpu, const Source &src, View &v)
 {
-    ImGui::SetNextWindowPos(ImVec2(370, 0), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(900, 720), ImGuiCond_FirstUseEver);
     ImGui::Begin("Inspector");
 
     if (v.selected < 0)
@@ -518,6 +538,7 @@ int RunViewer(const std::string &path)
             LoadSelection(gpu, src, v);
             v.dirty = false;
         }
+        DrawDockspace();
         DrawBrowser(src, v);
         DrawInspector(gpu, src, v);
         gpu.EndFrame();
