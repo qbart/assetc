@@ -35,12 +35,13 @@ every format. (The compiler links this SDK; the SDK never links back.)
 std::vector<assetc::ManifestEntry> manifest;
 assetc::ReadHMan("runtime/assets.hman", manifest);
 
-// 2. Resolve a material's texture ref to a file.
+// 2. Resolve a material's texture ref to a file. Embedded textures are content-
+//    addressed, so the .hmat already holds the manifest key — just look it up.
 uint64_t ref = mat.baseColorTex;                 // from a GpuMaterial in a .hmat
 // ...look ref up in the manifest map you built from `manifest`...
 
-// 3. Or compute a ref id yourself from a canonical ref string.
-uint64_t id = assetc::HashAssetRef("models/chair/tex_0");
+// 3. Or compute a name-addressed ref id yourself (shaders, font atlases).
+uint64_t id = assetc::HashAssetRef("shaders/bloom/down");
 
 // 4. mmap a .hmesh and walk its chunks using the structs in runtime_mesh.hpp.
 ```

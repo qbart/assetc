@@ -25,7 +25,7 @@ struct TextureExport
 {
     uint32_t       imageIndex; // index into tg3_model.images
     ktx::UASTCMode mode;
-    uint64_t       refHash;    // FNV1a64 of "<sourceRef>/tex_<imageIndex>" (manifest parity)
+    uint64_t       refHash;    // content hash (image bytes + mode); names tex/<hash>.ktx2
 };
 
 struct CompiledMaterials
@@ -40,8 +40,9 @@ struct CompiledMaterials
 // -> source material index. The returned rows are in that same slot order, so a
 // submesh's materialSlot indexes straight into the `.hmat`.
 //
-// Texture refs are HashAssetRef("<sourceRef>/tex_<imageIndex>"), matching where
-// EncodeGltfImageToKtx2 is expected to write each image (see main.cpp wiring).
+// Texture refs are content hashes (image bytes + encoder mode); the caller writes
+// each image to the flat content store as `tex/<refHash>.ktx2`, so identical
+// textures across different glTF sources resolve to one file (see main.cpp wiring).
 CompiledMaterials BuildMaterialsFromGltf(const gltf::GLTF &src,
                                          std::span<const uint32_t> denseSourceIndices,
                                          std::string_view sourceRef);

@@ -1,5 +1,6 @@
 #include "inspect.hpp"
 
+#include "assetc/hash.hpp"
 #include "assetc/pack.hpp"
 #include "assetc/runtime_anim.hpp"
 #include "assetc/runtime_manifest.hpp"
@@ -14,6 +15,8 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -55,6 +58,92 @@ uint64_t FileSize(const fs::path &p)
     std::error_code ec;
     auto            s = fs::file_size(p, ec);
     return ec ? 0 : static_cast<uint64_t>(s);
+}
+
+// ---- referenced-by index ----------------------------------------------------
+//
+// Materials reference textures by hash; to recover human context for the (now
+// content-addressed, opaque-named) `tex/<hash>.ktx2` files, we read every .hmat,
+// map each texture hash -> the material slots that use it, and join it into the
+// texture listing. Built once per inspect, shared by `info` and `pack info`.
+
+using RefererMap = std::unordered_map<uint64_t, std::vector<std::string>>;
+
+// The manifest hash for a texture given its runtime-relative path. Content-store
+// textures ("tex/<16-hex>.ktx2") carry the hash in their name; everything else
+// (e.g. font SDF atlases) is name-addressed via HashAssetRef.
+uint64_t TextureHashForPath(const std::string &rel)
+{
+    if (!rel.ends_with(".ktx2"))
+        return 0;
+    const std::string ref = rel.substr(0, rel.size() - 5);
+    constexpr std::string_view prefix = "tex/";
+    if (ref.size() == prefix.size() + 16 && ref.compare(0, prefix.size(), prefix) == 0)
+    {
+        uint64_t h  = 0;
+        bool     ok = true;
+        for (size_t i = prefix.size(); i < ref.size(); ++i)
+        {
+            const char ch = ref[i];
+            unsigned   v;
+            if (ch >= '0' && ch <= '9')
+                v = static_cast<unsigned>(ch - '0');
+            else if (ch >= 'a' && ch <= 'f')
+                v = static_cast<unsigned>(ch - 'a' + 10);
+            else
+            {
+                ok = false;
+                break;
+            }
+            h = (h << 4) | v;
+        }
+        if (ok)
+            return h;
+    }
+    return assetc::HashAssetRef(ref);
+}
+
+// Append each texture ref in one .hmat's rows to the referer map. `stem` is the
+// material's display name (rel path without ".hmat"). `read` pulls the next struct
+// from wherever the .hmat lives (a file or a pack payload).
+template <typename ReadFn>
+void IndexHMatRefs(RefererMap &out, const std::string &stem, ReadFn &&read)
+{
+    assetc::MatFileHeader hdr{};
+    if (!read(&hdr, sizeof(hdr)) || hdr.magic != assetc::MatMagic)
+        return;
+    for (uint32_t i = 0; i < hdr.count; ++i)
+    {
+        assetc::GpuMaterial m{};
+        if (!read(&m, sizeof(m)))
+            break;
+        const struct
+        {
+            uint64_t    ref;
+            const char *tag;
+        } slots[] = {{m.baseColorTex, "base"},  {m.metallicRoughnessTex, "mr"},
+                     {m.normalTex, "normal"},   {m.occlusionTex, "occ"},
+                     {m.emissiveTex, "emissive"}};
+        for (const auto &s : slots)
+            if (s.ref != 0)
+                out[s.ref].push_back(fmt::format("{}[{}].{}", stem, i, s.tag));
+    }
+}
+
+// " <- referenced by a, b, c (+N more)" for a texture hash, or empty if unused.
+std::string RefererSuffix(const RefererMap &referers, uint64_t hash)
+{
+    auto it = referers.find(hash);
+    if (hash == 0 || it == referers.end() || it->second.empty())
+        return {};
+    const auto      &v   = it->second;
+    constexpr size_t cap = 6;
+    std::string      s   = " <- referenced by ";
+    for (size_t i = 0; i < v.size() && i < cap; ++i)
+        s += (i ? ", " : "") + v[i];
+    if (v.size() > cap)
+        s += fmt::format(" (+{} more)", v.size() - cap);
+    return s;
 }
 
 // ---- aggregate totals -------------------------------------------------------
@@ -314,7 +403,8 @@ const char *SupercompressionName(uint32_t s)
     }
 }
 
-void InspectKtx2(const fs::path &p, const std::string &rel, Totals &t, std::vector<Line> &out)
+void InspectKtx2(const fs::path &p, const std::string &rel, Totals &t, std::vector<Line> &out,
+                 const RefererMap &referers)
 {
     // KTX2 header: 12-byte identifier then 9 little-endian u32 fields.
     std::ifstream in(p, std::ios::binary);
@@ -343,9 +433,10 @@ void InspectKtx2(const fs::path &p, const std::string &rel, Totals &t, std::vect
                                : fmt::format("{}x{}", h.w, h.h);
 
     Emit(out, rel,
-         fmt::format("{} | {} | {} | {} mips | {} faces, {} layers | supercompress: {} | {}", dims,
+         fmt::format("{} | {} | {} | {} mips | {} faces, {} layers | supercompress: {} | {}{}", dims,
                      kind, fmtStr, h.levels ? h.levels : 1, faces, layers,
-                     SupercompressionName(h.scheme), HumanBytes(FileSize(p))));
+                     SupercompressionName(h.scheme), HumanBytes(FileSize(p)),
+                     RefererSuffix(referers, TextureHashForPath(rel))));
 
     ++t.texFiles;
     t.texBytes += FileSize(p);
@@ -426,11 +517,37 @@ int assetc::InspectPack(const std::string &packPath)
                        HumanBytes(kindBytes[k]));
     }
 
+    // Referenced-by index: read each .hmat payload in place to map texture hashes
+    // back to the materials that use them (textures are content-addressed by name).
+    RefererMap referers;
+    {
+        std::ifstream in(packPath, std::ios::binary);
+        for (const auto &e : toc)
+        {
+            if (e.kind != assetc::PackKind::Material)
+                continue;
+            std::string stem = e.path;
+            if (stem.ends_with(".hmat"))
+                stem = stem.substr(0, stem.size() - 5);
+            in.clear();
+            in.seekg(static_cast<std::streamoff>(e.offset));
+            IndexHMatRefs(referers, stem, [&](void *dst, size_t n) {
+                return static_cast<bool>(in.read(reinterpret_cast<char *>(dst),
+                                                 static_cast<std::streamsize>(n)));
+            });
+        }
+    }
+
     // Entries (already path-sorted in the TOC): kind | path | size | offset.
     fmt::print("\n{}== entries{}\n", fmtx::CYAN, fmtx::RESET);
     for (const auto &e : toc)
-        fmt::print("  {:<9} {:<44} {:>10}  @{}\n", PackKindTag(e.kind), e.path, HumanBytes(e.size),
-                   e.offset);
+    {
+        const std::string suffix = e.kind == assetc::PackKind::Texture
+                                       ? RefererSuffix(referers, TextureHashForPath(e.path))
+                                       : std::string{};
+        fmt::print("  {:<9} {:<44} {:>10}  @{}{}\n", PackKindTag(e.kind), e.path, HumanBytes(e.size),
+                   e.offset, suffix);
+    }
 
     return 0;
 }
@@ -445,6 +562,26 @@ int assetc::InspectRuntime(const std::string &dir)
 
     Totals             t{};
     std::vector<Line>  meshes, mats, mans, textures, shaders, anims;
+
+    // Pre-pass: build the texture hash -> referencing-material index so the texture
+    // listing can show who uses each (content-addressed) .ktx2.
+    RefererMap      referers;
+    std::error_code rec;
+    for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied,
+                                             rec),
+         end;
+         it != end; it.increment(rec))
+    {
+        if (rec || !it->is_regular_file() || !it->path().filename().string().ends_with(".hmat"))
+            continue;
+        const std::string stem =
+            fs::relative(it->path(), dir, rec).replace_extension().generic_string();
+        std::ifstream in(it->path(), std::ios::binary);
+        IndexHMatRefs(referers, stem, [&](void *dst, size_t n) {
+            return static_cast<bool>(in.read(reinterpret_cast<char *>(dst),
+                                             static_cast<std::streamsize>(n)));
+        });
+    }
 
     std::error_code ec;
     for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec),
@@ -467,8 +604,8 @@ int assetc::InspectRuntime(const std::string &dir)
             InspectHMan(p, rel, t, mans);
         else if (name.ends_with(".hanim"))
             InspectHAnim(p, rel, t, anims);
-        else if (name.ends_with(".ktx2")) // covers tex_*, .lut.ktx2, .env.ktx2
-            InspectKtx2(p, rel, t, textures);
+        else if (name.ends_with(".ktx2")) // covers tex/<hash>, .lut.ktx2, .env.ktx2
+            InspectKtx2(p, rel, t, textures, referers);
         else if (name.ends_with(".spv"))
         {
             Emit(shaders, rel, HumanBytes(FileSize(p)));

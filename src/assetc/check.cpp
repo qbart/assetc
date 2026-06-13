@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -46,6 +47,30 @@ bool FileExists(const Ctx &c, const std::string &rel)
     return fs::exists(fs::path(c.root) / rel, ec);
 }
 
+// True if `ref` (a runtime ref without extension) names a content-store texture:
+// "tex/<16 lowercase-hex digits>". On success `outHash` is the parsed hash.
+bool IsContentStorePath(const std::string &ref, uint64_t &outHash)
+{
+    constexpr std::string_view prefix = "tex/";
+    if (ref.size() != prefix.size() + 16 || ref.compare(0, prefix.size(), prefix) != 0)
+        return false;
+    uint64_t h = 0;
+    for (size_t i = prefix.size(); i < ref.size(); ++i)
+    {
+        const char   ch = ref[i];
+        unsigned     v;
+        if (ch >= '0' && ch <= '9')
+            v = static_cast<unsigned>(ch - '0');
+        else if (ch >= 'a' && ch <= 'f')
+            v = static_cast<unsigned>(ch - 'a' + 10);
+        else
+            return false;
+        h = (h << 4) | v;
+    }
+    outHash = h;
+    return true;
+}
+
 // ---- .hman -----------------------------------------------------------------
 
 void CheckManifest(Ctx &c, const std::string &path, const std::string &rel)
@@ -66,15 +91,30 @@ void CheckManifest(Ctx &c, const std::string &path, const std::string &rel)
         c.byHash.emplace(e.hash, e.path);
         if (!FileExists(c, e.path))
             Problem(c, rel, fmt::format("entry 0x{:016x} -> missing file \"{}\"", e.hash, e.path));
-        // Texture-entry parity: hash must equal HashAssetRef(path without ".ktx2").
+        // Texture-entry parity. Content-addressed textures live in the flat store as
+        // "tex/<16-hex content hash>.ktx2", so their hash must equal the hex stem.
+        // Name-addressed textures (e.g. font SDF atlases) keep the older invariant
+        // hash == HashAssetRef(path without ".ktx2").
         if (e.kind == assetc::ManKind::Texture && e.path.ends_with(".ktx2"))
         {
-            const auto     ref      = e.path.substr(0, e.path.size() - 5);
-            const uint64_t expected = assetc::HashAssetRef(ref);
-            if (expected != e.hash)
-                Problem(c, rel,
+            const auto ref = e.path.substr(0, e.path.size() - 5);
+            uint64_t   stemHash = 0;
+            if (IsContentStorePath(ref, stemHash))
+            {
+                if (stemHash != e.hash)
+                    Problem(c, rel,
+                            fmt::format("entry \"{}\" hash 0x{:016x} != content-store stem 0x{:016x}",
+                                        e.path, e.hash, stemHash));
+            }
+            else
+            {
+                const uint64_t expected = assetc::HashAssetRef(ref);
+                if (expected != e.hash)
+                    Problem(
+                        c, rel,
                         fmt::format("entry \"{}\" hash 0x{:016x} != HashAssetRef(\"{}\")=0x{:016x}",
                                     e.path, e.hash, ref, expected));
+            }
         }
     }
 }

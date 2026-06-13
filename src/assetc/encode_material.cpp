@@ -71,6 +71,63 @@ std::vector<uint8_t> DecodeDataUri(const tg3_str &uri)
     return Base64Decode(s.substr(comma + 1));
 }
 
+// Raw at-rest bytes backing a glTF image: the still-encoded PNG/JPEG bytes for a
+// buffer view / data URI / image span, or the loader's raw decoded pixels if it
+// already decoded the image. Used only to derive a content hash for dedup; the
+// real pixel decode for encoding happens later in EncodeGltfImageToKtx2. Empty if
+// no bytes are reachable. Selection mirrors LoadGltfImagePixels so the same image
+// always resolves the same way.
+std::vector<uint8_t> GltfImageContentBytes(const tg3_model &m, const tg3_image &img)
+{
+    // Path 1: loader already decoded the image to raw 8-bit pixels.
+    if (img.width > 0 && img.height > 0 && img.component > 0 && img.bits == 8 &&
+        img.image.data != nullptr)
+    {
+        const uint64_t n = static_cast<uint64_t>(img.width) * static_cast<uint64_t>(img.height) *
+                           static_cast<uint64_t>(img.component);
+        if (img.image.count >= n)
+            return {img.image.data, img.image.data + n};
+    }
+    // Path 2: still-encoded bytes in a buffer view (typical for .glb).
+    if (img.buffer_view >= 0 && static_cast<uint32_t>(img.buffer_view) < m.buffer_views_count)
+    {
+        const tg3_buffer_view &bv = m.buffer_views[img.buffer_view];
+        if (bv.buffer >= 0 && static_cast<uint32_t>(bv.buffer) < m.buffers_count)
+        {
+            const tg3_buffer &buf = m.buffers[bv.buffer];
+            if (buf.data.data && bv.byte_offset + bv.byte_length <= buf.data.count)
+                return {buf.data.data + bv.byte_offset,
+                        buf.data.data + bv.byte_offset + bv.byte_length};
+        }
+    }
+    // Path 3: still-encoded bytes kept as-is in the image span.
+    if (img.image.data != nullptr && img.image.count > 0)
+        return {img.image.data, img.image.data + img.image.count};
+    // Path 4: an embedded "data:...;base64," URI (common in self-contained .gltf).
+    if (img.uri.data && img.uri.len > 0)
+        return DecodeDataUri(img.uri);
+    return {};
+}
+
+// FNV1a64 of the image's content bytes, salted by the encoder `mode` so the same
+// pixels encoded as color vs normal vs ORM stay distinct. Lives in the same hash
+// space as HashAssetRef (the manifest collision check guards cross-collisions).
+uint64_t HashImageContent(const std::vector<uint8_t> &bytes, ktx::UASTCMode mode) noexcept
+{
+    constexpr uint64_t kFnvOffset = 0xcbf29ce484222325ULL;
+    constexpr uint64_t kFnvPrime  = 0x00000100000001b3ULL;
+    uint64_t           h          = kFnvOffset;
+    const uint8_t      mb         = static_cast<uint8_t>(mode);
+    h ^= mb;
+    h *= kFnvPrime;
+    for (uint8_t b : bytes)
+    {
+        h ^= b;
+        h *= kFnvPrime;
+    }
+    return h;
+}
+
 // Resolve a glTF texture index to its backing image index, or -1 if absent.
 int ImageOfTexture(const tg3_model &m, int textureIndex) noexcept
 {
@@ -168,9 +225,12 @@ CompiledMaterials BuildMaterialsFromGltf(const gltf::GLTF &src,
     CompiledMaterials out;
     out.rows.reserve(denseSourceIndices.size());
 
-    // imageIndex -> the color-space/mode it was first used with. One .ktx2 per
-    // image, by index; warn if the same image is pulled into conflicting roles.
-    std::unordered_map<uint32_t, ktx::UASTCMode> seenImages;
+    // imageIndex -> (first mode, content hash) it was first used with. Textures are
+    // content-addressed: the hash is FNV1a64 of the image bytes + mode, so the same
+    // image embedded in two different glTF sources collapses to one .ktx2 in the flat
+    // `tex/<hash>.ktx2` store. Within a source one image emits one file; warn if the
+    // same image is pulled into conflicting roles (first use wins, like before).
+    std::unordered_map<uint32_t, std::pair<ktx::UASTCMode, uint64_t>> seenImages;
 
     auto useTexture = [&](int texIndex, int texCoord, ktx::UASTCMode mode) -> uint64_t {
         const int img = ImageOfTexture(m, texIndex);
@@ -182,19 +242,36 @@ CompiledMaterials BuildMaterialsFromGltf(const gltf::GLTF &src,
                 texCoord));
         const uint32_t ui = static_cast<uint32_t>(img);
 
-        std::string ref(sourceRef);
-        ref += "/tex_";
-        ref += std::to_string(ui);
-        const uint64_t h = HashAssetRef(ref);
+        // Already used in this source: reuse the one file's hash (keep first mode) so
+        // a conflicting-mode slot still resolves to the single .ktx2 we emit.
+        if (auto it = seenImages.find(ui); it != seenImages.end())
+        {
+            if (it->second.first != mode)
+                fmtx::Warn(fmt::format(
+                    "BuildMaterialsFromGltf: image {} used in conflicting color spaces; keeping "
+                    "first",
+                    ui));
+            return it->second.second;
+        }
 
-        auto [it, inserted] = seenImages.emplace(ui, mode);
-        if (inserted)
-            out.textures.push_back(TextureExport{ui, mode, h});
-        else if (it->second != mode)
-            fmtx::Warn(fmt::format(
-                "BuildMaterialsFromGltf: image {} used in conflicting color spaces; keeping first",
-                ui));
+        const std::vector<uint8_t> content = GltfImageContentBytes(m, m.images[ui]);
+        // Fall back to a name-derived ref only if no bytes are reachable, so two
+        // unreadable images in one source don't alias (the encode fails downstream).
+        uint64_t h;
+        if (content.empty())
+        {
+            std::string ref(sourceRef);
+            ref += "/tex_";
+            ref += std::to_string(ui);
+            h = HashAssetRef(ref);
+        }
+        else
+        {
+            h = HashImageContent(content, mode);
+        }
 
+        seenImages.emplace(ui, std::make_pair(mode, h));
+        out.textures.push_back(TextureExport{ui, mode, h});
         return h;
     };
 

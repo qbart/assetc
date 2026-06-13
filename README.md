@@ -2,7 +2,7 @@
 
 `assetc` compiles source assets under `assets/` (textures, meshes, shaders, materials, fonts) into runtime-friendly binary formats written to `runtime/`. Images become UASTC-encoded `.ktx2`, meshes become `.hmesh` with octahedral-packed normals/tangents and meshletized geometry; mesh files reference materials by stable 64-bit hashes so the engine can share resources across assets.
 
-A glTF/GLB mesh additionally emits a **companion material table** (`.hmat`) plus one **`.ktx2` per referenced image**. The three layers are orthogonal: `.hmesh` is geometry, `.hmat` is the small per-source material descriptor table (PBR factors + texture refs), and `.ktx2` is the GPU-ready pixel payload. A submesh's `materialSlot` indexes straight into the `.hmat` table (`.hmat` row `i` ⇔ `SubMesh::materialSlot i`).
+A glTF/GLB mesh additionally emits a **companion material table** (`.hmat`) plus one **content-addressed `.ktx2` per referenced image**. The three layers are orthogonal: `.hmesh` is geometry, `.hmat` is the small per-source material descriptor table (PBR factors + texture refs), and `.ktx2` is the GPU-ready pixel payload. A submesh's `materialSlot` indexes straight into the `.hmat` table (`.hmat` row `i` ⇔ `SubMesh::materialSlot i`). Embedded textures are written to a shared flat store `runtime/tex/<hash>.ktx2` keyed by content, so the **same texture used by two different models is encoded once and shares one runtime handle**.
 
 Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A single global **manifest** (`runtime/assets.hman`) maps each hash back to the `.ktx2` file on disk, so the runtime can content-address textures (load the manifest once into a `hash → path` map, then resolve any `baseColorTex` etc.). See [docs/hman.md](docs/hman.md).
 
@@ -104,7 +104,7 @@ Unknown keys are warned (typo protection). The schema is intentionally small —
 | `*.n.png`                              | Normal     | UASTC `.ktx2` (normal mode)             |
 | `*.ao.png`, `*.h.png`, `*.r.png`       | Grayscale  | UASTC `.ktx2` (grayscale mode)          |
 | `*.lut.cube`                           | LUT        | `.lut.ktx2` (3D LUT)                    |
-| `*.obj`, `*.gltf`, `*.glb`             | Mesh       | [`.hmesh`](docs/hmesh.md) (container); glTF also emits [`.hmat`](docs/hmat.md) + `tex_<i>.ktx2` |
+| `*.obj`, `*.gltf`, `*.glb`             | Mesh       | [`.hmesh`](docs/hmesh.md) (container); glTF also emits [`.hmat`](docs/hmat.md) + content-addressed `tex/<hash>.ktx2` |
 | `*.shader/` (directory)                | Shader     | `<entryPoint>.spv` per Slang entry point (stage from `[shader(...)]`; names unique per folder) |
 | `*.env/` (directory)                   | Cubemap    | UASTC `.env.ktx2` (6 faces: `px.png`, `nx.png`, `py.png`, `ny.png`, `pz.png`, `nz.png`) |
 | `*.array/` (directory)                 | Array      | `.arr.ktx2` *(planned)*                 |
@@ -116,7 +116,7 @@ For a glTF source `assets/models/chair.glb` the outputs are:
 ```
 runtime/models/chair.hmesh          geometry + submesh table
 runtime/models/chair.hmat           material table, row i == SubMesh::materialSlot i
-runtime/models/chair/tex_<i>.ktx2   one UASTC .ktx2 per referenced glTF image i
+runtime/tex/<hash>.ktx2             content-addressed UASTC textures (shared across all models)
 runtime/models/chair.hanim          animation clips (only if the source is skinned + animated)
 runtime/assets.hman                 global hash -> file manifest (all assets, written once)
 ```
@@ -174,7 +174,9 @@ target_link_libraries(my_engine PRIVATE assetc::sdk)
 
 std::vector<assetc::ManifestEntry> manifest;
 assetc::ReadHMan("runtime/assets.hman", manifest);     // hash -> path table
-uint64_t id = assetc::HashAssetRef("models/chair/tex_0"); // resolve a ref
+uint64_t shader = assetc::HashAssetRef("shaders/bloom/down"); // resolve a name-addressed ref
+// Embedded textures are content-addressed: read a material's *Tex hash from the
+// .hmat row and look it up directly in the manifest (no HashAssetRef needed).
 // ...then mmap the .hmesh / .hmat and cast the structs in <assetc/runtime_mesh.hpp>.
 ```
 

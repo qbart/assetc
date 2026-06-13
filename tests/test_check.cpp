@@ -67,6 +67,36 @@ int main()
     }
     CHECK(CheckRuntime(dangling.string()) != 0);
 
+    // --- content-addressed texture (tex/<hash>.ktx2) passes when stem == hash ---
+    const auto content = base / "content";
+    {
+        fs::remove_all(content);
+        fs::create_directories(content);
+        const uint64_t    hash   = 0x0123456789abcdefULL;
+        const std::string relTex = "tex/0123456789abcdef.ktx2";
+        Touch(content / relTex);
+        std::vector<ManifestEntry> e = {{hash, ManKind::Texture, ManColorSpace::Srgb, relTex}};
+        WriteHMan((content / "assets.hman").string(), e);
+        GpuMaterial row{};
+        row.baseColorTex = hash;
+        std::vector<GpuMaterial> rows = {row};
+        WriteHMat((content / "m.hmat").string(), rows);
+        CHECK_EQ(CheckRuntime(content.string()), 0);
+    }
+
+    // --- content-store texture whose stem != hash is caught --------------------
+    const auto contentBad = base / "content_bad";
+    {
+        fs::remove_all(contentBad);
+        fs::create_directories(contentBad);
+        const uint64_t    hash   = 0x0123456789abcdefULL;
+        const std::string relTex = "tex/ffffffffffffffff.ktx2"; // name disagrees with hash
+        Touch(contentBad / relTex);
+        std::vector<ManifestEntry> e = {{hash, ManKind::Texture, ManColorSpace::Srgb, relTex}};
+        WriteHMan((contentBad / "assets.hman").string(), e);
+        CHECK(CheckRuntime(contentBad.string()) != 0);
+    }
+
     // --- manifest entry pointing at a missing file is caught -------------------
     const auto badman = base / "badman";
     fs::remove_all(badman);

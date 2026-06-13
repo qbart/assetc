@@ -37,11 +37,14 @@ Entries are streamed (not a fixed stride), so the file is parsed sequentially ra
 
 ## Canonical hashed string
 
-The `hash` is `HashAssetRef("<sourceRef>/tex_<imageIndex>")` — the same canonical ref documented under [.hmat texture refs](hmat.md#texture-refs): `sourceRef` is the source path relative to `assets/`, extension stripped, lowercased, `/`-separated; no extension and no `runtime/` prefix. For a texture the on-disk `path` equals that ref plus `.ktx2`, so `hash == HashAssetRef(path-without-".ktx2")`.
+There are two texture-entry shapes:
+
+- **Content-addressed textures** (glTF-embedded images) live in the shared flat store. The `hash` is the content hash (image bytes + encoder mode; see [.hmat texture refs](hmat.md#texture-refs)) and the `path` is `tex/<hash>.ktx2` with the hash as 16 lowercase hex digits, so `hash == parse_hex(stem of path)`. Identical textures across sources share one entry.
+- **Name-addressed textures** (font SDF atlases) keep `hash == HashAssetRef(path-without-".ktx2")`, where the ref is the source path relative to `assets/`, extension stripped, lowercased, `/`-separated.
 
 ## Scope and guarantees
 
-- **Textures only.** Only `.ktx2` images referenced by an emitted `.hmat`, plus **font SDF atlases** referenced by an emitted [`.hfont`](hfont.md), appear. The standalone `*.png`-compiled textures (Color/Normal/Grayscale) and LUTs are not listed; `kind` reserves room to add them later.
+- **Textures only.** Only `.ktx2` images referenced by an emitted `.hmat` (content-addressed in `tex/`), plus **font SDF atlases** referenced by an emitted [`.hfont`](hfont.md), appear. The standalone `*.png`-compiled textures (Color/Normal/Grayscale) and LUTs are not listed; `kind` reserves room to add them later.
 - **Colorspace** mirrors what `assetc` baked into the `.ktx2` (sRGB for the `Color` slot, linear otherwise) — authoritative, so the runtime need not re-derive it from the material slot.
 - **Deduplicated.** A ref reachable from multiple slots/assets appears once; identical `(hash, path)` pairs collapse.
 - **Collision-checked.** If two distinct paths hash equal the build fails loudly rather than emit an ambiguous entry.

@@ -28,6 +28,7 @@
 #include <mutex>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include <bit>
@@ -162,9 +163,18 @@ std::string Asset::RuntimePath(const std::string &outputDir) const
     return out.generic_string();
 }
 
+// Cross-asset dedup state for the flat texture content store: which content hashes
+// have already been claimed for encoding this run, so two models sharing a texture
+// don't both write `tex/<hash>.ktx2` (and don't race on the same path).
+struct TexStore
+{
+    std::mutex                    mu;
+    std::unordered_set<uint64_t>  written;
+};
+
 int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threadCount,
                 bool verify, std::vector<assetc::ManifestEntry> &outEntries,
-                const assetc::Config &config, const std::string &preset)
+                const assetc::Config &config, const std::string &preset, TexStore &texStore)
 {
     const auto out = asset.RuntimePath(outputDir);
     fs::create_directories(fs::path(out).parent_path());
@@ -261,8 +271,10 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         }
 
         // Companion material table + textures (glTF only; OBJ materials are TODO).
-        // One .hmat per source, indexed by slot (row i == SubMesh::materialSlot i);
-        // each referenced glTF image becomes its own .ktx2 under <basename>/tex_<i>.ktx2.
+        // One .hmat per source, indexed by slot (row i == SubMesh::materialSlot i).
+        // Textures are content-addressed into a shared flat store: each referenced
+        // glTF image becomes `tex/<contentHash>.ktx2`, so the same texture embedded
+        // in two different models resolves to one file and one GPU handle.
         if (gltfSrc && !cm.materialSourceIndex.empty())
         {
             const auto mats =
@@ -270,8 +282,7 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
 
             fs::path hmatPath = fs::path(out);
             hmatPath.replace_extension(".hmat");
-            fs::path texDir = fs::path(out);
-            texDir.replace_extension(); // <outputDir>/<rel-no-ext>/ holds tex_<i>.ktx2
+            const fs::path texDir = fs::path(outputDir) / "tex"; // shared content store
 
             fmtx::Info(fmt::format("{} {} materials / {} textures -> {}", AssetType::Material,
                                    mats.rows.size(), mats.textures.size(),
@@ -291,15 +302,26 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
             fs::create_directories(texDir);
             for (const auto &t : mats.textures)
             {
-                const auto texPath =
-                    (texDir / fmt::format("tex_{}.ktx2", t.imageIndex)).generic_string();
-                if (assetc::EncodeGltfImageToKtx2(*gltfSrc, t.imageIndex, t.mode, texPath,
-                                                  threadCount, texCompress) != 0)
-                    return 1;
-
+                const auto fname   = fmt::format("{:016x}.ktx2", t.refHash);
+                const auto texPath = (texDir / fname).generic_string();
                 // Runtime-relative path so the engine resolves root + "/" + path.
-                const auto relPath =
-                    fs::path(texPath).lexically_relative(outputDir).generic_string();
+                const auto relPath = (fs::path("tex") / fname).generic_string();
+
+                // Encode only if no other asset (this run or a prior build) already
+                // produced this exact content. Claim the hash first so concurrent
+                // workers don't both write the same path.
+                bool claimed;
+                {
+                    std::lock_guard<std::mutex> lk(texStore.mu);
+                    claimed = texStore.written.insert(t.refHash).second;
+                }
+                if (claimed && !fs::exists(texPath))
+                {
+                    if (assetc::EncodeGltfImageToKtx2(*gltfSrc, t.imageIndex, t.mode, texPath,
+                                                      threadCount, texCompress) != 0)
+                        return 1;
+                }
+
                 // sRGB only for the color slot; ORM/normal/grayscale are sampled linear.
                 const auto cs = t.mode == ktx::UASTCMode::Color ? assetc::ManColorSpace::Srgb
                                                                 : assetc::ManColorSpace::Linear;
@@ -629,26 +651,6 @@ int main(int argc, char **argv)
         fmtx::Info(fmt::format("found {} asset(s) under {}", assets.size(),
                                assetDir.generic_string()));
 
-    // Split the `jobs` thread budget between outer (across assets) and inner
-    // (within each ktx encode), based on how much real work there is.
-    //
-    //   24 jobs, 3 image assets  -> 3 outer * 8 inner = 24 threads used
-    //   24 jobs, 100 image assets -> 24 outer * 1 inner = 24 threads used
-    //   24 jobs, 1 image asset   -> 1 outer * 24 inner = 24 threads used
-    const size_t imageCount = std::count_if(assets.begin(), assets.end(), [](const Asset &a) {
-        return a.type == AssetType::Color || a.type == AssetType::Normal ||
-               a.type == AssetType::Grayscale || a.type == AssetType::Font;
-    });
-
-    const unsigned outerWorkers = std::min<unsigned>(jobs, std::max<size_t>(1, imageCount));
-    const unsigned innerThreads = std::max(1u, jobs / outerWorkers);
-    fmtx::Info(fmt::format("schedule: {} outer x {} inner = {} threads",
-                           outerWorkers, innerThreads, outerWorkers * innerThreads));
-
-    std::mutex logMu;
-    std::atomic<size_t> next{0};
-    std::atomic<int> failures{0};
-    std::atomic<int> cached{0};
     assetc::ManifestSink manifest;
 
     // Incremental build: skip an asset whose source bytes + settings are unchanged
@@ -658,43 +660,116 @@ int main(int argc, char **argv)
     std::mutex                    cacheMu;
     std::vector<assetc::CacheEntry> newCache;
 
+    // Shared dedup state for the flat `tex/<hash>.ktx2` content store.
+    TexStore texStore;
+
+    // Decide cache hits BEFORE scheduling so the thread split reflects the work we
+    // will actually do (assets to build), not the whole tree. Hashing each source
+    // reads its bytes, so run this pre-pass across the `jobs` budget too.
+    struct Pre
+    {
+        uint64_t                       inputHash = 0;
+        bool                           hit       = false;
+        const assetc::CacheEntry      *entry     = nullptr; // valid when hit
+    };
+    std::vector<Pre> pre(assets.size());
+    {
+        std::atomic<size_t> idx{0};
+        auto                hasher = [&] {
+            for (;;)
+            {
+                size_t i = idx.fetch_add(1, std::memory_order_relaxed);
+                if (i >= assets.size()) return;
+                const Asset &a = assets[i];
+                // Fold the resolved settings + active preset into the cache seed so a
+                // config/preset change (merge or compress flip) rebuilds affected assets.
+                std::error_code   sec;
+                const std::string rel  = fs::relative(a.path, config.input, sec).generic_string();
+                const auto        rs   = config.resolve(rel, preset);
+                uint64_t          seed = static_cast<uint64_t>(a.type);
+                seed = seed * 1000003u + (rs.merge ? 1u : 0u);
+                seed = seed * 1000003u + (rs.compress ? 2u : 0u);
+                for (char c : preset)
+                    seed = seed * 131u + static_cast<uint8_t>(c);
+                const uint64_t inputHash = assetc::HashSource(a.path, seed);
+
+                Pre p{inputHash, false, nullptr};
+                if (!noCache && inputHash != 0)
+                {
+                    auto it = oldCache.find(a.path);
+                    if (it != oldCache.end() && it->second.inputHash == inputHash &&
+                        fs::exists(a.RuntimePath(outputDir)))
+                    {
+                        p.hit   = true;
+                        p.entry = &it->second;
+                    }
+                }
+                pre[i] = p;
+            }
+        };
+        const unsigned hashers =
+            std::max(1u, std::min<unsigned>(jobs, static_cast<unsigned>(assets.size())));
+        std::vector<std::thread> hs;
+        hs.reserve(hashers);
+        for (unsigned i = 0; i < hashers; ++i)
+            hs.emplace_back(hasher);
+        for (auto &th : hs)
+            th.join();
+    }
+
+    // Replay cache hits now; collect the rest as the build work-list.
+    struct Job
+    {
+        size_t   assetIndex;
+        uint64_t inputHash;
+    };
+    std::vector<Job> todo;
+    todo.reserve(assets.size());
+    int cachedCount = 0;
+    for (size_t i = 0; i < assets.size(); ++i)
+    {
+        if (pre[i].hit)
+        {
+            for (const auto &m : pre[i].entry->manifest)
+                manifest.Add(m);
+            newCache.push_back(*pre[i].entry);
+            ++cachedCount;
+        }
+        else
+        {
+            todo.push_back(Job{i, pre[i].inputHash});
+        }
+    }
+
+    // Split the `jobs` budget between outer (across assets being built) and inner
+    // (threads within each encode, e.g. ktx). Count ALL asset types in the work-
+    // list, not just images, and exclude cache hits — so a mesh- or shader-only
+    // build still fans out, and a mostly-cached build doesn't over-subscribe.
+    //
+    //   24 jobs, 3 assets to build   -> 3 outer * 8 inner = 24 threads
+    //   24 jobs, 100 assets to build -> 24 outer * 1 inner = 24 threads
+    //   24 jobs, 1 asset to build    -> 1 outer * 24 inner = 24 threads
+    const unsigned outerWorkers = std::min<unsigned>(jobs, std::max<size_t>(1, todo.size()));
+    const unsigned innerThreads = std::max(1u, jobs / outerWorkers);
+    fmtx::Info(fmt::format("schedule: {} outer x {} inner = {} threads ({} to build, {} cached)",
+                           outerWorkers, innerThreads, outerWorkers * innerThreads, todo.size(),
+                           cachedCount));
+
+    std::mutex           logMu;
+    std::atomic<size_t>  next{0};
+    std::atomic<int>     failures{0};
+
     auto worker = [&] {
         for (;;)
         {
-            size_t i = next.fetch_add(1, std::memory_order_relaxed);
-            if (i >= assets.size()) return;
-            const Asset &a   = assets[i];
-            const auto   out = a.RuntimePath(outputDir);
-            // Fold the resolved settings + active preset into the cache seed so a
-            // config/preset change (merge or compress flip) rebuilds affected assets.
-            std::error_code   sec;
-            const std::string rel = fs::relative(a.path, config.input, sec).generic_string();
-            const auto        rs  = config.resolve(rel, preset);
-            uint64_t          seed = static_cast<uint64_t>(a.type);
-            seed = seed * 1000003u + (rs.merge ? 1u : 0u);
-            seed = seed * 1000003u + (rs.compress ? 2u : 0u);
-            for (char c : preset)
-                seed = seed * 131u + static_cast<uint8_t>(c);
-            const uint64_t inputHash = assetc::HashSource(a.path, seed);
-
-            if (!noCache && inputHash != 0)
-            {
-                auto it = oldCache.find(a.path);
-                if (it != oldCache.end() && it->second.inputHash == inputHash && fs::exists(out))
-                {
-                    for (const auto &m : it->second.manifest)
-                        manifest.Add(m);
-                    {
-                        std::lock_guard<std::mutex> lk(cacheMu);
-                        newCache.push_back(it->second);
-                    }
-                    cached.fetch_add(1, std::memory_order_relaxed);
-                    continue;
-                }
-            }
+            size_t k = next.fetch_add(1, std::memory_order_relaxed);
+            if (k >= todo.size()) return;
+            const Job    job = todo[k];
+            const Asset &a   = assets[job.assetIndex];
 
             std::vector<assetc::ManifestEntry> entries;
-            if (handleAsset(a, outputDir, innerThreads, verify, entries, config, preset) != 0)
+            if (handleAsset(a, outputDir, innerThreads, verify, entries, config, preset,
+                            texStore) != 0)
             {
                 std::lock_guard<std::mutex> lk(logMu);
                 fmtx::Error(fmt::format("failed: {}", a.path));
@@ -703,10 +778,10 @@ int main(int argc, char **argv)
             }
             for (const auto &m : entries)
                 manifest.Add(m);
-            if (inputHash != 0)
+            if (job.inputHash != 0)
             {
                 std::lock_guard<std::mutex> lk(cacheMu);
-                newCache.push_back(assetc::CacheEntry{inputHash, a.path, std::move(entries)});
+                newCache.push_back(assetc::CacheEntry{job.inputHash, a.path, std::move(entries)});
             }
         }
     };
@@ -726,7 +801,7 @@ int main(int argc, char **argv)
     // mistaken for real work.
     const int total  = static_cast<int>(assets.size());
     const int failed = failures.load();
-    const int hit    = cached.load();
+    const int hit    = cachedCount;
     const int built  = total - hit - failed;
     fmtx::Info(fmt::format("done: {} asset(s) -> {} built, {} cached, {} failed -> {}", total, built,
                            hit, failed, outputDir));

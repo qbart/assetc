@@ -12,7 +12,9 @@ namespace assetc
 
 // Bump when the encoder output format/semantics change in a way that should
 // invalidate every cached asset regardless of source content.
-constexpr uint32_t kEncoderVersion = 1;
+//   v2: glTF-embedded textures are content-addressed into a flat `tex/<hash>.ktx2`
+//       store (cross-source dedup) instead of `<model>/tex_<imageIndex>.ktx2`.
+constexpr uint32_t kEncoderVersion = 2;
 
 // One cached source asset: the hash of its inputs (content + settings + encoder
 // version) and the manifest entries it contributed, so a cache hit can replay

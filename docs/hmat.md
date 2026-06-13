@@ -48,7 +48,7 @@ Factors carry glTF defaults when a field is absent in the source (base color `1,
 
 ## Texture refs
 
-Each `*Tex` field is an FNV1a64 hash of the texture's runtime ref, or `0` when the material has no texture in that slot. The ref is `<sourceRef>/tex_<imageIndex>` (lowercased, like material refs), and the matching file is written to `runtime/<rel-no-ext>/tex_<imageIndex>.ktx2`. Textures are **deduplicated by glTF image index** — one `.ktx2` per source image, even when shared across materials or slots.
+Each `*Tex` field is an FNV1a64 hash of the texture, or `0` when the material has no texture in that slot. Textures are **content-addressed**: the hash is FNV1a64 of the source image bytes salted by the encoder mode (color / linear / normal), and the matching file is written to the shared flat store `runtime/tex/<hash>.ktx2` (the hash formatted as 16 lowercase hex digits). Because the key is the content, the **same texture embedded in two different glTF sources resolves to one `.ktx2` and one GPU handle** — dedup spans models, not just slots within a source. Within a single source one image still emits one file (first-used mode wins on conflict).
 
 ## Texture color space & encoder mode
 

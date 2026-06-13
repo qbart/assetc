@@ -16,16 +16,18 @@ constexpr uint32_t ManVersion = 1;
 // `runtime/assets.hman` is the global hash -> file table the runtime uses to
 // resolve an asset reference (e.g. GpuMaterial::baseColorTex) to bytes on disk.
 //
-// The hash is the SAME FNV1a64 already stored in .hmat/.hmesh for that ref: it is
-// HashAssetRef of the canonical runtime ref string, which for a texture is
+// The hash is the SAME FNV1a64 already stored in .hmat/.hmesh for that ref.
+// glTF-embedded textures are content-addressed: the hash is FNV1a64 of the image
+// bytes salted by encoder mode, and the on-disk path is the shared flat store
 //
-//     "<sourceRef>/tex_<imageIndex>"   (lowercase, forward-slash, NO extension)
+//     "tex/<hash>.ktx2"               (hash as 16 lowercase hex digits)
 //
-// where sourceRef is the asset path relative to `assets/`, extension stripped and
-// lowercased (see Asset::SourceRef). For textures the on-disk path equals that ref
-// plus ".ktx2" (relative to the runtime root).
+// so the same texture in two sources collapses to one file. Font SDF atlases are
+// name-addressed instead: hash == HashAssetRef("<sourceRef>") and path == ref +
+// ".ktx2", where sourceRef is the asset path relative to `assets/`, extension
+// stripped and lowercased (see Asset::SourceRef).
 //
-// A shader entry point follows the same shape: its canonical ref is
+// A shader entry point follows the name-addressed shape: its canonical ref is
 //
 //     "<sourceRef>/<entryPoint>"       (e.g. "shaders/bloom/down")
 //
