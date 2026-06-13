@@ -28,6 +28,59 @@ void reportDiagnostics(std::string_view what, slang::IBlob *diagnostics)
             "slang {}: {}", what, static_cast<const char *>(diagnostics->getBufferPointer())));
 }
 
+// Canonical lowercase name for a shader stage; used as the emitted name when an
+// entry point is the conventional `main` (the stage is the only distinguishing
+// information in that case).
+std::string_view stageName(SlangStage stage)
+{
+    switch (stage)
+    {
+    case SLANG_STAGE_VERTEX:        return "vertex";
+    case SLANG_STAGE_FRAGMENT:      return "fragment";
+    case SLANG_STAGE_COMPUTE:       return "compute";
+    case SLANG_STAGE_GEOMETRY:      return "geometry";
+    case SLANG_STAGE_HULL:          return "hull";
+    case SLANG_STAGE_DOMAIN:        return "domain";
+    case SLANG_STAGE_MESH:          return "mesh";
+    case SLANG_STAGE_AMPLIFICATION: return "amplification";
+    case SLANG_STAGE_RAY_GENERATION:return "raygen";
+    case SLANG_STAGE_INTERSECTION:  return "intersection";
+    case SLANG_STAGE_ANY_HIT:       return "anyhit";
+    case SLANG_STAGE_CLOSEST_HIT:   return "closesthit";
+    case SLANG_STAGE_MISS:          return "miss";
+    case SLANG_STAGE_CALLABLE:      return "callable";
+    default:                        return "";
+    }
+}
+
+bool equalsIgnoreCase(std::string_view a, std::string_view b)
+{
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+    {
+        char ca = a[i], cb = b[i];
+        if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca - 'A' + 'a');
+        if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb - 'A' + 'a');
+        if (ca != cb) return false;
+    }
+    return true;
+}
+
+// Map a reflected entry-point name + stage to the `.spv` stem the asset emits:
+//   - `main` (any case)        -> the stage name        (vertex, fragment, ...)
+//   - a trailing exact "Main"  -> the name without it    (vsMain -> vs)
+//   - anything else            -> the name unchanged     (down -> down)
+// Capital-M-only stripping avoids mangling words like `domain`.
+std::string emittedName(std::string_view reflected, SlangStage stage)
+{
+    if (equalsIgnoreCase(reflected, "main"))
+        return std::string(stageName(stage));
+    constexpr std::string_view kSuffix = "Main";
+    if (reflected.size() > kSuffix.size() && reflected.ends_with(kSuffix))
+        return std::string(reflected.substr(0, reflected.size() - kSuffix.size()));
+    return std::string(reflected);
+}
+
 // Compose `module` with a single `entryPoint`, link, reflect the entry point's
 // name, and write its SPIR-V to `<outDir>/<name>.spv`. `used` tracks names
 // already emitted in this folder so collisions fail loud (one folder = one
@@ -55,9 +108,9 @@ int compileEntryPoint(slang::ISession *session, slang::IModule *module,
         return 1;
     }
 
-    // Reflect the composed program to recover the entry point's source name; that
-    // name (not the stage) becomes the `.spv` stem, so the engine references each
-    // entry point by the name it was declared with.
+    // Reflect the composed program to recover the entry point's source name and
+    // stage, then derive the `.spv` stem (see emittedName): `main` becomes the
+    // stage name, a `…Main` suffix is dropped, otherwise the name is kept as-is.
     diagnostics.setNull();
     slang::ProgramLayout *layout = linked->getLayout(0, diagnostics.writeRef());
     if (!layout || layout->getEntryPointCount() == 0)
@@ -66,13 +119,21 @@ int compileEntryPoint(slang::ISession *session, slang::IModule *module,
         fmtx::Error("shader: failed to reflect entry point");
         return 1;
     }
-    const std::string name = layout->getEntryPointByIndex(0)->getName();
+    slang::EntryPointReflection *refl = layout->getEntryPointByIndex(0);
+    const std::string            name = emittedName(refl->getName(), refl->getStage());
+    if (name.empty())
+    {
+        fmtx::Error(fmt::format("shader: entry point '{}' has no name and an unknown stage",
+                                refl->getName()));
+        return 1;
+    }
 
     if (!used.insert(name).second)
     {
         fmtx::Error(fmt::format(
-            "shader: duplicate entry-point name '{}' in {} (names must be unique per folder)",
-            name, outDir));
+            "shader: entry point '{}' maps to '{}', which already exists in {} "
+            "(emitted names must be unique per folder)",
+            refl->getName(), name, outDir));
         return 1;
     }
 
