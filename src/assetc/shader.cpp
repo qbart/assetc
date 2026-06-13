@@ -209,6 +209,9 @@ int CompileShaderFolder(const std::string &shaderDir, const std::string &outDir,
     sd.targetCount     = 1;
     sd.searchPaths     = searchPaths;
     sd.searchPathCount = 1;
+    // Column-major to match the mesh pipeline (glTF-native, stored column-major).
+    // Slang otherwise defaults to row-major.
+    sd.defaultMatrixLayoutMode = SLANG_MATRIX_LAYOUT_COLUMN_MAJOR;
 
     ComPtr<slang::ISession> session;
     if (SLANG_FAILED(globalSession->createSession(sd, session.writeRef())))
