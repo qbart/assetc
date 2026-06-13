@@ -1,5 +1,6 @@
 #include "viewer/viewer.hpp"
 #include "viewer/gpu.hpp"
+#include "viewer/mesh_view.hpp"
 
 #include "assetc/pack.hpp"
 #include "assetc/runtime_manifest.hpp"
@@ -322,6 +323,9 @@ struct View
     viewer::GpuTexture tex;
     bool               isTexture = false;
     KtxMeta            meta;
+    bool               isMesh = false;
+    viewer::MeshCpu    mesh;
+    viewer::MeshCamera meshCam;
     std::string        details; // non-texture pane text
     int                mip = 0, face = 0, layer = 0;
     float              zoom = 1.0f;
@@ -333,6 +337,8 @@ void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
     if (v.tex.valid)
         gpu.DestroyTexture(v.tex);
     v.isTexture = false;
+    v.isMesh    = false;
+    v.mesh      = viewer::MeshCpu{};
     v.details.clear();
     v.meta = KtxMeta{};
     if (v.selected < 0)
@@ -356,6 +362,15 @@ void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
             if (v.mip >= (int)v.tex.mips)
                 v.mip = 0;
         }
+        return;
+    }
+
+    if (e.kind == assetc::PackKind::Mesh)
+    {
+        v.mesh   = viewer::ParseHMesh(bytes.data(), bytes.size());
+        v.isMesh = v.mesh.valid;
+        if (!v.isMesh)
+            v.details = fmt::format("mesh parse failed: {}", v.mesh.error);
         return;
     }
 
@@ -489,6 +504,10 @@ void DrawInspector(viewer::GpuContext &gpu, const Source &src, View &v)
         ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "texture decode failed");
         if (!v.meta.error.empty())
             ImGui::TextWrapped("%s", v.meta.error.c_str());
+    }
+    else if (v.isMesh)
+    {
+        viewer::DrawMeshPreview(v.mesh, v.meshCam);
     }
     else
     {

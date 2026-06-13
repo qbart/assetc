@@ -100,6 +100,7 @@ endif()
 add_library(assetc_viewer STATIC
     src/viewer/gpu.cpp
     src/viewer/viewer.cpp
+    src/viewer/mesh_view.cpp
     )
 set_target_properties(assetc_viewer PROPERTIES
             CXX_STANDARD 23
