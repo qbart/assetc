@@ -10,11 +10,13 @@
 #include "deps/fmt.hpp"
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <imgui.h>
@@ -41,11 +43,16 @@ struct Entry
 
 struct Source
 {
-    bool                            isPack = false;
-    std::string                     packPath;          // when isPack
-    std::vector<assetc::PackEntry>  packToc;           // when isPack (parallel to entries)
-    std::string                     rootDir;           // when !isPack
-    std::vector<Entry>              entries;
+    bool                            isPack = false; // entries are read FROM the pack file
+    std::string                     rootDir;        // when !isPack
+    std::vector<Entry>              entries;        // the browseable asset list
+
+    // A `.hpack` to visualize, shown as a node in the list. Always present when
+    // isPack; in directory mode it's the sibling `<dir>.hpack` if one exists.
+    bool                            packAvailable = false;
+    std::string                     packPath;
+    std::vector<assetc::PackEntry>  packToc;
+    std::vector<int>                packToList; // packToc index -> entries index, or -1
 };
 
 std::vector<uint8_t> ReadAll(std::istream &in, uint64_t off, uint64_t size)
@@ -79,6 +86,30 @@ std::vector<uint8_t> ReadEntryBytes(const Source &src, int idx)
     return ReadAll(f, 0, sz);
 }
 
+// Map each pack-TOC entry to the matching list entry (by runtime-relative path),
+// so a click in the pack viz selects the right asset. Identity when entries came
+// straight from the pack.
+void BuildPackToList(Source &out)
+{
+    out.packToList.assign(out.packToc.size(), -1);
+    if (out.isPack)
+    {
+        for (size_t i = 0; i < out.packToc.size(); ++i)
+            out.packToList[i] = static_cast<int>(i);
+        return;
+    }
+    std::unordered_map<std::string, int> byPath;
+    byPath.reserve(out.entries.size());
+    for (int i = 0; i < static_cast<int>(out.entries.size()); ++i)
+        byPath.emplace(out.entries[i].path, i);
+    for (size_t i = 0; i < out.packToc.size(); ++i)
+    {
+        auto it = byPath.find(out.packToc[i].path);
+        if (it != byPath.end())
+            out.packToList[i] = it->second;
+    }
+}
+
 bool BuildSource(const std::string &path, Source &out)
 {
     std::error_code ec;
@@ -100,6 +131,23 @@ bool BuildSource(const std::string &path, Source &out)
         }
         std::sort(out.entries.begin(), out.entries.end(),
                   [](const Entry &a, const Entry &b) { return a.path < b.path; });
+
+        // Look for the sibling `<dir>.hpack` so it can be browsed/visualized inline,
+        // without the user ever pointing the viewer at the pack file directly.
+        fs::path    dd = fs::path(path).lexically_normal();
+        std::string dn = dd.filename().string();
+        if (dn.empty())
+        {
+            dd = dd.parent_path();
+            dn = dd.filename().string();
+        }
+        const fs::path pk = dd.parent_path() / (dn + ".hpack");
+        if (fs::exists(pk, ec) && assetc::ReadPackToc(pk.generic_string(), out.packToc) == 0)
+        {
+            out.packAvailable = true;
+            out.packPath      = pk.generic_string();
+            BuildPackToList(out);
+        }
         return !out.entries.empty();
     }
 
@@ -114,10 +162,12 @@ bool BuildSource(const std::string &path, Source &out)
     }
     if (assetc::ReadPackToc(pp, out.packToc) != 0)
         return false;
-    out.isPack   = true;
-    out.packPath = pp;
+    out.isPack        = true;
+    out.packAvailable = true;
+    out.packPath      = pp;
     for (const auto &pe : out.packToc)
         out.entries.push_back(Entry{pe.path, pe.kind, pe.size});
+    BuildPackToList(out);
     return true;
 }
 
@@ -696,6 +746,10 @@ void DrawDockspace()
     ImGui::DockBuilderFinish(dockspace_id);
 }
 
+// v.selected sentinel for "the pack itself is selected" (its overview opens in the
+// Inspector, like any other entry). -1 stays "nothing selected".
+constexpr int kPackSelected = -2;
+
 void DrawBrowser(Source &src, View &v)
 {
     ImGui::Begin("Assets");
@@ -707,6 +761,24 @@ void DrawBrowser(Source &src, View &v)
 
     ImGui::BeginChild("list");
     const std::string flt = v.filter;
+
+    // The pack file is itself a first-class node (distinct gold color): selecting it
+    // opens the pack overview/visualization in the Inspector.
+    if (src.packAvailable)
+    {
+        const std::string label =
+            fmt::format("[pack] {}##__pack__", fs::path(src.packPath).filename().string());
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.78f, 0.36f, 1.0f));
+        const bool sel = ImGui::Selectable(label.c_str(), v.selected == kPackSelected);
+        ImGui::PopStyleColor();
+        if (sel && v.selected != kPackSelected)
+        {
+            v.selected = kPackSelected;
+            v.dirty    = true;
+        }
+        ImGui::Separator();
+    }
+
     for (int i = 0; i < (int)src.entries.size(); ++i)
     {
         const Entry &e = src.entries[i];
@@ -812,6 +884,9 @@ void DrawDetail(const View &v)
             {
                 const assetc::GpuMaterial &m = v.matRows[i];
                 ImGui::TableNextRow();
+                // Scope per-row widget ids so the baseColor ColorButton (same "##c"
+                // label every row) doesn't collide and assert on hover.
+                ImGui::PushID(static_cast<int>(i));
                 ImGui::TableSetColumnIndex(0);
                 ImGui::Text("%zu", i);
                 ImGui::TableSetColumnIndex(1);
@@ -844,6 +919,7 @@ void DrawDetail(const View &v)
                 if (m.occlusionTex) tx += "occ ";
                 if (m.emissiveTex) tx += "emissive ";
                 ImGui::TextUnformatted(tx.empty() ? "(factors only)" : tx.c_str());
+                ImGui::PopID();
             }
             ImGui::EndTable();
         }
@@ -946,9 +1022,26 @@ void DrawDetail(const View &v)
     }
 }
 
-void DrawInspector(viewer::GpuContext &gpu, const Source &src, View &v)
+// Pack visualization, defined below; the Inspector renders it when the pack node is
+// selected, so the .hpack opens like any other entry.
+struct PackStats;
+void DrawPackTabs(const Source &src, const PackStats &s, View &v);
+
+void DrawInspector(viewer::GpuContext &gpu, const Source &src, const PackStats &packStats, View &v)
 {
     ImGui::Begin("Inspector");
+
+    // The pack node: show its overview/visualization right here in the Inspector.
+    if (v.selected == kPackSelected)
+    {
+        ImGui::Text("%s", fs::path(src.packPath).filename().string().c_str());
+        ImGui::SameLine();
+        ImGui::TextDisabled("(pack)");
+        ImGui::Separator();
+        DrawPackTabs(src, packStats, v);
+        ImGui::End();
+        return;
+    }
 
     if (v.selected < 0)
     {
@@ -1034,6 +1127,382 @@ void DrawInspector(viewer::GpuContext &gpu, const Source &src, View &v)
     (void)gpu;
 }
 
+// ---------------------------------------------------------------------------
+// Pack visualization: a "Pack" window (shown only when the source is a .hpack)
+// with three tabs — Summary (stats + per-kind bars), Layout (a byte-accurate
+// memory map), and Treemap (entries sized by bytes, grouped by kind). Everything
+// is derived from the in-memory TOC, and clicking any block selects that entry so
+// it loads in the Inspector.
+// ---------------------------------------------------------------------------
+
+constexpr assetc::PackKind kPackKindOrder[8] = {
+    assetc::PackKind::Mesh,      assetc::PackKind::Material, assetc::PackKind::Manifest,
+    assetc::PackKind::Animation, assetc::PackKind::Texture,  assetc::PackKind::Shader,
+    assetc::PackKind::Font,      assetc::PackKind::Other};
+
+ImVec4 PackKindColor(assetc::PackKind k)
+{
+    using K = assetc::PackKind;
+    switch (k)
+    {
+    case K::Mesh:      return ImVec4(0.35f, 0.59f, 0.92f, 1.0f);
+    case K::Material:  return ImVec4(0.92f, 0.59f, 0.27f, 1.0f);
+    case K::Manifest:  return ImVec4(0.71f, 0.47f, 0.86f, 1.0f);
+    case K::Animation: return ImVec4(0.35f, 0.78f, 0.47f, 1.0f);
+    case K::Texture:   return ImVec4(0.27f, 0.75f, 0.78f, 1.0f);
+    case K::Shader:    return ImVec4(0.88f, 0.80f, 0.35f, 1.0f);
+    case K::Font:      return ImVec4(0.88f, 0.47f, 0.67f, 1.0f);
+    case K::Other:     break;
+    }
+    return ImVec4(0.51f, 0.51f, 0.51f, 1.0f);
+}
+
+const char *PackKindWord(assetc::PackKind k)
+{
+    using K = assetc::PackKind;
+    switch (k)
+    {
+    case K::Mesh:      return "meshes";
+    case K::Material:  return "materials";
+    case K::Manifest:  return "manifests";
+    case K::Animation: return "animations";
+    case K::Texture:   return "textures";
+    case K::Shader:    return "shaders";
+    case K::Font:      return "fonts";
+    case K::Other:     break;
+    }
+    return "other";
+}
+
+// Per-entry TOC record size (mirrors WritePack: offset u64 + size u64 + kind u8 +
+// pathLen u16 + path), so we can show the TOC region's true byte cost.
+uint64_t PackTocRecordBytes(size_t pathLen)
+{
+    return sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint8_t) + sizeof(uint16_t) + pathLen;
+}
+
+struct PackStats
+{
+    bool             valid        = false;
+    uint64_t         fileSize     = 0;
+    uint64_t         headerBytes  = 24; // magic+version+count+flags (4xu32) + tocBytes (u64)
+    uint64_t         tocBytes     = 0;
+    uint64_t         payloadBytes = 0;
+    uint64_t         paddingBytes = 0;
+    uint64_t         kindCount[8] = {};
+    uint64_t         kindBytes[8] = {};
+    std::vector<int> byKind[8]; // packToc indices per kind, sorted by size descending
+};
+
+PackStats ComputePackStats(const Source &src)
+{
+    PackStats s;
+    if (!src.packAvailable)
+        return s;
+    std::error_code ec;
+    s.fileSize = static_cast<uint64_t>(fs::file_size(src.packPath, ec));
+    if (ec || s.fileSize == 0)
+        return s;
+    for (size_t i = 0; i < src.packToc.size(); ++i)
+    {
+        const auto &pe = src.packToc[i];
+        s.tocBytes += PackTocRecordBytes(pe.path.size());
+        s.payloadBytes += pe.size;
+        int k = static_cast<int>(pe.kind);
+        if (k < 0 || k >= 8)
+            k = 0;
+        ++s.kindCount[k];
+        s.kindBytes[k] += pe.size;
+        s.byKind[k].push_back(static_cast<int>(i));
+    }
+    for (int k = 0; k < 8; ++k)
+        std::sort(s.byKind[k].begin(), s.byKind[k].end(),
+                  [&](int a, int b) { return src.packToc[a].size > src.packToc[b].size; });
+    const uint64_t used = s.headerBytes + s.tocBytes + s.payloadBytes;
+    s.paddingBytes      = s.fileSize > used ? s.fileSize - used : 0;
+    s.valid             = true;
+    return s;
+}
+
+// The pack viz indexes into packToc; selecting maps that to the browseable list.
+void SelectPackEntry(const Source &src, View &v, int packIdx);
+
+// Select an entry from a viz click, resetting the per-selection texture/zoom state
+// like the browser does, so the Inspector reloads it.
+void SelectEntry(View &v, int idx)
+{
+    if (v.selected == idx)
+        return;
+    v.selected = idx;
+    v.mip = v.face = v.layer = 0;
+    v.zoom                   = 1.0f;
+    v.dirty                  = true;
+}
+
+void SelectPackEntry(const Source &src, View &v, int packIdx)
+{
+    if (packIdx < 0 || packIdx >= static_cast<int>(src.packToList.size()))
+        return;
+    const int li = src.packToList[packIdx];
+    if (li >= 0)
+        SelectEntry(v, li);
+}
+
+// Is the pack-TOC entry `packIdx` the one currently selected in the list?
+bool PackEntrySelected(const Source &src, const View &v, int packIdx)
+{
+    return packIdx >= 0 && packIdx < static_cast<int>(src.packToList.size()) &&
+           src.packToList[packIdx] == v.selected && v.selected >= 0;
+}
+
+void DrawPackSummary(const Source &src, const PackStats &s, View &v)
+{
+    (void)v;
+    ImGui::Text("%s", fs::path(src.packPath).filename().string().c_str());
+    ImGui::SameLine();
+    ImGui::TextDisabled("HPAK v%u  |  %s  |  %zu entries", assetc::PackVersion,
+                        HumanSize(s.fileSize).c_str(), src.packToc.size());
+
+    // Region bar: header / TOC / payload / padding, proportional to bytes.
+    const ImVec2 p0 = ImGui::GetCursorScreenPos();
+    const float  w  = ImGui::GetContentRegionAvail().x;
+    const float  h  = 14.0f;
+    ImGui::InvisibleButton("regionbar", ImVec2(w, h));
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    struct Seg
+    {
+        uint64_t    bytes;
+        ImU32       col;
+    } segs[] = {
+        {s.headerBytes, IM_COL32(120, 120, 128, 255)},
+        {s.tocBytes, IM_COL32(95, 95, 150, 255)},
+        {s.payloadBytes, IM_COL32(80, 140, 90, 255)},
+        {s.paddingBytes, IM_COL32(58, 58, 64, 255)},
+    };
+    float x = p0.x;
+    for (const auto &sg : segs)
+    {
+        const float sw = w * static_cast<float>((double)sg.bytes / (double)s.fileSize);
+        dl->AddRectFilled(ImVec2(x, p0.y), ImVec2(x + sw, p0.y + h), sg.col);
+        x += sw;
+    }
+    dl->AddRect(p0, ImVec2(p0.x + w, p0.y + h), IM_COL32(0, 0, 0, 120));
+    ImGui::Text("header %s   TOC %s   payload %s   padding %s (%.1f%% overhead)",
+                HumanSize(s.headerBytes).c_str(), HumanSize(s.tocBytes).c_str(),
+                HumanSize(s.payloadBytes).c_str(), HumanSize(s.paddingBytes).c_str(),
+                s.fileSize ? 100.0 * (s.headerBytes + s.tocBytes + s.paddingBytes) / s.fileSize : 0.0);
+    ImGui::Separator();
+
+    // Per-kind size bars.
+    if (ImGui::BeginTable("kinds", 3,
+                          ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp |
+                              ImGuiTableFlags_ScrollY))
+    {
+        ImGui::TableSetupColumn("kind", ImGuiTableColumnFlags_WidthFixed, 110.0f);
+        ImGui::TableSetupColumn("share");
+        ImGui::TableSetupColumn("size", ImGuiTableColumnFlags_WidthFixed, 140.0f);
+        for (assetc::PackKind k : kPackKindOrder)
+        {
+            const int ki = static_cast<int>(k);
+            if (!s.kindCount[ki])
+                continue;
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextColored(PackKindColor(k), "%s", PackKindWord(k));
+            ImGui::TableSetColumnIndex(1);
+            const float frac =
+                s.payloadBytes ? static_cast<float>((double)s.kindBytes[ki] / s.payloadBytes) : 0.0f;
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, PackKindColor(k));
+            ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0), "");
+            ImGui::PopStyleColor();
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%s (%llu)", HumanSize(s.kindBytes[ki]).c_str(),
+                        (unsigned long long)s.kindCount[ki]);
+        }
+        ImGui::EndTable();
+    }
+}
+
+// A small colored legend chip + label, laid out inline.
+void LegendChip(ImU32 col, const char *label, bool &first)
+{
+    if (!first)
+        ImGui::SameLine();
+    first          = false;
+    const ImVec2 q = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(12, 12));
+    ImGui::GetWindowDrawList()->AddRectFilled(q, ImVec2(q.x + 12, q.y + 12), col);
+    ImGui::SameLine();
+    ImGui::TextUnformatted(label);
+}
+
+void DrawPackLayout(const Source &src, const PackStats &s, View &v)
+{
+    ImGui::TextDisabled("offset 0 -> %s   (width = bytes, gaps = alignment padding; click to inspect)",
+                        HumanSize(s.fileSize).c_str());
+
+    const ImVec2 p0   = ImGui::GetCursorScreenPos();
+    const float  w    = ImGui::GetContentRegionAvail().x;
+    const float  barH = 48.0f;
+    ImGui::InvisibleButton("bytemap", ImVec2(w, barH));
+    const bool   hov     = ImGui::IsItemHovered();
+    const bool   clicked = hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const ImVec2 mouse   = ImGui::GetIO().MousePos;
+    ImDrawList  *dl      = ImGui::GetWindowDrawList();
+
+    auto X = [&](uint64_t pos) {
+        return p0.x + w * static_cast<float>((double)pos / (double)s.fileSize);
+    };
+
+    dl->AddRectFilled(p0, ImVec2(p0.x + w, p0.y + barH), IM_COL32(30, 30, 34, 255)); // bg = padding
+    dl->AddRectFilled(p0, ImVec2(X(s.headerBytes), p0.y + barH), IM_COL32(120, 120, 128, 255));
+    dl->AddRectFilled(ImVec2(X(s.headerBytes), p0.y),
+                      ImVec2(X(s.headerBytes + s.tocBytes), p0.y + barH), IM_COL32(95, 95, 150, 255));
+
+    int hovered = -1;
+    for (size_t i = 0; i < src.packToc.size(); ++i)
+    {
+        const auto &pe = src.packToc[i];
+        float       x0 = X(pe.offset);
+        float       x1 = X(pe.offset + pe.size);
+        if (x1 < x0 + 1.0f)
+            x1 = x0 + 1.0f; // keep sub-pixel entries visible
+        ImU32 col = PackEntrySelected(src, v, static_cast<int>(i))
+                        ? IM_COL32(255, 255, 255, 255)
+                        : ImGui::GetColorU32(PackKindColor(pe.kind));
+        dl->AddRectFilled(ImVec2(x0, p0.y), ImVec2(x1, p0.y + barH), col);
+        // Clear divider at each item's start, so adjacent (esp. same-kind) blocks
+        // read as distinct entries rather than one fused band.
+        dl->AddLine(ImVec2(x0, p0.y), ImVec2(x0, p0.y + barH), IM_COL32(16, 16, 20, 235), 1.0f);
+        if (hov && mouse.x >= x0 && mouse.x < x1)
+            hovered = static_cast<int>(i);
+    }
+    dl->AddRect(p0, ImVec2(p0.x + w, p0.y + barH), IM_COL32(0, 0, 0, 150));
+
+    if (hovered >= 0)
+    {
+        const auto &pe = src.packToc[hovered];
+        ImGui::BeginTooltip();
+        ImGui::TextColored(PackKindColor(pe.kind), "%s", PackKindWord(pe.kind));
+        ImGui::TextUnformatted(pe.path.c_str());
+        ImGui::Text("%s   @%llu", HumanSize(pe.size).c_str(), (unsigned long long)pe.offset);
+        ImGui::EndTooltip();
+        if (clicked)
+            SelectPackEntry(src, v, hovered);
+    }
+
+    ImGui::Spacing();
+    bool first = true;
+    LegendChip(IM_COL32(120, 120, 128, 255), "header", first);
+    LegendChip(IM_COL32(95, 95, 150, 255), "TOC", first);
+    for (assetc::PackKind k : kPackKindOrder)
+        if (s.kindCount[static_cast<int>(k)])
+            LegendChip(ImGui::GetColorU32(PackKindColor(k)), PackKindWord(k), first);
+}
+
+void DrawPackTreemap(const Source &src, const PackStats &s, View &v)
+{
+    ImGui::TextDisabled("payload only; columns = kind by size, tiles = entries by size (click to inspect)");
+
+    const ImVec2 p0    = ImGui::GetCursorScreenPos();
+    ImVec2       avail = ImGui::GetContentRegionAvail();
+    const float  W     = avail.x;
+    const float  H     = std::max(avail.y, 60.0f);
+    ImGui::InvisibleButton("treemap", ImVec2(W, H));
+    const bool   hov     = ImGui::IsItemHovered();
+    const bool   clicked = hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    const ImVec2 mouse   = ImGui::GetIO().MousePos;
+    ImDrawList  *dl      = ImGui::GetWindowDrawList();
+
+    int   hovered = -1;
+    float x       = p0.x;
+    for (assetc::PackKind k : kPackKindOrder)
+    {
+        const int ki = static_cast<int>(k);
+        if (!s.kindBytes[ki])
+            continue;
+        const float colW =
+            W * (s.payloadBytes ? static_cast<float>((double)s.kindBytes[ki] / s.payloadBytes) : 0.0f);
+        const ImVec4 base = PackKindColor(k);
+        float        y    = p0.y;
+        int          n    = 0;
+        for (int ei : s.byKind[ki]) // ei indexes packToc
+        {
+            const auto &pe = src.packToc[ei];
+            float       th = H * static_cast<float>((double)pe.size / (double)s.kindBytes[ki]);
+            if (y + th > p0.y + H)
+                th = p0.y + H - y;
+            const ImVec2 a(x, y), b(x + colW, y + th);
+            ImVec4       c = base;
+            if (n & 1) { c.x *= 0.82f; c.y *= 0.82f; c.z *= 0.82f; }
+            const ImU32 col = PackEntrySelected(src, v, ei) ? IM_COL32(255, 255, 255, 255)
+                                                            : ImGui::GetColorU32(c);
+            dl->AddRectFilled(a, b, col);
+            dl->AddRect(a, b, IM_COL32(18, 18, 22, 180));
+            if (colW > 46.0f && th > 16.0f)
+            {
+                const std::string nm = fs::path(pe.path).filename().string();
+                dl->PushClipRect(a, b, true);
+                dl->AddText(ImVec2(a.x + 3, a.y + 2), IM_COL32(12, 12, 16, 255), nm.c_str());
+                dl->PopClipRect();
+            }
+            if (hov && mouse.x >= a.x && mouse.x < b.x && mouse.y >= a.y && mouse.y < b.y)
+                hovered = ei;
+            y += th;
+            ++n;
+        }
+        if (colW > 40.0f)
+        {
+            dl->PushClipRect(ImVec2(x, p0.y), ImVec2(x + colW, p0.y + H), true);
+            dl->AddText(ImVec2(x + 3, p0.y + 2), IM_COL32(255, 255, 255, 235), PackKindWord(k));
+            dl->PopClipRect();
+        }
+        x += colW;
+    }
+
+    if (hovered >= 0)
+    {
+        const auto &pe = src.packToc[hovered];
+        ImGui::BeginTooltip();
+        ImGui::TextColored(PackKindColor(pe.kind), "%s", PackKindWord(pe.kind));
+        ImGui::TextUnformatted(pe.path.c_str());
+        ImGui::TextUnformatted(HumanSize(pe.size).c_str());
+        ImGui::EndTooltip();
+        if (clicked)
+            SelectPackEntry(src, v, hovered);
+    }
+}
+
+// Draws the three pack-visualization tabs inline (no window) into the current
+// window — the Inspector calls this when the pack node is selected.
+void DrawPackTabs(const Source &src, const PackStats &s, View &v)
+{
+    if (!s.valid)
+    {
+        ImGui::TextDisabled("pack size unavailable");
+        return;
+    }
+    if (ImGui::BeginTabBar("packtabs"))
+    {
+        if (ImGui::BeginTabItem("Summary"))
+        {
+            DrawPackSummary(src, s, v);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Layout"))
+        {
+            DrawPackLayout(src, s, v);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Treemap"))
+        {
+            DrawPackTreemap(src, s, v);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+}
+
 } // namespace
 
 namespace assetc
@@ -1054,16 +1523,25 @@ int RunViewer(const std::string &path)
         return 1;
     }
 
+    // Pack layout/size stats, computed once from the TOC (empty for a loose dir).
+    const PackStats packStats = ComputePackStats(src);
+
     View v;
-    // Open on the first texture (else first entry) so there's something on screen.
-    for (int i = 0; i < (int)src.entries.size(); ++i)
-        if (src.entries[i].kind == PackKind::Texture)
-        {
-            v.selected = i;
-            break;
-        }
-    if (v.selected < 0 && !src.entries.empty())
-        v.selected = 0;
+    // A pack opens on its own overview node; a loose dir opens on the first texture
+    // (else first entry) so there's something on screen.
+    if (src.isPack)
+        v.selected = kPackSelected;
+    else
+    {
+        for (int i = 0; i < (int)src.entries.size(); ++i)
+            if (src.entries[i].kind == PackKind::Texture)
+            {
+                v.selected = i;
+                break;
+            }
+        if (v.selected < 0 && !src.entries.empty())
+            v.selected = 0;
+    }
     v.dirty = true;
 
     while (gpu.BeginFrame())
@@ -1075,7 +1553,7 @@ int RunViewer(const std::string &path)
         }
         DrawDockspace();
         DrawBrowser(src, v);
-        DrawInspector(gpu, src, v);
+        DrawInspector(gpu, src, packStats, v);
         gpu.EndFrame();
     }
 
