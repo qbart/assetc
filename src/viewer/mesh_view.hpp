@@ -40,6 +40,14 @@ struct MeshCpu
     std::vector<std::vector<uint32_t>> lodSubmeshCount;
     std::vector<uint32_t>              submeshMaterial; // [submesh] -> material slot or kNoMaterial
 
+    // Meshlet partition of the LOD0 geometry (MLET/MLVR/MLTR), for the meshlet-colored
+    // view. `meshletTris` is a flat global-vertex index list (3 per triangle) and
+    // `meshletTriOwner[t]` is the meshlet that triangle t belongs to. Empty if the
+    // mesh carries no meshlet chunks.
+    std::vector<uint32_t> meshletTris;
+    std::vector<uint32_t> meshletTriOwner;
+    uint32_t              meshletCount = 0;
+
     // Real material base colors (linear RGBA), one per material slot, read from the
     // companion .hmat by the caller. Empty when there is no .hmat; material view
     // then falls back to a distinct-per-slot palette.
@@ -68,8 +76,10 @@ enum MeshMode
 {
     MeshMode_Wire = 0,     // triangle edges only
     MeshMode_Solid,        // flat gray lambert fill
-    MeshMode_DebugMaterial, // fill tinted by a distinct palette color per material/submesh
+    MeshMode_DebugMaterial, // fill tinted by a distinct palette color per material
     MeshMode_Material,     // fill tinted by the real .hmat base color (palette fallback)
+    MeshMode_Submesh,      // fill tinted by a distinct palette color per submesh
+    MeshMode_Meshlet,      // fill tinted by a distinct palette color per meshlet (LOD0)
     MeshMode_Count
 };
 

@@ -187,6 +187,59 @@ MeshCpu ParseHMesh(const uint8_t *data, size_t size)
         }
     }
 
+    // Meshlet partition (MLET + MLVR + MLTR) for the meshlet-colored preview. Each
+    // triangle's 3 local indices (MLTR) index into the meshlet's slice of MLVR, whose
+    // entries are GLOBAL vertex indices into VTXS. Bounds-checked throughout.
+    const ChunkEntry *mletC = FindChunk(table, ChunkId::Meshlets);
+    const ChunkEntry *mlvrC = FindChunk(table, ChunkId::MeshletVertices);
+    const ChunkEntry *mltrC = FindChunk(table, ChunkId::MeshletTriangles);
+    if (mletC && mlvrC && mltrC)
+    {
+        const uint32_t mlCount   = static_cast<uint32_t>(mletC->size / sizeof(assetc::Meshlet));
+        const uint32_t mlvrCount = static_cast<uint32_t>(mlvrC->size / sizeof(uint32_t));
+        const uint32_t mltrCount =
+            static_cast<uint32_t>(mltrC->size / sizeof(assetc::MeshletTriangle));
+        out.meshletCount = mlCount;
+        for (uint32_t mi = 0; mi < mlCount; ++mi)
+        {
+            assetc::Meshlet ml{};
+            std::memcpy(&ml, data + mletC->offset + static_cast<size_t>(mi) * sizeof(ml), sizeof(ml));
+            for (uint32_t t = 0; t < ml.triangleCount; ++t)
+            {
+                const uint32_t ti = ml.triangleOffset + t;
+                if (ti >= mltrCount)
+                    break;
+                assetc::MeshletTriangle tri{};
+                std::memcpy(&tri, data + mltrC->offset + static_cast<size_t>(ti) * sizeof(tri),
+                            sizeof(tri));
+                const uint32_t local[3] = {tri.i0, tri.i1, tri.i2};
+                uint32_t       g[3];
+                bool           okTri = true;
+                for (int k = 0; k < 3; ++k)
+                {
+                    const uint32_t vi = ml.vertexOffset + local[k];
+                    if (vi >= mlvrCount)
+                    {
+                        okTri = false;
+                        break;
+                    }
+                    std::memcpy(&g[k], data + mlvrC->offset + static_cast<size_t>(vi) * 4, 4);
+                    if (g[k] >= out.vertexCount)
+                    {
+                        okTri = false;
+                        break;
+                    }
+                }
+                if (!okTri)
+                    continue;
+                out.meshletTris.push_back(g[0]);
+                out.meshletTris.push_back(g[1]);
+                out.meshletTris.push_back(g[2]);
+                out.meshletTriOwner.push_back(mi);
+            }
+        }
+    }
+
     out.valid = true;
     return out;
 }
@@ -252,19 +305,38 @@ float LinToSrgb(float c)
     return c <= 0.0031308f ? c * 12.92f : 1.055f * std::pow(c, 1.0f / 2.4f) - 0.055f;
 }
 
-// Distinct base hues for the material-colored view, used only as a fallback when a
-// submesh has no real material color (no .hmat / kNoMaterial). Picked for separation.
-V3 MaterialColor(uint32_t key)
+V3 Hsv(float h, float s, float v)
 {
-    static const V3 kPalette[] = {
-        {0.90f, 0.49f, 0.45f}, {0.45f, 0.74f, 0.90f}, {0.62f, 0.84f, 0.45f},
-        {0.86f, 0.74f, 0.42f}, {0.74f, 0.55f, 0.88f}, {0.42f, 0.83f, 0.78f},
-        {0.92f, 0.62f, 0.78f}, {0.66f, 0.69f, 0.50f}, {0.50f, 0.62f, 0.86f},
-        {0.83f, 0.58f, 0.42f},
-    };
-    constexpr uint32_t n = sizeof(kPalette) / sizeof(kPalette[0]);
-    return kPalette[key % n];
+    h          = h - std::floor(h); // wrap to [0,1)
+    const float hh = h * 6.0f;
+    const int   i  = static_cast<int>(hh) % 6;
+    const float f  = hh - std::floor(hh);
+    const float p = v * (1.0f - s), q = v * (1.0f - s * f), t = v * (1.0f - s * (1.0f - f));
+    switch (i)
+    {
+    case 0:  return {v, t, p};
+    case 1:  return {q, v, p};
+    case 2:  return {p, v, t};
+    case 3:  return {p, q, v};
+    case 4:  return {t, p, v};
+    default: return {v, p, q};
+    }
 }
+
+// An unbounded, well-separated palette: golden-ratio hue stepping keeps adjacent
+// indices far apart in hue, while small saturation/value cycling separates colors
+// that wrap back to a similar hue — so even hundreds of meshlets stay distinct.
+V3 PaletteColor(uint32_t i)
+{
+    const float h = std::fmod(static_cast<float>(i) * 0.61803398875f, 1.0f);
+    const float s = 0.50f + 0.18f * static_cast<float>(i % 3);       // 0.50 / 0.68 / 0.86
+    const float v = 0.96f - 0.16f * static_cast<float>((i / 3) % 2); // 0.96 / 0.80
+    return Hsv(h, s, v);
+}
+
+// Distinct base hue for a key (material slot, submesh, or meshlet index). Used for
+// the debug-colored views and as the fallback when a submesh has no real material.
+V3 MaterialColor(uint32_t key) { return PaletteColor(key); }
 
 // Z-buffered flat-shaded software rasterizer. Renders the triangle set into a
 // packed RGBA8 framebuffer with correct per-pixel occlusion: depth is 1/z (linear
@@ -360,8 +432,8 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
     const float dx = m.aabbMax[0] - m.aabbMin[0];
     const float dy = m.aabbMax[1] - m.aabbMin[1];
     const float dz = m.aabbMax[2] - m.aabbMin[2];
-    ImGui::Text("%u verts  %u submeshes  %u materials", m.vertexCount, m.submeshCount,
-                m.materialCount);
+    ImGui::Text("%u verts  %u submeshes  %u materials  %u meshlets", m.vertexCount, m.submeshCount,
+                m.materialCount, m.meshletCount);
     ImGui::Text("bounds: %.3f x %.3f x %.3f", dx, dy, dz);
 
     const std::string lodLabel =
@@ -389,11 +461,16 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
         ImGui::Text("%zu triangles  (%.0f%% of LOD0)", curTris,
                     100.0 * static_cast<double>(curTris) / static_cast<double>(baseTris));
 
-    static const char *kModeNames[MeshMode_Count] = {"wireframe", "solid", "debug material",
-                                                      "material"};
+    static const char *kModeNames[MeshMode_Count] = {"wireframe", "solid",     "debug material",
+                                                      "material",  "submeshes", "meshlets"};
     cam.mode = std::clamp(cam.mode, 0, (int)MeshMode_Count - 1);
     ImGui::SetNextItemWidth(160.0f);
     ImGui::Combo("mode", &cam.mode, kModeNames, MeshMode_Count);
+    if (cam.mode == MeshMode_Meshlet)
+    {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(LOD0)");
+    }
     ImGui::SameLine();
     if (ImGui::SmallButton("reset view"))
     {
@@ -464,25 +541,33 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
         vy[i]         = Dot(rel, up);
     }
 
-    const std::vector<uint32_t> &idx = m.lodIndices[cam.lod];
+    // Meshlet mode draws the meshlet-partitioned LOD0 triangle list (its own index
+    // set); every other mode draws the selected LOD's index list.
+    const bool                   meshletMode = cam.mode == MeshMode_Meshlet;
+    const std::vector<uint32_t> &idx      = meshletMode ? m.meshletTris : m.lodIndices[cam.lod];
     const size_t                 triCount = idx.size() / 3;
 
-    const bool wantFill   = cam.mode == MeshMode_Solid || cam.mode == MeshMode_DebugMaterial ||
-                          cam.mode == MeshMode_Material;
-    const bool colorFill  = cam.mode == MeshMode_DebugMaterial || cam.mode == MeshMode_Material;
+    const bool wantFill   = cam.mode != MeshMode_Wire;
+    const bool colorFill  = cam.mode == MeshMode_DebugMaterial || cam.mode == MeshMode_Material ||
+                          cam.mode == MeshMode_Submesh || meshletMode;
     const bool realColors = cam.mode == MeshMode_Material; // else debug palette
     const bool drawFill   = wantFill && triCount > 0 && triCount <= kMaxSolidTris;
     const bool drawWire   = cam.mode == MeshMode_Wire && triCount > 0 && triCount <= kMaxWireTris;
 
     if (drawFill)
     {
-        // For the colored fills, resolve each triangle's base color from its
-        // submesh's material slot. "material" uses the real .hmat baseColorFactor
-        // when present; "debug material" always uses a distinct palette color (and
-        // is the fallback for unmaterialed submeshes). Submeshes are contiguous in
-        // `idx`, so walk the per-submesh counts to assign ranges.
+        // Resolve each triangle's base color. Meshlet mode colors per meshlet; the
+        // rest color per submesh range (submeshes are contiguous in `idx`): "submeshes"
+        // tints by submesh index, "material" by the real .hmat baseColorFactor, "debug
+        // material" by a distinct palette color per material slot.
         static std::vector<V3> triColor;
-        if (colorFill && cam.lod < (int)m.lodSubmeshCount.size())
+        if (meshletMode)
+        {
+            triColor.resize(triCount);
+            for (size_t t = 0; t < triCount; ++t)
+                triColor[t] = PaletteColor(m.meshletTriOwner[t]);
+        }
+        else if (colorFill && cam.lod < (int)m.lodSubmeshCount.size())
         {
             triColor.assign(triCount, V3{0.8f, 0.8f, 0.8f});
             const auto &counts = m.lodSubmeshCount[cam.lod];
@@ -491,7 +576,9 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
             {
                 const uint32_t slot = m.submeshMaterial[s];
                 V3             base;
-                if (realColors && slot != assetc::kNoMaterial && slot < m.materialColors.size())
+                if (cam.mode == MeshMode_Submesh)
+                    base = PaletteColor(s);
+                else if (realColors && slot != assetc::kNoMaterial && slot < m.materialColors.size())
                 {
                     const auto &c = m.materialColors[slot];
                     base = V3{LinToSrgb(c[0]), LinToSrgb(c[1]), LinToSrgb(c[2])};
@@ -542,10 +629,15 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
         if (render.tex.valid && !render.tex.mipIds.empty())
             dl->AddImage((ImTextureID)(uintptr_t)render.tex.mipIds[0], p0, p1);
     }
+    else if (meshletMode && m.meshletTris.empty())
+    {
+        dl->AddText(ImVec2(p0.x + 8, p0.y + 8), IM_COL32(255, 210, 120, 255),
+                    "this mesh has no meshlet chunks");
+    }
     else if (wantFill && triCount > kMaxSolidTris)
     {
         dl->AddText(ImVec2(p0.x + 8, p0.y + 8), IM_COL32(255, 210, 120, 255),
-                    "LOD too dense to rasterize — pick a lower LOD");
+                    "too dense to rasterize — pick a lower LOD");
     }
 
     if (drawWire)

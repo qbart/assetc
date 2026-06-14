@@ -943,6 +943,29 @@ std::string FourCCStr(uint32_t f)
     return c;
 }
 
+// Human-readable name for a .hmesh chunk fourcc.
+const char *ChunkName(uint32_t fourcc)
+{
+    switch (static_cast<assetc::ChunkId>(fourcc))
+    {
+    case assetc::ChunkId::Desc:             return "Mesh descriptor";
+    case assetc::ChunkId::Bounds:           return "Bounds (AABB + sphere)";
+    case assetc::ChunkId::Vertices:         return "Vertices";
+    case assetc::ChunkId::Indices:          return "Indices";
+    case assetc::ChunkId::Meshlets:         return "Meshlets";
+    case assetc::ChunkId::MeshletVertices:  return "Meshlet vertices";
+    case assetc::ChunkId::MeshletTriangles: return "Meshlet triangles";
+    case assetc::ChunkId::MeshletBounds:    return "Meshlet bounds";
+    case assetc::ChunkId::Materials:        return "Material refs";
+    case assetc::ChunkId::SubMeshes:        return "Submeshes";
+    case assetc::ChunkId::Skin:             return "Skin (joints + weights)";
+    case assetc::ChunkId::Skeleton:         return "Skeleton (joints)";
+    case assetc::ChunkId::LodIndices:       return "LOD indices";
+    case assetc::ChunkId::LodTable:         return "LOD table";
+    }
+    return "Unknown chunk";
+}
+
 constexpr ImGuiTableFlags kChunkTable = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
                                         ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
                                         ImGuiTableFlags_Resizable;
@@ -979,8 +1002,8 @@ void ArrayTable(const char *id, std::initializer_list<const char *> cols, int co
 void DrawMeshChunk(const View &v, const assetc::ChunkEntry &e)
 {
     using namespace assetc;
-    ImGui::Text("%s   |   @%llu   |   %llu bytes", FourCCStr(e.fourcc).c_str(),
-                (unsigned long long)e.offset, (unsigned long long)e.size);
+    ImGui::Text("%s — %s   |   @%llu   |   %llu bytes", FourCCStr(e.fourcc).c_str(),
+                ChunkName(e.fourcc), (unsigned long long)e.offset, (unsigned long long)e.size);
     ImGui::Separator();
 
     if (e.offset + e.size > v.meshBytes.size())
