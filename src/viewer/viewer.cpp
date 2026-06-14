@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <string>
 #include <unordered_map>
@@ -641,6 +642,12 @@ struct View
     SpirvInfo                        spirv;
     std::vector<uint8_t>             blob;       // raw bytes for an embed/other preview
     bool                             blobIsText = false;
+
+    // For a mesh: the raw `.hmesh` bytes + chunk table, so the inspector can show one
+    // tab per chunk decoded into tables (alongside the 3D Preview tab).
+    std::vector<uint8_t>            meshBytes;
+    std::vector<assetc::ChunkEntry> meshChunks;
+    assetc::MeshDesc                meshDesc{}; // counts/strides to interpret array chunks
 };
 
 void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
@@ -661,6 +668,9 @@ void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
     v.fontGlyphs.clear();
     v.spirv = SpirvInfo{};
     v.blob.clear();
+    v.meshBytes.clear();
+    v.meshChunks.clear();
+    v.meshDesc = assetc::MeshDesc{};
     if (v.selected < 0)
         return;
 
@@ -700,6 +710,27 @@ void LoadSelection(viewer::GpuContext &gpu, const Source &src, View &v)
             v.details = fmt::format("mesh parse failed: {}", v.mesh.error);
             return;
         }
+
+        // Keep the raw bytes + chunk table so the inspector can show a tab per chunk.
+        if (bytes.size() >= sizeof(assetc::FileHeader))
+        {
+            assetc::FileHeader fh{};
+            std::memcpy(&fh, bytes.data(), sizeof(fh));
+            const size_t tableOff   = sizeof(fh);
+            const size_t tableBytes = static_cast<size_t>(fh.chunkCount) * sizeof(assetc::ChunkEntry);
+            if (fh.magic == assetc::MeshMagic && tableOff + tableBytes <= bytes.size())
+            {
+                v.meshChunks.resize(fh.chunkCount);
+                std::memcpy(v.meshChunks.data(), bytes.data() + tableOff, tableBytes);
+                for (const auto &ce : v.meshChunks)
+                    if (ce.fourcc == static_cast<uint32_t>(assetc::ChunkId::Desc) &&
+                        ce.size >= sizeof(assetc::MeshDesc) &&
+                        ce.offset + sizeof(assetc::MeshDesc) <= bytes.size())
+                        std::memcpy(&v.meshDesc, bytes.data() + ce.offset, sizeof(assetc::MeshDesc));
+            }
+        }
+        v.meshBytes = std::move(bytes);
+
         // Pull real material colors from the companion .hmat (same path, .hmat
         // extension), if one exists in this source. Slot order matches the mesh.
         if (e.path.size() > 6 && e.path.compare(e.path.size() - 6, 6, ".hmesh") == 0)
@@ -865,9 +896,9 @@ void DrawBrowser(Source &src, View &v)
 }
 
 // A scrolling hex+ASCII dump of the first `cap` bytes, for binary embeds/unknowns.
-void DrawHexDump(const std::vector<uint8_t> &b, size_t cap = 4096)
+void DrawHexSpan(const uint8_t *b, size_t len, size_t cap = 4096)
 {
-    const size_t n = std::min(b.size(), cap);
+    const size_t n = std::min(len, cap);
     ImGui::BeginChild("hex", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
     for (size_t row = 0; row < n; row += 16)
     {
@@ -886,9 +917,370 @@ void DrawHexDump(const std::vector<uint8_t> &b, size_t cap = 4096)
         }
         ImGui::TextUnformatted(fmt::format("{} {}", line, ascii).c_str());
     }
-    if (b.size() > cap)
-        ImGui::TextDisabled("... %zu more bytes", b.size() - cap);
+    if (len > cap)
+        ImGui::TextDisabled("... %zu more bytes", len - cap);
     ImGui::EndChild();
+}
+
+void DrawHexDump(const std::vector<uint8_t> &b, size_t cap = 4096)
+{
+    DrawHexSpan(b.data(), b.size(), cap);
+}
+
+// ---------------------------------------------------------------------------
+// .hmesh chunk inspector: one tab per chunk, each decoding its payload into a
+// table. Reads straight from the kept raw bytes (View::meshBytes), with a virtual
+// (clipped) table so even million-row vertex/index chunks stay responsive.
+// ---------------------------------------------------------------------------
+
+std::string FourCCStr(uint32_t f)
+{
+    char c[5] = {static_cast<char>(f & 0xff), static_cast<char>((f >> 8) & 0xff),
+                 static_cast<char>((f >> 16) & 0xff), static_cast<char>((f >> 24) & 0xff), 0};
+    for (int i = 0; i < 4; ++i)
+        if (c[i] < 32 || c[i] >= 127)
+            c[i] = '.';
+    return c;
+}
+
+constexpr ImGuiTableFlags kChunkTable = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                        ImGuiTableFlags_ScrollY | ImGuiTableFlags_ScrollX |
+                                        ImGuiTableFlags_Resizable;
+
+// A scrollable, clipped table: `cols` headers, `count` rows, `row(i)` fills the
+// columns for row i (via TableSetColumnIndex/Text).
+void ArrayTable(const char *id, std::initializer_list<const char *> cols, int count,
+                const std::function<void(int)> &row)
+{
+    if (count <= 0)
+    {
+        ImGui::TextDisabled("(empty)");
+        return;
+    }
+    if (ImGui::BeginTable(id, static_cast<int>(cols.size()), kChunkTable))
+    {
+        for (const char *c : cols)
+            ImGui::TableSetupColumn(c);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
+        ImGuiListClipper clip;
+        clip.Begin(count);
+        while (clip.Step())
+            for (int i = clip.DisplayStart; i < clip.DisplayEnd; ++i)
+            {
+                ImGui::TableNextRow();
+                row(i);
+            }
+        ImGui::EndTable();
+    }
+}
+
+// Render one chunk's payload. `v.meshBytes` holds the whole file; `e` is the chunk.
+void DrawMeshChunk(const View &v, const assetc::ChunkEntry &e)
+{
+    using namespace assetc;
+    ImGui::Text("%s   |   @%llu   |   %llu bytes", FourCCStr(e.fourcc).c_str(),
+                (unsigned long long)e.offset, (unsigned long long)e.size);
+    ImGui::Separator();
+
+    if (e.offset + e.size > v.meshBytes.size())
+    {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "chunk range past end of file");
+        return;
+    }
+    const uint8_t *p  = v.meshBytes.data() + e.offset;
+    const ChunkId  id = static_cast<ChunkId>(e.fourcc);
+
+    auto kv = [](const char *k, const std::string &val) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::TextUnformatted(k);
+        ImGui::TableSetColumnIndex(1);
+        ImGui::TextUnformatted(val.c_str());
+    };
+    auto beginKV = [] {
+        return ImGui::BeginTable("kv", 2,
+                                 ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                     ImGuiTableFlags_SizingStretchProp);
+    };
+
+    switch (id)
+    {
+    case ChunkId::Desc:
+    {
+        MeshDesc d{};
+        std::memcpy(&d, p, std::min(sizeof(d), static_cast<size_t>(e.size)));
+        if (beginKV())
+        {
+            kv("vertexCount", fmt::format("{}", d.vertexCount));
+            kv("indexCount", fmt::format("{}", d.indexCount));
+            kv("meshletCount", fmt::format("{}", d.meshletCount));
+            kv("submeshCount", fmt::format("{}", d.submeshCount));
+            kv("materialCount", fmt::format("{}", d.materialCount));
+            kv("vertexStride", fmt::format("{} B", d.vertexStride));
+            kv("indexWidth", fmt::format("{} B", d.indexWidth));
+            kv("flags", fmt::format("0x{:02x}{}", d.flags,
+                                    (d.flags & MeshFlag_HasTangents) ? " (tangents)" : ""));
+            kv("meshletMaxVerts", fmt::format("{}", d.meshletMaxVerts));
+            kv("meshletMaxTris", fmt::format("{}", d.meshletMaxTris));
+            ImGui::EndTable();
+        }
+        break;
+    }
+    case ChunkId::Bounds:
+    {
+        MeshBounds b{};
+        std::memcpy(&b, p, std::min(sizeof(b), static_cast<size_t>(e.size)));
+        if (beginKV())
+        {
+            kv("aabbMin", fmt::format("{:.3f} {:.3f} {:.3f}", b.aabbMin.x, b.aabbMin.y, b.aabbMin.z));
+            kv("aabbMax", fmt::format("{:.3f} {:.3f} {:.3f}", b.aabbMax.x, b.aabbMax.y, b.aabbMax.z));
+            kv("sphereCenter",
+               fmt::format("{:.3f} {:.3f} {:.3f}", b.sphereCenter.x, b.sphereCenter.y,
+                           b.sphereCenter.z));
+            kv("sphereRadius", fmt::format("{:.3f}", b.sphereRadius));
+            ImGui::EndTable();
+        }
+        break;
+    }
+    case ChunkId::Vertices:
+    {
+        const uint32_t stride =
+            v.meshDesc.vertexStride ? v.meshDesc.vertexStride : static_cast<uint32_t>(sizeof(GpuVertex));
+        const int count = static_cast<int>(e.size / stride);
+        ImGui::Text("%d vertices, stride %u B (normal/tangent are octahedral int16)", count, stride);
+        ArrayTable("vtxs", {"#", "position", "uv", "normal", "tangent"}, count, [&](int i) {
+            GpuVertex gv{};
+            std::memcpy(&gv, p + static_cast<size_t>(i) * stride, sizeof(gv));
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%.3f %.3f %.3f", gv.position[0], gv.position[1], gv.position[2]);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f %.3f", gv.uv[0], gv.uv[1]);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%d %d", gv.normal[0], gv.normal[1]);
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%d %d", gv.tangent[0], gv.tangent[1]);
+        });
+        break;
+    }
+    case ChunkId::Indices:
+    {
+        const uint32_t iw    = v.meshDesc.indexWidth == 4 ? 4u : 2u;
+        const int      total = static_cast<int>(e.size / iw);
+        const int      tris  = total / 3;
+        ImGui::Text("%d indices (%d tris), %u-bit", total, tris, iw * 8);
+        auto at = [&](int k) {
+            uint32_t x = 0;
+            std::memcpy(&x, p + static_cast<size_t>(k) * iw, iw);
+            return x;
+        };
+        ArrayTable("idxs", {"tri", "i0", "i1", "i2"}, tris, [&](int t) {
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", t);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", at(t * 3 + 0));
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%u", at(t * 3 + 1));
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%u", at(t * 3 + 2));
+        });
+        break;
+    }
+    case ChunkId::Meshlets:
+    {
+        const int count = static_cast<int>(e.size / sizeof(Meshlet));
+        ArrayTable("mlet", {"#", "vtxOffset", "vtxCount", "triOffset", "triCount"}, count, [&](int i) {
+            Meshlet m{};
+            std::memcpy(&m, p + static_cast<size_t>(i) * sizeof(m), sizeof(m));
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", m.vertexOffset);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%u", m.vertexCount);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%u", m.triangleOffset);
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%u", m.triangleCount);
+        });
+        break;
+    }
+    case ChunkId::MeshletVertices:
+    {
+        const int count = static_cast<int>(e.size / sizeof(uint32_t));
+        ArrayTable("mlvr", {"#", "vertex"}, count, [&](int i) {
+            uint32_t x = 0;
+            std::memcpy(&x, p + static_cast<size_t>(i) * 4, 4);
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", x);
+        });
+        break;
+    }
+    case ChunkId::MeshletTriangles:
+    {
+        const int count = static_cast<int>(e.size / sizeof(MeshletTriangle));
+        ArrayTable("mltr", {"#", "i0", "i1", "i2"}, count, [&](int i) {
+            MeshletTriangle t{};
+            std::memcpy(&t, p + static_cast<size_t>(i) * sizeof(t), sizeof(t));
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", t.i0);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%u", t.i1);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%u", t.i2);
+        });
+        break;
+    }
+    case ChunkId::MeshletBounds:
+    {
+        const int count = static_cast<int>(e.size / sizeof(MeshletBounds));
+        ArrayTable("mlbn", {"#", "center", "radius", "coneAxis", "coneCutoff"}, count, [&](int i) {
+            MeshletBounds b{};
+            std::memcpy(&b, p + static_cast<size_t>(i) * sizeof(b), sizeof(b));
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%.2f %.2f %.2f", b.center.x, b.center.y, b.center.z);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f", b.radius);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.2f %.2f %.2f", b.coneAxis.x, b.coneAxis.y, b.coneAxis.z);
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.3f", b.coneCutoff);
+        });
+        break;
+    }
+    case ChunkId::Materials:
+    {
+        const int count = static_cast<int>(e.size / sizeof(uint64_t));
+        ArrayTable("mtrl", {"slot", "material hash"}, count, [&](int i) {
+            uint64_t h = 0;
+            std::memcpy(&h, p + static_cast<size_t>(i) * 8, 8);
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("0x%016llx", (unsigned long long)h);
+        });
+        break;
+    }
+    case ChunkId::SubMeshes:
+    {
+        const int count = static_cast<int>(e.size / sizeof(SubMesh));
+        ArrayTable("subm",
+                   {"#", "firstIdx", "idxCount", "firstMlet", "mletCount", "matSlot", "baseVtx",
+                    "aabbMin", "aabbMax"},
+                   count, [&](int i) {
+                       SubMesh s{};
+                       std::memcpy(&s, p + static_cast<size_t>(i) * sizeof(s), sizeof(s));
+                       ImGui::TableSetColumnIndex(0);
+                       ImGui::Text("%d", i);
+                       ImGui::TableSetColumnIndex(1);
+                       ImGui::Text("%u", s.firstIndex);
+                       ImGui::TableSetColumnIndex(2);
+                       ImGui::Text("%u", s.indexCount);
+                       ImGui::TableSetColumnIndex(3);
+                       ImGui::Text("%u", s.firstMeshlet);
+                       ImGui::TableSetColumnIndex(4);
+                       ImGui::Text("%u", s.meshletCount);
+                       ImGui::TableSetColumnIndex(5);
+                       if (s.materialSlot == kNoMaterial)
+                           ImGui::TextDisabled("none");
+                       else
+                           ImGui::Text("%u", s.materialSlot);
+                       ImGui::TableSetColumnIndex(6);
+                       ImGui::Text("%u", s.baseVertex);
+                       ImGui::TableSetColumnIndex(7);
+                       ImGui::Text("%.2f %.2f %.2f", s.bounds.aabbMin.x, s.bounds.aabbMin.y,
+                                   s.bounds.aabbMin.z);
+                       ImGui::TableSetColumnIndex(8);
+                       ImGui::Text("%.2f %.2f %.2f", s.bounds.aabbMax.x, s.bounds.aabbMax.y,
+                                   s.bounds.aabbMax.z);
+                   });
+        break;
+    }
+    case ChunkId::Skin:
+    {
+        const int count = static_cast<int>(e.size / sizeof(GpuSkinVertex));
+        ArrayTable("skin", {"#", "joints", "weights"}, count, [&](int i) {
+            GpuSkinVertex s{};
+            std::memcpy(&s, p + static_cast<size_t>(i) * sizeof(s), sizeof(s));
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u %u %u %u", s.joints[0], s.joints[1], s.joints[2], s.joints[3]);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f %.3f %.3f %.3f", s.weights[0], s.weights[1], s.weights[2],
+                        s.weights[3]);
+        });
+        break;
+    }
+    case ChunkId::Skeleton:
+    {
+        const int count = static_cast<int>(e.size / sizeof(GpuJoint));
+        ArrayTable("skel", {"joint", "parent", "bindT", "bindR (xyzw)", "bindS"}, count, [&](int i) {
+            GpuJoint j{};
+            std::memcpy(&j, p + static_cast<size_t>(i) * sizeof(j), sizeof(j));
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            if (j.parent < 0)
+                ImGui::TextDisabled("root");
+            else
+                ImGui::Text("%d", j.parent);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%.3f %.3f %.3f", j.bindT[0], j.bindT[1], j.bindT[2]);
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%.3f %.3f %.3f %.3f", j.bindR[0], j.bindR[1], j.bindR[2], j.bindR[3]);
+            ImGui::TableSetColumnIndex(4);
+            ImGui::Text("%.3f %.3f %.3f", j.bindS[0], j.bindS[1], j.bindS[2]);
+        });
+        break;
+    }
+    case ChunkId::LodIndices:
+    {
+        const int count = static_cast<int>(e.size / sizeof(uint32_t));
+        ArrayTable("lodi", {"#", "vertex index"}, count, [&](int i) {
+            uint32_t x = 0;
+            std::memcpy(&x, p + static_cast<size_t>(i) * 4, 4);
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", x);
+        });
+        break;
+    }
+    case ChunkId::LodTable:
+    {
+        LodTableHeader lh{};
+        if (e.size >= sizeof(lh))
+            std::memcpy(&lh, p, sizeof(lh));
+        ImGui::Text("lodCount %u, submeshCount %u  (rows are [submesh][lod])", lh.lodCount,
+                    lh.submeshCount);
+        const uint8_t *arr   = p + sizeof(lh);
+        const int      count = static_cast<int>((e.size - sizeof(lh)) / sizeof(MeshLod));
+        ArrayTable("lodt", {"#", "firstIndex", "indexCount"}, count, [&](int i) {
+            MeshLod ml{};
+            std::memcpy(&ml, arr + static_cast<size_t>(i) * sizeof(ml), sizeof(ml));
+            ImGui::TableSetColumnIndex(0);
+            ImGui::Text("%d", i);
+            ImGui::TableSetColumnIndex(1);
+            ImGui::Text("%u", ml.firstIndex);
+            ImGui::TableSetColumnIndex(2);
+            ImGui::Text("%u%s", ml.indexCount, ml.indexCount == 0 ? "  (reuse prev LOD)" : "");
+        });
+        break;
+    }
+    default:
+        ImGui::TextDisabled("no decoder for this chunk — raw bytes:");
+        DrawHexSpan(p, static_cast<size_t>(e.size));
+        break;
+    }
 }
 
 // Render the full per-file detail for the current non-texture, non-mesh selection.
@@ -1167,14 +1559,34 @@ void DrawInspector(viewer::GpuContext &gpu, const Source &src, const PackStats &
     }
     else if (v.isMesh)
     {
-        const viewer::MeshCpu &m = v.mesh;
-        const uint64_t tris0 = m.lodIndices.empty() ? 0 : m.lodIndices[0].size() / 3;
-        ImGui::Text("%u verts | %llu tris | %u submeshes | %u materials | %zu LOD(s)", m.vertexCount,
-                    (unsigned long long)tris0, m.submeshCount, m.materialCount, m.lodIndices.size());
-        ImGui::Text("aabb %.2f x %.2f x %.2f   r=%.2f", m.aabbMax[0] - m.aabbMin[0],
-                    m.aabbMax[1] - m.aabbMin[1], m.aabbMax[2] - m.aabbMin[2], m.radius);
-        ImGui::Separator();
-        viewer::DrawMeshPreview(gpu, v.mesh, v.meshCam, v.meshRender);
+        // Preview tab (3D view + stats) plus one tab per .hmesh chunk (decoded tables).
+        if (ImGui::BeginTabBar("meshtabs"))
+        {
+            if (ImGui::BeginTabItem("Preview"))
+            {
+                const viewer::MeshCpu &m     = v.mesh;
+                const uint64_t         tris0 = m.lodIndices.empty() ? 0 : m.lodIndices[0].size() / 3;
+                ImGui::Text("%u verts | %llu tris | %u submeshes | %u materials | %zu LOD(s)",
+                            m.vertexCount, (unsigned long long)tris0, m.submeshCount,
+                            m.materialCount, m.lodIndices.size());
+                ImGui::Text("aabb %.2f x %.2f x %.2f   r=%.2f", m.aabbMax[0] - m.aabbMin[0],
+                            m.aabbMax[1] - m.aabbMin[1], m.aabbMax[2] - m.aabbMin[2], m.radius);
+                ImGui::Separator();
+                viewer::DrawMeshPreview(gpu, v.mesh, v.meshCam, v.meshRender);
+                ImGui::EndTabItem();
+            }
+            for (size_t ci = 0; ci < v.meshChunks.size(); ++ci)
+            {
+                const auto       &e     = v.meshChunks[ci];
+                const std::string label = fmt::format("{}##chunk{}", FourCCStr(e.fourcc), ci);
+                if (ImGui::BeginTabItem(label.c_str()))
+                {
+                    DrawMeshChunk(v, e);
+                    ImGui::EndTabItem();
+                }
+            }
+            ImGui::EndTabBar();
+        }
     }
     else if (!v.details.empty())
     {
