@@ -36,28 +36,38 @@ int main()
     CHECK_EQ(WriteHMan(path, entries), 0);
     CHECK_EQ(ValidateHMan(path), 0);
 
-    // Embed entries (path WITH extension) round-trip alongside textures and read back
-    // with kind/path intact.
+    // Path-addressed entries (embeds + the by-path asset kinds) round-trip alongside
+    // textures and read back with kind/path intact.
     {
         const auto epath = (dir / "embed.hman").string();
         std::vector<ManifestEntry> emb = {
             {0x11, ManKind::Texture, ManColorSpace::Srgb, "models/a/tex_0.ktx2"},
             {0x22, ManKind::Embed, ManColorSpace::Linear, "scene/level.json"},
             {0x33, ManKind::Embed, ManColorSpace::Linear, "config/path.xml"},
+            {0x44, ManKind::Mesh, ManColorSpace::Linear, "models/chair.hmesh"},
+            {0x55, ManKind::Material, ManColorSpace::Linear, "models/chair.hmat"},
+            {0x66, ManKind::Animation, ManColorSpace::Linear, "models/chair.hanim"},
+            {0x77, ManKind::Font, ManColorSpace::Linear, "fonts/roboto.hfont"},
         };
         CHECK_EQ(WriteHMan(epath, emb), 0);
         CHECK_EQ(ValidateHMan(epath), 0);
         std::vector<ManifestEntry> back;
         CHECK_EQ(ReadHMan(epath, back), 0);
-        CHECK_EQ(back.size(), 3u);
-        int embeds = 0;
+        CHECK_EQ(back.size(), 7u);
+        int embeds = 0, mesh = 0, mat = 0, anim = 0, font = 0;
         for (const auto &e : back)
-            if (e.kind == ManKind::Embed)
-            {
-                ++embeds;
-                CHECK(e.path == "scene/level.json" || e.path == "config/path.xml");
-            }
+        {
+            if (e.kind == ManKind::Embed) ++embeds;
+            if (e.kind == ManKind::Mesh) { ++mesh; CHECK(e.path == "models/chair.hmesh"); }
+            if (e.kind == ManKind::Material) ++mat;
+            if (e.kind == ManKind::Animation) ++anim;
+            if (e.kind == ManKind::Font) ++font;
+        }
         CHECK_EQ(embeds, 2);
+        CHECK_EQ(mesh, 1);
+        CHECK_EQ(mat, 1);
+        CHECK_EQ(anim, 1);
+        CHECK_EQ(font, 1);
     }
 
     // Parse it back and assert structure: 3 entries, sorted ascending by hash.

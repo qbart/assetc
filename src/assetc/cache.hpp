@@ -14,7 +14,9 @@ namespace assetc
 // invalidate every cached asset regardless of source content.
 //   v2: glTF-embedded textures are content-addressed into a flat `tex/<hash>.ktx2`
 //       store (cross-source dedup) instead of `<model>/tex_<imageIndex>.ktx2`.
-constexpr uint32_t kEncoderVersion = 2;
+//   v3: meshes/materials/anims/fonts are registered in assets.hman (HashEmbedRef of
+//       their runtime path), so cached manifest contributions must be regenerated.
+constexpr uint32_t kEncoderVersion = 3;
 
 // One cached source asset: the hash of its inputs (content + settings + encoder
 // version) and the manifest entries it contributed, so a cache hit can replay

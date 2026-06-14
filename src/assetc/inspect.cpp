@@ -314,7 +314,8 @@ void InspectHMan(const fs::path &p, const std::string &rel, Totals &t, std::vect
         return;
     }
 
-    uint32_t tex = 0, mesh = 0, mat = 0, lut = 0, shader = 0, embed = 0, srgb = 0, linear = 0;
+    uint32_t tex = 0, mesh = 0, mat = 0, lut = 0, shader = 0, embed = 0, anim = 0, font = 0;
+    uint32_t srgb = 0, linear = 0;
     for (uint32_t i = 0; i < count; ++i)
     {
         uint64_t hash = 0;
@@ -331,6 +332,8 @@ void InspectHMan(const fs::path &p, const std::string &rel, Totals &t, std::vect
         case assetc::ManKind::Lut: ++lut; break;
         case assetc::ManKind::Shader: ++shader; break;
         case assetc::ManKind::Embed: ++embed; break;
+        case assetc::ManKind::Animation: ++anim; break;
+        case assetc::ManKind::Font: ++font; break;
         }
         if (static_cast<assetc::ManColorSpace>(cs) == assetc::ManColorSpace::Srgb)
             ++srgb;
@@ -339,9 +342,9 @@ void InspectHMan(const fs::path &p, const std::string &rel, Totals &t, std::vect
     }
 
     Emit(out, rel,
-         fmt::format("v{} | {} entries | kind: {} texture/{} mesh/{} material/{} lut/{} shader/{} "
-                     "embed | colorspace: {} sRGB/{} linear | {}",
-                     version, count, tex, mesh, mat, lut, shader, embed, srgb, linear,
+         fmt::format("v{} | {} entries | kind: {} texture/{} mesh/{} material/{} anim/{} font/{} "
+                     "lut/{} shader/{} embed | colorspace: {} sRGB/{} linear | {}",
+                     version, count, tex, mesh, mat, anim, font, lut, shader, embed, srgb, linear,
                      HumanBytes(FileSize(p))));
     ++t.manFiles;
     t.manEntries += count;

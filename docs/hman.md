@@ -28,7 +28,7 @@ The engine loads it once into a `hash → path` map and does `root + "/" + path`
 | Field        | Type           | Notes                                                          |
 | ------------ | -------------- | -------------------------------------------------------------- |
 | `hash`       | u64            | FNV1a64 ref — byte-identical to the `.hmat`/`.hmesh` ref hash  |
-| `kind`       | u8             | `0` texture, `4` shader, `5` embed (`1` mesh, `2` material, `3` lut reserved) |
+| `kind`       | u8             | `0` texture, `1` mesh, `2` material, `4` shader, `5` embed, `6` animation, `7` font (`3` lut reserved) |
 | `colorspace` | u8             | `0` = linear, `1` = sRGB                                       |
 | `pathLen`    | u16            | byte length of `path`                                          |
 | `path`       | `u8[pathLen]`  | UTF-8, forward-slash, **relative to the runtime root**         |
@@ -44,11 +44,13 @@ There are two texture-entry shapes:
 
 Shaders (`kind = 4`) follow the name-addressed shape with `path = "<sourceRef>/<entryPoint>.spv"` and `hash == HashAssetRef(path-without-".spv")`.
 
-**Embeds** (`kind = 5`) are raw files copied verbatim into the runtime tree by the `embed:` config option (see the main [README](../README.md#configuration-assetcyml)). Unlike every other ref, the **extension is part of the hashed string**: `hash == HashEmbedRef(path)`, where `path` is the full runtime-relative path *with* its extension (e.g. `scene/level.json`), lowercased, `/`-separated. So `scene/level.json` and `scene/level.xml` get distinct ids. The engine reads an embed by `HashEmbedRef("scene/level.json") → path → bytes` (loose or via the `.hpack` TOC). `colorspace` is `linear` and unused.
+**Embeds** (`kind = 5`) are raw files copied verbatim into the runtime tree by the `embed:` config option (see the main [README](../README.md#configuration-assetcyml)). Unlike the texture/shader refs, the **extension is part of the hashed string**: `hash == HashEmbedRef(path)`, where `path` is the full runtime-relative path *with* its extension (e.g. `scene/level.json`), lowercased, `/`-separated. So `scene/level.json` and `scene/level.xml` get distinct ids. The engine reads an embed by `HashEmbedRef("scene/level.json") → path → bytes` (loose or via the `.hpack` TOC). `colorspace` is `linear` and unused.
+
+**By-path assets** — meshes (`kind = 1`, `.hmesh`), material tables (`kind = 2`, `.hmat`), animation clips (`kind = 6`, `.hanim`), and font metadata (`kind = 7`, `.hfont`) — use the **same `HashEmbedRef(path)` rule as embeds**: the hash is over the full runtime-relative path with extension. Because a mesh source emits `<stem>.hmesh`/`.hmat`/`.hanim` sharing a stem, keeping the extension is what gives each a distinct id. The engine resolves any of them uniformly: `HashEmbedRef("models/chair.hmesh") → path → bytes`.
 
 ## Scope and guarantees
 
-- **What appears.** `.ktx2` images referenced by an emitted `.hmat` (content-addressed in `tex/`), **font SDF atlases** referenced by an emitted [`.hfont`](hfont.md), **shader entry points** (one per Slang `[shader(...)]`), and **embeds** (every file matched by the `embed:` config globs). The standalone `*.png`-compiled textures (Color/Normal/Grayscale) and LUTs are not listed; `kind` reserves room to add them later.
+- **What appears.** Every compiled asset is now resolvable by id: content-addressed `.ktx2` images referenced by an emitted `.hmat` (in `tex/`), **font SDF atlases** + **font metadata** ([`.hfont`](hfont.md)), **shader entry points** (one per Slang `[shader(...)]`), **meshes** ([`.hmesh`](hmesh.md)), **material tables** ([`.hmat`](hmat.md)), **animation clips** ([`.hanim`](hanim.md)), and **embeds** (every file matched by the `embed:` config globs). Still excluded: standalone `*.png`-compiled textures (Color/Normal/Grayscale) and LUTs — they're rarely referenced by id; `kind` reserves room to add them the same way.
 - **Colorspace** mirrors what `assetc` baked into the `.ktx2` (sRGB for the `Color` slot, linear otherwise) — authoritative, so the runtime need not re-derive it from the material slot.
 - **Deduplicated.** A ref reachable from multiple slots/assets appears once; identical `(hash, path)` pairs collapse.
 - **Collision-checked.** If two distinct paths hash equal the build fails loudly rather than emit an ambiguous entry.

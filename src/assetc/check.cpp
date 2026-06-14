@@ -116,9 +116,11 @@ void CheckManifest(Ctx &c, const std::string &path, const std::string &rel)
                                     e.path, e.hash, ref, expected));
             }
         }
-        // Embed parity: an embed keeps its extension, so the hash is over the full
-        // runtime-relative path (HashEmbedRef), not the extension-stripped ref.
-        else if (e.kind == assetc::ManKind::Embed)
+        // Path-addressed parity: embeds and the by-path assets (mesh/material/anim/
+        // font) all key on HashEmbedRef of the full runtime path (extension kept).
+        else if (e.kind == assetc::ManKind::Embed || e.kind == assetc::ManKind::Mesh ||
+                 e.kind == assetc::ManKind::Material || e.kind == assetc::ManKind::Animation ||
+                 e.kind == assetc::ManKind::Font)
         {
             const uint64_t expected = assetc::HashEmbedRef(e.path);
             if (expected != e.hash)

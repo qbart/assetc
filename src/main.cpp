@@ -253,6 +253,15 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         if (verify && assetc::ValidateHMesh(out) != 0)
             return 1;
 
+        // Register the mesh by its stable runtime ref, so the engine resolves it like
+        // any other asset: HashEmbedRef(runtime path) -> assets.hman -> bytes.
+        {
+            const auto meshRel = fs::path(out).lexically_relative(outputDir).generic_string();
+            outEntries.push_back(assetc::ManifestEntry{assetc::HashEmbedRef(meshRel),
+                                                       assetc::ManKind::Mesh,
+                                                       assetc::ManColorSpace::Linear, meshRel});
+        }
+
         // Companion animation clips (.hanim) when the source is animated.
         if (!cm.animations.empty())
         {
@@ -268,6 +277,11 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
                 return 1;
             if (verify && assetc::ValidateHAnim(animPath.generic_string()) != 0)
                 return 1;
+
+            const auto animRel = animPath.lexically_relative(outputDir).generic_string();
+            outEntries.push_back(assetc::ManifestEntry{assetc::HashEmbedRef(animRel),
+                                                       assetc::ManKind::Animation,
+                                                       assetc::ManColorSpace::Linear, animRel});
         }
 
         // Companion material table + textures (glTF only; OBJ materials are TODO).
@@ -292,6 +306,11 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
                 return 1;
             if (verify && assetc::ValidateHMat(hmatPath.generic_string()) != 0)
                 return 1;
+
+            const auto hmatRel = hmatPath.lexically_relative(outputDir).generic_string();
+            outEntries.push_back(assetc::ManifestEntry{assetc::HashEmbedRef(hmatRel),
+                                                       assetc::ManKind::Material,
+                                                       assetc::ManColorSpace::Linear, hmatRel});
 
             // texture.compress for this source (a UI/data glTF can opt all its
             // images out of block compression via a rule on the .glb path).
@@ -375,6 +394,12 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         outEntries.push_back(assetc::ManifestEntry{assetc::HashAssetRef(sourceRef),
                                                    assetc::ManKind::Texture,
                                                    assetc::ManColorSpace::Linear, relPath});
+
+        // The `.hfont` metadata itself is resolvable by its runtime ref too.
+        const auto fontRel = fs::path(out).lexically_relative(outputDir).generic_string();
+        outEntries.push_back(assetc::ManifestEntry{assetc::HashEmbedRef(fontRel),
+                                                   assetc::ManKind::Font,
+                                                   assetc::ManColorSpace::Linear, fontRel});
         return 0;
     }
     case AssetType::Cubemap:

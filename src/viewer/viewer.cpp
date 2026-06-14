@@ -185,7 +185,40 @@ const char *KindTag(assetc::PackKind k)
     case K::Font:      return "font";
     case K::Other:     break;
     }
-    return "??? ";
+    return "file";
+}
+
+// The reference name the engine content-addresses this asset by — i.e. what you
+// pass to the SDK hasher to resolve it through `assets.hman`. Mirrors how the
+// manifest is keyed:
+//   - content-store textures "tex/<hash>.ktx2" -> the content hash (filename stem)
+//   - shaders (.spv) and name-addressed atlases (.ktx2) -> path minus extension
+//     (engine: HashAssetRef on this)
+//   - embeds and everything else -> the runtime-relative path, extension kept
+//     (engine: HashEmbedRef on this)
+std::string ContentRef(const std::string &path)
+{
+    // "tex/<16 lowercase hex>.ktx2": the stem IS the content address.
+    if (path.size() == 4 + 16 + 5 && path.compare(0, 4, "tex/") == 0 && path.ends_with(".ktx2"))
+    {
+        bool hex = true;
+        for (size_t i = 4; i < 4 + 16; ++i)
+        {
+            const char c = path[i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            {
+                hex = false;
+                break;
+            }
+        }
+        if (hex)
+            return path.substr(4, 16);
+    }
+    if (path.ends_with(".spv"))
+        return path.substr(0, path.size() - 4);
+    if (path.ends_with(".ktx2"))
+        return path.substr(0, path.size() - 5);
+    return path;
 }
 
 std::string HumanSize(uint64_t b)
@@ -384,12 +417,14 @@ const char *ManKindName(uint8_t k)
 {
     switch (static_cast<assetc::ManKind>(k))
     {
-    case assetc::ManKind::Texture:  return "texture";
-    case assetc::ManKind::Mesh:     return "mesh";
-    case assetc::ManKind::Material: return "material";
-    case assetc::ManKind::Lut:      return "lut";
-    case assetc::ManKind::Shader:   return "shader";
-    case assetc::ManKind::Embed:    return "embed";
+    case assetc::ManKind::Texture:   return "texture";
+    case assetc::ManKind::Mesh:      return "mesh";
+    case assetc::ManKind::Material:  return "material";
+    case assetc::ManKind::Lut:       return "lut";
+    case assetc::ManKind::Shader:    return "shader";
+    case assetc::ManKind::Embed:     return "embed";
+    case assetc::ManKind::Animation: return "anim";
+    case assetc::ManKind::Font:      return "font";
     }
     return "?";
 }
@@ -762,40 +797,68 @@ void DrawBrowser(Source &src, View &v)
     ImGui::BeginChild("list");
     const std::string flt = v.filter;
 
-    // The pack file is itself a first-class node (distinct gold color): selecting it
-    // opens the pack overview/visualization in the Inspector.
-    if (src.packAvailable)
+    constexpr ImGuiTableFlags kListFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                                           ImGuiTableFlags_Resizable |
+                                           ImGuiTableFlags_BordersInnerV;
+    if (ImGui::BeginTable("entries", 3, kListFlags))
     {
-        const std::string label =
-            fmt::format("[pack] {}##__pack__", fs::path(src.packPath).filename().string());
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.93f, 0.78f, 0.36f, 1.0f));
-        const bool sel = ImGui::Selectable(label.c_str(), v.selected == kPackSelected);
-        ImGui::PopStyleColor();
-        if (sel && v.selected != kPackSelected)
-        {
-            v.selected = kPackSelected;
-            v.dirty    = true;
-        }
-        ImGui::Separator();
-    }
+        ImGui::TableSetupColumn("kind", ImGuiTableColumnFlags_WidthFixed, 38.0f);
+        ImGui::TableSetupColumn("path", ImGuiTableColumnFlags_WidthStretch, 0.55f);
+        // The reference the engine content-addresses each asset by (see ContentRef).
+        ImGui::TableSetupColumn("engine ref", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+        ImGui::TableSetupScrollFreeze(0, 1);
+        ImGui::TableHeadersRow();
 
-    for (int i = 0; i < (int)src.entries.size(); ++i)
-    {
-        const Entry &e = src.entries[i];
-        if (!flt.empty() && e.path.find(flt) == std::string::npos)
-            continue;
-        const std::string label =
-            fmt::format("[{}] {}##{}", KindTag(e.kind), e.path, i);
-        if (ImGui::Selectable(label.c_str(), v.selected == i))
+        const ImVec4 gold(0.93f, 0.78f, 0.36f, 1.0f);
+
+        // The pack file is itself a first-class, gold node: selecting it opens the
+        // pack overview/visualization in the Inspector.
+        if (src.packAvailable)
         {
-            if (v.selected != i)
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::PushStyleColor(ImGuiCol_Text, gold);
+            const bool sel = ImGui::Selectable("pack##__pack__", v.selected == kPackSelected,
+                                               ImGuiSelectableFlags_SpanAllColumns);
+            ImGui::PopStyleColor();
+            if (sel && v.selected != kPackSelected)
             {
-                v.selected = i;
-                v.mip = v.face = v.layer = 0;
-                v.zoom                   = 1.0f;
-                v.dirty                  = true;
+                v.selected = kPackSelected;
+                v.dirty    = true;
             }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextColored(gold, "%s", fs::path(src.packPath).filename().string().c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextDisabled("(whole pack)");
         }
+
+        for (int i = 0; i < (int)src.entries.size(); ++i)
+        {
+            const Entry      &e   = src.entries[i];
+            const std::string ref = ContentRef(e.path);
+            if (!flt.empty() && e.path.find(flt) == std::string::npos &&
+                ref.find(flt) == std::string::npos)
+                continue;
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            const std::string id = fmt::format("{}##{}", KindTag(e.kind), i);
+            if (ImGui::Selectable(id.c_str(), v.selected == i, ImGuiSelectableFlags_SpanAllColumns))
+            {
+                if (v.selected != i)
+                {
+                    v.selected = i;
+                    v.mip = v.face = v.layer = 0;
+                    v.zoom                   = 1.0f;
+                    v.dirty                  = true;
+                }
+            }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(e.path.c_str());
+            ImGui::TableSetColumnIndex(2);
+            ImGui::TextUnformatted(ref.c_str());
+        }
+        ImGui::EndTable();
     }
     ImGui::EndChild();
     ImGui::End();

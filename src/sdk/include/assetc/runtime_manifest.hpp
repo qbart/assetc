@@ -40,6 +40,13 @@ constexpr uint32_t ManVersion = 1;
 // (e.g. "scene/level.json"), and its hash is HashEmbedRef(path) — i.e. the same
 // FNV1a64, but the extension is part of the ref so path and extension both matter.
 //
+// Meshes (`.hmesh`), material tables (`.hmat`), animation clips (`.hanim`), and
+// font metadata (`.hfont`) are registered the SAME way: hash == HashEmbedRef(their
+// runtime-relative path, extension kept), kind Mesh/Material/Animation/Font. So
+// every asset — not just textures — resolves through one uniform id -> path lookup,
+// and a mesh and its sibling `.hmat`/`.hanim` get distinct ids from their distinct
+// extensions.
+//
 // On-disk layout (little-endian), entries sorted by hash ascending:
 //
 //     magic       u32   == ManMagic
@@ -54,12 +61,14 @@ constexpr uint32_t ManVersion = 1;
 //         path        pathLen bytes, UTF-8, forward-slash, relative to runtime root
 enum class ManKind : uint8_t
 {
-    Texture  = 0,
-    Mesh     = 1, // reserved, not emitted
-    Material = 2, // reserved, not emitted
-    Lut      = 3, // reserved, not emitted
-    Shader   = 4, // SPIR-V entry point: ref "<sourceRef>/<entryPoint>", path + ".spv"
-    Embed    = 5, // `embed:`-ed raw file: hash == HashEmbedRef(path), path kept verbatim
+    Texture   = 0,
+    Mesh      = 1, // `.hmesh`:  hash == HashEmbedRef(runtime path)
+    Material  = 2, // `.hmat`:   hash == HashEmbedRef(runtime path)
+    Lut       = 3, // reserved, not emitted
+    Shader    = 4, // SPIR-V entry point: ref "<sourceRef>/<entryPoint>", path + ".spv"
+    Embed     = 5, // `embed:`-ed raw file: hash == HashEmbedRef(path), path kept verbatim
+    Animation = 6, // `.hanim`:  hash == HashEmbedRef(runtime path)
+    Font      = 7, // `.hfont`:  hash == HashEmbedRef(runtime path)
 };
 
 enum class ManColorSpace : uint8_t

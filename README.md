@@ -4,7 +4,7 @@
 
 A glTF/GLB mesh additionally emits a **companion material table** (`.hmat`) plus one **content-addressed `.ktx2` per referenced image**. The three layers are orthogonal: `.hmesh` is geometry, `.hmat` is the small per-source material descriptor table (PBR factors + texture refs), and `.ktx2` is the GPU-ready pixel payload. A submesh's `materialSlot` indexes straight into the `.hmat` table (`.hmat` row `i` ⇔ `SubMesh::materialSlot i`). Embedded textures are written to a shared flat store `runtime/tex/<hash>.ktx2` keyed by content, so the **same texture used by two different models is encoded once and shares one runtime handle**.
 
-Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A single global **manifest** (`runtime/assets.hman`) maps each hash back to the `.ktx2` file on disk, so the runtime can content-address textures (load the manifest once into a `hash → path` map, then resolve any `baseColorTex` etc.). See [docs/hman.md](docs/hman.md).
+Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A single global **manifest** (`runtime/assets.hman`) maps each hash back to the file on disk. Load it once into a `hash → path` map and you can resolve **any** asset by a stable id — textures (`baseColorTex` etc.), but also meshes, materials, animations, fonts, shaders, and embeds — through one uniform lookup. Name/by-path assets key on `HashEmbedRef(runtime-relative path)`; embedded textures key on their content hash. See [docs/hman.md](docs/hman.md).
 
 Every output format has a detailed binary spec under [`docs/`](#file-formats).
 
@@ -35,7 +35,7 @@ Common flags (apply to `assetc`; `-o` also applies to `info`/`check`):
 
 `assetc info` reports geometry stats per `.hmesh` (verts / triangles / indices / meshlets / submeshes / materials / bounds), material-table breakdowns per `.hmat` (texture-slot usage, alpha modes, double-sided count), `.hman` manifest entry counts by kind/colorspace, and `.ktx2` dimensions / mips / format / supercompression — then a totals summary across the whole output tree.
 
-`assetc check` validates internal consistency: each `.hmesh`/`.hmat`/`.hman` is structurally valid; every nonzero texture ref in a `.hmat` resolves via `.hman` to a file that exists; every `.hman` entry points at an existing file whose hash matches its kind's rule (content-store stem for `tex/<hash>.ktx2`, `HashAssetRef(path-without-ext)` for name-addressed textures, `HashEmbedRef(path)` for embeds); and each `.hmesh` material count matches its companion `.hmat` row count with all submesh material slots in range. Use it as a CI gate after a build.
+`assetc check` validates internal consistency: each `.hmesh`/`.hmat`/`.hman` is structurally valid; every nonzero texture ref in a `.hmat` resolves via `.hman` to a file that exists; every `.hman` entry points at an existing file whose hash matches its kind's rule (content-store stem for `tex/<hash>.ktx2`, `HashAssetRef(path-without-ext)` for name-addressed textures/shaders, `HashEmbedRef(path)` for embeds and the by-path assets — mesh/material/anim/font); and each `.hmesh` material count matches its companion `.hmat` row count with all submesh material slots in range. Use it as a CI gate after a build.
 
 ## Configuration (`assetc.yml`)
 
@@ -153,11 +153,11 @@ All runtime formats are little-endian and versioned by a 4-byte magic in their h
 | `.hmesh` | `HMSH` | [docs/hmesh.md](docs/hmesh.md) | Tagged-chunk geometry container: `DESC` + pure-array chunks (vertices, indices, meshlets, submeshes, material refs), optional skinning / LODs. |
 | `.hanim` | `HANM` | [docs/hanim.md](docs/hanim.md) | Animation clips for a skinned `.hmesh`: per-joint TRS channels with keyframes. |
 | `.hmat`  | `HMAT` | [docs/hmat.md](docs/hmat.md)   | Flat per-source PBR material table; fixed-stride `GpuMaterial[]`, textures referenced by hash. |
-| `.hman`  | `HMAN` | [docs/hman.md](docs/hman.md)   | Single global hash → file manifest the runtime uses to content-address textures. |
+| `.hman`  | `HMAN` | [docs/hman.md](docs/hman.md)   | Single global hash → file manifest; resolves every asset (textures, meshes, materials, anims, fonts, shaders, embeds) by a stable id. |
 | `.hfont` | `HFNT` | [docs/hfont.md](docs/hfont.md) | Font metadata (em-unit glyph metrics + kerning) beside a single-channel SDF `.ktx2` atlas for smooth, scalable text in 2D or 3D. |
 | `.hpack` | `HPAK` | [docs/hpack.md](docs/hpack.md) | Optional bundle (`--pack`) of the whole output dir into one TOC + payload blob so the engine opens a single file. |
 
-The resolution chain across formats: load `assets.hman` once into a `hash → path` map; load a mesh by its known path (`.hmesh`/`.hmat`/`.hanim` are siblings); a material's or font's texture hash resolves through the manifest to a `.ktx2` path (and, if bundled, through the `.hpack` TOC to the bytes).
+The resolution chain across formats: load `assets.hman` once into a `hash → path` map; resolve any asset by its id — `HashEmbedRef("models/chair.hmesh")` for a mesh and its `.hmat`/`.hanim` siblings, a material's or font's texture hash for a `.ktx2` — to a runtime-relative path, and (if bundled) through the `.hpack` TOC to the bytes. Meshes can still be opened by their known path; the manifest just adds a stable-id route that works the same for every asset type.
 
 ## Using as a library (SDK)
 

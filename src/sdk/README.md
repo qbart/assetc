@@ -43,11 +43,12 @@ uint64_t ref = mat.baseColorTex;                 // from a GpuMaterial in a .hma
 // 3. Or compute a name-addressed ref id yourself (shaders, font atlases).
 uint64_t id = assetc::HashAssetRef("shaders/bloom/down");
 
-// 3b. Read an embedded raw file (assetc.yml `embed:`). Extension is significant, so
-//     use HashEmbedRef on the full runtime-relative path, then resolve via the manifest.
-uint64_t lvl = assetc::HashEmbedRef("scene/level.json");
+// 3b. Resolve ANY by-path asset — a mesh/material/anim/font, or an `embed:`-ed raw
+//     file — by HashEmbedRef on its full runtime-relative path (extension kept).
+uint64_t mesh = assetc::HashEmbedRef("models/chair.hmesh"); // -> manifest -> path -> bytes
+uint64_t lvl  = assetc::HashEmbedRef("scene/level.json");
 
-// 4. mmap a .hmesh and walk its chunks using the structs in runtime_mesh.hpp.
+// 4. mmap the resolved .hmesh and walk its chunks using the structs in runtime_mesh.hpp.
 ```
 
 ## Integrate via CMake FetchContent
