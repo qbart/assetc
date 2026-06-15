@@ -481,6 +481,12 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
     ImGui::SameLine();
     ImGui::TextDisabled("(drag: orbit, wheel: zoom)");
 
+    // Bounds overlays (BNDS chunk): the AABB box and the bounding sphere, drawn as
+    // wireframe through ImGui's draw list over whatever render mode is active.
+    ImGui::Checkbox("AABB", &cam.showAabb);
+    ImGui::SameLine();
+    ImGui::Checkbox("sphere", &cam.showSphere);
+
     // --- canvas ---------------------------------------------------------------
     ImVec2 size = ImGui::GetContentRegionAvail();
     size.x      = std::max(size.x, 64.0f);
@@ -665,6 +671,77 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
     {
         dl->AddText(ImVec2(p0.x + 8, p0.y + 8), IM_COL32(255, 150, 150, 255),
                     "mesh too dense to preview at this LOD");
+    }
+
+    // --- bounds overlays ------------------------------------------------------
+    // Project an arbitrary world point with the same camera basis the mesh uses;
+    // returns false when it falls behind the near plane (so the edge is dropped).
+    // Uses the canvas (point) projection, matching both the displayed image and the
+    // wireframe path so the overlay registers with the geometry in every mode.
+    if (cam.showAabb || cam.showSphere)
+    {
+        const float  ovFocal = (0.5f * size.y) / std::tan(kFov * 0.5f);
+        const ImVec2 mid(p0.x + size.x * 0.5f, p0.y + size.y * 0.5f);
+        auto         project = [&](const V3 &p, ImVec2 &out) -> bool {
+            const V3    rel = Sub(p, eye);
+            const float z   = Dot(rel, fwd);
+            if (z <= zNear)
+                return false;
+            out = ImVec2(mid.x + (Dot(rel, right) / z) * ovFocal,
+                         mid.y - (Dot(rel, up) / z) * ovFocal);
+            return true;
+        };
+        auto edgeLine = [&](const V3 &a, const V3 &b, ImU32 col) {
+            ImVec2 sa, sb;
+            if (project(a, sa) && project(b, sb))
+                dl->AddLine(sa, sb, col, 1.5f);
+        };
+
+        if (cam.showAabb)
+        {
+            const ImU32 col   = IM_COL32(255, 224, 96, 220); // amber
+            const float xs[2] = {m.aabbMin[0], m.aabbMax[0]};
+            const float ys[2] = {m.aabbMin[1], m.aabbMax[1]};
+            const float zs[2] = {m.aabbMin[2], m.aabbMax[2]};
+            V3          c[8];
+            for (int i = 0; i < 8; ++i)
+                c[i] = V3{xs[(i >> 0) & 1], ys[(i >> 1) & 1], zs[(i >> 2) & 1]};
+            // The 12 box edges: every pair of corners that differs in one axis bit.
+            for (int i = 0; i < 8; ++i)
+                for (int bit = 0; bit < 3; ++bit)
+                {
+                    const int j = i | (1 << bit);
+                    if (j != i)
+                        edgeLine(c[i], c[j], col);
+                }
+        }
+
+        if (cam.showSphere)
+        {
+            const ImU32 col = IM_COL32(120, 220, 255, 200); // cyan
+            const V3    sc{m.center[0], m.center[1], m.center[2]};
+            const float r = m.radius;
+            constexpr int kSeg = 48;
+            // Three great circles, one per coordinate plane.
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                V3 prev{};
+                bool havePrev = false;
+                for (int s = 0; s <= kSeg; ++s)
+                {
+                    const float a  = (6.2831853f * static_cast<float>(s)) / kSeg;
+                    const float ca = std::cos(a) * r, sa = std::sin(a) * r;
+                    V3          p  = sc;
+                    if (axis == 0) { p.y += ca; p.z += sa; } // YZ plane
+                    else if (axis == 1) { p.x += ca; p.z += sa; } // XZ plane
+                    else { p.x += ca; p.y += sa; }                // XY plane
+                    if (havePrev)
+                        edgeLine(prev, p, col);
+                    prev     = p;
+                    havePrev = true;
+                }
+            }
+        }
     }
 
     dl->PopClipRect();

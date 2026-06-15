@@ -92,6 +92,8 @@ struct MeshCamera
     float distScale   = 1.0f; // multiple of the auto-fit distance
     int   lod         = 0;    // selected LOD level (index into MeshCpu::lodIndices)
     int   mode        = MeshMode_Solid; // one of MeshMode
+    bool  showAabb    = false; // overlay the mesh AABB wireframe (BNDS chunk)
+    bool  showSphere  = false; // overlay the mesh bounding sphere wireframe (BNDS chunk)
 };
 
 // Persistent preview state owned by the caller. Filled modes are drawn by a CPU
