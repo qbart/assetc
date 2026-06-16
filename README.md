@@ -8,6 +8,11 @@ Texture refs in `.hmat`/`.hmesh` are stored as 64-bit hashes, not paths. A singl
 
 Every output format has a detailed binary spec under [`docs/`](#file-formats).
 
+![fox-mesh](./docs/res/fox1.png)
+![fox-tex](./docs/res/fox2.png)
+![fox-desc](./docs/res/fox3.png)
+![fox-pack](./docs/res/fox4.png)
+
 ## Commands
 
 | Command       | What it does                                                                          |
