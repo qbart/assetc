@@ -11,6 +11,8 @@
 
 #include "viewer/gpu.hpp" // GpuContext + GpuTexture for the rasterized preview
 
+#include "assetc/runtime_mesh.hpp" // MeshletBounds (sphere + normal cone)
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -47,6 +49,11 @@ struct MeshCpu
     std::vector<uint32_t> meshletTris;
     std::vector<uint32_t> meshletTriOwner;
     uint32_t              meshletCount = 0;
+
+    // Per-meshlet bounds (MLBN), parallel to the meshlet partition above: bounding
+    // sphere (center/radius) + normal cone (axis/cutoff). Empty if the mesh carries
+    // no MLBN chunk. Drives the hover overlay that highlights one meshlet's bounds.
+    std::vector<assetc::MeshletBounds> meshletBounds;
 
     // Real material base colors (linear RGBA), one per material slot, read from the
     // companion .hmat by the caller. Empty when there is no .hmat; material view
@@ -94,6 +101,7 @@ struct MeshCamera
     int   mode        = MeshMode_Solid; // one of MeshMode
     bool  showAabb    = false; // overlay the mesh AABB wireframe (BNDS chunk)
     bool  showSphere  = false; // overlay the mesh bounding sphere wireframe (BNDS chunk)
+    bool  showMeshletHover = false; // highlight the hovered meshlet's sphere + normal cone (MLBN)
 };
 
 // Persistent preview state owned by the caller. Filled modes are drawn by a CPU

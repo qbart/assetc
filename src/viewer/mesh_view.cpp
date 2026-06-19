@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <utility>
 
@@ -238,6 +239,16 @@ MeshCpu ParseHMesh(const uint8_t *data, size_t size)
                 out.meshletTriOwner.push_back(mi);
             }
         }
+    }
+
+    // Per-meshlet bounds (MLBN), parallel to MLET. Size must match the meshlet count
+    // we just read; otherwise leave it empty and the hover overlay stays disabled.
+    const ChunkEntry *mlbnC = FindChunk(table, ChunkId::MeshletBounds);
+    if (mlbnC && out.meshletCount > 0 &&
+        mlbnC->size == static_cast<size_t>(out.meshletCount) * sizeof(assetc::MeshletBounds))
+    {
+        out.meshletBounds.resize(out.meshletCount);
+        std::memcpy(out.meshletBounds.data(), data + mlbnC->offset, mlbnC->size);
     }
 
     out.valid = true;
@@ -486,6 +497,11 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
     ImGui::Checkbox("AABB", &cam.showAabb);
     ImGui::SameLine();
     ImGui::Checkbox("sphere", &cam.showSphere);
+    if (!m.meshletBounds.empty())
+    {
+        ImGui::SameLine();
+        ImGui::Checkbox("meshlet hover", &cam.showMeshletHover);
+    }
 
     // --- canvas ---------------------------------------------------------------
     ImVec2 size = ImGui::GetContentRegionAvail();
@@ -545,6 +561,49 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
         ok[i]         = z > zNear;
         vx[i]         = Dot(rel, right);
         vy[i]         = Dot(rel, up);
+    }
+
+    // Hover pick: which meshlet is under the cursor. We splat the LOD0 meshlet
+    // triangle list to the canvas (same projection the overlays use) and run the
+    // rasterizer's point-in-triangle + perspective-correct depth test at the single
+    // mouse pixel, keeping the nearest hit's owning meshlet. O(meshlet tris) per
+    // frame, only while hovering with the toggle on, so it stays interactive.
+    int hoveredMeshlet = -1;
+    if (cam.showMeshletHover && hovered && !m.meshletBounds.empty() && !m.meshletTris.empty())
+    {
+        const float  pkFocal = (0.5f * size.y) / std::tan(kFov * 0.5f);
+        const ImVec2 mid(p0.x + size.x * 0.5f, p0.y + size.y * 0.5f);
+        const float  mx = io.MousePos.x, my = io.MousePos.y;
+        auto         edge = [](float x0, float y0, float x1, float y1, float px, float py) {
+            return (x1 - x0) * (py - y0) - (y1 - y0) * (px - x0);
+        };
+        float        bestIz   = 0.0f;
+        const size_t mtCount  = m.meshletTris.size() / 3;
+        for (size_t t = 0; t < mtCount; ++t)
+        {
+            const uint32_t a = m.meshletTris[t * 3 + 0], b = m.meshletTris[t * 3 + 1],
+                           c = m.meshletTris[t * 3 + 2];
+            if (!ok[a] || !ok[b] || !ok[c])
+                continue;
+            const float ax = mid.x + (vx[a] / vz[a]) * pkFocal, ay = mid.y - (vy[a] / vz[a]) * pkFocal;
+            const float bx = mid.x + (vx[b] / vz[b]) * pkFocal, by = mid.y - (vy[b] / vz[b]) * pkFocal;
+            const float cx = mid.x + (vx[c] / vz[c]) * pkFocal, cy = mid.y - (vy[c] / vz[c]) * pkFocal;
+            const float area = edge(ax, ay, bx, by, cx, cy);
+            if (std::fabs(area) < 1e-6f)
+                continue;
+            const float inv = 1.0f / area;
+            const float w0  = edge(bx, by, cx, cy, mx, my) * inv;
+            const float w1  = edge(cx, cy, ax, ay, mx, my) * inv;
+            const float w2  = edge(ax, ay, bx, by, mx, my) * inv;
+            if (w0 < -1e-4f || w1 < -1e-4f || w2 < -1e-4f)
+                continue;
+            const float iz = w0 / vz[a] + w1 / vz[b] + w2 / vz[c]; // perspective-correct 1/z
+            if (iz > bestIz)
+            {
+                bestIz         = iz;
+                hoveredMeshlet = static_cast<int>(m.meshletTriOwner[t]);
+            }
+        }
     }
 
     // Meshlet mode draws the meshlet-partitioned LOD0 triangle list (its own index
@@ -673,12 +732,12 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
                     "mesh too dense to preview at this LOD");
     }
 
-    // --- bounds overlays ------------------------------------------------------
+    // --- overlays (mesh bounds + hovered meshlet) -----------------------------
     // Project an arbitrary world point with the same camera basis the mesh uses;
     // returns false when it falls behind the near plane (so the edge is dropped).
     // Uses the canvas (point) projection, matching both the displayed image and the
     // wireframe path so the overlay registers with the geometry in every mode.
-    if (cam.showAabb || cam.showSphere)
+    if (cam.showAabb || cam.showSphere || hoveredMeshlet >= 0)
     {
         const float  ovFocal = (0.5f * size.y) / std::tan(kFov * 0.5f);
         const ImVec2 mid(p0.x + size.x * 0.5f, p0.y + size.y * 0.5f);
@@ -695,6 +754,28 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
             ImVec2 sa, sb;
             if (project(a, sa) && project(b, sb))
                 dl->AddLine(sa, sb, col, 1.5f);
+        };
+        // Three great circles (one per coordinate plane) approximating a sphere.
+        auto sphereWire = [&](const V3 &sc, float r, ImU32 col) {
+            constexpr int kSeg = 48;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                V3   prev{};
+                bool havePrev = false;
+                for (int s = 0; s <= kSeg; ++s)
+                {
+                    const float a  = (6.2831853f * static_cast<float>(s)) / kSeg;
+                    const float ca = std::cos(a) * r, sa = std::sin(a) * r;
+                    V3          p  = sc;
+                    if (axis == 0) { p.y += ca; p.z += sa; }      // YZ plane
+                    else if (axis == 1) { p.x += ca; p.z += sa; } // XZ plane
+                    else { p.x += ca; p.y += sa; }                // XY plane
+                    if (havePrev)
+                        edgeLine(prev, p, col);
+                    prev     = p;
+                    havePrev = true;
+                }
+            }
         };
 
         if (cam.showAabb)
@@ -717,30 +798,65 @@ void DrawMeshPreview(GpuContext &gpu, const MeshCpu &m, MeshCamera &cam, MeshRen
         }
 
         if (cam.showSphere)
+            sphereWire(V3{m.center[0], m.center[1], m.center[2]}, m.radius,
+                       IM_COL32(120, 220, 255, 200)); // cyan
+
+        // Hovered meshlet: its bounding sphere (green) + normal cone (magenta). The
+        // normal cone is the spread of triangle normals meshopt records for backface
+        // cluster culling; cone_cutoff == sin(half-angle), so the half-angle is
+        // asin(cutoff). cutoff >= 1 means "normals span > 90deg, never cullable" — we
+        // draw just the axis in that case. Apex is the sphere center (we don't store
+        // meshopt's cone_apex); good enough to read off the direction and spread.
+        if (hoveredMeshlet >= 0 && hoveredMeshlet < static_cast<int>(m.meshletBounds.size()))
         {
-            const ImU32 col = IM_COL32(120, 220, 255, 200); // cyan
-            const V3    sc{m.center[0], m.center[1], m.center[2]};
-            const float r = m.radius;
-            constexpr int kSeg = 48;
-            // Three great circles, one per coordinate plane.
-            for (int axis = 0; axis < 3; ++axis)
+            const auto &mb = m.meshletBounds[hoveredMeshlet];
+            const V3    mc{mb.center.x, mb.center.y, mb.center.z};
+            const float len = mb.radius > 0.0f ? mb.radius : m.radius * 0.1f;
+            sphereWire(mc, mb.radius, IM_COL32(120, 255, 140, 220)); // green
+
+            const ImU32 ccol = IM_COL32(255, 140, 220, 230); // magenta
+            V3          axis = Normalize(V3{mb.coneAxis.x, mb.coneAxis.y, mb.coneAxis.z});
+            if (Dot(axis, axis) > 1e-6f)
             {
-                V3 prev{};
-                bool havePrev = false;
-                for (int s = 0; s <= kSeg; ++s)
+                const float cutoff = std::clamp(mb.coneCutoff, 0.0f, 1.0f);
+                if (cutoff >= 0.999f)
                 {
-                    const float a  = (6.2831853f * static_cast<float>(s)) / kSeg;
-                    const float ca = std::cos(a) * r, sa = std::sin(a) * r;
-                    V3          p  = sc;
-                    if (axis == 0) { p.y += ca; p.z += sa; } // YZ plane
-                    else if (axis == 1) { p.x += ca; p.z += sa; } // XZ plane
-                    else { p.x += ca; p.y += sa; }                // XY plane
-                    if (havePrev)
-                        edgeLine(prev, p, col);
-                    prev     = p;
-                    havePrev = true;
+                    edgeLine(mc, V3{mc.x + axis.x * len, mc.y + axis.y * len, mc.z + axis.z * len},
+                             ccol);
+                }
+                else
+                {
+                    const float alpha = std::asin(cutoff);     // normal-cone half-angle
+                    const float fr    = len * std::cos(alpha); // along axis to the ring plane
+                    const float rr    = len * std::sin(alpha); // ring radius
+                    // An orthonormal basis spanning the plane perpendicular to the axis.
+                    V3 t0 = std::fabs(axis.y) < 0.99f ? Normalize(Cross(axis, V3{0, 1, 0}))
+                                                      : V3{1, 0, 0};
+                    V3 t1 = Cross(axis, t0);
+                    const V3      fc{mc.x + axis.x * fr, mc.y + axis.y * fr, mc.z + axis.z * fr};
+                    constexpr int kSeg = 32;
+                    V3            prev{};
+                    bool          havePrev = false;
+                    for (int s = 0; s <= kSeg; ++s)
+                    {
+                        const float a  = (6.2831853f * static_cast<float>(s)) / kSeg;
+                        const float cs = std::cos(a) * rr, sn = std::sin(a) * rr;
+                        const V3    p{fc.x + t0.x * cs + t1.x * sn, fc.y + t0.y * cs + t1.y * sn,
+                                   fc.z + t0.z * cs + t1.z * sn};
+                        if (havePrev)
+                            edgeLine(prev, p, ccol); // ring
+                        if (s % (kSeg / 8) == 0)
+                            edgeLine(mc, p, ccol); // spoke from apex
+                        prev     = p;
+                        havePrev = true;
+                    }
                 }
             }
+
+            char buf[80];
+            std::snprintf(buf, sizeof(buf), "meshlet #%d   r=%.3f   cutoff=%.2f", hoveredMeshlet,
+                          mb.radius, mb.coneCutoff);
+            dl->AddText(ImVec2(p0.x + 8, p1.y - 22), IM_COL32(160, 255, 180, 255), buf);
         }
     }
 
