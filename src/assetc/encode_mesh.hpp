@@ -22,6 +22,17 @@ struct GLTF;
 namespace assetc
 {
 
+// Tunables for the reduced-LOD levels generated per submesh (meshopt_simplify).
+// See docs/hmesh.md and assetc.yml's `mesh.lod` block, which this mirrors.
+struct LodParams
+{
+    std::vector<float> ratios = {0.5f, 0.25f}; // target index-count fraction per level, from LOD0
+    float              targetError    = 0.05f; // meshopt_simplify target_error (0..1), first attempt
+    float              errorStep      = 0.05f; // relax target_error by this much per retry on stall
+    uint32_t           maxAttempts    = 3;     // retries at relaxed error before falling back
+    bool               sloppyFallback = true;  // meshopt_simplifySloppy if still stalled after retries
+};
+
 struct CompiledMesh
 {
     Mesh                  mesh;         // GpuVertex array + indices + meshlets (all submeshes concatenated)
@@ -50,7 +61,8 @@ struct CompiledMesh
 // so refs stay stable across meshes from the same source.
 //
 // On failure, the returned CompiledMesh has empty vectors.
-CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef);
+CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef,
+                          const LodParams &lod = {});
 
 // Build a runtime-ready mesh from a parsed glTF/GLB.
 //
@@ -69,7 +81,7 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef);
 // kept in its source-local space (node transforms are not baked); skinned meshes
 // are never baked regardless.
 CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef,
-                           bool mergeNodes = true);
+                           bool mergeNodes = true, const LodParams &lod = {});
 
 // HashAssetRef now lives in the SDK (assetc/hash.hpp, included above) so the
 // engine and the encoder compute refs the same way.
