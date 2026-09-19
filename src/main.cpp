@@ -212,23 +212,31 @@ int handleAsset(const Asset &asset, const std::string &outputDir, unsigned threa
         assetc::CompiledMesh cm;
         std::unique_ptr<gltf::GLTF> gltfSrc; // kept alive for companion .hmat + .ktx2 emission
 
+        // Per-pattern mesh settings (merge, LOD tuning), keyed by the source path
+        // relative to input.
+        std::error_code   rec;
+        const std::string rel = fs::relative(asset.path, config.input, rec).generic_string();
+        const auto        rs  = config.resolve(rel, preset);
+        assetc::LodParams lod;
+        lod.ratios         = rs.lodRatios;
+        lod.targetError    = rs.lodError;
+        lod.errorStep      = rs.lodErrorStep;
+        lod.maxAttempts    = static_cast<uint32_t>(rs.lodMaxAttempts);
+        lod.sloppyFallback = rs.lodSloppyFallback;
+
         if (ext == ".obj")
         {
             auto src = obj::Load(asset.path);
             if (!src)
                 return 1;
-            cm = assetc::BuildFromObj(*src, sourceRef);
+            cm = assetc::BuildFromObj(*src, sourceRef, lod);
         }
         else if (ext == ".gltf" || ext == ".glb")
         {
             gltfSrc = gltf::Load(asset.path);
             if (!gltfSrc)
                 return 1;
-            // Per-pattern merge override, keyed by the source path relative to input.
-            std::error_code  rec;
-            const std::string rel = fs::relative(asset.path, config.input, rec).generic_string();
-            const bool        merge = config.resolve(rel, preset).merge;
-            cm = assetc::BuildFromGltf(*gltfSrc, sourceRef, merge);
+            cm = assetc::BuildFromGltf(*gltfSrc, sourceRef, rs.merge, lod);
         }
         else
         {
@@ -714,6 +722,12 @@ int main(int argc, char **argv)
                 uint64_t          seed = static_cast<uint64_t>(a.type);
                 seed = seed * 1000003u + (rs.merge ? 1u : 0u);
                 seed = seed * 1000003u + (rs.compress ? 2u : 0u);
+                seed = seed * 1000003u + (rs.lodSloppyFallback ? 1u : 0u);
+                seed = seed * 1000003u + static_cast<uint64_t>(rs.lodMaxAttempts);
+                seed = seed * 1000003u + static_cast<uint64_t>(rs.lodError * 1000.0f);
+                seed = seed * 1000003u + static_cast<uint64_t>(rs.lodErrorStep * 1000.0f);
+                for (float ratio : rs.lodRatios)
+                    seed = seed * 1000003u + static_cast<uint64_t>(ratio * 1000.0f);
                 for (char c : preset)
                     seed = seed * 131u + static_cast<uint8_t>(c);
                 const uint64_t inputHash = assetc::HashSource(a.path, seed);

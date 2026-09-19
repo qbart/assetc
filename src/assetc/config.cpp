@@ -22,6 +22,16 @@ void assetc::MeshSettings::overlay(const MeshSettings &o)
 {
     if (o.merge)
         merge = o.merge;
+    if (o.lodRatios)
+        lodRatios = o.lodRatios;
+    if (o.lodError)
+        lodError = o.lodError;
+    if (o.lodErrorStep)
+        lodErrorStep = o.lodErrorStep;
+    if (o.lodMaxAttempts)
+        lodMaxAttempts = o.lodMaxAttempts;
+    if (o.lodSloppyFallback)
+        lodSloppyFallback = o.lodSloppyFallback;
 }
 
 assetc::Config::Resolved assetc::Config::resolve(const std::string &relPath,
@@ -59,7 +69,13 @@ assetc::Config::Resolved assetc::Config::resolve(const std::string &relPath,
     if (p)
         applyRules(p->rules);
 
-    return Resolved{tex.compress.value_or(true), mesh.merge.value_or(true)};
+    return Resolved{tex.compress.value_or(true),
+                    mesh.merge.value_or(true),
+                    mesh.lodRatios.value_or(std::vector<float>{0.5f, 0.25f}),
+                    mesh.lodError.value_or(0.05f),
+                    mesh.lodErrorStep.value_or(0.05f),
+                    mesh.lodMaxAttempts.value_or(3),
+                    mesh.lodSloppyFallback.value_or(true)};
 }
 
 std::string assetc::Config::outputFor(const std::string &preset) const
@@ -160,7 +176,27 @@ void ParseMesh(const YAML::Node &n, assetc::MeshSettings &mesh, const std::strin
         return;
     if (n["merge"])
         mesh.merge = n["merge"].as<bool>();
-    WarnUnknownKeys(n, {"merge"}, where + ".mesh", file);
+    if (const auto &lod = n["lod"])
+    {
+        if (lod["ratios"] && lod["ratios"].IsSequence())
+        {
+            std::vector<float> ratios;
+            for (const auto &rn : lod["ratios"])
+                ratios.push_back(rn.as<float>());
+            mesh.lodRatios = std::move(ratios);
+        }
+        if (lod["error"])
+            mesh.lodError = lod["error"].as<float>();
+        if (lod["errorStep"])
+            mesh.lodErrorStep = lod["errorStep"].as<float>();
+        if (lod["maxAttempts"])
+            mesh.lodMaxAttempts = lod["maxAttempts"].as<int>();
+        if (lod["sloppyFallback"])
+            mesh.lodSloppyFallback = lod["sloppyFallback"].as<bool>();
+        WarnUnknownKeys(lod, {"ratios", "error", "errorStep", "maxAttempts", "sloppyFallback"},
+                        where + ".mesh.lod", file);
+    }
+    WarnUnknownKeys(n, {"merge", "lod"}, where + ".mesh", file);
 }
 
 // Parse a `default:`/preset layer. `isPreset` controls whether `output` is allowed.
@@ -310,6 +346,16 @@ output: runtime
 #     merge: true        # bake glTF node transforms into one combined mesh;
 #                        # false keeps geometry source-local. (Skinned meshes are
 #                        # never baked; OBJ has no node graph.)
+#     lod:               # reduced-LOD generation (meshopt_simplify per submesh)
+#       ratios: [0.5, 0.25]  # target index-count fraction per level, from LOD0
+#       error: 0.05          # meshopt_simplify target_error (0..1), first attempt
+#       errorStep: 0.05      # relax target_error by this much per retry if a level
+#                            # fails to reduce at all (hard edges/unwelded verts
+#                            # often stall the topology-preserving simplifier)
+#       maxAttempts: 3       # retries at relaxed error before falling back
+#       sloppyFallback: true # meshopt_simplifySloppy (ignores topology) if still
+#                            # stalled after maxAttempts; always hits the target
+#                            # count but can distort attributes/UVs more
 #   texture:
 #     compress: true     # UASTC-encode (default). false = store raw, lossless.
 #   rules:               # first-to-last; later matches override. `match` is a glob

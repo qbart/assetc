@@ -20,7 +20,15 @@ struct TextureSettings
 struct MeshSettings
 {
     std::optional<bool> merge; // bake glTF node transforms into one combined mesh
-    void                overlay(const MeshSettings &o);
+
+    // Reduced-LOD generation (meshopt_simplify over each submesh). See docs/hmesh.md.
+    std::optional<std::vector<float>> lodRatios;   // target index-count fraction per level, from LOD0
+    std::optional<float>              lodError;    // meshopt_simplify target_error (0..1), first attempt
+    std::optional<float>              lodErrorStep; // relax target_error by this much per retry if a level stalls
+    std::optional<int>                lodMaxAttempts;    // retries at relaxed error before falling back
+    std::optional<bool>               lodSloppyFallback; // meshopt_simplifySloppy if attempts still stall
+
+    void overlay(const MeshSettings &o);
 };
 
 // A pattern-based override. `match` is a glob (`*` spans `/`, `?` one char) tested
@@ -61,8 +69,13 @@ struct Config
     // Fully-resolved per-file settings under the active preset ("" = none).
     struct Resolved
     {
-        bool compress;
-        bool merge;
+        bool               compress;
+        bool               merge;
+        std::vector<float> lodRatios;
+        float              lodError;
+        float              lodErrorStep;
+        int                lodMaxAttempts;
+        bool               lodSloppyFallback;
     };
     Resolved resolve(const std::string &relPath, const std::string &preset) const;
 

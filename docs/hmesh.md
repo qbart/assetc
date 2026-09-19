@@ -100,6 +100,8 @@ Per the glTF spec, a skinned mesh node's own transform is ignored — assetc doe
 
 Every submesh additionally gets reduced LODs via meshoptimizer simplification (default 2 levels at ~50% and ~25% of the triangle count). They live in two optional chunks so the full-res path is untouched: `LODI` is a `u32` index buffer (global vertex indices, same `VTXS`) and `LODT` is a header plus a `MeshLod{firstIndex, indexCount}` per `[submesh][lod]` row. LOD0 is the full-resolution mesh in `IDXS`/`SUBM`/`MLET` (meshlets are LOD0-only); the reduced levels are for classic distance-based indexed draws. A `MeshLod` with `indexCount == 0` means simplification stalled at that level, so the engine should reuse the previous LOD. `ValidateHMesh` checks every range lands inside `LODI`.
 
+Generation is tunable per-asset via `assetc.yml`'s `mesh.lod` block (ratios, error tolerance, retry/fallback behavior) — see the commented example in a freshly written config. `meshopt_simplify` is topology-preserving: it won't collapse an edge unless exactly two triangles share it, so hard-edged/unwelded source geometry (duplicated verts at every seam) can make almost every edge look like a boundary and stall simplification at 0% reduction. The encoder retries at a relaxed error limit (`errorStep`, up to `maxAttempts`) before falling back to `meshopt_simplifySloppy` (topology-agnostic, always hits the target count) when `sloppyFallback` is enabled.
+
 ## Endianness
 
 Little-endian only. `src/sdk/src/runtime_mesh.cpp` enforces this with a `static_assert(std::endian::native == std::endian::little)`.

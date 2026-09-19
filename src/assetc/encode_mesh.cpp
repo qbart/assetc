@@ -255,7 +255,8 @@ struct PrimitiveInput
 // emitted, in first-use order, with SubMesh::materialSlot indexing into that list.
 CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
                           std::span<const std::string_view> allMaterialNames,
-                          std::string_view                  sourceRef)
+                          std::string_view                  sourceRef,
+                          const LodParams                   &lod = {})
 {
     CompiledMesh cm{};
 
@@ -429,32 +430,55 @@ CompiledMesh FinalizeMesh(std::vector<PrimitiveInput>     &&prims,
         // triangle count. Each level is appended to the shared LOD index buffer as
         // global indices; an empty range (count 0) means simplification stalled and
         // the engine should fall back to the previous level.
-        constexpr uint32_t kExtraLods           = 2;
-        constexpr float    kLodRatios[kExtraLods] = {0.5f, 0.25f};
-        cm.mesh.lodCount                        = kExtraLods;
-        for (uint32_t l = 0; l < kExtraLods; ++l)
+        //
+        // meshopt_simplify is topology-preserving: it treats any edge that isn't
+        // shared by exactly two triangles as a boundary and won't collapse across
+        // it. Hard-edged/unwelded geometry (duplicated verts at every seam) makes
+        // almost every edge look like a boundary, so a single attempt at a tight
+        // error limit can stall with zero reduction. Relax the error limit across
+        // `lod.maxAttempts` retries first; if it's still stuck, `lod.sloppyFallback`
+        // switches to meshopt_simplifySloppy, which ignores topology entirely and
+        // always hits the target count (at the cost of possibly distorting UVs/attrs).
+        cm.mesh.lodCount = static_cast<uint32_t>(lod.ratios.size());
+        for (float ratio : lod.ratios)
         {
             const size_t target =
-                std::max<size_t>(3, (static_cast<size_t>(localIdx.size() * kLodRatios[l]) / 3) * 3);
-            MeshLod lod{};
+                std::max<size_t>(3, (static_cast<size_t>(localIdx.size() * ratio) / 3) * 3);
+            MeshLod lodEntry{};
             if (target < localIdx.size())
             {
                 std::vector<unsigned int> simplified(localIdx.size());
-                float                     err = 0.0f;
-                const size_t              got = meshopt_simplify(
-                    simplified.data(), localIdx.data(), localIdx.size(), &localVerts[0].pos.x,
-                    localVerts.size(), sizeof(CpuVertex), target, /*target_error=*/0.05f,
-                    /*options=*/0, &err);
+                size_t                    got         = localIdx.size();
+                float                     err         = 0.0f;
+                float                     targetError = lod.targetError;
+                for (uint32_t attempt = 0; attempt <= lod.maxAttempts; ++attempt)
+                {
+                    got = meshopt_simplify(simplified.data(), localIdx.data(), localIdx.size(),
+                                           &localVerts[0].pos.x, localVerts.size(),
+                                           sizeof(CpuVertex), target, targetError,
+                                           /*options=*/0, &err);
+                    if (got < localIdx.size())
+                        break; // made some progress; good enough even short of target
+                    targetError += lod.errorStep;
+                }
+                if (got >= localIdx.size() && lod.sloppyFallback)
+                {
+                    got = meshopt_simplifySloppy(simplified.data(), localIdx.data(),
+                                                 localIdx.size(), &localVerts[0].pos.x,
+                                                 localVerts.size(), sizeof(CpuVertex), target,
+                                                 /*target_error=*/std::numeric_limits<float>::max(),
+                                                 &err);
+                }
                 if (got >= 3 && got < localIdx.size())
                 {
-                    lod.firstIndex = static_cast<uint32_t>(cm.mesh.lodIndices.size());
-                    lod.indexCount = static_cast<uint32_t>(got);
+                    lodEntry.firstIndex = static_cast<uint32_t>(cm.mesh.lodIndices.size());
+                    lodEntry.indexCount = static_cast<uint32_t>(got);
                     cm.mesh.lodIndices.reserve(cm.mesh.lodIndices.size() + got);
                     for (size_t i = 0; i < got; ++i)
                         cm.mesh.lodIndices.push_back(simplified[i] + baseVertex);
                 }
             }
-            cm.mesh.lodTable.push_back(lod);
+            cm.mesh.lodTable.push_back(lodEntry);
         }
 
         SubMesh sm{};
@@ -551,7 +575,7 @@ std::string MaterialLeaf(std::string_view name, size_t index,
     return lower;
 }
 
-CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
+CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef, const LodParams &lod)
 {
     CompiledMesh cm{};
 
@@ -671,7 +695,7 @@ CompiledMesh BuildFromObj(const obj::OBJ &src, std::string_view sourceRef)
     for (const auto &mat : src.materials)
         matNames.emplace_back(mat.name);
 
-    return FinalizeMesh(std::move(prims), matNames, sourceRef);
+    return FinalizeMesh(std::move(prims), matNames, sourceRef, lod);
 }
 
 // --- BuildFromGltf -----------------------------------------------------------
@@ -1316,7 +1340,8 @@ SkinBuild BuildSkinAndAnimations(const tg3_model &m)
 
 } // namespace
 
-CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef, bool mergeNodes)
+CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef, bool mergeNodes,
+                           const LodParams &lod)
 {
     const auto &m = src.model;
     DumpGltfStructure(m);
@@ -1429,7 +1454,7 @@ CompiledMesh BuildFromGltf(const gltf::GLTF &src, std::string_view sourceRef, bo
         names.emplace_back(nameStorage.back());
     }
 
-    CompiledMesh cm = FinalizeMesh(std::move(prims), names, sourceRef);
+    CompiledMesh cm = FinalizeMesh(std::move(prims), names, sourceRef, lod);
     if (!cm.mesh.vertices.empty())
     {
         SkinBuild sb  = BuildSkinAndAnimations(m);
