@@ -64,6 +64,16 @@ default:
   mesh:
     merge: true          # bake glTF node transforms into one combined, world-space
                          # mesh; false keeps geometry source-local
+    lod:                 # reduced-LOD generation (meshopt_simplify per submesh)
+      ratios: [0.5, 0.25]  # target index-count fraction per level, from LOD0
+      error: 0.05          # meshopt_simplify target_error (0..1), first attempt
+      errorStep: 0.05      # relax target_error by this much per retry if a level
+                           # fails to reduce at all (hard edges/unwelded verts
+                           # often stall the topology-preserving simplifier)
+      maxAttempts: 3       # retries at relaxed error before falling back
+      sloppyFallback: true # meshopt_simplifySloppy (ignores topology) if still
+                           # stalled after maxAttempts; always hits the target
+                           # count but can distort attributes/UVs more
   texture:
     compress: true       # UASTC-encode (default); false = raw R8G8B8A8 + Zstd
   rules:                 # cascading: later matches override earlier; `match` is a
