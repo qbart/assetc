@@ -2,6 +2,7 @@
 
 #include "deps/fmt.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <vector>
 
@@ -35,6 +36,42 @@ bool                     g_SwapChainRebuild = false;
 VkCommandPool                    g_UploadPool = VK_NULL_HANDLE; // transient, for texture uploads
 VkSampler                        g_Sampler    = VK_NULL_HANDLE; // shared NEAREST sampler
 VkPhysicalDeviceMemoryProperties g_MemProps{};
+
+constexpr float kUiScaleMin  = 0.5f;
+constexpr float kUiScaleMax  = 20.0f;
+constexpr float kUiScaleStep = 0.1f;
+
+float      g_UiScale   = 1.0f;
+ImGuiStyle g_BaseStyle; // style at DPI 1.0, captured right after StyleColorsDark(); ScaleAllSizes()
+                        // is cumulative, so every rescale starts from this untouched copy.
+
+// Ctrl+=/Ctrl+- (and the keypad +/-) adjust the UI scale; applying it is cheap
+// enough to just do unconditionally when it changes rather than track dirtiness.
+void ApplyUiScale(float scale)
+{
+    g_UiScale             = scale;
+    ImGuiIO &io           = ImGui::GetIO();
+    io.FontGlobalScale    = g_UiScale;
+    ImGuiStyle &style     = ImGui::GetStyle();
+    style                 = g_BaseStyle;
+    style.ScaleAllSizes(g_UiScale);
+}
+
+void HandleUiScaleShortcut()
+{
+    ImGuiIO &io = ImGui::GetIO();
+    if (!io.KeyCtrl)
+        return;
+
+    const bool up   = ImGui::IsKeyPressed(ImGuiKey_Equal) || ImGui::IsKeyPressed(ImGuiKey_KeypadAdd);
+    const bool down = ImGui::IsKeyPressed(ImGuiKey_Minus) || ImGui::IsKeyPressed(ImGuiKey_KeypadSubtract);
+    if (!up && !down)
+        return;
+
+    const float next = std::clamp(g_UiScale + (up ? kUiScaleStep : -kUiScaleStep), kUiScaleMin, kUiScaleMax);
+    if (next != g_UiScale)
+        ApplyUiScale(next);
+}
 
 void check_vk(VkResult err)
 {
@@ -322,6 +359,7 @@ bool GpuContext::Init(const char *title, int width, int height)
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     io.IniFilename = nullptr; // don't litter the cwd with imgui.ini
     ImGui::StyleColorsDark();
+    g_BaseStyle = ImGui::GetStyle();
 
     ImGui_ImplGlfw_InitForVulkan(window, true);
     ImGui_ImplVulkan_InitInfo init{};
@@ -365,6 +403,7 @@ bool GpuContext::BeginFrame()
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
+    HandleUiScaleShortcut();
     return true;
 }
 
