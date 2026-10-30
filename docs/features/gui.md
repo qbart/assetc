@@ -26,8 +26,8 @@ frame that later features plug into; it has no asset functionality of its own.
   - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar.
   - `Help` shows the application name and version.
 - **Left sidebar** (resizable, default width 260 px, min 200 px): a single
-  **Project** section with a header row and a weak "No project open"
-  placeholder.
+  **Project** section with a header row, showing the project root (see
+  [`cli.md`](cli.md)) or a weak "No project open" placeholder.
 - **Right sidebar** (resizable, default width 320 px, min 220 px), split
   vertically into two sections:
   - **Assets** (top, ~40% height): header row with title and a disabled `+`
@@ -36,7 +36,7 @@ frame that later features plug into; it has no asset functionality of its own.
     tabs (`Info`, `Settings`), and the active tab's content on the right.
     Both tabs show a weak "Nothing selected" placeholder for now.
 - **Status bar** (bottom, fixed height): status message on the left
-  (`Ready`), `assetc <version>` on the right in weak text.
+  (see [`cli.md`](cli.md)), `assetc <version>` on the right in weak text.
 - **Center**: no canvas. The window clear color fills the remaining space.
 
 ## Look
