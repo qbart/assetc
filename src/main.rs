@@ -1,5 +1,6 @@
 mod config;
 mod theme;
+mod tree;
 mod ui;
 
 use std::env;

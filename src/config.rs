@@ -12,18 +12,44 @@ pub const FILE_NAME: &str = "assetc.toml";
 const TEMPLATE: &str = "\
 # assetc project configuration.
 # See docs/spec/assetc.toml.md for available options.
+
+input = \"assets\"
+output = \"build\"
 ";
 
-#[derive(Debug, Default, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {}
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Config {
+    /// Source assets directory, relative to the project root.
+    pub input: PathBuf,
+    /// Compiled assets directory, relative to the project root.
+    pub output: PathBuf,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            input: "assets".into(),
+            output: "build".into(),
+        }
+    }
+}
 
 /// The loaded project: its root (the directory holding `assetc.toml`) and config.
 #[derive(Debug, Default, Resource)]
 pub struct Project {
     pub root: Option<PathBuf>,
-    #[expect(dead_code, reason = "config has no keys yet")]
     pub config: Config,
+}
+
+impl Project {
+    pub fn input_dir(&self) -> Option<PathBuf> {
+        Some(self.root.as_ref()?.join(&self.config.input))
+    }
+
+    pub fn output_dir(&self) -> Option<PathBuf> {
+        Some(self.root.as_ref()?.join(&self.config.output))
+    }
 }
 
 #[derive(Debug)]
@@ -109,6 +135,28 @@ mod tests {
     fn template_parses_as_default_config() {
         let config: Config = toml::from_str(TEMPLATE).unwrap();
         assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn empty_file_uses_defaults() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn dirs_resolve_against_root() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(FILE_NAME), "input = \"src\"\n").unwrap();
+        let project = load(dir.path()).unwrap();
+        assert_eq!(project.input_dir(), Some(dir.path().join("src")));
+        assert_eq!(project.output_dir(), Some(dir.path().join("build")));
+    }
+
+    #[test]
+    fn dirs_without_project_are_none() {
+        let project = Project::default();
+        assert_eq!(project.input_dir(), None);
+        assert_eq!(project.output_dir(), None);
     }
 
     #[test]

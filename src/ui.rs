@@ -4,6 +4,7 @@ use egui::{Frame, Margin, RichText, Stroke, Ui, vec2};
 
 use crate::config::Project;
 use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE};
+use crate::tree::{FileTrees, Listing, Node};
 
 pub struct UiPlugin;
 
@@ -12,6 +13,7 @@ impl Plugin for UiPlugin {
         let [r, g, b, _] = BG_CENTER.to_array();
         app.insert_resource(ClearColor(Color::srgb_u8(r, g, b)))
             .init_resource::<UiState>()
+            .add_systems(Startup, (scan_trees, set_title))
             .add_systems(EguiPrimaryContextPass, shell);
     }
 }
@@ -21,6 +23,8 @@ struct UiState {
     show_left_sidebar: bool,
     show_right_sidebar: bool,
     inspector_tab: InspectorTab,
+    browser_tab: BrowserTab,
+    rescan: bool,
 }
 
 impl Default for UiState {
@@ -29,6 +33,25 @@ impl Default for UiState {
             show_left_sidebar: true,
             show_right_sidebar: true,
             inspector_tab: InspectorTab::Info,
+            browser_tab: BrowserTab::Input,
+            rescan: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BrowserTab {
+    Input,
+    Output,
+}
+
+impl BrowserTab {
+    const ALL: [Self; 2] = [Self::Input, Self::Output];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Input => "Input",
+            Self::Output => "Output",
         }
     }
 }
@@ -57,10 +80,21 @@ impl InspectorTab {
     }
 }
 
+fn scan_trees(mut commands: Commands, project: Res<Project>) {
+    commands.insert_resource(FileTrees::scan(&project));
+}
+
+fn set_title(project: Res<Project>, mut window: Single<&mut Window>) {
+    if let Some(name) = project.root.as_deref().and_then(|r| r.file_name()) {
+        window.title = format!("assetc — {}", name.to_string_lossy());
+    }
+}
+
 fn shell(
     mut contexts: EguiContexts,
     mut state: ResMut<UiState>,
     project: Res<Project>,
+    mut trees: ResMut<FileTrees>,
     mut exit: MessageWriter<AppExit>,
     mut themed: Local<bool>,
 ) -> Result {
@@ -92,7 +126,7 @@ fn shell(
             .default_size(260.0)
             .min_size(200.0)
             .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, |ui| left_sidebar(ui, &project));
+            .show(&mut root, |ui| left_sidebar(ui, &mut state, &trees));
     }
 
     if state.show_right_sidebar {
@@ -102,6 +136,10 @@ fn shell(
             .min_size(220.0)
             .frame(Frame::new().fill(BG_PANEL))
             .show(&mut root, |ui| right_sidebar(ui, &mut state));
+    }
+
+    if std::mem::take(&mut state.rescan) {
+        *trees = FileTrees::scan(&project);
     }
 
     Ok(())
@@ -165,22 +203,64 @@ fn status_bar(ui: &mut Ui, project: &Project) {
     });
 }
 
-fn left_sidebar(ui: &mut Ui, project: &Project) {
-    section_header(ui, "Project", |_| {});
-    let Some(root) = &project.root else {
-        placeholder(ui, "No project open");
-        return;
-    };
-    let name = root.file_name().map_or_else(
-        || root.display().to_string(),
-        |n| n.to_string_lossy().into_owned(),
-    );
+fn left_sidebar(ui: &mut Ui, state: &mut UiState, trees: &FileTrees) {
     Frame::new()
-        .inner_margin(Margin::symmetric(8, 6))
+        .fill(BG_HEADER)
+        .inner_margin(Margin::symmetric(4, 4))
         .show(ui, |ui| {
-            ui.label(RichText::new(name).strong());
-            ui.weak(root.display().to_string());
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                for tab in BrowserTab::ALL {
+                    let button = egui::Button::new(tab.name()).selected(state.browser_tab == tab);
+                    if ui.add(button).clicked() {
+                        state.browser_tab = tab;
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("⟳").on_hover_text("Rescan").clicked() {
+                        state.rescan = true;
+                    }
+                });
+            });
         });
+
+    let listing = match state.browser_tab {
+        BrowserTab::Input => &trees.input,
+        BrowserTab::Output => &trees.output,
+    };
+    match listing {
+        Listing::NoProject => placeholder(ui, "No project open"),
+        Listing::Missing(dir) => placeholder(ui, &format!("{} does not exist", dir.display())),
+        Listing::Failed(e) => placeholder(ui, e),
+        Listing::Loaded(nodes) if nodes.is_empty() => placeholder(ui, "Empty"),
+        Listing::Loaded(nodes) => {
+            egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
+                Frame::new()
+                    .inner_margin(Margin::symmetric(8, 6))
+                    .show(ui, |ui| tree(ui, nodes));
+            });
+        }
+    }
+}
+
+fn tree(ui: &mut Ui, nodes: &[Node]) {
+    for node in nodes {
+        match &node.children {
+            Some(children) => {
+                egui::CollapsingHeader::new(format!("🗀 {}", node.name))
+                    .id_salt(&node.path)
+                    .default_open(false)
+                    .show(ui, |ui| tree(ui, children));
+            }
+            None => {
+                ui.horizontal(|ui| {
+                    // Line files up with folder labels, past the collapse arrow.
+                    ui.add_space(ui.spacing().indent);
+                    ui.label(format!("🗋 {}", node.name));
+                });
+            }
+        }
+    }
 }
 
 fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
