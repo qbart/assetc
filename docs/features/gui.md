@@ -8,13 +8,13 @@ frame that later features plug into; it has no asset functionality of its own.
 ```
 +--------------------------------------------------------------+
 | ◆  File  Edit  View  Help                         (menu bar) |
-+-------------------------------------------+------------------+
-|                                           | Assets        +  |
-|                                           |                  |
-|            (empty, no canvas)             |------------------|
-|                                           | ℹ | Inspector    |
-|                                           | ⚙ |              |
-+-------------------------------------------+------------------+
++-------------+------------------------------+-----------------+
+| Project     |                              | Assets       +  |
+|             |                              |                 |
+|             |     (empty, no canvas)       |-----------------|
+|             |                              | ℹ | Inspector   |
+|             |                              | ⚙ |             |
++-------------+------------------------------+-----------------+
 | Ready                                     assetc 0.1.0       |
 +--------------------------------------------------------------+
 ```
@@ -23,9 +23,12 @@ frame that later features plug into; it has no asset functionality of its own.
   `File`, `Edit`, `View`, `Help` menus.
   - `File → Quit` exits the application.
   - `Edit` contains no items yet (button shown disabled).
-  - `View → Sidebar` toggles the sidebar.
+  - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar.
   - `Help` shows the application name and version.
-- **Sidebar** (right, resizable, default width 320 px, min 220 px), split
+- **Left sidebar** (resizable, default width 260 px, min 200 px): a single
+  **Project** section with a header row and a weak "No project open"
+  placeholder.
+- **Right sidebar** (resizable, default width 320 px, min 220 px), split
   vertically into two sections:
   - **Assets** (top, ~40% height): header row with title and a disabled `+`
     button; body shows a weak "No assets" placeholder.
@@ -38,19 +41,21 @@ frame that later features plug into; it has no asset functionality of its own.
 
 ## Look
 
+Colors live as constants in `src/theme.rs`.
+
 Dark theme, flat panels separated by 1 px lines, single accent color for
 selection and active elements.
 
 | Token          | Color     | Used for                              |
 |----------------|-----------|---------------------------------------|
 | `BG_CENTER`    | `#2B2B2D` | window clear color                    |
-| `BG_PANEL`     | `#1F1F22` | sidebar                               |
+| `BG_PANEL`     | `#1F1F22` | sidebars                              |
 | `BG_BAR`       | `#18181A` | menu bar, status bar, tab strip       |
 | `BG_HEADER`    | `#252528` | section headers                       |
 | `STROKE`       | `#2E2E32` | panel separators                      |
 | `TEXT`         | `#D4D4D8` | regular text                          |
 | `TEXT_WEAK`    | `#7A7A82` | placeholders, secondary text          |
-| `ACCENT`       | `#6E56CF` | logo, selection, active tab           |
+| `ACCENT`       | `#F0883E` | logo, selection, active tab           |
 
 ## Keybindings
 
