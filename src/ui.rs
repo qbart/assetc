@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use egui::{Frame, Margin, RichText, Stroke, Ui, vec2};
 
+use crate::config::Project;
 use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE};
 
 pub struct UiPlugin;
@@ -20,7 +21,6 @@ struct UiState {
     show_left_sidebar: bool,
     show_right_sidebar: bool,
     inspector_tab: InspectorTab,
-    status: String,
 }
 
 impl Default for UiState {
@@ -29,7 +29,6 @@ impl Default for UiState {
             show_left_sidebar: true,
             show_right_sidebar: true,
             inspector_tab: InspectorTab::Info,
-            status: "Ready".into(),
         }
     }
 }
@@ -61,6 +60,7 @@ impl InspectorTab {
 fn shell(
     mut contexts: EguiContexts,
     mut state: ResMut<UiState>,
+    project: Res<Project>,
     mut exit: MessageWriter<AppExit>,
     mut themed: Local<bool>,
 ) -> Result {
@@ -84,7 +84,7 @@ fn shell(
 
     egui::Panel::bottom("status_bar")
         .frame(bar_frame())
-        .show(&mut root, |ui| status_bar(ui, &state));
+        .show(&mut root, |ui| status_bar(ui, &project));
 
     if state.show_left_sidebar {
         egui::Panel::left("left_sidebar")
@@ -92,7 +92,7 @@ fn shell(
             .default_size(260.0)
             .min_size(200.0)
             .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, left_sidebar);
+            .show(&mut root, |ui| left_sidebar(ui, &project));
     }
 
     if state.show_right_sidebar {
@@ -152,18 +152,35 @@ fn logo(ui: &mut Ui) {
     ));
 }
 
-fn status_bar(ui: &mut Ui, state: &UiState) {
+fn status_bar(ui: &mut Ui, project: &Project) {
     ui.horizontal(|ui| {
-        ui.label(&state.status);
+        if project.root.is_some() {
+            ui.label("Ready");
+        } else {
+            ui.label("No assetc.toml found (run assetc init)");
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.weak(format!("assetc {}", env!("CARGO_PKG_VERSION")));
         });
     });
 }
 
-fn left_sidebar(ui: &mut Ui) {
+fn left_sidebar(ui: &mut Ui, project: &Project) {
     section_header(ui, "Project", |_| {});
-    placeholder(ui, "No project open");
+    let Some(root) = &project.root else {
+        placeholder(ui, "No project open");
+        return;
+    };
+    let name = root.file_name().map_or_else(
+        || root.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    Frame::new()
+        .inner_margin(Margin::symmetric(8, 6))
+        .show(ui, |ui| {
+            ui.label(RichText::new(name).strong());
+            ui.weak(root.display().to_string());
+        });
 }
 
 fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
