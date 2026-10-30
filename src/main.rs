@@ -1,3 +1,4 @@
+mod theme;
 mod ui;
 
 use bevy::prelude::*;

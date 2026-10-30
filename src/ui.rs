@@ -1,16 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
-use egui::{Color32, Frame, Margin, RichText, Stroke, Ui, vec2};
+use egui::{Frame, Margin, RichText, Stroke, Ui, vec2};
 
-// Palette, see docs/features/gui.md.
-const BG_CENTER: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2D);
-const BG_PANEL: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x22);
-const BG_BAR: Color32 = Color32::from_rgb(0x18, 0x18, 0x1A);
-const BG_HEADER: Color32 = Color32::from_rgb(0x25, 0x25, 0x28);
-const STROKE: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x32);
-const TEXT: Color32 = Color32::from_rgb(0xD4, 0xD4, 0xD8);
-const TEXT_WEAK: Color32 = Color32::from_rgb(0x7A, 0x7A, 0x82);
-const ACCENT: Color32 = Color32::from_rgb(0x6E, 0x56, 0xCF);
+use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE};
 
 pub struct UiPlugin;
 
@@ -25,7 +17,8 @@ impl Plugin for UiPlugin {
 
 #[derive(Resource)]
 struct UiState {
-    show_sidebar: bool,
+    show_left_sidebar: bool,
+    show_right_sidebar: bool,
     inspector_tab: InspectorTab,
     status: String,
 }
@@ -33,7 +26,8 @@ struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            show_sidebar: true,
+            show_left_sidebar: true,
+            show_right_sidebar: true,
             inspector_tab: InspectorTab::Info,
             status: "Ready".into(),
         }
@@ -72,7 +66,7 @@ fn shell(
 ) -> Result {
     let ctx = contexts.ctx_mut()?.clone();
     if !*themed {
-        apply_theme(&ctx);
+        theme::apply(&ctx);
         *themed = true;
     }
 
@@ -92,44 +86,25 @@ fn shell(
         .frame(bar_frame())
         .show(&mut root, |ui| status_bar(ui, &state));
 
-    if state.show_sidebar {
-        egui::Panel::right("sidebar")
+    if state.show_left_sidebar {
+        egui::Panel::left("left_sidebar")
+            .resizable(true)
+            .default_size(260.0)
+            .min_size(200.0)
+            .frame(Frame::new().fill(BG_PANEL))
+            .show(&mut root, left_sidebar);
+    }
+
+    if state.show_right_sidebar {
+        egui::Panel::right("right_sidebar")
             .resizable(true)
             .default_size(320.0)
             .min_size(220.0)
             .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, |ui| sidebar(ui, &mut state));
+            .show(&mut root, |ui| right_sidebar(ui, &mut state));
     }
 
     Ok(())
-}
-
-fn apply_theme(ctx: &egui::Context) {
-    let mut v = egui::Visuals::dark();
-    v.panel_fill = BG_PANEL;
-    v.window_fill = BG_PANEL;
-    v.window_stroke = Stroke::new(1.0, STROKE);
-    v.extreme_bg_color = BG_BAR;
-    v.faint_bg_color = BG_HEADER;
-    v.weak_text_color = Some(TEXT_WEAK);
-    v.selection.bg_fill = ACCENT;
-    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
-
-    let w = &mut v.widgets;
-    w.noninteractive.bg_fill = BG_PANEL;
-    w.noninteractive.bg_stroke = Stroke::new(1.0, STROKE);
-    w.noninteractive.fg_stroke.color = TEXT;
-    w.inactive.weak_bg_fill = Color32::TRANSPARENT;
-    w.inactive.bg_fill = BG_HEADER;
-    w.inactive.fg_stroke.color = TEXT;
-    w.hovered.weak_bg_fill = STROKE;
-    w.hovered.bg_fill = STROKE;
-    w.hovered.bg_stroke = Stroke::NONE;
-    w.active.weak_bg_fill = ACCENT;
-    w.active.bg_fill = ACCENT;
-    w.open.weak_bg_fill = STROKE;
-
-    ctx.set_visuals(v);
 }
 
 fn bar_frame() -> Frame {
@@ -152,7 +127,8 @@ fn menu_bar(ui: &mut Ui, state: &mut UiState, exit: &mut MessageWriter<AppExit>)
             ui.menu_button("Edit", |_| {});
         });
         ui.menu_button("View", |ui| {
-            ui.checkbox(&mut state.show_sidebar, "Sidebar");
+            ui.checkbox(&mut state.show_left_sidebar, "Left Sidebar");
+            ui.checkbox(&mut state.show_right_sidebar, "Right Sidebar");
         });
         ui.menu_button("Help", |ui| {
             ui.label(format!("assetc {}", env!("CARGO_PKG_VERSION")));
@@ -185,7 +161,12 @@ fn status_bar(ui: &mut Ui, state: &UiState) {
     });
 }
 
-fn sidebar(ui: &mut Ui, state: &mut UiState) {
+fn left_sidebar(ui: &mut Ui) {
+    section_header(ui, "Project", |_| {});
+    placeholder(ui, "No project open");
+}
+
+fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
     let assets_height = (ui.available_height() * 0.4).round();
 
     egui::Panel::top("assets")
