@@ -1,9 +1,13 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
-use egui::{Frame, Margin, RichText, Stroke, Ui, vec2};
+use egui::{
+    Align, Align2, FontId, Frame, Layout, Margin, Rect, Response, RichText, Sense, Stroke, Ui,
+    UiBuilder, vec2,
+};
 
 use crate::config::Project;
-use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE};
+use crate::icons::Icon;
+use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE, TEXT, TEXT_WEAK};
 use crate::tree::{FileTrees, Listing, Node};
 
 pub struct UiPlugin;
@@ -65,10 +69,10 @@ enum InspectorTab {
 impl InspectorTab {
     const ALL: [Self; 2] = [Self::Info, Self::Settings];
 
-    fn icon(self) -> &'static str {
+    fn icon(self) -> Icon {
         match self {
-            Self::Info => "ℹ",
-            Self::Settings => "⚙",
+            Self::Info => Icon::Info,
+            Self::Settings => Icon::Settings,
         }
     }
 
@@ -101,6 +105,7 @@ fn shell(
     let ctx = contexts.ctx_mut()?.clone();
     if !*themed {
         theme::apply(&ctx);
+        egui_extras::install_image_loaders(&ctx);
         *themed = true;
     }
 
@@ -204,25 +209,24 @@ fn status_bar(ui: &mut Ui, project: &Project) {
 }
 
 fn left_sidebar(ui: &mut Ui, state: &mut UiState, trees: &FileTrees) {
-    Frame::new()
-        .fill(BG_HEADER)
-        .inner_margin(Margin::symmetric(4, 4))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                for tab in BrowserTab::ALL {
-                    let button = egui::Button::new(tab.name()).selected(state.browser_tab == tab);
-                    if ui.add(button).clicked() {
-                        state.browser_tab = tab;
-                    }
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("⟳").on_hover_text("Rescan").clicked() {
-                        state.rescan = true;
-                    }
-                });
-            });
-        });
+    let strip = tab_strip(ui, vec2(ui.available_width(), 32.0));
+    let mut tabs = ui.new_child(
+        UiBuilder::new()
+            .max_rect(strip)
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    tabs.spacing_mut().item_spacing.x = 0.0;
+    for tab in BrowserTab::ALL {
+        if text_tab(&mut tabs, tab.name(), state.browser_tab == tab).clicked() {
+            state.browser_tab = tab;
+        }
+    }
+    tabs.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        ui.add_space(6.0);
+        if icon_button(ui, Icon::RefreshCw, "Rescan", true).clicked() {
+            state.rescan = true;
+        }
+    });
 
     let listing = match state.browser_tab {
         BrowserTab::Input => &trees.input,
@@ -234,33 +238,145 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, trees: &FileTrees) {
         Listing::Failed(e) => placeholder(ui, e),
         Listing::Loaded(nodes) if nodes.is_empty() => placeholder(ui, "Empty"),
         Listing::Loaded(nodes) => {
-            egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-                Frame::new()
-                    .inner_margin(Margin::symmetric(8, 6))
-                    .show(ui, |ui| tree(ui, nodes));
-            });
+            egui::ScrollArea::vertical()
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    ui.add_space(4.0);
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    tree(ui, nodes, 0);
+                });
         }
     }
 }
 
-fn tree(ui: &mut Ui, nodes: &[Node]) {
+/// Allocates a tab strip background with a separator line along its bottom edge.
+fn tab_strip(ui: &mut Ui, size: egui::Vec2) -> Rect {
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, BG_BAR);
+    painter.hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, STROKE),
+    );
+    rect
+}
+
+fn tab_color(selected: bool, hovered: bool) -> egui::Color32 {
+    if selected || hovered { TEXT } else { TEXT_WEAK }
+}
+
+/// Horizontal tab attached to the pane below: active tab takes the pane color.
+fn text_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {
+    let font = FontId::proportional(14.0);
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(label.into(), font.clone(), TEXT)
+        .size()
+        .x;
+    let size = vec2(text_width + 24.0, ui.available_height());
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let painter = ui.painter();
+    if selected {
+        painter.rect_filled(rect, 0.0, BG_PANEL);
+        painter.rect_filled(
+            Rect::from_min_size(rect.min, vec2(rect.width(), 2.0)),
+            0.0,
+            ACCENT,
+        );
+    }
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        font,
+        tab_color(selected, response.hovered()),
+    );
+    response
+}
+
+/// Vertical icon tab attached to the pane on its right.
+fn icon_tab(ui: &mut Ui, icon: Icon, selected: bool) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+    if selected {
+        let painter = ui.painter();
+        painter.rect_filled(rect, 0.0, BG_PANEL);
+        painter.rect_filled(
+            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
+            0.0,
+            ACCENT,
+        );
+    }
+    icon.image(18.0, tab_color(selected, response.hovered()))
+        .paint_at(ui, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
+    response
+}
+
+fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, enabled: bool) -> Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), sense);
+    let color = match (enabled, response.hovered()) {
+        (false, _) => TEXT_WEAK.gamma_multiply(0.5),
+        (true, true) => TEXT,
+        (true, false) => TEXT_WEAK,
+    };
+    icon.image(16.0, color)
+        .paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+    response.on_hover_text(tooltip)
+}
+
+fn tree(ui: &mut Ui, nodes: &[Node], depth: usize) {
     for node in nodes {
         match &node.children {
             Some(children) => {
-                egui::CollapsingHeader::new(format!("🗀 {}", node.name))
-                    .id_salt(&node.path)
-                    .default_open(false)
-                    .show(ui, |ui| tree(ui, children));
+                let id = ui.make_persistent_id(&node.path);
+                let open = ui.data(|d| d.get_temp::<bool>(id).unwrap_or(false));
+                let (chevron, icon) = if open {
+                    (Icon::ChevronDown, Icon::FolderOpen)
+                } else {
+                    (Icon::ChevronRight, Icon::Folder)
+                };
+                if tree_row(ui, depth, Some(chevron), icon, &node.name).clicked() {
+                    ui.data_mut(|d| d.insert_temp(id, !open));
+                }
+                if open {
+                    tree(ui, children, depth + 1);
+                }
             }
             None => {
-                ui.horizontal(|ui| {
-                    // Line files up with folder labels, past the collapse arrow.
-                    ui.add_space(ui.spacing().indent);
-                    ui.label(format!("🗋 {}", node.name));
-                });
+                tree_row(ui, depth, None, Icon::File, &node.name);
             }
         }
     }
+}
+
+fn tree_row(ui: &mut Ui, depth: usize, chevron: Option<Icon>, icon: Icon, name: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+    if response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, BG_HEADER);
+    }
+    let icon_rect =
+        |x: f32| Rect::from_center_size(egui::pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0));
+    let x = rect.left() + 6.0 + depth as f32 * 14.0;
+    if let Some(chevron) = chevron {
+        chevron
+            .image(14.0, TEXT_WEAK)
+            .paint_at(ui, icon_rect(x).shrink(1.0));
+    }
+    icon.image(16.0, TEXT_WEAK)
+        .paint_at(ui, icon_rect(x + 16.0));
+    ui.painter().text(
+        egui::pos2(x + 38.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        name,
+        FontId::proportional(13.0),
+        TEXT,
+    );
+    response
 }
 
 fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
@@ -272,7 +388,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
         .frame(Frame::new().fill(BG_PANEL))
         .show(ui, |ui| {
             section_header(ui, "Assets", |ui| {
-                ui.add_enabled(false, egui::Button::new("+").small());
+                icon_button(ui, Icon::Plus, "Add asset", false);
             });
             placeholder(ui, "No assets");
         });
@@ -282,13 +398,16 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
     egui::Panel::left("inspector_tabs")
         .exact_size(36.0)
         .resizable(false)
-        .frame(Frame::new().fill(BG_BAR).inner_margin(Margin::same(4)))
+        .show_separator_line(false)
+        .frame(Frame::new().fill(BG_BAR))
         .show(ui, |ui| {
+            let rect = ui.max_rect();
+            ui.painter()
+                .vline(rect.right() - 0.5, rect.y_range(), Stroke::new(1.0, STROKE));
+            ui.spacing_mut().item_spacing.y = 0.0;
             for tab in InspectorTab::ALL {
-                let button = egui::Button::new(RichText::new(tab.icon()).size(16.0))
-                    .selected(state.inspector_tab == tab)
-                    .min_size(vec2(28.0, 28.0));
-                if ui.add(button).on_hover_text(tab.name()).clicked() {
+                let response = icon_tab(ui, tab.icon(), state.inspector_tab == tab);
+                if response.on_hover_text(tab.name()).clicked() {
                     state.inspector_tab = tab;
                 }
             }

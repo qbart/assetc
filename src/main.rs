@@ -1,4 +1,5 @@
 mod config;
+mod icons;
 mod theme;
 mod tree;
 mod ui;

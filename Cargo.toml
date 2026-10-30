@@ -7,6 +7,7 @@ description = "Compiles source assets into runtime-friendly binary formats for v
 [dependencies]
 bevy_egui = "0.43.1"
 clap = { version = "4.6.7", features = ["derive"] }
+egui_extras = { version = "0.36.2", default-features = false, features = ["svg"] }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
 
