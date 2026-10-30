@@ -27,13 +27,13 @@ frame that later features plug into; it has no asset functionality of its own.
   - `Help` shows the application name and version.
 - **Left sidebar** (resizable, default width 260 px, min 200 px): file
   browser with two tabs in its header row, **Input** and **Output**, plus a
-  rescan button (`⟳`) on the right. See [File browser](#file-browser).
+  rescan button (`refresh-cw` icon) on the right. See [File browser](#file-browser).
 - **Right sidebar** (resizable, default width 320 px, min 220 px), split
   vertically into two sections:
-  - **Assets** (top, ~40% height): header row with title and a disabled `+`
-    button; body shows a weak "No assets" placeholder.
+  - **Assets** (top, ~40% height): header row with title and a disabled
+    `plus` icon button; body shows a weak "No assets" placeholder.
   - **Inspector** (bottom): a narrow vertical tab strip on the left with icon
-    tabs (`Info`, `Settings`), and the active tab's content on the right.
+    tabs (`Info`, `Settings`, see [Tabs](#tabs)), and the active tab's content on the right.
     Both tabs show a weak "Nothing selected" placeholder for now.
 - **Status bar** (bottom, fixed height): status message on the left
   (see [`cli.md`](cli.md)), `assetc <version>` on the right in weak text.
@@ -44,17 +44,47 @@ frame that later features plug into; it has no asset functionality of its own.
 Each tab shows a tree of the directory configured in `assetc.toml`
 (`input` / `output`, see [`docs/spec/assetc.toml.md`](../spec/assetc.toml.md)).
 
+- Each row: chevron (`chevron-right` / `chevron-down`, folders only), icon
+  (`folder` / `folder-open` / `file`), name. Rows are 22 px tall, indented
+  14 px per level, and highlight with `BG_HEADER` on hover; clicking a folder
+  row toggles it.
 - Folders are collapsible (collapsed by default) and listed before files;
   each group is sorted by name, case-insensitively.
 - Entries whose name starts with `.` are hidden.
 - Symlinks are listed as plain entries and never followed.
-- Directories are scanned when the app opens and when `⟳` is clicked; there
+- Directories are scanned when the app opens and when the rescan button is clicked; there
   is no live file watching.
 - Placeholders (weak text) instead of a tree:
   - no project: "No project open"
   - directory missing: "<path> does not exist"
   - directory empty: "Empty"
   - read error: the error message
+
+## Tabs
+
+Tabs are attached to the pane they switch, not drawn as separate buttons:
+
+- The tab strip has `BG_BAR` background and a 1 px `STROKE` line along the
+  edge facing the pane.
+- The active tab is filled with the pane's color (`BG_PANEL`), covers that
+  line so it flows into the pane, and has a 2 px `ACCENT` indicator on its
+  outer edge.
+- Inactive tabs are unfilled with `TEXT_WEAK` text/icons; hover brightens
+  them to `TEXT`.
+- Left sidebar tabs (horizontal): 32 px tall, 14 px text, 12 px horizontal
+  padding, indicator on the top edge.
+- Inspector tabs (vertical): 36 × 36 px, 18 px icon, indicator on the left
+  edge.
+
+## Icons
+
+All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
+`lucide-static` into `assets/icons/` together with Lucide's ISC `LICENSE`, and
+embedded in the binary. Their `currentColor` stroke is rendered white and
+tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
+(rescan), `plus` (Assets header), `folder`, `folder-open`, `file`,
+`chevron-right`, `chevron-down` (file tree). The logo mark is drawn, not an
+icon.
 
 ## Look
 
