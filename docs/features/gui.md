@@ -9,7 +9,7 @@ frame that later features plug into; it has no asset functionality of its own.
 +--------------------------------------------------------------+
 | ◆  File  Edit  View  Help                         (menu bar) |
 +-------------+------------------------------+-----------------+
-| Project     |                              | Assets       +  |
+| Input|Output|                              | Assets       +  |
 |             |                              |                 |
 |             |     (empty, no canvas)       |-----------------|
 |             |                              | ℹ | Inspector   |
@@ -25,9 +25,9 @@ frame that later features plug into; it has no asset functionality of its own.
   - `Edit` contains no items yet (button shown disabled).
   - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar.
   - `Help` shows the application name and version.
-- **Left sidebar** (resizable, default width 260 px, min 200 px): a single
-  **Project** section with a header row, showing the project root (see
-  [`cli.md`](cli.md)) or a weak "No project open" placeholder.
+- **Left sidebar** (resizable, default width 260 px, min 200 px): file
+  browser with two tabs in its header row, **Input** and **Output**, plus a
+  rescan button (`⟳`) on the right. See [File browser](#file-browser).
 - **Right sidebar** (resizable, default width 320 px, min 220 px), split
   vertically into two sections:
   - **Assets** (top, ~40% height): header row with title and a disabled `+`
@@ -38,6 +38,23 @@ frame that later features plug into; it has no asset functionality of its own.
 - **Status bar** (bottom, fixed height): status message on the left
   (see [`cli.md`](cli.md)), `assetc <version>` on the right in weak text.
 - **Center**: no canvas. The window clear color fills the remaining space.
+
+## File browser
+
+Each tab shows a tree of the directory configured in `assetc.toml`
+(`input` / `output`, see [`docs/spec/assetc.toml.md`](../spec/assetc.toml.md)).
+
+- Folders are collapsible (collapsed by default) and listed before files;
+  each group is sorted by name, case-insensitively.
+- Entries whose name starts with `.` are hidden.
+- Symlinks are listed as plain entries and never followed.
+- Directories are scanned when the app opens and when `⟳` is clicked; there
+  is no live file watching.
+- Placeholders (weak text) instead of a tree:
+  - no project: "No project open"
+  - directory missing: "<path> does not exist"
+  - directory empty: "Empty"
+  - read error: the error message
 
 ## Look
 
