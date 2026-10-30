@@ -189,9 +189,8 @@ fn sidebar(ui: &mut Ui, state: &mut UiState) {
     let assets_height = (ui.available_height() * 0.4).round();
 
     egui::Panel::top("assets")
-        .resizable(true)
-        .default_size(assets_height)
-        .min_size(80.0)
+        .resizable(false)
+        .exact_size(assets_height)
         .frame(Frame::new().fill(BG_PANEL))
         .show(ui, |ui| {
             section_header(ui, "Assets", |ui| {
