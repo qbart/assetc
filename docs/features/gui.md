@@ -19,7 +19,7 @@ frame that later features plug into; it has no asset functionality of its own.
 +--------------------------------------------------------------+
 ```
 
-- **Menu bar** (top, fixed height): accent-colored logo mark followed by the
+- **Menu bar** (top, fixed height): logo (see [Logo](#logo)) followed by the
   `File`, `Edit`, `View`, `Help` menus.
   - Each menu item's click/hover area spans the full bar height with 10 px
     horizontal padding, and items sit edge to edge with no gaps, so the whole
@@ -87,8 +87,15 @@ All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `plus` (Assets header), `folder`, `folder-open`, `file`,
-`chevron-right`, `chevron-down` (file tree). The logo mark is drawn, not an
-icon.
+`chevron-right`, `chevron-down` (file tree). The logo is not a
+Lucide icon, see below.
+
+## Logo
+
+Source: `assets/icons/logo.png` (anvil, transparent background), embedded in
+the binary. At startup it is cropped to the bounding box of its non-transparent
+pixels, then resized (Lanczos3) to 16 pt tall at the window's scale factor,
+keeping its aspect ratio, and shown untinted at the left of the menu bar.
 
 ## Look
 
@@ -106,7 +113,7 @@ selection and active elements.
 | `STROKE`       | `#2E2E32` | panel separators                      |
 | `TEXT`         | `#D4D4D8` | regular text                          |
 | `TEXT_WEAK`    | `#7A7A82` | placeholders, secondary text          |
-| `ACCENT`       | `#F0883E` | logo, selection, active tab           |
+| `ACCENT`       | `#F0883E` | selection, active tab                 |
 
 ## Keybindings
 
