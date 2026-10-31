@@ -3,6 +3,7 @@ mod config;
 mod hash;
 mod icons;
 mod ktx2;
+mod logo;
 mod manifest;
 mod theme;
 mod tree;

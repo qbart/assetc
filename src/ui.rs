@@ -10,6 +10,7 @@ use std::thread::JoinHandle;
 use crate::build::{self, Outcome};
 use crate::config::Project;
 use crate::icons::Icon;
+use crate::logo;
 use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE, TEXT, TEXT_WEAK};
 use crate::tree::{FileTrees, Listing, Node};
 
@@ -113,14 +114,14 @@ fn shell(
     project: Res<Project>,
     mut trees: ResMut<FileTrees>,
     mut exit: MessageWriter<AppExit>,
-    mut themed: Local<bool>,
+    mut logo: Local<Option<egui::TextureHandle>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?.clone();
-    if !*themed {
+    let logo = logo.get_or_insert_with(|| {
         theme::apply(&ctx);
         egui_extras::install_image_loaders(&ctx);
-        *themed = true;
-    }
+        logo::load(&ctx)
+    });
 
     let mut root = Ui::new(
         ctx.clone(),
@@ -132,7 +133,7 @@ fn shell(
 
     egui::Panel::top("menu_bar")
         .frame(bar_frame().inner_margin(Margin::symmetric(8, 0)))
-        .show(&mut root, |ui| menu_bar(ui, &mut state, &mut exit));
+        .show(&mut root, |ui| menu_bar(ui, logo, &mut state, &mut exit));
 
     egui::Panel::bottom("status_bar")
         .frame(bar_frame())
@@ -207,7 +208,12 @@ fn bar_frame() -> Frame {
         .stroke(Stroke::new(1.0, STROKE))
 }
 
-fn menu_bar(ui: &mut Ui, state: &mut UiState, exit: &mut MessageWriter<AppExit>) {
+fn menu_bar(
+    ui: &mut Ui,
+    logo: &egui::TextureHandle,
+    state: &mut UiState,
+    exit: &mut MessageWriter<AppExit>,
+) {
     // Padded buttons with no gaps so the whole item, not just its text, is clickable.
     let style = |style: &mut egui::Style| {
         egui::containers::menu::menu_style(style);
@@ -215,7 +221,8 @@ fn menu_bar(ui: &mut Ui, state: &mut UiState, exit: &mut MessageWriter<AppExit>)
         style.spacing.item_spacing.x = 0.0;
     };
     egui::MenuBar::new().style(style).ui(ui, |ui| {
-        logo(ui);
+        let size = logo.size_vec2() * (logo::HEIGHT / logo.size_vec2().y);
+        ui.add(egui::Image::new((logo.id(), size)));
         ui.add_space(4.0);
         ui.menu_button("File", |ui| {
             if ui.button("Quit").clicked() {
@@ -233,22 +240,6 @@ fn menu_bar(ui: &mut Ui, state: &mut UiState, exit: &mut MessageWriter<AppExit>)
             ui.label(format!("assetc {}", env!("CARGO_PKG_VERSION")));
         });
     });
-}
-
-fn logo(ui: &mut Ui) {
-    let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
-    let c = rect.center();
-    let r = 6.0;
-    ui.painter().add(egui::Shape::convex_polygon(
-        vec![
-            c + vec2(0.0, -r),
-            c + vec2(r, 0.0),
-            c + vec2(0.0, r),
-            c + vec2(-r, 0.0),
-        ],
-        ACCENT,
-        Stroke::NONE,
-    ));
 }
 
 fn status_bar(ui: &mut Ui, project: &Project, build: &BuildStatus) {
