@@ -1,27 +1,50 @@
 //! KTX2 writer for the subset in docs/spec/ktx2.md.
 
+use crate::texture::{ColorSpace, Image};
+
 const IDENTIFIER: [u8; 12] = [
     0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A,
 ];
+const VK_FORMAT_R8G8B8A8_UNORM: u32 = 37;
 const VK_FORMAT_R8G8B8A8_SRGB: u32 = 43;
 const LEVEL_INDEX_OFFSET: usize = 80;
-const DFD_OFFSET: usize = LEVEL_INDEX_OFFSET + 24;
+const LEVEL_INDEX_ENTRY: usize = 24;
 const DFD_SIZE: u32 = 92;
 
-/// Encodes an sRGB RGBA8 image (rows top to bottom) as a single-level KTX2 file.
-pub fn encode_rgba8_srgb(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
-    assert_eq!(pixels.len(), width as usize * height as usize * 4);
+/// Encodes RGBA8 mip levels (largest first, each half the previous) as a KTX2 file.
+pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
+    let base = &levels[0];
+    for level in levels {
+        assert_eq!(
+            level.pixels.len(),
+            level.width as usize * level.height as usize * 4
+        );
+    }
 
+    let (format, transfer) = match color {
+        ColorSpace::Srgb => (VK_FORMAT_R8G8B8A8_SRGB, 2),
+        ColorSpace::Linear => (VK_FORMAT_R8G8B8A8_UNORM, 1),
+    };
     let kvd = key_value_data();
-    let kvd_offset = DFD_OFFSET + DFD_SIZE as usize;
-    let level_offset = (kvd_offset + kvd.len()).next_multiple_of(4);
+    let dfd_offset = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * levels.len();
+    let kvd_offset = dfd_offset + DFD_SIZE as usize;
+    let data_offset = (kvd_offset + kvd.len()).next_multiple_of(4);
 
-    let mut out = Vec::with_capacity(level_offset + pixels.len());
+    // Images are stored smallest level first; the index lists level 0 first.
+    let mut offsets = vec![0; levels.len()];
+    let mut offset = data_offset;
+    for (i, level) in levels.iter().enumerate().rev() {
+        offsets[i] = offset;
+        offset += level.pixels.len();
+    }
+
+    let mut out = Vec::with_capacity(offset);
     out.extend_from_slice(&IDENTIFIER);
-    for v in [VK_FORMAT_R8G8B8A8_SRGB, 1, width, height, 0, 0, 1, 1, 0] {
+    let level_count = levels.len() as u32;
+    for v in [format, 1, base.width, base.height, 0, 0, 1, level_count, 0] {
         put_u32(&mut out, v);
     }
-    put_u32(&mut out, DFD_OFFSET as u32);
+    put_u32(&mut out, dfd_offset as u32);
     put_u32(&mut out, DFD_SIZE);
     put_u32(&mut out, kvd_offset as u32);
     put_u32(&mut out, kvd.len() as u32);
@@ -29,24 +52,28 @@ pub fn encode_rgba8_srgb(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
     put_u64(&mut out, 0);
     debug_assert_eq!(out.len(), LEVEL_INDEX_OFFSET);
 
-    put_u64(&mut out, level_offset as u64);
-    put_u64(&mut out, pixels.len() as u64);
-    put_u64(&mut out, pixels.len() as u64);
-    debug_assert_eq!(out.len(), DFD_OFFSET);
+    for (level, offset) in levels.iter().zip(&offsets) {
+        put_u64(&mut out, *offset as u64);
+        put_u64(&mut out, level.pixels.len() as u64);
+        put_u64(&mut out, level.pixels.len() as u64);
+    }
+    debug_assert_eq!(out.len(), dfd_offset);
 
-    write_dfd(&mut out);
+    write_dfd(&mut out, transfer);
     out.extend_from_slice(&kvd);
-    out.resize(level_offset, 0);
-    out.extend_from_slice(pixels);
+    out.resize(data_offset, 0);
+    for level in levels.iter().rev() {
+        out.extend_from_slice(&level.pixels);
+    }
     out
 }
 
-fn write_dfd(out: &mut Vec<u8>) {
+fn write_dfd(out: &mut Vec<u8>, transfer: u8) {
     put_u32(out, DFD_SIZE);
     put_u32(out, 0); // vendorId 0, descriptorType 0
     put_u16(out, 2); // versionNumber
     put_u16(out, 88); // descriptorBlockSize
-    out.extend_from_slice(&[1, 1, 2, 0]); // RGBSDA, BT.709, sRGB, straight alpha
+    out.extend_from_slice(&[1, 1, transfer, 0]); // RGBSDA, BT.709, transfer, straight alpha
     out.extend_from_slice(&[0; 4]); // texelBlockDimension
     out.extend_from_slice(&[4, 0, 0, 0, 0, 0, 0, 0]); // bytesPlane
     for (channel, channel_type) in [0x00u8, 0x01, 0x02, 0x1F].into_iter().enumerate() {
@@ -85,23 +112,28 @@ fn put_u64(out: &mut Vec<u8>, v: u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::texture::mip_chain;
     use ::ktx2::{Format, Reader, dfd};
 
-    fn sample() -> (u32, u32, Vec<u8>) {
-        let (w, h) = (3, 2);
-        let pixels = (0..w * h * 4).map(|i| i as u8).collect();
-        (w, h, pixels)
+    fn sample() -> Image {
+        let (width, height) = (3, 2);
+        let pixels = (0..width * height * 4).map(|i| i as u8).collect();
+        Image {
+            width,
+            height,
+            pixels,
+        }
     }
 
     #[test]
     fn reader_accepts_header_and_level() {
-        let (w, h, pixels) = sample();
-        let file = encode_rgba8_srgb(w, h, &pixels);
+        let image = sample();
+        let file = encode_rgba8(ColorSpace::Srgb, std::slice::from_ref(&image));
         let reader = Reader::new(&file[..]).unwrap();
         let header = reader.header();
         assert_eq!(header.format, Some(Format::R8G8B8A8_SRGB));
         assert_eq!(header.type_size, 1);
-        assert_eq!((header.pixel_width, header.pixel_height), (w, h));
+        assert_eq!((header.pixel_width, header.pixel_height), (3, 2));
         assert_eq!(header.pixel_depth, 0);
         assert_eq!(header.layer_count, 0);
         assert_eq!(header.face_count, 1);
@@ -110,26 +142,56 @@ mod tests {
 
         let levels: Vec<_> = reader.levels().collect();
         assert_eq!(levels.len(), 1);
-        assert_eq!(levels[0].data, &pixels[..]);
-        assert_eq!(levels[0].uncompressed_byte_length, pixels.len() as u64);
+        assert_eq!(levels[0].data, &image.pixels[..]);
+        assert_eq!(
+            levels[0].uncompressed_byte_length,
+            image.pixels.len() as u64
+        );
     }
 
     #[test]
-    fn dfd_matches_reference_for_format() {
-        let (w, h, pixels) = sample();
-        let file = encode_rgba8_srgb(w, h, &pixels);
-        let reader = Reader::new(&file[..]).unwrap();
-        let (expected, _) = dfd::Basic::from_format(Format::R8G8B8A8_SRGB).unwrap();
-        match reader.dfd_blocks() {
-            [dfd::Block::Basic(basic)] => assert_eq!(basic, &expected),
-            other => panic!("unexpected dfd blocks: {other:?}"),
+    fn dfd_matches_reference_for_both_formats() {
+        for (color, format) in [
+            (ColorSpace::Srgb, Format::R8G8B8A8_SRGB),
+            (ColorSpace::Linear, Format::R8G8B8A8_UNORM),
+        ] {
+            let file = encode_rgba8(color, &[sample()]);
+            let reader = Reader::new(&file[..]).unwrap();
+            assert_eq!(reader.header().format, Some(format));
+            let (expected, _) = dfd::Basic::from_format(format).unwrap();
+            match reader.dfd_blocks() {
+                [dfd::Block::Basic(basic)] => assert_eq!(basic, &expected),
+                other => panic!("unexpected dfd blocks: {other:?}"),
+            }
         }
     }
 
     #[test]
+    fn mip_levels_stored_smallest_first() {
+        let levels = mip_chain(sample(), ColorSpace::Linear);
+        assert_eq!(levels.len(), 2);
+        let file = encode_rgba8(ColorSpace::Linear, &levels);
+        let reader = Reader::new(&file[..]).unwrap();
+        assert_eq!(reader.header().level_count, 2);
+
+        let read: Vec<_> = reader.levels().collect();
+        assert_eq!(read.len(), 2);
+        for (read, level) in read.iter().zip(&levels) {
+            assert_eq!(read.data, &level.pixels[..]);
+        }
+        let offset = |i: usize| {
+            let at = LEVEL_INDEX_OFFSET + i * LEVEL_INDEX_ENTRY;
+            u64::from_le_bytes(file[at..at + 8].try_into().unwrap())
+        };
+        assert!(offset(1) < offset(0));
+        assert_eq!(offset(1) % 4, 0);
+        assert_eq!(file.len() as u64, offset(0) + levels[0].pixels.len() as u64);
+    }
+
+    #[test]
     fn writer_key_and_alignment() {
-        let (w, h, pixels) = sample();
-        let file = encode_rgba8_srgb(w, h, &pixels);
+        let image = sample();
+        let file = encode_rgba8(ColorSpace::Srgb, std::slice::from_ref(&image));
         let reader = Reader::new(&file[..]).unwrap();
         let kv: Vec<_> = reader.key_value_data().collect();
         assert_eq!(kv.len(), 1);
@@ -140,6 +202,6 @@ mod tests {
         );
         let level_offset = u64::from_le_bytes(file[80..88].try_into().unwrap());
         assert_eq!(level_offset % 4, 0);
-        assert_eq!(file.len() as u64, level_offset + pixels.len() as u64);
+        assert_eq!(file.len() as u64, level_offset + image.pixels.len() as u64);
     }
 }

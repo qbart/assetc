@@ -178,7 +178,10 @@ fn start_build(state: &mut UiState, project: &Project) {
     let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
         return;
     };
-    state.build = BuildStatus::Running(std::thread::spawn(move || build::run(&input, &output)));
+    let textures = project.config.textures.clone();
+    state.build = BuildStatus::Running(std::thread::spawn(move || {
+        build::run(&input, &output, &textures)
+    }));
 }
 
 fn poll_build(state: &mut UiState) {

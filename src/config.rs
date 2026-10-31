@@ -15,6 +15,10 @@ const TEMPLATE: &str = "\
 
 input = \"assets\"
 output = \"build\"
+
+# [textures]
+# linear = [\"**/*_n.png\"]
+# no_mipmaps = [\"ui/**\"]
 ";
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
@@ -24,6 +28,17 @@ pub struct Config {
     pub input: PathBuf,
     /// Compiled assets directory, relative to the project root.
     pub output: PathBuf,
+    pub textures: Textures,
+}
+
+/// Per-texture settings, see docs/features/textures.md.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Textures {
+    /// Globs of textures holding linear data instead of sRGB color.
+    pub linear: Vec<String>,
+    /// Globs of textures written without mipmaps.
+    pub no_mipmaps: Vec<String>,
 }
 
 impl Default for Config {
@@ -31,6 +46,7 @@ impl Default for Config {
         Self {
             input: "assets".into(),
             output: "build".into(),
+            textures: Textures::default(),
         }
     }
 }
@@ -190,6 +206,16 @@ mod tests {
             let project = load(dir.path()).unwrap();
             assert!(project.root.is_none());
         }
+    }
+
+    #[test]
+    fn parses_texture_settings() {
+        let config: Config =
+            toml::from_str("[textures]\nlinear = [\"**/*_n.png\"]\nno_mipmaps = [\"ui/**\"]\n")
+                .unwrap();
+        assert_eq!(config.textures.linear, ["**/*_n.png"]);
+        assert_eq!(config.textures.no_mipmaps, ["ui/**"]);
+        assert!(toml::from_str::<Config>("[textures]\nlinaer = []\n").is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@ mod icons;
 mod ktx2;
 mod logo;
 mod manifest;
+mod texture;
 mod theme;
 mod tree;
 mod ui;
@@ -57,9 +58,13 @@ fn build() -> Result<(), Box<dyn std::error::Error>> {
     let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
         return Err(format!("no {} found (run assetc init)", config::FILE_NAME).into());
     };
-    let outcome = build::run(&input, &output)?;
+    let outcome = build::run(&input, &output, &project.config.textures)?;
     for built in &outcome.built {
-        println!("{} -> {}", built.source, built.output);
+        let levels = if built.levels == 1 { "level" } else { "levels" };
+        println!(
+            "{} -> {} ({}, {} {levels})",
+            built.source, built.output, built.color, built.levels
+        );
     }
     for failure in &outcome.failures {
         eprintln!("error: {failure}");

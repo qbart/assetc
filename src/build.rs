@@ -6,8 +6,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::config;
 use crate::hash::fnv1a64;
 use crate::manifest::{self, Kind};
+use crate::texture::{self, ColorSpace, Settings};
 use crate::tree::{self, Node};
 
 /// One compiled source.
@@ -17,6 +19,8 @@ pub struct Built {
     pub source: String,
     /// Output path relative to `output`.
     pub output: String,
+    pub color: ColorSpace,
+    pub levels: usize,
 }
 
 #[derive(Debug)]
@@ -60,6 +64,7 @@ impl Outcome {
 #[derive(Debug)]
 pub enum Error {
     MissingInput(PathBuf),
+    Pattern(globset::Error),
     Io(PathBuf, io::Error),
 }
 
@@ -69,6 +74,7 @@ impl fmt::Display for Error {
             Self::MissingInput(dir) => {
                 write!(f, "input directory {} does not exist", dir.display())
             }
+            Self::Pattern(e) => write!(f, "{} [textures]: {e}", config::FILE_NAME),
             Self::Io(path, e) => write!(f, "{}: {e}", path.display()),
         }
     }
@@ -83,7 +89,8 @@ struct Texture {
     output_rel: String,
 }
 
-pub fn run(input: &Path, output: &Path) -> Result<Outcome, Error> {
+pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<Outcome, Error> {
+    let settings = Settings::new(textures).map_err(Error::Pattern)?;
     if !input.is_dir() {
         return Err(Error::MissingInput(input.to_path_buf()));
     }
@@ -134,10 +141,14 @@ pub fn run(input: &Path, output: &Path) -> Result<Outcome, Error> {
             });
             continue;
         }
-        match compile_texture(&t.source, &output.join(&t.output_rel)) {
-            Ok(()) => outcome.built.push(Built {
+        let color = settings.color_space(&t.source_rel);
+        let mipmaps = settings.mipmaps(&t.source_rel);
+        match compile_texture(&t.source, &output.join(&t.output_rel), color, mipmaps) {
+            Ok(levels) => outcome.built.push(Built {
                 source: t.source_rel.clone(),
                 output: t.output_rel.clone(),
+                color,
+                levels,
             }),
             Err(message) => outcome.failures.push(Failure {
                 source: t.source_rel.clone(),
@@ -188,7 +199,13 @@ fn strip_extension(rel: &str) -> &str {
     }
 }
 
-fn compile_texture(source: &Path, dest: &Path) -> Result<(), String> {
+/// Returns the number of levels written.
+fn compile_texture(
+    source: &Path,
+    dest: &Path,
+    color: ColorSpace,
+    mipmaps: bool,
+) -> Result<usize, String> {
     let image = image::ImageReader::open(source)
         .map_err(|e| e.to_string())?
         .with_guessed_format()
@@ -196,11 +213,22 @@ fn compile_texture(source: &Path, dest: &Path) -> Result<(), String> {
         .decode()
         .map_err(|e| e.to_string())?
         .to_rgba8();
-    let bytes = crate::ktx2::encode_rgba8_srgb(image.width(), image.height(), image.as_raw());
+    let base = texture::Image {
+        width: image.width(),
+        height: image.height(),
+        pixels: image.into_raw(),
+    };
+    let levels = if mipmaps {
+        texture::mip_chain(base, color)
+    } else {
+        vec![base]
+    };
+    let bytes = crate::ktx2::encode_rgba8(color, &levels);
     if let Some(dir) = dest.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    fs::write(dest, bytes).map_err(|e| format!("{}: {e}", dest.display()))
+    fs::write(dest, bytes).map_err(|e| format!("{}: {e}", dest.display()))?;
+    Ok(levels.len())
 }
 
 #[cfg(test)]
@@ -230,7 +258,7 @@ mod tests {
         png(&input.join("logo.PNG"), 1, 1);
         fs::write(input.join("notes.txt"), "x").unwrap();
 
-        let outcome = run(&input, &output).unwrap();
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(outcome.built.len(), 2);
         assert_eq!(outcome.skipped, 1);
@@ -239,6 +267,8 @@ mod tests {
         let ktx = fs::read(output.join("textures/Grass.ktx2")).unwrap();
         let reader = ::ktx2::Reader::new(&ktx[..]).unwrap();
         assert_eq!(reader.header().pixel_width, 4);
+        assert_eq!(reader.header().format, Some(::ktx2::Format::R8G8B8A8_SRGB));
+        assert_eq!(reader.header().level_count, 3);
         assert_eq!(reader.levels().next().unwrap().data[..4], [0, 0, 7, 255]);
 
         let mut entries =
@@ -258,7 +288,7 @@ mod tests {
         png(&input.join("ok.png"), 1, 1);
         fs::write(input.join("broken.png"), "not a png").unwrap();
 
-        let outcome = run(&input, &output).unwrap();
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "broken.png");
         assert!(outcome.summary().starts_with("Build failed: broken.png:"));
@@ -273,7 +303,7 @@ mod tests {
         png(&input.join("a.png"), 1, 1);
         png(&input.join("a.PNG"), 1, 1);
 
-        let outcome = run(&input, &output).unwrap();
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
         assert_eq!(outcome.failures.len(), 2);
         assert!(outcome.failures[0].message.contains("collides"));
         assert!(outcome.summary().ends_with("(2 errors)"));
@@ -281,9 +311,59 @@ mod tests {
     }
 
     #[test]
+    fn settings_pick_color_space_and_mipmaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("rock_n.png"), 4, 4);
+        png(&input.join("ui/button.png"), 4, 4);
+        let textures = config::Textures {
+            linear: vec!["**/*_n.png".into()],
+            no_mipmaps: vec!["ui/**".into()],
+        };
+
+        let mut outcome = run(&input, &output, &textures).unwrap();
+        outcome.built.sort_by(|a, b| a.source.cmp(&b.source));
+        let built: Vec<_> = outcome
+            .built
+            .iter()
+            .map(|b| (b.source.as_str(), b.color, b.levels))
+            .collect();
+        assert_eq!(
+            built,
+            [
+                ("rock_n.png", ColorSpace::Linear, 3),
+                ("ui/button.png", ColorSpace::Srgb, 1)
+            ]
+        );
+        let ktx = fs::read(output.join("rock_n.ktx2")).unwrap();
+        let header = ::ktx2::Reader::new(&ktx[..]).unwrap().header();
+        assert_eq!(header.format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+    }
+
+    #[test]
+    fn invalid_pattern_stops_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("a.png"), 1, 1);
+        let textures = config::Textures {
+            linear: vec!["[".into()],
+            no_mipmaps: vec![],
+        };
+        assert!(matches!(
+            run(&input, &output, &textures),
+            Err(Error::Pattern(_))
+        ));
+        assert!(!output.exists());
+    }
+
+    #[test]
     fn missing_input_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let result = run(&dir.path().join("nope"), &dir.path().join("build"));
+        let result = run(
+            &dir.path().join("nope"),
+            &dir.path().join("build"),
+            &config::Textures::default(),
+        );
         assert!(matches!(result, Err(Error::MissingInput(_))));
     }
 }
