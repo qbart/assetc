@@ -42,7 +42,7 @@ The panel shares the single selection with the file browser (see
 
 ## Header
 
-`Assets` title; the disabled `plus` button stays as before.
+`Assets` title only, no buttons.
 
 ## Keybindings
 

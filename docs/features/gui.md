@@ -34,8 +34,7 @@ frame that later features plug into; it has no asset functionality of its own.
   (`refresh-cw` icon) buttons on the right. See [File browser](#file-browser).
 - **Right sidebar** (resizable, default width 320 px, min 220 px), split
   vertically into two sections:
-  - **Assets** (top, ~40% height): header row with title and a disabled
-    `plus` icon button; body lists the built assets, see
+  - **Assets** (top, ~40% height): header row with title; body lists the built assets, see
     [`assets.md`](assets.md).
   - **Inspector** (bottom): a narrow vertical tab strip on the left with icon
     tabs (`Info`, `Settings`, see [Tabs](#tabs)), and the active tab's content on the right.
@@ -89,7 +88,7 @@ All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 `lucide-static` into `assets/icons/` together with Lucide's ISC `LICENSE`, and
 embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
-(rescan), `hammer` (build), `plus` (Assets header), `folder`, `folder-open`, `file`,
+(rescan), `hammer` (build), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 
