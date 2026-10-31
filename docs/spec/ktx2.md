@@ -68,7 +68,12 @@ Then four 16-byte samples, one per channel:
 | R       |         0 |    7 (8 bits) | `0x00`             | 0,0,0,0        |           0 |         255 |
 | G       |         8 |    7      | `0x01`                 | 0,0,0,0        |           0 |         255 |
 | B       |        16 |    7      | `0x02`                 | 0,0,0,0        |           0 |         255 |
-| A       |        24 |    7      | `0x1F` (alpha, linear) | 0,0,0,0        |           0 |         255 |
+| A       |        24 |    7      | `0x1F` for `_SRGB`, `0x0F` for `_UNORM` | 0,0,0,0 |      0 |         255 |
+
+Alpha is channel `0x0F`. With the sRGB transfer function it carries the
+`LINEAR` qualifier (`0x10`), marking alpha as not sRGB-encoded; with the linear
+transfer function the qualifier is omitted, matching the Khronos reference
+descriptors.
 
 Sample layout: `bitOffset` u16, `bitLength` u8, `channelType` u8,
 `samplePosition` 4×u8, `sampleLower` u32, `sampleUpper` u32.
