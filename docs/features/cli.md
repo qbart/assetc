@@ -5,6 +5,7 @@
 ```
 assetc            Open the GUI for the project containing the current directory
 assetc init       Create assetc.toml in the current directory
+assetc build      Compile input into output, see build.md
 assetc --help     Print usage
 assetc --version  Print version
 ```

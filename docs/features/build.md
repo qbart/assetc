@@ -1,0 +1,82 @@
+# Build
+
+Compiles the project's `input` directory into its `output` directory (both
+from [`assetc.toml`](../spec/assetc.toml.md)). This first version handles
+textures only and establishes the pieces every later asset type builds on:
+asset IDs, output layout, and the manifest.
+
+## Asset IDs
+
+Every compiled asset has a stable 64-bit ID:
+
+```
+id = FNV-1a-64(utf8(asset path))
+```
+
+- **Asset path** = the source path relative to `input`, `/`-separated, with
+  the final extension removed. Case is preserved.
+  `assets/textures/Grass.png` → `textures/Grass`.
+- FNV-1a 64: offset basis `0xcbf29ce484222325`, prime `0x100000001b3`, applied
+  byte by byte.
+- The ID does not depend on the source format, so replacing `grass.png` with a
+  different image format later keeps the same ID.
+- Two sources with the same asset path are a build error, e.g. `a/b.png` and
+  `a/b.PNG`, or (once more formats exist) `a/b.png` and `a/b.jpg`.
+
+## Inputs
+
+The input directory is walked recursively with the same rules as the file
+browser: entries starting with `.` are skipped, symlinks are not followed.
+
+| Source             | Asset kind | Output                                        |
+|--------------------|------------|-----------------------------------------------|
+| `*.png` (any case) | texture    | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
+| anything else      | —          | ignored, counted as skipped                   |
+
+Textures are decoded to 8-bit RGBA (other bit depths and color types are
+converted) and treated as sRGB color data. No compression and no mipmaps yet.
+
+## Outputs
+
+```
+<output>/
+  assets.manifest            see docs/spec/manifest.md
+  <asset path>.ktx2          one per texture, same directory structure as input
+```
+
+- Output directories are created as needed; existing files are overwritten.
+- Files in `output` that no longer correspond to a source are left in place
+  (no cleaning yet). They are not listed in the new manifest.
+
+## Failure
+
+- Every source is attempted; failures are collected and reported together.
+- If any source fails, or an ID collision is found, the build fails and
+  `assets.manifest` is **not** written, so a manifest never refers to a broken
+  set of outputs. Individual `.ktx2` files that did succeed are still written.
+- Building without a project (`assetc.toml` not found) is an error.
+
+## CLI
+
+`assetc build` runs the build for the discovered project:
+
+```
+$ assetc build
+textures/Grass.png -> textures/Grass.ktx2
+textures/dirt.png -> textures/dirt.ktx2
+Built 2 textures (1 skipped) into /path/to/project/build
+```
+
+Errors are printed as `error: <source>: <message>`; exit code is non-zero if
+the build failed.
+
+## GUI
+
+- A **Build** button (`hammer` icon) sits in the left sidebar tab strip, left
+  of the rescan button. It is disabled while a build is running or when no
+  project is open.
+- The build runs on a background thread; the UI stays responsive.
+- Status bar shows `Building…` while running, then either
+  `Built N textures (M skipped)` or `Build failed: <first error>` (with the
+  error count when more than one).
+- When the build finishes, both file trees are rescanned.

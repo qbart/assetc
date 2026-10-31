@@ -26,8 +26,9 @@ frame that later features plug into; it has no asset functionality of its own.
   - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar.
   - `Help` shows the application name and version.
 - **Left sidebar** (resizable, default width 260 px, min 200 px): file
-  browser with two tabs in its header row, **Input** and **Output**, plus a
-  rescan button (`refresh-cw` icon) on the right. See [File browser](#file-browser).
+  browser with two tabs in its header row, **Input** and **Output**, plus
+  build (`hammer` icon, see [`build.md`](build.md#gui)) and rescan
+  (`refresh-cw` icon) buttons on the right. See [File browser](#file-browser).
 - **Right sidebar** (resizable, default width 320 px, min 220 px), split
   vertically into two sections:
   - **Assets** (top, ~40% height): header row with title and a disabled
@@ -36,7 +37,7 @@ frame that later features plug into; it has no asset functionality of its own.
     tabs (`Info`, `Settings`, see [Tabs](#tabs)), and the active tab's content on the right.
     Both tabs show a weak "Nothing selected" placeholder for now.
 - **Status bar** (bottom, fixed height): status message on the left
-  (see [`cli.md`](cli.md)), `assetc <version>` on the right in weak text.
+  (see [`cli.md`](cli.md) and [`build.md`](build.md#gui)), `assetc <version>` on the right in weak text.
 - **Center**: no canvas. The window clear color fills the remaining space.
 
 ## File browser
@@ -82,7 +83,7 @@ All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 `lucide-static` into `assets/icons/` together with Lucide's ISC `LICENSE`, and
 embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
-(rescan), `plus` (Assets header), `folder`, `folder-open`, `file`,
+(rescan), `hammer` (build), `plus` (Assets header), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree). The logo mark is drawn, not an
 icon.
 
