@@ -68,6 +68,9 @@ fn build() -> Result<(), Box<dyn std::error::Error>> {
             built.source, built.output, built.color, built.levels
         );
     }
+    for removed in &outcome.removed {
+        println!("removed {removed}");
+    }
     for failure in &outcome.failures {
         eprintln!("error: {failure}");
     }

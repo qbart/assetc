@@ -1,6 +1,6 @@
 //! Compiles `input` into `output`, see docs/features/build.md.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -39,6 +39,8 @@ impl fmt::Display for Failure {
 pub struct Outcome {
     pub built: Vec<Built>,
     pub skipped: usize,
+    /// Stale outputs deleted after a successful build, relative to `output`.
+    pub removed: Vec<String>,
     /// Non-empty means the build failed and no manifest was written.
     pub failures: Vec<Failure>,
 }
@@ -55,7 +57,11 @@ impl Outcome {
         } else {
             let n = self.built.len();
             let noun = if n == 1 { "texture" } else { "textures" };
-            format!("Built {n} {noun} ({} skipped)", self.skipped)
+            let removed = match self.removed.len() {
+                0 => String::new(),
+                k => format!(", {k} removed"),
+            };
+            format!("Built {n} {noun} ({} skipped{removed})", self.skipped)
         }
     }
 }
@@ -64,6 +70,8 @@ impl Outcome {
 #[derive(Debug)]
 pub enum Error {
     MissingInput(PathBuf),
+    /// `output` is `input` or one of its ancestors.
+    OutputContainsInput(PathBuf),
     Pattern(globset::Error),
     Io(PathBuf, io::Error),
 }
@@ -74,6 +82,11 @@ impl fmt::Display for Error {
             Self::MissingInput(dir) => {
                 write!(f, "input directory {} does not exist", dir.display())
             }
+            Self::OutputContainsInput(dir) => write!(
+                f,
+                "output directory {} must not contain the input directory",
+                dir.display()
+            ),
             Self::Pattern(e) => write!(f, "{} [textures]: {e}", config::FILE_NAME),
             Self::Io(path, e) => write!(f, "{}: {e}", path.display()),
         }
@@ -93,6 +106,13 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
     let settings = Settings::new(textures).map_err(Error::Pattern)?;
     if !input.is_dir() {
         return Err(Error::MissingInput(input.to_path_buf()));
+    }
+    // A missing output cannot contain the existing input.
+    if output.exists() {
+        let canonical = |dir: &Path| fs::canonicalize(dir).map_err(|e| Error::Io(dir.into(), e));
+        if canonical(input)?.starts_with(canonical(output)?) {
+            return Err(Error::OutputContainsInput(output.to_path_buf()));
+        }
     }
     let nodes = tree::scan(input).map_err(|e| Error::Io(input.to_path_buf(), e))?;
     let mut files = Vec::new();
@@ -169,8 +189,50 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
         let path = output.join(manifest::FILE_NAME);
         fs::create_dir_all(output).map_err(|e| Error::Io(output.to_path_buf(), e))?;
         fs::write(&path, manifest::encode(&entries)).map_err(|e| Error::Io(path, e))?;
+
+        let produced = textures
+            .iter()
+            .map(|t| t.output_rel.to_lowercase())
+            .collect();
+        outcome.removed = remove_stale(output, &produced)?;
     }
     Ok(outcome)
+}
+
+/// Extensions of files assetc writes; only these are ever deleted.
+const OUTPUT_EXTENSIONS: [&str; 1] = ["ktx2"];
+
+/// Deletes outputs not in `produced` (lowercased `output`-relative paths) and
+/// the directories this leaves empty. Returns the deleted paths.
+fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>, Error> {
+    let nodes = tree::scan(output).map_err(|e| Error::Io(output.to_path_buf(), e))?;
+    let mut files = Vec::new();
+    flatten(&nodes, &mut files);
+
+    let mut removed = Vec::new();
+    for file in files {
+        let is_output = file.extension().is_some_and(|ext| {
+            OUTPUT_EXTENSIONS
+                .iter()
+                .any(|known| ext.eq_ignore_ascii_case(known))
+        });
+        let Ok(rel) = relative(output, file) else {
+            continue;
+        };
+        if !is_output || produced.contains(&rel.to_lowercase()) {
+            continue;
+        }
+        fs::remove_file(file).map_err(|e| Error::Io(file.to_path_buf(), e))?;
+        for dir in file.ancestors().skip(1).take_while(|dir| *dir != output) {
+            let mut entries = fs::read_dir(dir).map_err(|e| Error::Io(dir.to_path_buf(), e))?;
+            if entries.next().is_some() {
+                break;
+            }
+            fs::remove_dir(dir).map_err(|e| Error::Io(dir.to_path_buf(), e))?;
+        }
+        removed.push(rel);
+    }
+    Ok(removed)
 }
 
 fn flatten<'a>(nodes: &'a [Node], files: &mut Vec<&'a Path>) {
@@ -354,6 +416,89 @@ mod tests {
             Err(Error::Pattern(_))
         ));
         assert!(!output.exists());
+    }
+
+    #[test]
+    fn removes_stale_outputs_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        let textures = config::Textures::default();
+        png(&input.join("keep.png"), 1, 1);
+        png(&input.join("old/deep/gone.png"), 1, 1);
+        png(&input.join("shared/gone.png"), 1, 1);
+        png(&input.join("shared/stays.png"), 1, 1);
+        run(&input, &output, &textures).unwrap();
+
+        fs::remove_dir_all(input.join("old")).unwrap();
+        fs::remove_file(input.join("shared/gone.png")).unwrap();
+        fs::write(output.join("notes.txt"), "mine").unwrap();
+        fs::write(output.join(".hidden.ktx2"), "mine").unwrap();
+        fs::create_dir_all(output.join("empty")).unwrap();
+
+        let outcome = run(&input, &output, &textures).unwrap();
+        let mut removed = outcome.removed.clone();
+        removed.sort();
+        assert_eq!(removed, ["old/deep/gone.ktx2", "shared/gone.ktx2"]);
+        assert_eq!(outcome.summary(), "Built 2 textures (0 skipped, 2 removed)");
+
+        assert!(!output.join("old").exists());
+        assert!(output.join("shared/stays.ktx2").is_file());
+        assert!(output.join("keep.ktx2").is_file());
+        assert!(output.join("notes.txt").is_file());
+        assert!(output.join(".hidden.ktx2").is_file());
+        assert!(output.join("empty").is_dir());
+
+        let again = run(&input, &output, &textures).unwrap();
+        assert!(again.removed.is_empty());
+        assert_eq!(again.summary(), "Built 2 textures (0 skipped)");
+    }
+
+    #[test]
+    fn stale_check_ignores_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("Grass.png"), 1, 1);
+        fs::create_dir_all(&output).unwrap();
+        fs::write(output.join("grass.KTX2"), "older build").unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert!(outcome.removed.is_empty());
+        assert!(output.join("grass.KTX2").is_file());
+    }
+
+    #[test]
+    fn failed_build_removes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        fs::write(input.join("broken.png"), "not a png").unwrap();
+        fs::create_dir_all(&output).unwrap();
+        fs::write(output.join("stale.ktx2"), "x").unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert!(outcome.removed.is_empty());
+        assert!(output.join("stale.ktx2").is_file());
+    }
+
+    #[test]
+    fn output_containing_input_is_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("assets");
+        png(&input.join("a.png"), 1, 1);
+        let textures = config::Textures::default();
+        for output in [dir.path().to_path_buf(), input.clone(), input.join("..")] {
+            assert!(
+                matches!(
+                    run(&input, &output, &textures),
+                    Err(Error::OutputContainsInput(_))
+                ),
+                "{}",
+                output.display()
+            );
+        }
+        assert!(!dir.path().join("a.ktx2").exists());
+        assert!(!input.join("a.ktx2").exists());
     }
 
     #[test]
