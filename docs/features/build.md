@@ -34,7 +34,8 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | anything else      | —          | ignored, counted as skipped                   |
 
 Textures are decoded to 8-bit RGBA (other bit depths and color types are
-converted) and treated as sRGB color data. No compression and no mipmaps yet.
+converted). Color space and mipmaps follow the `[textures]` settings, see
+[`textures.md`](textures.md). No compression yet.
 
 ## Outputs
 
@@ -55,6 +56,7 @@ converted) and treated as sRGB color data. No compression and no mipmaps yet.
   `assets.manifest` is **not** written, so a manifest never refers to a broken
   set of outputs. Individual `.ktx2` files that did succeed are still written.
 - Building without a project (`assetc.toml` not found) is an error.
+- An invalid glob pattern in `[textures]` is an error; nothing is compiled.
 
 ## CLI
 
@@ -62,8 +64,8 @@ converted) and treated as sRGB color data. No compression and no mipmaps yet.
 
 ```
 $ assetc build
-textures/Grass.png -> textures/Grass.ktx2
-textures/dirt.png -> textures/dirt.ktx2
+textures/Grass.png -> textures/Grass.ktx2 (srgb, 10 levels)
+textures/dirt.png -> textures/dirt.ktx2 (srgb, 9 levels)
 Built 2 textures (1 skipped) into /path/to/project/build
 ```
 
