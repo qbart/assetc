@@ -183,7 +183,7 @@ fn flatten<'a>(nodes: &'a [Node], files: &mut Vec<&'a Path>) {
 }
 
 /// `input`-relative, `/`-separated path.
-fn relative(input: &Path, file: &Path) -> Result<String, String> {
+pub fn relative(input: &Path, file: &Path) -> Result<String, String> {
     let rel = file.strip_prefix(input).map_err(|e| e.to_string())?;
     let parts: Option<Vec<&str>> = rel.components().map(|c| c.as_os_str().to_str()).collect();
     parts
@@ -191,7 +191,7 @@ fn relative(input: &Path, file: &Path) -> Result<String, String> {
         .ok_or_else(|| "path is not valid UTF-8".into())
 }
 
-fn strip_extension(rel: &str) -> &str {
+pub fn strip_extension(rel: &str) -> &str {
     let name_start = rel.rfind('/').map_or(0, |i| i + 1);
     match rel[name_start..].rfind('.') {
         Some(dot) if dot > 0 => &rel[..name_start + dot],

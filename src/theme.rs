@@ -9,6 +9,8 @@ pub const STROKE: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x32);
 pub const TEXT: Color32 = Color32::from_rgb(0xD4, 0xD4, 0xD8);
 pub const TEXT_WEAK: Color32 = Color32::from_rgb(0x7A, 0x7A, 0x82);
 pub const ACCENT: Color32 = Color32::from_rgb(0xF0, 0x88, 0x3E);
+pub const CHECKER_LIGHT: Color32 = Color32::from_rgb(0x3A, 0x3A, 0x3E);
+pub const CHECKER_DARK: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x32);
 
 pub fn apply(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();

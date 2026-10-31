@@ -66,6 +66,11 @@ pub struct Image {
     pub pixels: Vec<u8>,
 }
 
+/// Levels in a full chain down to 1×1: `floor(log2(max(width, height))) + 1`.
+pub fn level_count(width: u32, height: u32) -> usize {
+    (u32::BITS - width.max(height).max(1).leading_zeros()) as usize
+}
+
 /// `base` followed by every smaller level down to 1×1.
 pub fn mip_chain(base: Image, color: ColorSpace) -> Vec<Image> {
     let mut levels = vec![base];
@@ -210,6 +215,12 @@ mod tests {
         assert_eq!(sizes, [(5, 2), (2, 1), (1, 1)]);
         assert_eq!(mip_chain(checker(1, 1), ColorSpace::Srgb).len(), 1);
         assert_eq!(mip_chain(checker(256, 64), ColorSpace::Srgb).len(), 9);
+        for (w, h) in [(1, 1), (5, 2), (256, 64), (3, 7), (1000, 1)] {
+            assert_eq!(
+                level_count(w, h),
+                mip_chain(checker(w, h), ColorSpace::Linear).len()
+            );
+        }
     }
 
     #[test]

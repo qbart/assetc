@@ -1,4 +1,4 @@
-//! KTX2 writer for the subset in docs/spec/ktx2.md.
+//! KTX2 writer for the subset in docs/spec/ktx2.md, and a header reader for inspecting files.
 
 use crate::texture::{ColorSpace, Image};
 
@@ -89,6 +89,74 @@ fn write_dfd(out: &mut Vec<u8>, color: ColorSpace) {
         put_u32(out, 0);
         put_u32(out, 255);
     }
+}
+
+/// What the Inspector shows of a `.ktx2` file.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Info {
+    pub vk_format: u32,
+    pub width: u32,
+    pub height: u32,
+    pub levels: u32,
+    /// Level 0, only for the subset assetc writes.
+    pub level0: Option<Image>,
+}
+
+impl Info {
+    pub fn format_name(&self) -> String {
+        match self.vk_format {
+            VK_FORMAT_R8G8B8A8_SRGB => "R8G8B8A8_SRGB".into(),
+            VK_FORMAT_R8G8B8A8_UNORM => "R8G8B8A8_UNORM".into(),
+            n => format!("vkFormat {n}"),
+        }
+    }
+}
+
+pub fn read(bytes: &[u8]) -> Result<Info, String> {
+    if bytes.len() < LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY || bytes[..12] != IDENTIFIER {
+        return Err("not a KTX2 file".into());
+    }
+    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let u64_at = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
+    let [
+        vk_format,
+        _,
+        width,
+        height,
+        depth,
+        layers,
+        faces,
+        levels,
+        supercompression,
+    ] = std::array::from_fn(|i| u32_at(12 + i * 4));
+
+    let plain_2d = depth == 0 && layers == 0 && faces == 1 && supercompression == 0;
+    let rgba8 = matches!(
+        vk_format,
+        VK_FORMAT_R8G8B8A8_SRGB | VK_FORMAT_R8G8B8A8_UNORM
+    );
+    let level0 = (plain_2d && rgba8)
+        .then(|| {
+            let (offset, length) = (u64_at(LEVEL_INDEX_OFFSET), u64_at(LEVEL_INDEX_OFFSET + 8));
+            let expected = width as u64 * height as u64 * 4;
+            let end = offset.checked_add(length)?;
+            if length != expected || end > bytes.len() as u64 {
+                return None;
+            }
+            Some(Image {
+                width,
+                height,
+                pixels: bytes[offset as usize..end as usize].to_vec(),
+            })
+        })
+        .flatten();
+    Ok(Info {
+        vk_format,
+        width,
+        height,
+        levels: levels.max(1),
+        level0,
+    })
 }
 
 fn key_value_data() -> Vec<u8> {
@@ -191,6 +259,33 @@ mod tests {
         assert!(offset(1) < offset(0));
         assert_eq!(offset(1) % 4, 0);
         assert_eq!(file.len() as u64, offset(0) + levels[0].pixels.len() as u64);
+    }
+
+    #[test]
+    fn read_returns_header_and_level0() {
+        let levels = mip_chain(sample(), ColorSpace::Srgb);
+        let info = read(&encode_rgba8(ColorSpace::Srgb, &levels)).unwrap();
+        assert_eq!((info.width, info.height, info.levels), (3, 2, 2));
+        assert_eq!(info.format_name(), "R8G8B8A8_SRGB");
+        assert_eq!(info.level0, Some(levels[0].clone()));
+
+        let info = read(&encode_rgba8(ColorSpace::Linear, &[sample()])).unwrap();
+        assert_eq!(info.format_name(), "R8G8B8A8_UNORM");
+    }
+
+    #[test]
+    fn read_without_preview_for_other_formats() {
+        let mut file = encode_rgba8(ColorSpace::Srgb, &[sample()]);
+        file[12..16].copy_from_slice(&131u32.to_le_bytes()); // BC1
+        let info = read(&file).unwrap();
+        assert_eq!(info.format_name(), "vkFormat 131");
+        assert_eq!(info.level0, None);
+    }
+
+    #[test]
+    fn read_rejects_non_ktx2() {
+        assert!(read(b"not a ktx2 file at all").is_err());
+        assert!(read(&[0; 200]).is_err());
     }
 
     #[test]

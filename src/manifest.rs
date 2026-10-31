@@ -4,7 +4,7 @@ use std::fmt;
 
 pub const FILE_NAME: &str = "assets.manifest";
 const MAGIC: [u8; 4] = *b"ACMF";
-const VERSION: u32 = 1;
+pub const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 16;
 const ENTRY_SIZE: usize = 16;
 
@@ -62,7 +62,6 @@ impl fmt::Display for DecodeError {
 impl std::error::Error for DecodeError {}
 
 /// Decodes a manifest, skipping entries of unknown kinds.
-#[cfg_attr(not(test), expect(dead_code, reason = "no runtime reader yet"))]
 pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, DecodeError> {
     let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     if bytes.len() < HEADER_SIZE || bytes[..4] != MAGIC {

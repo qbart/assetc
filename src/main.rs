@@ -2,6 +2,7 @@ mod build;
 mod config;
 mod hash;
 mod icons;
+mod inspect;
 mod ktx2;
 mod logo;
 mod manifest;

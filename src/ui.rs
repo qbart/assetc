@@ -5,13 +5,18 @@ use egui::{
     UiBuilder, vec2,
 };
 
+use std::path::PathBuf;
 use std::thread::JoinHandle;
 
 use crate::build::{self, Outcome};
 use crate::config::Project;
 use crate::icons::Icon;
+use crate::inspect::{self, Inspection, Location};
 use crate::logo;
-use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE, TEXT, TEXT_WEAK};
+use crate::theme::{
+    self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHECKER_DARK, CHECKER_LIGHT, STROKE,
+    TEXT, TEXT_WEAK,
+};
 use crate::tree::{FileTrees, Listing, Node};
 
 pub struct UiPlugin;
@@ -35,6 +40,21 @@ struct UiState {
     rescan: bool,
     start_build: bool,
     build: BuildStatus,
+    selection: Option<Selection>,
+    /// Set when the selection changed or the trees were rescanned.
+    reinspect: bool,
+    inspected: Option<Inspected>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Selection {
+    location: Location,
+    path: PathBuf,
+}
+
+struct Inspected {
+    inspection: Inspection,
+    preview: Option<egui::TextureHandle>,
 }
 
 enum BuildStatus {
@@ -53,6 +73,9 @@ impl Default for UiState {
             rescan: false,
             start_build: false,
             build: BuildStatus::Idle,
+            selection: None,
+            reinspect: false,
+            inspected: None,
         }
     }
 }
@@ -65,6 +88,13 @@ enum BrowserTab {
 
 impl BrowserTab {
     const ALL: [Self; 2] = [Self::Input, Self::Output];
+
+    fn location(self) -> Location {
+        match self {
+            Self::Input => Location::Input,
+            Self::Output => Location::Output,
+        }
+    }
 
     fn name(self) -> &'static str {
         match self {
@@ -166,9 +196,35 @@ fn shell(
 
     if std::mem::take(&mut state.rescan) {
         *trees = FileTrees::scan(&project);
+        state.reinspect = true;
+    }
+    if std::mem::take(&mut state.reinspect) {
+        state.inspected = state
+            .selection
+            .as_ref()
+            .map(|selection| inspect_selection(&ctx, &project, selection));
+        ctx.request_repaint();
     }
 
     Ok(())
+}
+
+fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selection) -> Inspected {
+    let mut inspection = inspect::inspect(project, selection.location, &selection.path);
+    let preview = inspection.preview.take().map(|image| {
+        let size = [image.width as usize, image.height as usize];
+        let image = egui::ColorImage::from_rgba_unmultiplied(size, &image.pixels);
+        let options = egui::TextureOptions {
+            magnification: egui::TextureFilter::Nearest,
+            minification: egui::TextureFilter::Linear,
+            ..Default::default()
+        };
+        ctx.load_texture("inspector_preview", image, options)
+    });
+    Inspected {
+        inspection,
+        preview,
+    }
 }
 
 fn start_build(state: &mut UiState, project: &Project) {
@@ -292,6 +348,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
         BrowserTab::Input => &trees.input,
         BrowserTab::Output => &trees.output,
     };
+    let location = state.browser_tab.location();
     match listing {
         Listing::NoProject => placeholder(ui, "No project open"),
         Listing::Missing(dir) => placeholder(ui, &format!("{} does not exist", dir.display())),
@@ -303,7 +360,13 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                 .show(ui, |ui| {
                     ui.add_space(4.0);
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    tree(ui, nodes, 0);
+                    if let Some(path) = tree(ui, nodes, 0, location, state.selection.as_ref()) {
+                        let selection = Some(Selection { location, path });
+                        if state.selection != selection {
+                            state.selection = selection;
+                            state.reinspect = true;
+                        }
+                    }
                 });
         }
     }
@@ -389,7 +452,15 @@ fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, enabled: bool) -> Respons
     response.on_hover_text(tooltip)
 }
 
-fn tree(ui: &mut Ui, nodes: &[Node], depth: usize) {
+/// Draws `nodes`; returns the file clicked this frame, if any.
+fn tree(
+    ui: &mut Ui,
+    nodes: &[Node],
+    depth: usize,
+    location: Location,
+    selection: Option<&Selection>,
+) -> Option<PathBuf> {
+    let mut clicked = None;
     for node in nodes {
         match &node.children {
             Some(children) => {
@@ -400,23 +471,43 @@ fn tree(ui: &mut Ui, nodes: &[Node], depth: usize) {
                 } else {
                     (Icon::ChevronRight, Icon::Folder)
                 };
-                if tree_row(ui, depth, Some(chevron), icon, &node.name).clicked() {
+                if tree_row(ui, depth, Some(chevron), icon, &node.name, false).clicked() {
                     ui.data_mut(|d| d.insert_temp(id, !open));
                 }
                 if open {
-                    tree(ui, children, depth + 1);
+                    clicked = tree(ui, children, depth + 1, location, selection).or(clicked);
                 }
             }
             None => {
-                tree_row(ui, depth, None, Icon::File, &node.name);
+                let selected =
+                    selection.is_some_and(|s| s.location == location && s.path == node.path);
+                if tree_row(ui, depth, None, Icon::File, &node.name, selected).clicked() {
+                    clicked = Some(node.path.clone());
+                }
             }
         }
     }
+    clicked
 }
 
-fn tree_row(ui: &mut Ui, depth: usize, chevron: Option<Icon>, icon: Icon, name: &str) -> Response {
+fn tree_row(
+    ui: &mut Ui,
+    depth: usize,
+    chevron: Option<Icon>,
+    icon: Icon,
+    name: &str,
+    selected: bool,
+) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
-    if response.hovered() {
+    if selected {
+        ui.painter()
+            .rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.25));
+        ui.painter().rect_filled(
+            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
+            0.0,
+            ACCENT,
+        );
+    } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, BG_HEADER);
     }
     let icon_rect =
@@ -475,9 +566,69 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
 
     egui::CentralPanel::default()
         .frame(Frame::new().fill(BG_PANEL))
-        .show(ui, |ui| match state.inspector_tab {
-            InspectorTab::Info | InspectorTab::Settings => placeholder(ui, "Nothing selected"),
+        .show(ui, |ui| match (state.inspector_tab, &state.inspected) {
+            (_, None) => placeholder(ui, "Nothing selected"),
+            (InspectorTab::Info, Some(inspected)) => info(ui, inspected),
+            (InspectorTab::Settings, Some(_)) => placeholder(ui, "No settings for this file"),
         });
+}
+
+fn info(ui: &mut Ui, inspected: &Inspected) {
+    let inspection = &inspected.inspection;
+    if inspection.missing {
+        placeholder(ui, &format!("{} no longer exists", inspection.name));
+        return;
+    }
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                if let Some(texture) = &inspected.preview {
+                    preview(ui, texture);
+                    ui.add_space(8.0);
+                } else if let Some(note) = inspection.note {
+                    ui.weak(note);
+                    ui.add_space(8.0);
+                }
+                ui.label(RichText::new(&inspection.name).strong());
+                ui.weak(&inspection.path);
+                ui.add_space(6.0);
+                egui::Grid::new("inspector_details")
+                    .num_columns(2)
+                    .spacing(vec2(12.0, 4.0))
+                    .show(ui, |ui| {
+                        for (label, value) in &inspection.rows {
+                            ui.weak(*label);
+                            ui.label(value);
+                            ui.end_row();
+                        }
+                    });
+            });
+        });
+}
+
+/// Texture fitted to the available width (max 240 px tall, max 8×) over a checkerboard.
+fn preview(ui: &mut Ui, texture: &egui::TextureHandle) {
+    let size = texture.size_vec2();
+    let scale = (ui.available_width() / size.x).min(240.0 / size.y).min(8.0);
+    let size = size * scale;
+    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), size.y), Sense::hover());
+    let rect = Rect::from_center_size(row.center(), size);
+
+    const CELL: f32 = 8.0;
+    let painter = ui.painter().with_clip_rect(rect);
+    painter.rect_filled(rect, 0.0, CHECKER_DARK);
+    for y in 0..(rect.height() / CELL).ceil() as usize {
+        for x in (y % 2..(rect.width() / CELL).ceil() as usize).step_by(2) {
+            let min = rect.min + vec2(x as f32, y as f32) * CELL;
+            painter.rect_filled(
+                Rect::from_min_size(min, vec2(CELL, CELL)),
+                0.0,
+                CHECKER_LIGHT,
+            );
+        }
+    }
+    egui::Image::new((texture.id(), size)).paint_at(ui, rect);
 }
 
 fn section_header(ui: &mut Ui, title: &str, actions: impl FnOnce(&mut Ui)) {
