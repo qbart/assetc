@@ -21,6 +21,9 @@ frame that later features plug into; it has no asset functionality of its own.
 
 - **Menu bar** (top, fixed height): accent-colored logo mark followed by the
   `File`, `Edit`, `View`, `Help` menus.
+  - Each menu item's click/hover area spans the full bar height with 10 px
+    horizontal padding, and items sit edge to edge with no gaps, so the whole
+    item is clickable, not just its text.
   - `File → Quit` exits the application.
   - `Edit` contains no items yet (button shown disabled).
   - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar.
