@@ -46,8 +46,30 @@ converted). Color space and mipmaps follow the `[textures]` settings, see
 ```
 
 - Output directories are created as needed; existing files are overwritten.
-- Files in `output` that no longer correspond to a source are left in place
-  (no cleaning yet). They are not listed in the new manifest.
+- `output` must not be the input directory or contain it (e.g. `output = "."`
+  with `input = "assets"`); the build refuses to start, since cleaning could
+  otherwise delete files outside assetc's own output.
+
+### Removing stale outputs
+
+After a **successful** build (manifest written), outputs that no source
+produces any more, e.g. after a source was renamed or deleted, are removed:
+
+- Only files with an extension assetc writes are candidates: `.ktx2` (any
+  case). Anything else in `output` (your own files, `.gitkeep`, …) is never
+  touched. Entries starting with `.` and the contents of symlinked directories
+  are not looked at, as in the file browser.
+- A candidate is kept if its `output`-relative path matches an output of this
+  build, compared **case-insensitively**, so that on case-insensitive file
+  systems an output whose case changed is not deleted right after being
+  written.
+- Every other candidate is deleted. Directories left empty by a deletion are
+  removed too, up to (not including) `output`; directories that were already
+  empty, or still contain anything, stay.
+- A failed build removes nothing, so the previous manifest keeps matching the
+  files on disk.
+- If a deletion fails, the build reports it as an error (the new manifest has
+  already been written and is valid).
 
 ## Failure
 
@@ -57,6 +79,7 @@ converted). Color space and mipmaps follow the `[textures]` settings, see
   set of outputs. Individual `.ktx2` files that did succeed are still written.
 - Building without a project (`assetc.toml` not found) is an error.
 - An invalid glob pattern in `[textures]` is an error; nothing is compiled.
+- `output` equal to or containing `input` is an error; nothing is compiled.
 
 ## CLI
 
@@ -66,7 +89,8 @@ converted). Color space and mipmaps follow the `[textures]` settings, see
 $ assetc build
 textures/Grass.png -> textures/Grass.ktx2 (srgb, 10 levels)
 textures/dirt.png -> textures/dirt.ktx2 (srgb, 9 levels)
-Built 2 textures (1 skipped) into /path/to/project/build
+removed textures/old.ktx2
+Built 2 textures (1 skipped, 1 removed) into /path/to/project/build
 ```
 
 Errors are printed as `error: <source>: <message>`; exit code is non-zero if
@@ -79,6 +103,7 @@ the build failed.
   project is open.
 - The build runs on a background thread; the UI stays responsive.
 - Status bar shows `Building…` while running, then either
-  `Built N textures (M skipped)` or `Build failed: <first error>` (with the
+  `Built N textures (M skipped)` (with `, K removed` added inside the
+  parentheses when stale outputs were removed) or `Build failed: <first error>` (with the
   error count when more than one).
 - When the build finishes, both file trees are rescanned.
