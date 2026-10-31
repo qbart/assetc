@@ -92,7 +92,8 @@ manifest), the details show the rows that are still known (Kind, Size) and an
 - Images larger than 512 px on either side are downscaled to fit 512 × 512
   (aspect kept) before upload; the Dimensions row still shows the real size.
 - Magnified pixels stay sharp (nearest filtering); minified ones are smoothed.
-- Drawn over an 8 px gray checkerboard so transparency is visible.
+- Drawn over an 8 px checkerboard (`CHECKER_LIGHT` / `CHECKER_DARK`) so
+  transparency is visible.
 
 ## Settings tab
 

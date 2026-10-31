@@ -116,6 +116,8 @@ selection and active elements.
 | `TEXT`         | `#D4D4D8` | regular text                          |
 | `TEXT_WEAK`    | `#7A7A82` | placeholders, secondary text          |
 | `ACCENT`       | `#F0883E` | selection, active tab                 |
+| `CHECKER_LIGHT`| `#3A3A3E` | transparency checkerboard (light)     |
+| `CHECKER_DARK` | `#2E2E32` | transparency checkerboard (dark)      |
 
 ## Keybindings
 
