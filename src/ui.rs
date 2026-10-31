@@ -131,7 +131,7 @@ fn shell(
     );
 
     egui::Panel::top("menu_bar")
-        .frame(bar_frame())
+        .frame(bar_frame().inner_margin(Margin::symmetric(8, 0)))
         .show(&mut root, |ui| menu_bar(ui, &mut state, &mut exit));
 
     egui::Panel::bottom("status_bar")
@@ -208,9 +208,15 @@ fn bar_frame() -> Frame {
 }
 
 fn menu_bar(ui: &mut Ui, state: &mut UiState, exit: &mut MessageWriter<AppExit>) {
-    egui::MenuBar::new().ui(ui, |ui| {
+    // Padded buttons with no gaps so the whole item, not just its text, is clickable.
+    let style = |style: &mut egui::Style| {
+        egui::containers::menu::menu_style(style);
+        style.spacing.button_padding = vec2(10.0, 6.0);
+        style.spacing.item_spacing.x = 0.0;
+    };
+    egui::MenuBar::new().style(style).ui(ui, |ui| {
         logo(ui);
-        ui.add_space(6.0);
+        ui.add_space(4.0);
         ui.menu_button("File", |ui| {
             if ui.button("Quit").clicked() {
                 exit.write(AppExit::Success);
