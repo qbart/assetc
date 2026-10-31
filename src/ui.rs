@@ -221,8 +221,13 @@ fn menu_bar(
         style.spacing.item_spacing.x = 0.0;
     };
     egui::MenuBar::new().style(style).ui(ui, |ui| {
+        // Same height as the menu buttons so the logo is centered with their text.
         let size = logo.size_vec2() * (logo::HEIGHT / logo.size_vec2().y);
-        ui.add(egui::Image::new((logo.id(), size)).fit_to_exact_size(size));
+        let row_height =
+            ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y;
+        let (rect, _) = ui.allocate_exact_size(vec2(size.x, row_height), Sense::hover());
+        egui::Image::new((logo.id(), size))
+            .paint_at(ui, Rect::from_center_size(rect.center(), size));
         ui.add_space(4.0);
         ui.menu_button("File", |ui| {
             if ui.button("Quit").clicked() {
