@@ -93,8 +93,8 @@ Lucide icon, see below.
 ## Logo
 
 Source: `assets/icons/logo.png` (anvil, transparent background), embedded in
-the binary. At startup it is cropped to the bounding box of its non-transparent
-pixels, then resized (Lanczos3) to 16 pt tall at the window's scale factor,
+the binary. At startup it is cropped to the bounding box of its visible pixels
+(alpha > 8 of 255, so near-invisible noise in the margins is ignored), then resized (Lanczos3) to 16 pt tall at the window's scale factor,
 keeping its aspect ratio, and shown untinted at the left of the menu bar.
 
 ## Look
