@@ -10,6 +10,7 @@ pub enum Icon {
     File,
     Folder,
     FolderOpen,
+    Hammer,
     Info,
     Plus,
     RefreshCw,
@@ -17,7 +18,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 9] = [
+const SVGS: [(&str, &str); 10] = [
     (
         "chevron-down",
         include_str!("../assets/icons/chevron-down.svg"),
@@ -32,6 +33,7 @@ const SVGS: [(&str, &str); 9] = [
         "folder-open",
         include_str!("../assets/icons/folder-open.svg"),
     ),
+    ("hammer", include_str!("../assets/icons/hammer.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),

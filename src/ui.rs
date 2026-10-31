@@ -5,6 +5,9 @@ use egui::{
     UiBuilder, vec2,
 };
 
+use std::thread::JoinHandle;
+
+use crate::build::{self, Outcome};
 use crate::config::Project;
 use crate::icons::Icon;
 use crate::theme::{self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, STROKE, TEXT, TEXT_WEAK};
@@ -29,6 +32,14 @@ struct UiState {
     inspector_tab: InspectorTab,
     browser_tab: BrowserTab,
     rescan: bool,
+    start_build: bool,
+    build: BuildStatus,
+}
+
+enum BuildStatus {
+    Idle,
+    Running(JoinHandle<Result<Outcome, build::Error>>),
+    Finished(String),
 }
 
 impl Default for UiState {
@@ -39,6 +50,8 @@ impl Default for UiState {
             inspector_tab: InspectorTab::Info,
             browser_tab: BrowserTab::Input,
             rescan: false,
+            start_build: false,
+            build: BuildStatus::Idle,
         }
     }
 }
@@ -123,7 +136,7 @@ fn shell(
 
     egui::Panel::bottom("status_bar")
         .frame(bar_frame())
-        .show(&mut root, |ui| status_bar(ui, &project));
+        .show(&mut root, |ui| status_bar(ui, &project, &state.build));
 
     if state.show_left_sidebar {
         egui::Panel::left("left_sidebar")
@@ -131,7 +144,9 @@ fn shell(
             .default_size(260.0)
             .min_size(200.0)
             .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, |ui| left_sidebar(ui, &mut state, &trees));
+            .show(&mut root, |ui| {
+                left_sidebar(ui, &mut state, &project, &trees)
+            });
     }
 
     if state.show_right_sidebar {
@@ -143,11 +158,46 @@ fn shell(
             .show(&mut root, |ui| right_sidebar(ui, &mut state));
     }
 
+    if std::mem::take(&mut state.start_build) {
+        start_build(&mut state, &project);
+    }
+    poll_build(&mut state);
+
     if std::mem::take(&mut state.rescan) {
         *trees = FileTrees::scan(&project);
     }
 
     Ok(())
+}
+
+fn start_build(state: &mut UiState, project: &Project) {
+    if matches!(state.build, BuildStatus::Running(_)) {
+        return;
+    }
+    let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
+        return;
+    };
+    state.build = BuildStatus::Running(std::thread::spawn(move || build::run(&input, &output)));
+}
+
+fn poll_build(state: &mut UiState) {
+    let BuildStatus::Running(handle) = &state.build else {
+        return;
+    };
+    if !handle.is_finished() {
+        return;
+    }
+    let BuildStatus::Running(handle) = std::mem::replace(&mut state.build, BuildStatus::Idle)
+    else {
+        unreachable!();
+    };
+    let message = match handle.join() {
+        Ok(Ok(outcome)) => outcome.summary(),
+        Ok(Err(e)) => format!("Build failed: {e}"),
+        Err(_) => "Build failed: build thread panicked".into(),
+    };
+    state.build = BuildStatus::Finished(message);
+    state.rescan = true;
 }
 
 fn bar_frame() -> Frame {
@@ -195,20 +245,21 @@ fn logo(ui: &mut Ui) {
     ));
 }
 
-fn status_bar(ui: &mut Ui, project: &Project) {
+fn status_bar(ui: &mut Ui, project: &Project, build: &BuildStatus) {
     ui.horizontal(|ui| {
-        if project.root.is_some() {
-            ui.label("Ready");
-        } else {
-            ui.label("No assetc.toml found (run assetc init)");
-        }
+        match build {
+            BuildStatus::Running(_) => ui.label("Building…"),
+            BuildStatus::Finished(message) => ui.label(message),
+            BuildStatus::Idle if project.root.is_some() => ui.label("Ready"),
+            BuildStatus::Idle => ui.label("No assetc.toml found (run assetc init)"),
+        };
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.weak(format!("assetc {}", env!("CARGO_PKG_VERSION")));
         });
     });
 }
 
-fn left_sidebar(ui: &mut Ui, state: &mut UiState, trees: &FileTrees) {
+fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &FileTrees) {
     let strip = tab_strip(ui, vec2(ui.available_width(), 32.0));
     let mut tabs = ui.new_child(
         UiBuilder::new()
@@ -225,6 +276,10 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, trees: &FileTrees) {
         ui.add_space(6.0);
         if icon_button(ui, Icon::RefreshCw, "Rescan", true).clicked() {
             state.rescan = true;
+        }
+        let can_build = project.root.is_some() && !matches!(state.build, BuildStatus::Running(_));
+        if icon_button(ui, Icon::Hammer, "Build", can_build).clicked() {
+            state.start_build = true;
         }
     });
 

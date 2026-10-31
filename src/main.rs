@@ -1,5 +1,9 @@
+mod build;
 mod config;
+mod hash;
 mod icons;
+mod ktx2;
+mod manifest;
 mod theme;
 mod tree;
 mod ui;
@@ -22,11 +26,14 @@ struct Cli {
 enum Command {
     /// Create assetc.toml in the current directory
     Init,
+    /// Compile input into output
+    Build,
 }
 
 fn main() -> ExitCode {
     let result = match Cli::parse().command {
         Some(Command::Init) => init(),
+        Some(Command::Build) => build(),
         None => open(),
     };
     match result {
@@ -41,6 +48,25 @@ fn main() -> ExitCode {
 fn init() -> Result<(), Box<dyn std::error::Error>> {
     let path = config::init(&env::current_dir()?)?;
     println!("Created {}", path.display());
+    Ok(())
+}
+
+fn build() -> Result<(), Box<dyn std::error::Error>> {
+    let project = config::load(&env::current_dir()?)?;
+    let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
+        return Err(format!("no {} found (run assetc init)", config::FILE_NAME).into());
+    };
+    let outcome = build::run(&input, &output)?;
+    for built in &outcome.built {
+        println!("{} -> {}", built.source, built.output);
+    }
+    for failure in &outcome.failures {
+        eprintln!("error: {failure}");
+    }
+    if !outcome.failures.is_empty() {
+        return Err(outcome.summary().into());
+    }
+    println!("{} into {}", outcome.summary(), output.display());
     Ok(())
 }
 

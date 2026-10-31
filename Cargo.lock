@@ -326,6 +326,8 @@ dependencies = [
  "bevy_egui",
  "clap",
  "egui_extras",
+ "image",
+ "ktx2",
  "serde",
  "tempfile",
  "toml",
