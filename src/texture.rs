@@ -151,7 +151,11 @@ mod tests {
     fn checker(w: u32, h: u32) -> Image {
         let pixels = (0..w * h)
             .flat_map(|i| {
-                let v = if (i % w + i / w) % 2 == 0 { 0 } else { 255 };
+                let v = if (i % w + i / w).is_multiple_of(2) {
+                    0
+                } else {
+                    255
+                };
                 [v, v, v, v]
             })
             .collect();

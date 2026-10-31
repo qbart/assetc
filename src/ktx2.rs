@@ -21,9 +21,9 @@ pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
         );
     }
 
-    let (format, transfer) = match color {
-        ColorSpace::Srgb => (VK_FORMAT_R8G8B8A8_SRGB, 2),
-        ColorSpace::Linear => (VK_FORMAT_R8G8B8A8_UNORM, 1),
+    let format = match color {
+        ColorSpace::Srgb => VK_FORMAT_R8G8B8A8_SRGB,
+        ColorSpace::Linear => VK_FORMAT_R8G8B8A8_UNORM,
     };
     let kvd = key_value_data();
     let dfd_offset = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * levels.len();
@@ -59,7 +59,7 @@ pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
     }
     debug_assert_eq!(out.len(), dfd_offset);
 
-    write_dfd(&mut out, transfer);
+    write_dfd(&mut out, color);
     out.extend_from_slice(&kvd);
     out.resize(data_offset, 0);
     for level in levels.iter().rev() {
@@ -68,7 +68,12 @@ pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
     out
 }
 
-fn write_dfd(out: &mut Vec<u8>, transfer: u8) {
+fn write_dfd(out: &mut Vec<u8>, color: ColorSpace) {
+    // Alpha is flagged linear only when the color channels are sRGB.
+    let (transfer, alpha) = match color {
+        ColorSpace::Srgb => (2, 0x1F),
+        ColorSpace::Linear => (1, 0x0F),
+    };
     put_u32(out, DFD_SIZE);
     put_u32(out, 0); // vendorId 0, descriptorType 0
     put_u16(out, 2); // versionNumber
@@ -76,7 +81,7 @@ fn write_dfd(out: &mut Vec<u8>, transfer: u8) {
     out.extend_from_slice(&[1, 1, transfer, 0]); // RGBSDA, BT.709, transfer, straight alpha
     out.extend_from_slice(&[0; 4]); // texelBlockDimension
     out.extend_from_slice(&[4, 0, 0, 0, 0, 0, 0, 0]); // bytesPlane
-    for (channel, channel_type) in [0x00u8, 0x01, 0x02, 0x1F].into_iter().enumerate() {
+    for (channel, channel_type) in [0x00u8, 0x01, 0x02, alpha].into_iter().enumerate() {
         put_u16(out, channel as u16 * 8);
         out.push(7); // bitLength - 1
         out.push(channel_type);
