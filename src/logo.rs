@@ -5,6 +5,8 @@ use image::{RgbaImage, imageops};
 
 const PNG: &[u8] = include_bytes!("../assets/icons/logo.png");
 pub const HEIGHT: f32 = 16.0;
+/// Pixels at or below this alpha are treated as empty when trimming.
+const ALPHA_THRESHOLD: u8 = 8;
 
 /// Loads the logo as a texture sized for `HEIGHT` points at the current scale factor.
 pub fn load(ctx: &egui::Context) -> TextureHandle {
@@ -22,9 +24,11 @@ pub fn load(ctx: &egui::Context) -> TextureHandle {
     )
 }
 
-/// Crops to the bounding box of non-transparent pixels.
+/// Crops to the bounding box of visible pixels.
 fn trim(image: &RgbaImage) -> RgbaImage {
-    let opaque = image.enumerate_pixels().filter(|(_, _, p)| p[3] > 0);
+    let opaque = image
+        .enumerate_pixels()
+        .filter(|(_, _, p)| p[3] > ALPHA_THRESHOLD);
     let bounds = opaque.fold(None, |acc: Option<(u32, u32, u32, u32)>, (x, y, _)| {
         Some(match acc {
             None => (x, y, x, y),
@@ -48,7 +52,8 @@ mod tests {
     fn trim_crops_transparent_border() {
         let mut image = RgbaImage::new(10, 8);
         image.put_pixel(2, 3, Rgba([255, 0, 0, 255]));
-        image.put_pixel(6, 4, Rgba([0, 255, 0, 1]));
+        image.put_pixel(6, 4, Rgba([0, 255, 0, 9]));
+        image.put_pixel(9, 7, Rgba([0, 0, 255, ALPHA_THRESHOLD]));
         let trimmed = trim(&image);
         assert_eq!(trimmed.dimensions(), (5, 2));
         assert_eq!(trimmed.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
@@ -58,7 +63,6 @@ mod tests {
     fn embedded_logo_is_wider_than_tall_after_trim() {
         let image = image::load_from_memory(PNG).unwrap().to_rgba8();
         let trimmed = trim(&image);
-        assert!(trimmed.width() > trimmed.height());
-        assert!(trimmed.height() < image.height());
+        assert_eq!(trimmed.dimensions(), (1223, 587));
     }
 }
