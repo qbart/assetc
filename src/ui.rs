@@ -568,13 +568,11 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &A
         .exact_size(assets_height)
         .frame(Frame::new().fill(BG_PANEL))
         .show(ui, |ui| {
-            section_header(ui, "Assets", |ui| {
-                icon_button(ui, Icon::Plus, "Add asset", false);
-            });
+            section_header(ui, "Assets");
             asset_list(ui, state, project, assets);
         });
 
-    section_header(ui, "Inspector", |_| {});
+    section_header(ui, "Inspector");
 
     egui::Panel::left("inspector_tabs")
         .exact_size(36.0)
@@ -691,16 +689,13 @@ fn asset_list(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &Asse
         });
 }
 
-fn section_header(ui: &mut Ui, title: &str, actions: impl FnOnce(&mut Ui)) {
+fn section_header(ui: &mut Ui, title: &str) {
     Frame::new()
         .fill(BG_HEADER)
         .inner_margin(Margin::symmetric(8, 4))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(title).strong());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), actions);
-            });
+            ui.label(RichText::new(title).strong());
         });
 }
 
