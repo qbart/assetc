@@ -222,7 +222,7 @@ fn menu_bar(
     };
     egui::MenuBar::new().style(style).ui(ui, |ui| {
         let size = logo.size_vec2() * (logo::HEIGHT / logo.size_vec2().y);
-        ui.add(egui::Image::new((logo.id(), size)));
+        ui.add(egui::Image::new((logo.id(), size)).fit_to_exact_size(size));
         ui.add_space(4.0);
         ui.menu_button("File", |ui| {
             if ui.button("Quit").clicked() {
