@@ -6,7 +6,8 @@ it. Lives in the bottom half of the right sidebar (see [`gui.md`](gui.md)).
 ## Selection
 
 - Clicking a **file** row in the Input or Output tree selects it. Clicking a
-  folder row still only opens/closes it.
+  folder row still only opens/closes it. Clicking an asset in the Assets panel
+  selects its compiled file (see [`assets.md`](assets.md#selection)).
 - One file is selected at a time, across both tabs: selecting a file in one
   tab replaces a selection in the other. Switching tabs keeps the selection.
 - The selected row is filled with `ACCENT` at 25% opacity and has a 2 px
