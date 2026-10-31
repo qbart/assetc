@@ -11,6 +11,7 @@ pub enum Icon {
     Folder,
     FolderOpen,
     Hammer,
+    Image,
     Info,
     Plus,
     RefreshCw,
@@ -18,7 +19,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 10] = [
+const SVGS: [(&str, &str); 11] = [
     (
         "chevron-down",
         include_str!("../assets/icons/chevron-down.svg"),
@@ -34,6 +35,7 @@ const SVGS: [(&str, &str); 10] = [
         include_str!("../assets/icons/folder-open.svg"),
     ),
     ("hammer", include_str!("../assets/icons/hammer.svg")),
+    ("image", include_str!("../assets/icons/image.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
@@ -67,6 +69,7 @@ mod tests {
     fn svgs_match_enum_order() {
         let names: Vec<_> = SVGS.iter().map(|(name, _)| *name).collect();
         assert_eq!(names[Icon::Info as usize], "info");
+        assert_eq!(names[Icon::Image as usize], "image");
         assert_eq!(names[Icon::Settings as usize], "settings");
         for (name, svg) in SVGS {
             assert!(svg.contains(&format!("lucide-{name}\"")), "{name}");

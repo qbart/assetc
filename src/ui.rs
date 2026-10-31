@@ -8,11 +8,13 @@ use egui::{
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
+use crate::assets::Assets;
 use crate::build::{self, Outcome};
 use crate::config::Project;
 use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
+use crate::manifest::Kind;
 use crate::theme::{
     self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHECKER_DARK, CHECKER_LIGHT, STROKE,
     TEXT, TEXT_WEAK,
@@ -130,6 +132,7 @@ impl InspectorTab {
 
 fn scan_trees(mut commands: Commands, project: Res<Project>) {
     commands.insert_resource(FileTrees::scan(&project));
+    commands.insert_resource(Assets::load(&project));
 }
 
 fn set_title(project: Res<Project>, mut window: Single<&mut Window>) {
@@ -143,6 +146,7 @@ fn shell(
     mut state: ResMut<UiState>,
     project: Res<Project>,
     mut trees: ResMut<FileTrees>,
+    mut assets: ResMut<Assets>,
     mut exit: MessageWriter<AppExit>,
     mut logo: Local<Option<egui::TextureHandle>>,
 ) -> Result {
@@ -186,7 +190,9 @@ fn shell(
             .default_size(320.0)
             .min_size(220.0)
             .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, |ui| right_sidebar(ui, &mut state));
+            .show(&mut root, |ui| {
+                right_sidebar(ui, &mut state, &project, &assets)
+            });
     }
 
     if std::mem::take(&mut state.start_build) {
@@ -196,6 +202,7 @@ fn shell(
 
     if std::mem::take(&mut state.rescan) {
         *trees = FileTrees::scan(&project);
+        *assets = Assets::load(&project);
         state.reinspect = true;
     }
     if std::mem::take(&mut state.reinspect) {
@@ -361,11 +368,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                     ui.add_space(4.0);
                     ui.spacing_mut().item_spacing.y = 0.0;
                     if let Some(path) = tree(ui, nodes, 0, location, state.selection.as_ref()) {
-                        let selection = Some(Selection { location, path });
-                        if state.selection != selection {
-                            state.selection = selection;
-                            state.reinspect = true;
-                        }
+                        select(state, location, path);
                     }
                 });
         }
@@ -452,6 +455,14 @@ fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, enabled: bool) -> Respons
     response.on_hover_text(tooltip)
 }
 
+fn select(state: &mut UiState, location: Location, path: PathBuf) {
+    let selection = Some(Selection { location, path });
+    if state.selection != selection {
+        state.selection = selection;
+        state.reinspect = true;
+    }
+}
+
 /// Draws `nodes`; returns the file clicked this frame, if any.
 fn tree(
     ui: &mut Ui,
@@ -498,6 +509,26 @@ fn tree_row(
     name: &str,
     selected: bool,
 ) -> Response {
+    // Every level reserves room for a chevron left of the icon.
+    list_row(
+        ui,
+        22.0 + depth as f32 * 14.0,
+        chevron,
+        icon,
+        name,
+        selected,
+    )
+}
+
+/// 22 px row with the icon `indent` px from the left edge and an optional chevron before it.
+fn list_row(
+    ui: &mut Ui,
+    indent: f32,
+    chevron: Option<Icon>,
+    icon: Icon,
+    name: &str,
+    selected: bool,
+) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
     if selected {
         ui.painter()
@@ -512,16 +543,15 @@ fn tree_row(
     }
     let icon_rect =
         |x: f32| Rect::from_center_size(egui::pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0));
-    let x = rect.left() + 6.0 + depth as f32 * 14.0;
+    let x = rect.left() + indent;
     if let Some(chevron) = chevron {
         chevron
             .image(14.0, TEXT_WEAK)
-            .paint_at(ui, icon_rect(x).shrink(1.0));
+            .paint_at(ui, icon_rect(x - 16.0).shrink(1.0));
     }
-    icon.image(16.0, TEXT_WEAK)
-        .paint_at(ui, icon_rect(x + 16.0));
+    icon.image(16.0, TEXT_WEAK).paint_at(ui, icon_rect(x));
     ui.painter().text(
-        egui::pos2(x + 38.0, rect.center().y),
+        egui::pos2(x + 22.0, rect.center().y),
         Align2::LEFT_CENTER,
         name,
         FontId::proportional(13.0),
@@ -530,7 +560,7 @@ fn tree_row(
     response
 }
 
-fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
+fn right_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &Assets) {
     let assets_height = (ui.available_height() * 0.4).round();
 
     egui::Panel::top("assets")
@@ -541,7 +571,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState) {
             section_header(ui, "Assets", |ui| {
                 icon_button(ui, Icon::Plus, "Add asset", false);
             });
-            placeholder(ui, "No assets");
+            asset_list(ui, state, project, assets);
         });
 
     section_header(ui, "Inspector", |_| {});
@@ -629,6 +659,36 @@ fn preview(ui: &mut Ui, texture: &egui::TextureHandle) {
         }
     }
     egui::Image::new((texture.id(), size)).paint_at(ui, rect);
+}
+
+fn asset_list(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &Assets) {
+    let list = match assets {
+        Assets::NoProject => return placeholder(ui, "No project open"),
+        Assets::NotBuilt => return placeholder(ui, "Not built yet"),
+        Assets::Failed(e) => return placeholder(ui, e),
+        Assets::Loaded(list) if list.is_empty() => return placeholder(ui, "No assets"),
+        Assets::Loaded(list) => list,
+    };
+    let linked = state
+        .selection
+        .as_ref()
+        .and_then(|s| assets.linked(project, s.location, &s.path));
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            ui.add_space(4.0);
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for (i, asset) in list.iter().enumerate() {
+                let icon = match asset.kind {
+                    Kind::Texture => Icon::Image,
+                };
+                let response = list_row(ui, 6.0, None, icon, &asset.asset_path, linked == Some(i))
+                    .on_hover_text(format!("{:#018x}", asset.id));
+                if response.clicked() {
+                    select(state, Location::Output, asset.file.clone());
+                }
+            }
+        });
 }
 
 fn section_header(ui: &mut Ui, title: &str, actions: impl FnOnce(&mut Ui)) {
