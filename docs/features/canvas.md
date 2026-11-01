@@ -21,11 +21,11 @@ View  [ 2D | 3D ]
   `TEXT_WEAK` text, `TEXT` and a `BG_HEADER` fill on hover.
 - **2D** is the default. The mode is global (not per image) and lasts for the
   session.
-- The bar is always shown, but the mode only applies to **images**; with
-  anything else selected, both buttons are disabled (`TEXT_WEAK` at 50%, no
-  hover or clicks). An [environment map](#environment-maps) is always shown in
-  3D, so its 3D button is drawn active and 2D disabled; for other selections
-  neither is active.
+- The bar is always shown, but the mode only applies to **images**:
+  - an [environment map](#environment-maps) only exists in 3D, so the bar is
+    empty (no `View` label, no buttons);
+  - with anything else (or nothing) selected, both buttons are disabled
+    (`TEXT_WEAK` at 50%, no hover or clicks) and neither is active.
 
 The rest of the canvas, below the bar, shows the selection in the chosen
 mode. Everything below ("canvas") means that area.
