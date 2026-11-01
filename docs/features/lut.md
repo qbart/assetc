@@ -49,10 +49,16 @@ graded on the right** of a vertical divider.
 
 - The image is fitted to the canvas (24 px margin, like 2D fit), drawn with
   linear filtering, no zoom or pan.
-- The divider starts in the middle; clicking or dragging with the left button
-  anywhere on the canvas moves it to the pointer (clamped to the image). It
-  is a 2 px `TEXT` line with small "Before" / "After" labels (12 px, `TEXT`
-  on a `BG_BAR` pill) at the top of each side.
+- The divider starts in the middle. It is a 2 px `TEXT` line with small
+  "Before" / "After" labels (12 px, `TEXT` on a `BG_BAR` pill) at the top of
+  each side, and a **grab handle** centered on it vertically (within the
+  image): a 24 × 40 px pill (12 px radius) with `BG_BAR` fill, a 1 px
+  `STROKE` border and a 16 px `grip-vertical` icon in `TEXT`; while hovered
+  or dragged the border and icon turn `ACCENT`.
+- Dragging the handle, or the line (8 px wide hit area), with the left button
+  moves the divider with the pointer (clamped to the image); the cursor is a
+  grab hand (closed while dragging). Clicking elsewhere on the canvas does
+  nothing.
 - **Source** — a toolbar group (top-right, like the canvas toolbar):
 
   | Button | Icon      | Image                                              |

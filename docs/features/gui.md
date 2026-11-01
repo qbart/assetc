@@ -127,7 +127,8 @@ tinted per use. In use: `info` (inspector tabs), `refresh-cw`
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart), `eye`, `eye-off` (LUT cube before / after),
 `sliders-vertical` (Inspector Parameters tab), `wrench`,
-`grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab), `loader`
+`grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab),
+`grip-vertical` (LUT compare divider), `loader`
 (status bar), `folder`, `folder-open`, `file`, `sun-medium`, `type`,
 `swatch-book`, `image`, `torus`, `chevron-right`, `chevron-down` (file tree,
 see [Tree icons](#tree-icons)), `image` (texture assets). The logo is not a
