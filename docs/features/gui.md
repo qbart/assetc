@@ -106,7 +106,8 @@ tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart), `eye`, `eye-off` (LUT cube before / after),
-`sliders-vertical` (Inspector Parameters tab), `folder`, `folder-open`, `file`,
+`sliders-vertical` (Inspector Parameters tab), `wrench`, `arrow-up`,
+`arrow-down`, `trash-2`, `plus` (Inspector Modifiers tab), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 
@@ -116,6 +117,24 @@ Source: `assets/icons/logo.png` (anvil, transparent background), embedded in
 the binary. At startup it is cropped to the bounding box of its visible pixels
 (alpha > 8 of 255, so near-invisible noise in the margins is ignored), then resized (Lanczos3) to 16 pt tall at the window's scale factor,
 keeping its aspect ratio, and shown untinted at the left of the menu bar.
+
+## Property editor
+
+Inspector tabs that edit values (Parameters, Modifiers) are laid out like a
+property sheet, inside 8 px margins:
+
+- **Sections**: cards with 6 px rounded corners and `BG_HEADER` fill, 8 px
+  apart. The header row (28 px) has a `chevron-down` / `chevron-right` icon
+  and the title (14 px, `TEXT`); clicking the chevron or title collapses /
+  expands the card (open by default, remembered for the session). Optional
+  header buttons sit on the right. The body is inset 10 px.
+- **Rows**: 26 px tall, 6 px apart. The label (13 px, `TEXT_WEAK`) is
+  right-aligned in a column 40% of the card width (at least 80 px); the
+  control fills the rest.
+- **Controls**: text and number fields, dropdowns and buttons fill the
+  control column, with 4 px rounded corners and `BG_BAR` fill.
+  **Sliders** take the control column minus 64 px, followed by a 56 px value
+  box (a number field) 8 px to their right.
 
 ## Look
 

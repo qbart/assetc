@@ -19,10 +19,10 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Four icon tabs, top to bottom: **Info** (`info`), **Parameters**
-(`sliders-vertical`, only for `.noise` files in the Input tree, see
-[`noise.md`](noise.md#editing)), **Assets** (`files`), **Settings**
-(`settings`). Hovering a tab shows its name.
+Five icon tabs, top to bottom: **Info** (`info`), **Parameters**
+(`sliders-vertical`) and **Modifiers** (`wrench`), both only for `.noise`
+files in the Input tree (see [`noise.md`](noise.md#parameters-tab)),
+**Assets** (`files`), **Settings** (`settings`). Hovering a tab shows its name.
 
 A tab that does not apply to the selected file is disabled: its icon is drawn
 in `TEXT_WEAK` at 50% opacity, it does not react to hover or clicks. If the

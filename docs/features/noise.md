@@ -1,49 +1,93 @@
 # Noise textures
 
 Procedural textures stored as parameters in `.noise` files (format and exact
-algorithms: [`docs/spec/noise.md`](../spec/noise.md)). They behave like any
-other texture source: the build turns them into `.ktx2`, the canvas previews
-them, and they can fill material slots (`rock.h.noise` is the height map of
+algorithms: [`docs/spec/noise.md`](../spec/noise.md)): a generator with its
+own parameters, followed by a list of modifiers. They behave like any other
+texture source: the build turns them into `.ktx2`, the canvas previews them,
+and they can fill material slots (`rock.h.noise` is the height map of
 material `rock`).
+
+## Generators
+
+| Menu / dropdown name | `type`                |
+|----------------------|-----------------------|
+| Checkerboard         | `checkerboard`        |
+| Uniform              | `noise/uniform`       |
+| Value                | `noise/value`         |
+| Perlin               | `noise/perlin`        |
+| Simplex              | `noise/simplex`       |
+| fBm                  | `noise/fbm`           |
+| Voronoi              | `noise/voronoi`       |
+| Perlin-Worley        | `noise/perlin-worley` |
+| Musgrave             | `noise/musgrave`      |
+| Ridged               | `noise/ridged`        |
+| Curl                 | `noise/curl`          |
+
+Each generator has its own parameters; nothing is shared between types
+except the image `size`.
 
 ## Creating
 
-In the Input tree's context menu, **New Noise** opens a submenu of the four
-types: **White**, **Value**, **Perlin**, **Worley** (see
-[`file-operations.md`](file-operations.md)). Picking one creates
-`<type>.noise` (lowercase type name; `<type> 2.noise`, `<type> 3.noise`, …
-if taken) with that type and all other parameters at their defaults, selects
-it, and starts renaming it.
+In the Input tree's context menu, **New Noise** lists the generators by the
+names above (see [`file-operations.md`](file-operations.md)). Picking one
+creates `<name>.noise` (the last part of `type`, e.g. `perlin-worley.noise`,
+`checkerboard.noise`; `<name> 2.noise`, … if taken) with that generator, its
+default parameters and no modifiers, selects it and starts renaming it.
 
-## Editing
+## Parameters tab
 
-The Inspector's **Parameters** tab (`sliders-vertical` icon) edits a selected
-`.noise` file from the Input tree; for any other selection the tab is
-disabled. Controls, in a two-column grid like Info (weak labels left):
+The Inspector's **Parameters** tab (`sliders-vertical`) edits the selected
+`.noise` file from the Input tree; for anything else it is disabled. It uses
+the [property editor](gui.md#property-editor) look, with two sections:
 
-| Parameter | Control                                             |
-|-----------|-----------------------------------------------------|
-| Type      | dropdown: White, Value, Perlin, Worley              |
-| Size      | dropdown: 64, 128, 256, 512, 1024, 2048, 4096 (a value from the file that is not listed is shown as is and kept until changed) |
-| Seed      | integer drag field, 0 … 4294967295                  |
-| Frequency | integer slider 1 … 64 (the field accepts up to 256) |
-| Octaves   | integer slider 1 … 8                                |
-| Gain      | slider 0 … 1, two decimals                          |
-| Invert    | checkbox                                            |
+- **Generator**: **Type** (dropdown of the names above) and **Size**
+  (dropdown: 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096; a size from
+  the file that is not listed is shown as is and kept until changed).
+- **<Generator name>** (e.g. "fBm"): one row per parameter of the generator,
+  in table order:
+  - *int* with a range up to 256 and *float*: slider plus value box;
+  - `seed`: a full-width integer field (drag or type);
+  - *choice*: dropdown;
+  - *gray*: slider plus value box (0–1);
+  - *color*: color button.
 
-- Frequency, Octaves and Gain are disabled (dimmed) for White.
-- A change is **written to the file** in the
-  [written form](../spec/noise.md#written-form) when it is committed: a
-  dropdown or checkbox immediately, a slider or drag field when the pointer is
-  released (or Enter is pressed in its text field). The file is then
-  inspected again, so the canvas and Info update.
-- If the file does not parse, the tab shows the error instead of controls.
+  A generator without parameters besides `seed` still shows its section.
+
+Changing **Type** switches to that generator's parameters. Parameters are
+kept per type for the rest of the session (per file), so switching back
+restores what was set; the file only ever stores the current type's.
+
+## Modifiers tab
+
+The **Modifiers** tab (`wrench`) edits the selected `.noise` file's modifiers
+(disabled for anything else). Each modifier is a section card, in order:
+
+- Header: chevron (collapse), an eye button (`eye` enabled / `eye-off`
+  disabled; a disabled modifier's title is drawn in `TEXT_WEAK`), the
+  modifier name (Invert, Levels, Brightness / Contrast, Threshold, Posterize,
+  Blur, Normalize, Colorize), and on the right **move up** (`arrow-up`),
+  **move down** (`arrow-down`, each disabled at the ends) and **remove**
+  (`trash-2`) icon buttons with tooltips.
+- Body: the modifier's parameters as rows (as in Parameters), or weak
+  "No parameters".
+- Below the list: an **Add modifier** button (`plus` icon and text) opening a
+  menu of the eight modifiers; the new one is appended, enabled, with default
+  parameters.
+- With no modifiers, a weak "No modifiers" line precedes the button.
+
+## Saving
+
+Edits are **written to the file** in the
+[written form](../spec/noise.md#written-form) when committed: dropdowns,
+checkboxes, color changes and the modifier buttons (add, remove, move,
+enable) immediately; sliders and fields when the pointer is released (or
+Enter is pressed). The file is then inspected again, so the canvas and Info
+update. If the file does not parse, both tabs show the error instead.
 
 ## Build
 
 - `*.noise` (any case) files in `input` are texture sources; their asset path
-  drops `.noise`, e.g. `textures/clouds.noise` → `textures/clouds` →
-  `textures/clouds.ktx2`.
+  drops `.noise`, e.g. `textures/clouds.noise` → `textures/clouds.ktx2`.
 - Generated noise is **linear** (data) unless it fills an sRGB material slot
   (base color, emissive); the `[textures] linear` globs do not apply to it.
   `no_mipmaps` applies as usual.
@@ -52,7 +96,7 @@ disabled. Controls, in a two-column grid like Info (weak labels left):
 
 ## Inspector Info
 
-Kind `Noise`, the file Size, then the parameters as rows (Type, Seed,
-Frequency, Octaves, Gain, Invert; the generated size is the Dimensions row),
-then the usual source texture rows (Dimensions, Asset path, Asset ID,
-Material, Color, Mip levels, Output).
+Kind `Noise`, the file Size, **Type** (generator name), one row per generator
+parameter (labels as in the Parameters tab), **Modifiers** (`none`, or e.g.
+`Levels, Blur (off)`), then the usual source texture rows (Dimensions, Asset
+path, Asset ID, Material, Color, Mip levels, Output).
