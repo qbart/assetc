@@ -223,8 +223,8 @@ Bevy into the canvas area (below the view bar) behind the egui overlay.
 
   | Shape    | Geometry                                           | UVs                                   |
   |----------|----------------------------------------------------|---------------------------------------|
-  | Box      | cube, 1.2 units                                    | the whole image on each face          |
-  | Sphere   | UV sphere, radius 0.75, 48 × 24 segments           | U around, V pole to pole              |
+  | Box      | cube, 1.2 units                                    | the whole image on each face, upright (image top up) on the four sides; on the top face the image top points away from the front (−Z), on the bottom toward it |
+  | Sphere   | UV sphere, radius 0.75, 48 × 24 segments, poles on the vertical axis | U around, V from the top pole (image top) to the bottom pole |
   | Cylinder | radius 0.6, height 1.4, 48 segments, capped        | U around the side, V along the height |
   | Torus    | ring radius 0.6, tube radius 0.25                  | U around the ring, V around the tube  |
 
