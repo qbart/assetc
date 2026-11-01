@@ -545,8 +545,8 @@ struct Model {
     gltf: Handle<Gltf>,
     /// Waiting for a reload from disk to finish before spawning.
     reloading: bool,
-    /// Spins about the vertical axis; hidden until fitted.
-    spin: Entity,
+    /// Holds the model; hidden until fitted.
+    root: Entity,
     /// Centers and scales the scene, spawned as its child once the file has loaded.
     fit: Entity,
     /// The scene being shown, once spawned.
@@ -562,13 +562,13 @@ struct Model {
 }
 
 fn spawn_model_entities(commands: &mut Commands) -> (Entity, Entity) {
-    let spin = commands
+    let root = commands
         .spawn((Transform::default(), Visibility::Hidden))
         .id();
     let fit = commands
-        .spawn((Transform::default(), Visibility::default(), ChildOf(spin)))
+        .spawn((Transform::default(), Visibility::default(), ChildOf(root)))
         .id();
-    (spin, fit)
+    (root, fit)
 }
 
 /// Spawns `scene` under `fit`, marking the model ready once its entities exist.
@@ -592,8 +592,7 @@ fn sync_model(
     server: Res<AssetServer>,
     gltfs: Res<Assets<Gltf>>,
     mut events: MessageReader<AssetEvent<Gltf>>,
-    time: Res<Time>,
-    mut spins: Query<(&mut Transform, &mut Visibility)>,
+    mut roots: Query<&mut Visibility>,
     (children, mut players, mut graphs): (
         Query<&Children>,
         Query<&mut AnimationPlayer>,
@@ -612,12 +611,12 @@ fn sync_model(
             if reloading {
                 server.reload(path);
             }
-            let (spin, fit) = spawn_model_entities(&mut commands);
+            let (root, fit) = spawn_model_entities(&mut commands);
             loaded.0 = Some(Model {
                 key,
                 gltf,
                 reloading,
-                spin,
+                root,
                 fit,
                 scene: None,
                 ready: false,
@@ -628,7 +627,7 @@ fn sync_model(
             preview.model_status = ModelStatus::Loading(Instant::now());
         }
         if let Some(previous) = previous {
-            commands.entity(previous.spin).despawn();
+            commands.entity(previous.root).despawn();
         }
     }
     let Some(model) = &mut loaded.0 else {
@@ -643,8 +642,8 @@ fn sync_model(
             && (model.reloading || matches!(event, AssetEvent::Modified { .. }))
         {
             if model.scene.is_some() {
-                commands.entity(model.spin).despawn();
-                (model.spin, model.fit) = spawn_model_entities(&mut commands);
+                commands.entity(model.root).despawn();
+                (model.root, model.fit) = spawn_model_entities(&mut commands);
                 (model.scene, model.ready, model.fitted) = (None, false, None);
                 (model.graph, model.playing) = (None, None);
                 if !matches!(preview.model_status, ModelStatus::Loading(_)) {
@@ -691,7 +690,7 @@ fn sync_model(
             // Back to the rest pose: spawn the scene again, fitted as before.
             commands.entity(model.fit).despawn();
             model.fit = commands
-                .spawn((fitted, Visibility::default(), ChildOf(model.spin)))
+                .spawn((fitted, Visibility::default(), ChildOf(model.root)))
                 .id();
             spawn_scene(&mut commands, model.fit, scene);
             (model.ready, model.playing) = (false, None);
@@ -716,14 +715,13 @@ fn sync_model(
         }
     }
 
-    if let Ok((mut transform, mut visibility)) = spins.get_mut(model.spin) {
-        if model.fitted.is_some() && *visibility == Visibility::Hidden {
-            *visibility = Visibility::Inherited;
-            preview.model_status = ModelStatus::Ready;
-        }
-        if !preview.dragging {
-            transform.rotate_y(SPIN * time.delta_secs());
-        }
+    // Shown once fitted; models do not auto-rotate.
+    if model.fitted.is_some()
+        && let Ok(mut visibility) = roots.get_mut(model.root)
+        && *visibility == Visibility::Hidden
+    {
+        *visibility = Visibility::Inherited;
+        preview.model_status = ModelStatus::Ready;
     }
 }
 
