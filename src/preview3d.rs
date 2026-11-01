@@ -1,17 +1,31 @@
 //! The canvas' 3D mode: the selected image on a rotating, lit shape, rendered
 //! behind the egui overlay. See docs/features/canvas.md#3d.
 
-use bevy::asset::RenderAssetUsages;
+use std::path::PathBuf;
+use std::time::Instant;
+
+use bevy::asset::{AssetPath, LoadState, RenderAssetUsages};
 use bevy::camera::{ClearColorConfig, Viewport};
+use bevy::gltf::Gltf;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::{GeneratedEnvironmentMapLight, Skybox};
+use bevy::math::Affine3A;
+use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{CylinderMeshBuilder, Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
 };
 
+use bevy::transform::TransformSystems;
+use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
+
 use crate::theme::BG_CENTER;
+
+/// Asset source for the project's input directory, registered at startup; models load from it.
+pub const INPUT_SOURCE: &str = "input";
+/// Longest side of a fitted model's bounding box, in units.
+const MODEL_SIZE: f32 = 1.5;
 
 pub struct Preview3dPlugin;
 
@@ -22,8 +36,15 @@ impl Plugin for Preview3dPlugin {
                 brightness: AMBIENT_BRIGHTNESS,
                 ..default()
             })
+            .init_resource::<LoadedModel>()
             .add_systems(Startup, setup)
-            .add_systems(PostUpdate, sync);
+            .add_systems(
+                PostUpdate,
+                (
+                    (sync, sync_model).before(TransformSystems::Propagate),
+                    fit_model.after(TransformSystems::Propagate),
+                ),
+            );
     }
 }
 
@@ -126,6 +147,21 @@ pub struct Preview3d {
     pub color_cube: Option<(Mesh, Mesh)>,
     /// A new environment map, taken by [`sync`].
     pub cubemap: Option<CubemapUpload>,
+    /// A glTF model to show instead of the shape: input-relative path and a generation; a
+    /// new generation of the same file reads it from disk again.
+    pub model: Option<(PathBuf, u64)>,
+    /// How the requested model is doing, written by [`sync_model`].
+    pub model_status: ModelStatus,
+}
+
+#[derive(Clone, Default, PartialEq, Debug)]
+pub enum ModelStatus {
+    #[default]
+    Idle,
+    /// Loading or fitting since.
+    Loading(Instant),
+    Ready,
+    Failed(String),
 }
 
 impl Preview3d {
@@ -240,6 +276,7 @@ type ShapeQuery = (
     &'static mut Mesh3d,
     &'static mut MeshMaterial3d<StandardMaterial>,
     &'static mut Transform,
+    &'static mut Visibility,
 );
 
 /// Auto-rotation, radians per second.
@@ -457,7 +494,16 @@ fn sync(
         meshes.remove(&old.1);
     }
 
-    let (mesh, material, transform) = &mut *shape;
+    let (mesh, material, transform, visibility) = &mut *shape;
+    // A model replaces the shape.
+    let wanted_visibility = if preview.model.is_some() {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
+    if **visibility != wanted_visibility {
+        **visibility = wanted_visibility;
+    }
     let current = if environment {
         preview.environment_shape()
     } else {
@@ -481,6 +527,205 @@ fn sync(
     if active && !preview.dragging {
         transform.rotate_y(SPIN * time.delta_secs());
     }
+}
+
+/// The model being shown, see docs/features/models.md#preview.
+#[derive(Resource, Default)]
+struct LoadedModel(Option<Model>);
+
+struct Model {
+    key: (PathBuf, u64),
+    gltf: Handle<Gltf>,
+    /// Waiting for a reload from disk to finish before spawning.
+    reloading: bool,
+    /// Spins about the vertical axis; hidden until fitted.
+    spin: Entity,
+    /// Centers and scales the scene, spawned as its child once the file has loaded.
+    fit: Entity,
+    spawned: bool,
+    /// The scene's entities exist.
+    ready: bool,
+    fitted: bool,
+}
+
+fn spawn_model_entities(commands: &mut Commands) -> (Entity, Entity) {
+    let spin = commands
+        .spawn((Transform::default(), Visibility::Hidden))
+        .id();
+    let fit = commands
+        .spawn((Transform::default(), Visibility::default(), ChildOf(spin)))
+        .id();
+    (spin, fit)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sync_model(
+    mut commands: Commands,
+    mut preview: ResMut<Preview3d>,
+    mut loaded: ResMut<LoadedModel>,
+    server: Res<AssetServer>,
+    gltfs: Res<Assets<Gltf>>,
+    mut events: MessageReader<AssetEvent<Gltf>>,
+    time: Res<Time>,
+    mut spins: Query<(&mut Transform, &mut Visibility)>,
+) {
+    let wanted = preview.model.clone().filter(|_| preview.viewport.is_some());
+    if loaded.0.as_ref().map(|m| &m.key) != wanted.as_ref() {
+        let previous = loaded.0.take();
+        preview.model_status = ModelStatus::Idle;
+        if let Some(key) = wanted {
+            let path = AssetPath::from(key.0.clone()).with_source(INPUT_SOURCE);
+            // Taken while the previous handle still holds the asset, so a reload applies to it.
+            let gltf = server.load(path.clone());
+            let reloading = previous.as_ref().is_some_and(|p| p.key.0 == key.0);
+            if reloading {
+                server.reload(path);
+            }
+            let (spin, fit) = spawn_model_entities(&mut commands);
+            loaded.0 = Some(Model {
+                key,
+                gltf,
+                reloading,
+                spin,
+                fit,
+                spawned: false,
+                ready: false,
+                fitted: false,
+            });
+            preview.model_status = ModelStatus::Loading(Instant::now());
+        }
+        if let Some(previous) = previous {
+            commands.entity(previous.spin).despawn();
+        }
+    }
+    let Some(model) = &mut loaded.0 else {
+        events.clear();
+        return;
+    };
+
+    // A finished reload: spawn the new contents from scratch, and fit them again.
+    for event in events.read() {
+        if let AssetEvent::Modified { id } | AssetEvent::LoadedWithDependencies { id } = event
+            && *id == model.gltf.id()
+            && (model.reloading || matches!(event, AssetEvent::Modified { .. }))
+        {
+            if model.spawned {
+                commands.entity(model.spin).despawn();
+                (model.spin, model.fit) = spawn_model_entities(&mut commands);
+                (model.spawned, model.ready, model.fitted) = (false, false, false);
+                if !matches!(preview.model_status, ModelStatus::Loading(_)) {
+                    preview.model_status = ModelStatus::Loading(Instant::now());
+                }
+            }
+            model.reloading = false;
+        }
+    }
+
+    if !model.spawned {
+        match server.load_state(&model.gltf) {
+            LoadState::Failed(error) => {
+                preview.model_status = ModelStatus::Failed(error.to_string());
+            }
+            LoadState::Loaded if !model.reloading => {
+                if let Some(gltf) = gltfs.get(&model.gltf) {
+                    match gltf
+                        .default_scene
+                        .clone()
+                        .or_else(|| gltf.scenes.first().cloned())
+                    {
+                        Some(scene) => {
+                            commands
+                                .entity(model.fit)
+                                .insert(WorldAssetRoot(scene))
+                                .observe(
+                                |ready: On<WorldInstanceReady>, mut loaded: ResMut<LoadedModel>| {
+                                    if let Some(model) = &mut loaded.0
+                                        && model.fit == ready.event().entity
+                                    {
+                                        model.ready = true;
+                                    }
+                                },
+                            );
+                            model.spawned = true;
+                        }
+                        None => {
+                            preview.model_status =
+                                ModelStatus::Failed("the file has no scene".into());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Ok((mut transform, mut visibility)) = spins.get_mut(model.spin) {
+        if model.fitted && *visibility == Visibility::Hidden {
+            *visibility = Visibility::Inherited;
+            preview.model_status = ModelStatus::Ready;
+        }
+        if !preview.dragging {
+            transform.rotate_y(SPIN * time.delta_secs());
+        }
+    }
+}
+
+/// Centers and scales a model's scene once its entities exist, see docs/features/models.md#preview.
+fn fit_model(
+    mut loaded: ResMut<LoadedModel>,
+    children: Query<&Children>,
+    mesh_entities: Query<(&Mesh3d, &GlobalTransform, Option<&SkinnedMesh>)>,
+    globals: Query<&GlobalTransform>,
+    mut transforms: Query<&mut Transform>,
+    meshes: Res<Assets<Mesh>>,
+    bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+) {
+    let Some(model) = &mut loaded.0 else {
+        return;
+    };
+    if !model.ready || model.fitted {
+        return;
+    }
+    let Ok(fit_global) = globals.get(model.fit) else {
+        return;
+    };
+    let to_fit = fit_global.affine().inverse();
+    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    for entity in children.iter_descendants(model.fit) {
+        let Ok((mesh, global, skin)) = mesh_entities.get(entity) else {
+            continue;
+        };
+        let Some(positions) = meshes
+            .get(&mesh.0)
+            .and_then(|m| m.attribute(Mesh::ATTRIBUTE_POSITION))
+            .and_then(|a| a.as_float3())
+        else {
+            continue;
+        };
+        // A skinned mesh is placed by its joints: measure it through the first one.
+        let skinned = skin.and_then(|skin| {
+            let joint = globals.get(*skin.joints.first()?).ok()?;
+            let bind = bindposes.get(&skin.inverse_bindposes)?.first()?;
+            Some(joint.affine() * Affine3A::from_mat4(*bind))
+        });
+        let matrix = to_fit * skinned.unwrap_or_else(|| global.affine());
+        for p in positions {
+            let p = matrix.transform_point3(Vec3::from(*p));
+            (min, max) = (min.min(p), max.max(p));
+        }
+    }
+    if min.cmple(max).all()
+        && let Ok(mut transform) = transforms.get_mut(model.fit)
+    {
+        let size = (max - min).max_element();
+        let scale = if size > 0.0 { MODEL_SIZE / size } else { 1.0 };
+        *transform = Transform {
+            translation: -(min + max) / 2.0 * scale,
+            scale: Vec3::splat(scale),
+            ..default()
+        };
+    }
+    model.fitted = true;
 }
 
 #[cfg(test)]

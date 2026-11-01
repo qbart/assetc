@@ -12,6 +12,7 @@ mod logo;
 mod lut;
 mod manifest;
 mod material;
+mod model;
 mod noise;
 mod plan;
 mod preview3d;
@@ -23,6 +24,7 @@ mod ui;
 use std::env;
 use std::process::ExitCode;
 
+use bevy::asset::io::AssetSourceBuilder;
 use bevy::prelude::*;
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use clap::{Parser, Subcommand};
@@ -87,24 +89,31 @@ fn build() -> Result<(), Box<dyn std::error::Error>> {
 
 fn open() -> Result<(), Box<dyn std::error::Error>> {
     let project = config::load(&env::current_dir()?)?;
-    App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "assetc".into(),
-                ..default()
-            }),
+    let mut app = App::new();
+    // Models load from the input directory; sources must exist before `AssetPlugin`.
+    if let Some(input) = project.input_dir() {
+        app.register_asset_source(
+            preview3d::INPUT_SOURCE,
+            AssetSourceBuilder::platform_default(&input.to_string_lossy(), None),
+        );
+    }
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "assetc".into(),
             ..default()
-        }))
-        .add_plugins(EguiPlugin::default())
-        // The overlay camera is chosen explicitly: the 3D preview camera must not get egui.
-        .insert_resource(EguiGlobalSettings {
-            auto_create_primary_context: false,
-            ..default()
-        })
-        .add_plugins((ui::UiPlugin, preview3d::Preview3dPlugin))
-        .insert_resource(project)
-        .add_systems(Startup, setup_camera)
-        .run();
+        }),
+        ..default()
+    }))
+    .add_plugins(EguiPlugin::default())
+    // The overlay camera is chosen explicitly: the 3D preview camera must not get egui.
+    .insert_resource(EguiGlobalSettings {
+        auto_create_primary_context: false,
+        ..default()
+    })
+    .add_plugins((ui::UiPlugin, preview3d::Preview3dPlugin))
+    .insert_resource(project)
+    .add_systems(Startup, setup_camera)
+    .run();
     Ok(())
 }
 

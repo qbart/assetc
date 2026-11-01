@@ -11,7 +11,7 @@ use crate::material::{self, AlphaMode, HeightMode};
 use crate::noise::Noise;
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
-use crate::{font, ktx2, manifest};
+use crate::{font, ktx2, manifest, model};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
@@ -37,6 +37,8 @@ pub struct Inspection {
     pub lut: Option<Lut>,
     /// `preview` is a rendered font specimen, not an image file: no tiling, channels or 3D.
     pub specimen: bool,
+    /// A glTF model that parsed, previewed in 3D by the canvas.
+    pub model: bool,
 }
 
 /// Face file stems of an environment map folder, in cube layer order.
@@ -55,6 +57,7 @@ enum Kind {
     MaterialSource,
     ColorLut,
     Font,
+    Model,
     CompiledTexture,
     CompiledMaterial,
     Manifest,
@@ -70,6 +73,7 @@ impl Kind {
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
+            Self::Model => "Model",
             Self::CompiledTexture => "Compiled texture",
             Self::CompiledMaterial => "Compiled material",
             Self::Manifest => "Manifest",
@@ -126,6 +130,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if has_ext("cube") => Kind::ColorLut,
         Location::Input if is_noise(file) => Kind::Noise,
         Location::Input if font::is_font(file) => Kind::Font,
+        Location::Input if model::is_model(file) => Kind::Model,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
         Location::Input => Kind::Ignored,
         Location::Output if has_ext(manifest::Kind::Texture.extension()) => Kind::CompiledTexture,
@@ -144,6 +149,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(file, &mut out),
         Kind::Font => font_rows(file, &mut out),
+        Kind::Model => model_rows(file, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
         Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
         Kind::Manifest => manifest(file, &mut out),
@@ -285,6 +291,13 @@ fn font_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     out.preview = Some(font::specimen(&data)?);
     out.channels = [true; 4];
     out.specimen = true;
+    Ok(())
+}
+
+fn model_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    let data = fs::read(file).map_err(|e| e.to_string())?;
+    out.rows.extend(model::rows(&data)?);
+    out.model = true;
     Ok(())
 }
 
@@ -851,6 +864,29 @@ mod tests {
         // Fonts are only inspected as sources.
         let i = inspect(&project, Location::Output, &font);
         assert_eq!(row(&i, "Kind"), "File");
+    }
+
+    #[test]
+    fn models() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        fs::create_dir_all(dir.path().join("assets")).unwrap();
+        let fox = dir.path().join("assets/Fox.glb");
+        fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/samples/Fox.glb"),
+            &fox,
+        )
+        .unwrap();
+        let i = inspect(&project, Location::Input, &fox);
+        assert_eq!(row(&i, "Kind"), "Model");
+        assert_eq!(row(&i, "Animations"), "3");
+        assert!(i.model);
+
+        let broken = dir.path().join("assets/broken.gltf");
+        fs::write(&broken, "{").unwrap();
+        let i = inspect(&project, Location::Input, &broken);
+        assert!(row(&i, "Error").starts_with("not a valid glTF file"));
+        assert!(!i.model);
     }
 
     #[test]

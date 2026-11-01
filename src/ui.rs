@@ -7,6 +7,7 @@ use egui::{
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -20,7 +21,7 @@ use crate::logo;
 use crate::lut::Lut;
 use crate::manifest::Kind;
 use crate::noise::{GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Value};
-use crate::preview3d::{CubemapUpload, Orbit, Preview3d, Shape, Upload};
+use crate::preview3d::{CubemapUpload, ModelStatus, Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
 use crate::theme::{
     self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHANNEL_B, CHANNEL_G, CHANNEL_R,
@@ -120,6 +121,8 @@ struct Inspected {
     noise: Option<Result<NoiseEdit, String>>,
     lut_compare: Option<CompareCache>,
     uploaded_color_cube: bool,
+    /// A glTF model's input-relative path and this inspection's generation, for the 3D view.
+    model: Option<(PathBuf, u64)>,
 }
 
 /// Before / after textures of the LUT compare view for one source image.
@@ -396,6 +399,10 @@ fn shell(
                     _ => None,
                 },
                 state.inspector.running.as_ref().map(|(_, since, _)| *since),
+                match preview3d.model_status {
+                    ModelStatus::Loading(since) => Some(since),
+                    _ => None,
+                },
             ]
             .into_iter()
             .flatten()
@@ -434,10 +441,11 @@ fn shell(
     preview3d.dragging = false;
     preview3d.environment = false;
     preview3d.colors = false;
+    preview3d.model = None;
     let shown = Shown::of(state.inspected.as_ref());
     let show_3d = match shown {
         Shown::Image => state.mode == ViewMode::ThreeD,
-        Shown::Environment => true,
+        Shown::Environment | Shown::Model => true,
         Shown::Lut => state.lut.view == LutView::Cube,
         Shown::Specimen | Shown::Other => false,
     };
@@ -461,7 +469,7 @@ fn shell(
             let (options, active, enabled): (&[&str], _, _) = match shown {
                 Shown::Image => (&modes, mode, true),
                 Shown::Lut => (&lut_views, lut_view, true),
-                Shown::Environment | Shown::Specimen => (&[], None, false),
+                Shown::Environment | Shown::Specimen | Shown::Model => (&[], None, false),
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -484,6 +492,9 @@ fn shell(
             match (shown, state.mode) {
                 (Shown::Environment, _) => {
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
+                }
+                (Shown::Model, _) => {
+                    canvas_model(ui, rect, state.inspected.as_ref(), &mut preview3d)
                 }
                 (Shown::Lut, _) => canvas_lut(
                     ui,
@@ -547,6 +558,7 @@ struct Prepared {
     cubemap: Option<Vec<Image>>,
     lut: Option<Lut>,
     noise: Option<Result<Noise, String>>,
+    model: Option<(PathBuf, u64)>,
 }
 
 fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
@@ -590,7 +602,21 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
                 .map_err(|e| e.to_string())
                 .and_then(|text| Noise::parse(&text))
         });
+    // Each inspection of a model is a new generation, so the 3D view reads the file again.
+    static GENERATION: AtomicU64 = AtomicU64::new(0);
+    let model = project
+        .input_dir()
+        .filter(|_| inspection.model && selection.location == Location::Input)
+        .and_then(|input| {
+            selection
+                .path
+                .strip_prefix(input)
+                .ok()
+                .map(Path::to_path_buf)
+        })
+        .map(|path| (path, GENERATION.fetch_add(1, Ordering::Relaxed)));
     Prepared {
+        model,
         pixels: inspection
             .preview
             .take()
@@ -678,6 +704,7 @@ fn inspected(
         noise,
         lut_compare: None,
         uploaded_color_cube: false,
+        model: prepared.model,
     }
 }
 
@@ -2045,6 +2072,7 @@ enum Shown {
     /// A font's specimen sheet: an image without tiling, channels or 3D.
     Specimen,
     Environment,
+    Model,
     Lut,
     Other,
 }
@@ -2053,6 +2081,7 @@ impl Shown {
     fn of(inspected: Option<&Inspected>) -> Self {
         match inspected {
             Some(i) if i.cubemap.is_some() => Self::Environment,
+            Some(i) if i.model.is_some() => Self::Model,
             Some(i) if i.lut.is_some() => Self::Lut,
             Some(i) if i.inspection.specimen && i.preview.is_some() => Self::Specimen,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
@@ -2568,6 +2597,27 @@ fn canvas_environment(
     if let Some((_, button)) = toolbar(ui, rect, &[&shapes]) {
         preview.environment_shape = Some(Shape::ALL[button]);
         ui.ctx().request_repaint();
+    }
+}
+
+/// A glTF model in the 3D view, see docs/features/models.md#preview.
+fn canvas_model(ui: &mut Ui, rect: Rect, inspected: Option<&Inspected>, preview: &mut Preview3d) {
+    let Some(Inspected {
+        model: Some(model), ..
+    }) = inspected
+    else {
+        return;
+    };
+    preview.model = Some(model.clone());
+    view_3d(ui, rect, preview);
+    if let ModelStatus::Failed(error) = &preview.model_status {
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            format!("Could not load the model: {error}"),
+            FontId::proportional(14.0),
+            TEXT_WEAK,
+        );
     }
 }
 
