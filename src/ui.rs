@@ -27,7 +27,8 @@ use crate::manifest::Kind;
 use crate::model;
 use crate::noise::{GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Value};
 use crate::preview3d::{
-    CompiledUpload, CubemapUpload, MeshDisplay, ModelStatus, Orbit, Preview3d, Shape, Upload,
+    CompiledUpload, CubemapUpload, MeshDisplay, MeshOverlay, ModelStatus, Orbit, Preview3d, Shape,
+    Upload,
 };
 use crate::texture::Image;
 use crate::theme::{
@@ -81,6 +82,8 @@ struct UiState {
     mip_levels: HashMap<PathBuf, usize>,
     /// How compiled meshes are drawn.
     mesh_display: MeshDisplay,
+    /// Bounds drawn over compiled meshes, by index in [`MeshOverlay::ALL`].
+    mesh_overlays: [bool; 6],
     /// Level of detail shown for each compiled mesh, by path.
     lod_levels: HashMap<PathBuf, usize>,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
@@ -317,6 +320,7 @@ impl Default for UiState {
             animations: HashMap::new(),
             mip_levels: HashMap::new(),
             mesh_display: MeshDisplay::default(),
+            mesh_overlays: [false; 6],
             lod_levels: HashMap::new(),
             mesh_in_3d: true,
             font_atlas: true,
@@ -631,6 +635,7 @@ fn shell(
                         state.inspected.as_mut(),
                         &mut preview3d,
                         &mut state.mesh_display,
+                        &mut state.mesh_overlays,
                         lod,
                     )
                 }
@@ -3925,6 +3930,7 @@ fn canvas_compiled_mesh(
     inspected: Option<&mut Inspected>,
     preview: &mut Preview3d,
     display: &mut MeshDisplay,
+    overlays: &mut [bool; 6],
     lod: usize,
 ) {
     let Some(inspected) = inspected else {
@@ -3947,11 +3953,18 @@ fn canvas_compiled_mesh(
             level: level.clone(),
             bounds: [min, max],
             materials: inspected.compiled_materials.clone(),
+            mesh_bounds: mesh.bounds,
+            submesh_bounds: mesh.submesh_bounds.clone(),
+            meshlet_bounds: mesh.meshlet_bounds.clone(),
+            meshlet_boxes: mesh.meshlet_boxes(),
         });
         inspected.uploaded_lod = Some(lod);
     }
     preview.compiled_shown = true;
     preview.display = *display;
+    // Meshlets exist only for LOD 0.
+    let available = |overlay: MeshOverlay| lod == 0 || !overlay.of_meshlets();
+    preview.overlays = std::array::from_fn(|i| overlays[i] && available(MeshOverlay::ALL[i]));
     view_3d(ui, rect, preview);
     let tools: Vec<Tool> = MeshDisplay::ALL
         .into_iter()
@@ -3969,9 +3982,33 @@ fn canvas_compiled_mesh(
             enabled: true,
         })
         .collect();
-    if let Some((_, button)) = toolbar(ui, rect, &[&tools]) {
-        *display = MeshDisplay::ALL[button];
-        ui.ctx().request_repaint();
+    let bounds: Vec<Tool> = MeshOverlay::ALL
+        .into_iter()
+        .enumerate()
+        .map(|(i, overlay)| Tool {
+            glyph: Glyph::Icon(match overlay {
+                MeshOverlay::BoundingBox => Icon::Scan,
+                MeshOverlay::BoundingSphere => Icon::CircleDashed,
+                MeshOverlay::SubmeshBoxes => Icon::Group,
+                MeshOverlay::MeshletBoxes => Icon::LayoutGrid,
+                MeshOverlay::MeshletSpheres => Icon::CircleDot,
+                MeshOverlay::MeshletCones => Icon::Cone,
+            }),
+            name: overlay.name().into(),
+            on: preview.overlays[i],
+            enabled: available(overlay),
+        })
+        .collect();
+    match toolbar(ui, rect, &[&tools, &bounds]) {
+        Some((0, button)) => {
+            *display = MeshDisplay::ALL[button];
+            ui.ctx().request_repaint();
+        }
+        Some((_, button)) => {
+            overlays[button] = !overlays[button];
+            ui.ctx().request_repaint();
+        }
+        None => {}
     }
     // The level drawn, left of the toolbar's first button.
     let painter = ui.painter_at(rect);

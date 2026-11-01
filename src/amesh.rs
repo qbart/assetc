@@ -235,12 +235,35 @@ pub struct Summary {
     pub meshlets: usize,
 }
 
-#[derive(Clone, Copy)]
-struct Bounds {
-    min: [f32; 3],
-    max: [f32; 3],
-    center: [f32; 3],
-    radius: f32,
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Bounds {
+    pub min: [f32; 3],
+    pub max: [f32; 3],
+    pub center: [f32; 3],
+    pub radius: f32,
+}
+
+impl Bounds {
+    /// Reads a 40-byte `Bounds` record at `at`.
+    fn read(bytes: &[u8], at: usize) -> Option<Self> {
+        let f = |k: usize| chunks::f32_at(bytes, 0, 4, at + k * 4);
+        let three = |k: usize| Some([f(k)?, f(k + 1)?, f(k + 2)?]);
+        Some(Self {
+            min: three(0)?,
+            max: three(3)?,
+            center: three(6)?,
+            radius: f(9)?,
+        })
+    }
+}
+
+/// A meshlet's `MeshletBounds` record.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeshletBounds {
+    pub center: [f32; 3],
+    pub radius: f32,
+    pub cone_axis: [f32; 3],
+    pub cone_cutoff: f32,
 }
 
 fn bounds<'a>(positions: impl Iterator<Item = &'a [f32; 3]> + Clone) -> Bounds {
@@ -566,8 +589,35 @@ impl Level {
 #[derive(Clone, Debug, Default)]
 pub struct Preview {
     pub levels: Vec<Level>,
+    /// Bounds of the whole mesh (`BOUNDS`), of each submesh, and of each meshlet.
+    pub bounds: Bounds,
+    pub submesh_bounds: Vec<Bounds>,
+    pub meshlet_bounds: Vec<MeshletBounds>,
     /// Asset IDs of the material slots (`MATERIAL`).
     pub materials: Vec<u64>,
+}
+
+impl Preview {
+    /// Each meshlet's box, around the vertices of its LOD 0 triangles (empty if it has none).
+    pub fn meshlet_boxes(&self) -> Vec<[[f32; 3]; 2]> {
+        let mut boxes =
+            vec![[[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]; self.meshlet_bounds.len()];
+        let Some(full) = self.levels.first() else {
+            return boxes;
+        };
+        for (t, &m) in full.meshlets.iter().enumerate() {
+            let Some([min, max]) = boxes.get_mut(m as usize) else {
+                continue;
+            };
+            for p in &full.positions[t * 3..t * 3 + 3] {
+                for c in 0..3 {
+                    min[c] = min[c].min(p[c]);
+                    max[c] = max[c].max(p[c]);
+                }
+            }
+        }
+        boxes
+    }
 }
 
 pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
@@ -686,8 +736,27 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
             levels.push(level);
         }
     }
+    let mesh_bounds = reader.require("BOUNDS")?;
+    let meshlet_bounds = reader.require("MLBOUNDS")?;
     Ok(Preview {
         levels,
+        bounds: Bounds::read(mesh_bounds, 0).ok_or_else(bad)?,
+        submesh_bounds: (0..submesh_count)
+            .map(|s| Bounds::read(submeshes, s * 64 + 24))
+            .collect::<Option<_>>()
+            .ok_or_else(bad)?,
+        meshlet_bounds: (0..meshlet_bounds.len() / 32)
+            .map(|m| {
+                let f = |at| chunks::f32_at(meshlet_bounds, m, 32, at);
+                Some(MeshletBounds {
+                    center: [f(0)?, f(4)?, f(8)?],
+                    radius: f(12)?,
+                    cone_axis: [f(16)?, f(20)?, f(24)?],
+                    cone_cutoff: f(28)?,
+                })
+            })
+            .collect::<Option<_>>()
+            .ok_or_else(bad)?,
         materials: reader
             .require("MATERIAL")?
             .as_chunks::<8>()
@@ -1092,6 +1161,30 @@ mod tests {
         assert_eq!(*full.submeshes.last().unwrap(), 1);
         assert_eq!(full.material_slots[0], Some(0));
         assert_eq!(*full.material_slots.last().unwrap(), None);
+        // Bounds: the mesh's hold each submesh's and each meshlet's box.
+        assert_eq!(preview.submesh_bounds.len(), 2);
+        assert_eq!(preview.meshlet_bounds.len(), summary.meshlets);
+        let b = preview.bounds;
+        let inside = |[min, max]: [[f32; 3]; 2]| {
+            (0..3)
+                .all(|c| min[c] >= b.min[c] - 1e-5 && max[c] <= b.max[c] + 1e-5 && min[c] <= max[c])
+        };
+        assert!(
+            preview
+                .submesh_bounds
+                .iter()
+                .all(|s| inside([s.min, s.max]))
+        );
+        let boxes = preview.meshlet_boxes();
+        assert_eq!(boxes.len(), summary.meshlets);
+        assert!(boxes.iter().all(|&m| inside(m)));
+        // Each meshlet's sphere holds its box's center.
+        for (m, [min, max]) in preview.meshlet_bounds.iter().zip(&boxes) {
+            let d: f32 = (0..3)
+                .map(|c| ((min[c] + max[c]) / 2.0 - m.center[c]).powi(2))
+                .sum();
+            assert!(d.sqrt() <= m.radius + 1e-4);
+        }
         // Normals, tangents and their handedness decode back.
         assert!(full.normals.iter().all(|n| (n[2] - 1.0).abs() < 1e-3));
         assert!(

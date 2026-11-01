@@ -161,6 +161,8 @@ pub struct Preview3d {
     /// Show the last compiled mesh uploaded.
     pub compiled_shown: bool,
     pub display: MeshDisplay,
+    /// Which [`MeshOverlay`]s are drawn, by index in [`MeshOverlay::ALL`].
+    pub overlays: [bool; 6],
 }
 
 /// A compiled mesh and its material slots, see docs/features/models.md#compiled-mesh-preview.
@@ -170,6 +172,52 @@ pub struct CompiledUpload {
     /// Bounds of the full mesh (min, max), so every level is fitted alike.
     pub bounds: [Vec3; 2],
     pub materials: Vec<Option<crate::inspect::MaterialPreview>>,
+    /// The file's bounds (`BOUNDS`, each submesh's, each meshlet's) and each meshlet's box.
+    pub mesh_bounds: crate::amesh::Bounds,
+    pub submesh_bounds: Vec<crate::amesh::Bounds>,
+    pub meshlet_bounds: Vec<crate::amesh::MeshletBounds>,
+    pub meshlet_boxes: Vec<[[f32; 3]; 2]>,
+}
+
+/// Bounds drawn over a compiled mesh; see docs/features/models.md#compiled-mesh-preview.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MeshOverlay {
+    BoundingBox,
+    BoundingSphere,
+    SubmeshBoxes,
+    MeshletBoxes,
+    MeshletSpheres,
+    MeshletCones,
+}
+
+impl MeshOverlay {
+    pub const ALL: [Self; 6] = [
+        Self::BoundingBox,
+        Self::BoundingSphere,
+        Self::SubmeshBoxes,
+        Self::MeshletBoxes,
+        Self::MeshletSpheres,
+        Self::MeshletCones,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::BoundingBox => "Bounding box",
+            Self::BoundingSphere => "Bounding sphere",
+            Self::SubmeshBoxes => "Submesh boxes",
+            Self::MeshletBoxes => "Meshlet boxes",
+            Self::MeshletSpheres => "Meshlet spheres",
+            Self::MeshletCones => "Meshlet cones",
+        }
+    }
+
+    /// Drawn from the meshlets, which only LOD 0 has.
+    pub fn of_meshlets(self) -> bool {
+        matches!(
+            self,
+            Self::MeshletBoxes | Self::MeshletSpheres | Self::MeshletCones
+        )
+    }
 }
 
 /// How a compiled mesh is drawn.
@@ -220,12 +268,17 @@ impl MeshDisplay {
 #[derive(Component)]
 struct CompiledPart;
 
+/// The lines of one [`MeshOverlay`], by index in [`MeshOverlay::ALL`].
+#[derive(Component)]
+struct CompiledOverlay(usize);
+
 /// A compiled mesh on the GPU: vertex-colored meshes, the wireframe, and one entity per
 /// material slot for the Material mode, with every asset they own.
 struct CompiledScene {
     colored: [Handle<Mesh>; 4],
     wire: Handle<Mesh>,
     parts: Vec<Entity>,
+    overlays: Vec<Entity>,
     meshes: Vec<Handle<Mesh>>,
     materials: Vec<Handle<StandardMaterial>>,
     images: Vec<Handle<Image>>,
@@ -652,11 +705,12 @@ fn sync_compiled(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut parts: Query<&mut Visibility, With<CompiledPart>>,
+    mut parts: Query<&mut Visibility, (With<CompiledPart>, Without<CompiledOverlay>)>,
+    mut overlays: Query<(&CompiledOverlay, &mut Visibility), Without<CompiledPart>>,
 ) {
     if let Some(upload) = preview.compiled.take() {
         if let Some(old) = scene.compiled.take() {
-            for entity in old.parts {
+            for entity in old.parts.into_iter().chain(old.overlays) {
                 commands.entity(entity).despawn();
             }
             for handle in old.meshes {
@@ -669,27 +723,91 @@ fn sync_compiled(
                 images.remove(&handle);
             }
         }
+        let unlit = scene.unlit.clone();
         scene.compiled = Some(build_compiled(
             upload,
+            &unlit,
             &mut commands,
             &mut meshes,
             &mut materials,
             &mut images,
         ));
     }
-    let shown = preview.viewport.is_some()
-        && preview.compiled_shown
-        && !preview.environment
-        && preview.display == MeshDisplay::Material;
-    let wanted = if shown {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
+    let visible = |shown: bool| {
+        if shown {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        }
     };
+    let compiled = preview.viewport.is_some() && preview.compiled_shown && !preview.environment;
+    let wanted = visible(compiled && preview.display == MeshDisplay::Material);
     for mut visibility in &mut parts {
         if *visibility != wanted {
             *visibility = wanted;
         }
+    }
+    for (overlay, mut visibility) in &mut overlays {
+        let wanted = visible(compiled && preview.overlays[overlay.0]);
+        if *visibility != wanted {
+            *visibility = wanted;
+        }
+    }
+}
+
+/// Lines of a box's 12 edges.
+fn box_lines(lines: &mut Vec<[f32; 3]>, min: Vec3, max: Vec3) {
+    let corner = |i: usize| {
+        Vec3::new(
+            if i & 1 == 0 { min.x } else { max.x },
+            if i & 2 == 0 { min.y } else { max.y },
+            if i & 4 == 0 { min.z } else { max.z },
+        )
+        .to_array()
+    };
+    for i in 0..8 {
+        for bit in [1, 2, 4] {
+            if i & bit == 0 {
+                lines.extend([corner(i), corner(i | bit)]);
+            }
+        }
+    }
+}
+
+/// Lines of a circle around `center` in the plane of the unit vectors `u`, `v`.
+fn circle_lines(
+    lines: &mut Vec<[f32; 3]>,
+    center: Vec3,
+    u: Vec3,
+    v: Vec3,
+    radius: f32,
+    segments: usize,
+) {
+    let point = |k: usize| {
+        let a = k as f32 / segments as f32 * std::f32::consts::TAU;
+        (center + (u * a.cos() + v * a.sin()) * radius).to_array()
+    };
+    for k in 0..segments {
+        lines.extend([point(k), point(k + 1)]);
+    }
+}
+
+/// Three great circles, in the XY, YZ and XZ planes.
+fn sphere_lines(lines: &mut Vec<[f32; 3]>, center: Vec3, radius: f32) {
+    for (u, v) in [(Vec3::X, Vec3::Y), (Vec3::Y, Vec3::Z), (Vec3::X, Vec3::Z)] {
+        circle_lines(lines, center, u, v, radius, 48);
+    }
+}
+
+/// A normal cone: apex at `apex`, around `axis`, `half_angle` wide, `slant` long.
+fn cone_lines(lines: &mut Vec<[f32; 3]>, apex: Vec3, axis: Vec3, half_angle: f32, slant: f32) {
+    let (u, v) = axis.any_orthonormal_pair();
+    let base = apex + axis * slant * half_angle.cos();
+    let radius = slant * half_angle.sin();
+    lines.extend([apex.to_array(), base.to_array()]);
+    circle_lines(lines, base, u, v, radius, 32);
+    for dir in [u, v, -u, -v] {
+        lines.extend([apex.to_array(), (base + dir * radius).to_array()]);
     }
 }
 
@@ -728,6 +846,7 @@ fn bevy_image(image: &crate::texture::Image, srgb: bool) -> Image {
 
 fn build_compiled(
     upload: CompiledUpload,
+    unlit: &Handle<StandardMaterial>,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
@@ -870,10 +989,95 @@ fn build_compiled(
                 .id(),
         );
     }
+
+    // Bounds, as vertex-colored lines placed like the mesh.
+    let place = |p: [f32; 3]| (Vec3::from(p) - center) * scale;
+    let [ar, ag, ab, _] = crate::theme::ACCENT.to_array();
+    let accent = Color::srgb_u8(ar, ag, ab).to_linear().to_f32_array();
+    let mut overlays = Vec::new();
+    for (i, overlay) in MeshOverlay::ALL.into_iter().enumerate() {
+        let (mut lines, mut colors) = (Vec::new(), Vec::new());
+        let mut add =
+            |lines: &mut Vec<[f32; 3]>, color: [f32; 4], draw: &dyn Fn(&mut Vec<[f32; 3]>)| {
+                let start = lines.len();
+                draw(lines);
+                colors.resize(colors.len() + lines.len() - start, color);
+            };
+        let b = &upload.mesh_bounds;
+        match overlay {
+            MeshOverlay::BoundingBox => add(&mut lines, accent, &|l| {
+                box_lines(l, place(b.min), place(b.max))
+            }),
+            MeshOverlay::BoundingSphere => add(&mut lines, accent, &|l| {
+                sphere_lines(l, place(b.center), b.radius * scale)
+            }),
+            MeshOverlay::SubmeshBoxes => {
+                for (s, b) in upload.submesh_bounds.iter().enumerate() {
+                    add(&mut lines, id_color(s as u32), &|l| {
+                        box_lines(l, place(b.min), place(b.max))
+                    });
+                }
+            }
+            MeshOverlay::MeshletBoxes => {
+                for (m, [min, max]) in upload.meshlet_boxes.iter().enumerate() {
+                    if min[0] <= max[0] {
+                        add(&mut lines, id_color(m as u32), &|l| {
+                            box_lines(l, place(*min), place(*max))
+                        });
+                    }
+                }
+            }
+            MeshOverlay::MeshletSpheres => {
+                for (m, b) in upload.meshlet_bounds.iter().enumerate() {
+                    add(&mut lines, id_color(m as u32), &|l| {
+                        sphere_lines(l, place(b.center), b.radius * scale)
+                    });
+                }
+            }
+            MeshOverlay::MeshletCones => {
+                for (m, b) in upload.meshlet_bounds.iter().enumerate() {
+                    let axis = Vec3::from(b.cone_axis).normalize_or_zero();
+                    if b.cone_cutoff < 1.0 && axis != Vec3::ZERO {
+                        add(&mut lines, id_color(m as u32), &|l| {
+                            cone_lines(
+                                l,
+                                place(b.center),
+                                axis,
+                                b.cone_cutoff.max(0.0).asin(),
+                                b.radius * scale,
+                            )
+                        });
+                    }
+                }
+            }
+        }
+        if lines.is_empty() {
+            continue;
+        }
+        let mesh = meshes.add(
+            Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default())
+                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, lines)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors),
+        );
+        owned_meshes.push(mesh.clone());
+        overlays.push(
+            commands
+                .spawn((
+                    CompiledOverlay(i),
+                    Mesh3d(mesh),
+                    MeshMaterial3d(unlit.clone()),
+                    Transform::default(),
+                    Visibility::Hidden,
+                ))
+                .id(),
+        );
+    }
+
     CompiledScene {
         colored,
         wire,
         parts,
+        overlays,
         meshes: owned_meshes,
         materials: owned_materials,
         images: owned_images,
