@@ -21,6 +21,11 @@ View  [ 2D | 3D ]
   `TEXT_WEAK` text, `TEXT` and a `BG_HEADER` fill on hover.
 - **2D** is the default. The mode is global (not per image) and lasts for the
   session.
+- The bar is always shown, but the mode only applies to **images**; with
+  anything else selected, both buttons are disabled (`TEXT_WEAK` at 50%, no
+  hover or clicks). An [environment map](#environment-maps) is always shown in
+  3D, so its 3D button is drawn active and 2D disabled; for other selections
+  neither is active.
 
 The rest of the canvas, below the bar, shows the selection in the chosen
 mode. Everything below ("canvas") means that area.
@@ -42,7 +47,8 @@ Both modes show the same messages when there is no image to show.
 | source texture (Input `*.png`, `*.jpg`, `*.jpeg`) | the decoded image |
 | compiled texture (Output `*.ktx2`)| level 0, if the file is in assetc's own KTX2 subset (`R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression, see [`ktx2.md`](../spec/ktx2.md)); otherwise "No preview for this format" |
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
-| any other file                    | "No preview"                              |
+| an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
+| any other file or folder          | "No preview"                              |
 | a selected file that disappeared  | "<name> no longer exists"                 |
 
 Messages are weak text centered in the canvas.
@@ -260,3 +266,33 @@ While the pointer is over the canvas (see also [`KEYS.md`](../../KEYS.md)):
 | Left or right drag            | orbit: horizontal → yaw, vertical → pitch, 0.3° per point  |
 | Scroll wheel, pinch           | dolly: distance ÷ 1.2 per notch toward the shape (× 1.2 away) |
 | Double-click (left)           | reset the camera                                           |
+
+## Environment maps
+
+A folder named `*.env` (any case) is a cubemap given as six face images:
+
+| File  | Face | Cube layer |
+|-------|------|------------|
+| `px.*` | +X  | 0          |
+| `nx.*` | −X  | 1          |
+| `py.*` | +Y  | 2          |
+| `ny.*` | −Y  | 3          |
+| `pz.*` | +Z  | 4          |
+| `nz.*` | −Z  | 5          |
+
+- Faces are direct children with those names (case-sensitive) and a texture
+  source extension (`png`, `jpg`, `jpeg`) in the Input tree, or `.ktx2`
+  (assetc's subset, level 0) in the Output tree.
+- All six must exist, decode, be square, have the same size, and that size
+  must be a power of two; otherwise the canvas shows the problem as its
+  message (the Inspector shows it as an Error row).
+- Selecting it shows the 3D view with the faces uploaded as an sRGB cubemap
+  (stored as given, no flipping):
+  - as the **background** (skybox, 1000 cd/m²), and
+  - as the only **light** (image-based lighting filtered at runtime,
+    intensity 1000): the directional and ambient lights are off.
+- The shape is a mirror-like material (white, metallic, roughness 0.2) so the
+  lighting and reflections are visible; the Shape group, auto-rotation and
+  the orbit camera work as for images. The Channels group is not shown.
+- This is a preview only: the build still compiles each face as a plain
+  texture.

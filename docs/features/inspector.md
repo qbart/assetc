@@ -6,8 +6,8 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Selection
 
-- Clicking a **file** row in the Input or Output tree selects it. Clicking a
-  folder row still only opens/closes it.
+- Clicking a **file** or **folder** row in the Input or Output tree selects
+  it. Clicking a folder row also opens / closes it.
 - One file is selected at a time, across both tabs: selecting a file in one
   tab replaces a selection in the other. Switching tabs keeps the selection.
 - The selected row is filled with `ACCENT` at 25% opacity and has a 2 px
@@ -54,6 +54,8 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `*.mat`                    | Compiled material  |
 | Output | `assets.manifest` at the output root | Manifest |
 | Output | anything else              | File               |
+| either | folder named `*.env` (any case) | Environment map |
+| either | any other folder           | Folder             |
 
 Every kind shows **Kind** and **Size** (`B`, `KiB`, `MiB`, `GiB` with one
 decimal, e.g. `12.3 KiB`; plain bytes below 1 KiB, e.g. `512 B`).
@@ -86,6 +88,20 @@ Material sources, compiled materials, and source textures used by a material
 get extra rows, see [`materials.md`](materials.md#inspector).
 
 **Manifest:** Version, Entries (count).
+
+**Folder:** Kind and Items (number of direct entries, hidden ones excluded);
+no Size row.
+
+**Environment map** (a cubemap given as a folder, see
+[`canvas.md`](canvas.md#environment-maps)):
+
+| Row       | Value                                                          |
+|-----------|----------------------------------------------------------------|
+| Faces     | `6 of 6`, or `4 of 6 (missing nz, pz)`                         |
+| Face size | `W × H px` of the faces                                        |
+
+plus an **Error** row when a face fails to decode or the faces are not all
+square, the same size, and a power of two.
 
 **Ignored / File:** Kind and Size only.
 

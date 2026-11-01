@@ -60,9 +60,9 @@ Each tab shows a tree of the directory configured in `assetc.toml`
 
 - Each row: chevron (`chevron-right` / `chevron-down`, folders only), icon
   (`folder` / `folder-open` / `file`), name. Rows are 22 px tall, indented
-  14 px per level, and highlight with `BG_HEADER` on hover; clicking a folder
-  row toggles it, clicking a file row selects it for the Inspector (see
-  [`inspector.md`](inspector.md#selection)).
+  14 px per level, and highlight with `BG_HEADER` on hover. Clicking a folder
+  row opens / closes it **and** selects it; clicking a file row selects it
+  (see [`inspector.md`](inspector.md#selection)).
 - Folders are collapsible (collapsed by default) and listed before files;
   each group is sorted by name, case-insensitively.
 - Entries whose name starts with `.` are hidden.
