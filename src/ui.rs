@@ -867,9 +867,9 @@ fn start_build(state: &mut UiState, project: &Project) {
     let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
         return;
     };
-    let textures = project.config.textures.clone();
+    let config = project.config.clone();
     state.build = BuildStatus::Running(
-        std::thread::spawn(move || build::run(&input, &output, &textures)),
+        std::thread::spawn(move || build::run(&input, &output, &config)),
         Instant::now(),
     );
 }

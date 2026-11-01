@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+use crate::amesh::{MeshSettings, MeshletLimits};
 use crate::build::{
     Error, Failure, is_lut, is_noise, is_texture_source, relative, strip_extension,
 };
@@ -56,7 +57,10 @@ pub enum Job {
     /// docs/features/lut.md#build.
     Lut { source: String, volume: bool },
     /// A glTF model (relative to `input`): writes its `.amesh` and every other output of it.
-    Model { source: String },
+    Model {
+        source: String,
+        limits: MeshletLimits,
+    },
     /// Another output of a model, written by its [`Job::Model`].
     ModelPart { source: String },
     Material {
@@ -86,7 +90,7 @@ impl Asset {
                 .join(", "),
             Job::Material { source, .. }
             | Job::Lut { source, .. }
-            | Job::Model { source }
+            | Job::Model { source, .. }
             | Job::ModelPart { source } => source.clone(),
         }
     }
@@ -113,7 +117,7 @@ struct Group {
 }
 
 /// The assets of one glTF model; see docs/features/models.md#build.
-fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs) {
+fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs, limits: MeshletLimits) {
     let p = strip_extension(source);
     let mut push = |kind: Kind, asset_path: String, job: Job| {
         plan.assets.push(Asset {
@@ -132,6 +136,7 @@ fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs) {
         format!("{p}.amesh"),
         Job::Model {
             source: source.to_owned(),
+            limits,
         },
     );
     if outputs.animation {
@@ -155,8 +160,9 @@ struct Claim {
     flip_green: bool,
 }
 
-pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
-    let settings = Settings::new(textures).map_err(Error::Pattern)?;
+pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
+    let settings = Settings::new(&config.textures).map_err(Error::Pattern)?;
+    let meshes = MeshSettings::new(&config.meshes).map_err(Error::Meshes)?;
     let nodes = tree::scan(input).map_err(|e| Error::Io(input.to_path_buf(), e))?;
     let mut files = Vec::new();
     flatten(&nodes, &mut files);
@@ -199,7 +205,7 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
                 .map_err(|e| e.to_string())
                 .and_then(|data| model::outputs(&data))
             {
-                Ok(outputs) => model_assets(&mut plan, &rel, &outputs),
+                Ok(outputs) => model_assets(&mut plan, &rel, &outputs, meshes.limits(&rel)),
                 Err(message) => plan.failures.push(Failure {
                     source: rel,
                     message,

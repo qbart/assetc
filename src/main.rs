@@ -75,7 +75,7 @@ fn build() -> Result<(), Box<dyn std::error::Error>> {
     let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
         return Err(format!("no {} found (run assetc init)", config::FILE_NAME).into());
     };
-    let outcome = build::run(&input, &output, &project.config.textures)?;
+    let outcome = build::run(&input, &output, &project.config)?;
     for built in &outcome.built {
         println!("{} -> {} ({})", built.source, built.output, built.detail);
     }

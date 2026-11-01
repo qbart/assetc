@@ -218,7 +218,7 @@ fn source_texture(
     let mut output = None;
     match project
         .input_dir()
-        .map(|dir| plan::plan(&dir, &project.config.textures))
+        .map(|dir| plan::plan(&dir, &project.config))
     {
         Some(Ok(plan)) => {
             let uses = plan.uses.get(rel).map(Vec::as_slice).unwrap_or_default();
@@ -361,6 +361,19 @@ fn model_rows(
     out.animations = model::animations(&data)?;
     out.model = true;
     // Compiled to an `.amesh` and more, see docs/features/models.md#build.
+    out.rows.push((
+        "Meshlet limits",
+        match crate::amesh::MeshSettings::new(&project.config.meshes) {
+            Ok(settings) => {
+                let limits = settings.limits(rel);
+                format!(
+                    "{} vertices, {} triangles",
+                    limits.max_vertices, limits.max_triangles
+                )
+            }
+            Err(e) => e,
+        },
+    ));
     let mesh = format!("{}.amesh", strip_extension(rel));
     out.rows.push(("Asset path", mesh.clone()));
     output_row(project, &mesh, "", out);
@@ -700,7 +713,7 @@ mod tests {
 
         let input = project.input_dir().unwrap();
         let output = project.output_dir().unwrap();
-        build::run(&input, &output, &project.config.textures).unwrap();
+        build::run(&input, &output, &project.config).unwrap();
         let i = inspect(&project, Location::Input, &file);
         assert_eq!(row(&i, "Output"), "textures/rock_n.ktx2");
 
@@ -924,7 +937,7 @@ mod tests {
 
         let input = project.input_dir().unwrap();
         let output = project.output_dir().unwrap();
-        build::run(&input, &output, &project.config.textures).unwrap();
+        build::run(&input, &output, &project.config).unwrap();
         let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
         assert_eq!(row(&r, "Output"), "brick/brick.orm.ktx2 (channel G)");
 
@@ -991,6 +1004,8 @@ mod tests {
         let i = inspect(&project, Location::Input, &fox);
         assert_eq!(row(&i, "Kind"), "Model");
         assert_eq!(row(&i, "Animations"), "3");
+        assert_eq!(row(&i, "Meshlet limits"), "64 vertices, 124 triangles");
+        assert_eq!(row(&i, "Asset path"), "Fox.amesh");
         assert_eq!(i.animations.len(), 3);
         assert!(i.model);
 

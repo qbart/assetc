@@ -57,7 +57,7 @@ impl Settings {
     }
 }
 
-fn glob_set(patterns: &[String]) -> Result<GlobSet, globset::Error> {
+pub fn glob_set(patterns: &[String]) -> Result<GlobSet, globset::Error> {
     let mut set = GlobSetBuilder::new();
     for pattern in patterns {
         set.add(GlobBuilder::new(pattern).literal_separator(true).build()?);

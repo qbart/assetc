@@ -88,6 +88,8 @@ pub enum Error {
     /// `output` is `input` or one of its ancestors.
     OutputContainsInput(PathBuf),
     Pattern(globset::Error),
+    /// Invalid `[meshes]` settings.
+    Meshes(String),
     Io(PathBuf, io::Error),
 }
 
@@ -103,6 +105,7 @@ impl fmt::Display for Error {
                 dir.display()
             ),
             Self::Pattern(e) => write!(f, "{} [textures]: {e}", config::FILE_NAME),
+            Self::Meshes(e) => write!(f, "{} [meshes]: {e}", config::FILE_NAME),
             Self::Io(path, e) => write!(f, "{}: {e}", path.display()),
         }
     }
@@ -110,9 +113,10 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<Outcome, Error> {
-    // Checked first so a bad pattern is reported even without an input directory.
-    texture::Settings::new(textures).map_err(Error::Pattern)?;
+pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outcome, Error> {
+    // Checked first so bad settings are reported even without an input directory.
+    texture::Settings::new(&config.textures).map_err(Error::Pattern)?;
+    crate::amesh::MeshSettings::new(&config.meshes).map_err(Error::Meshes)?;
     if !input.is_dir() {
         return Err(Error::MissingInput(input.to_path_buf()));
     }
@@ -123,7 +127,7 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
             return Err(Error::OutputContainsInput(output.to_path_buf()));
         }
     }
-    let plan = plan::plan(input, textures)?;
+    let plan = plan::plan(input, config)?;
     let mut outcome = Outcome {
         skipped: plan.skipped,
         failures: plan.failures,
@@ -142,7 +146,7 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
                 .map(|levels| levels_detail(*color, levels)),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
-            Job::Model { source } => compile_model(input, source, output),
+            Job::Model { source, limits } => compile_model(input, source, output, *limits),
             // Written with its model.
             Job::ModelPart { .. } => continue,
             Job::Lut { source, volume } => {
@@ -326,9 +330,14 @@ pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType)
 }
 
 /// Writes every output of a glTF model; see docs/features/models.md#build.
-fn compile_model(input: &Path, source: &str, output: &Path) -> Result<String, String> {
+fn compile_model(
+    input: &Path,
+    source: &str,
+    output: &Path,
+    limits: crate::amesh::MeshletLimits,
+) -> Result<String, String> {
     let p = strip_extension(source);
-    let model = crate::model::compile(&input.join(source), p)?;
+    let model = crate::model::compile(&input.join(source), p, limits)?;
     write(&output.join(format!("{p}.amesh")), &model.mesh)?;
     if let Some(animation) = &model.animation {
         write(&output.join(format!("{p}.aanim")), animation)?;
@@ -456,6 +465,13 @@ fn write(dest: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_textures(textures: &config::Textures) -> config::Config {
+        config::Config {
+            textures: textures.clone(),
+            ..Default::default()
+        }
+    }
     use crate::hash::fnv1a64;
 
     fn png(path: &Path, w: u32, h: u32) {
@@ -481,7 +497,7 @@ mod tests {
         png(&input.join("logo.PNG"), 1, 1);
         fs::write(input.join("notes.txt"), "x").unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(outcome.built.len(), 2);
         assert_eq!(outcome.skipped, 1);
@@ -511,7 +527,7 @@ mod tests {
         png(&input.join("ok.png"), 1, 1);
         fs::write(input.join("broken.png"), "not a png").unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "broken.png");
         assert!(outcome.summary().starts_with("Build failed: broken.png:"));
@@ -528,7 +544,7 @@ mod tests {
             .save(input.join("brick.n.JPEG"))
             .unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(outcome.built[0].output, "brick.n.ktx2");
         let ktx = fs::read(output.join("brick.n.ktx2")).unwrap();
@@ -551,7 +567,7 @@ mod tests {
             .save(input.join("a.jpg"))
             .unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 2);
         assert!(outcome.failures[0].message.contains("collides"));
     }
@@ -568,7 +584,7 @@ mod tests {
         fs::write(input.join("grades/warm.lut.cube"), cube).unwrap();
         fs::write(input.join("bad.cube"), "LUT_3D_SIZE 2\n").unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "bad.cube");
         let path = output.join("grades/warm.lut.ktx2");
@@ -603,7 +619,7 @@ mod tests {
             ..Default::default()
         };
 
-        let outcome = run(&input, &output, &textures).unwrap();
+        let outcome = run(&input, &output, &with_textures(&textures)).unwrap();
         assert!(outcome.failures.is_empty());
         let size = |name: &str| {
             let bytes = fs::read(output.join(name)).unwrap();
@@ -634,11 +650,11 @@ mod tests {
         .unwrap();
         fs::write(input.join("models/broken.gltf"), "{").unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "models/broken.gltf");
         fs::remove_file(input.join("models/broken.gltf")).unwrap();
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         let built: Vec<_> = outcome.built.iter().map(|b| b.output.as_str()).collect();
         assert_eq!(built, ["models/Fox.amesh"]);
@@ -669,6 +685,25 @@ mod tests {
             reader.require("MATERIAL").unwrap(),
             fnv1a64(b"models/Fox/fox_material.amat").to_le_bytes()
         );
+
+        // Meshlet limits come from [meshes], overridden per model.
+        let mut config = config::Config::default();
+        config.meshes.overrides.push(config::MeshOverride {
+            patterns: vec!["models/*.glb".into()],
+            meshlet_max_vertices: Some(32),
+            meshlet_max_triangles: Some(32),
+        });
+        run(&input, &output, &config).unwrap();
+        let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
+        let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
+        let desc = reader.require("DESC").unwrap();
+        assert_eq!(desc[24..32], [32, 0, 0, 0, 32, 0, 0, 0]);
+        config.meshes.meshlet_max_triangles = 7;
+        let error = run(&input, &output, &config).unwrap_err().to_string();
+        assert_eq!(
+            error,
+            "assetc.toml [meshes]: meshlet_max_triangles 7 must be 4–512 and a multiple of 4"
+        );
     }
 
     #[test]
@@ -684,7 +719,7 @@ mod tests {
         .unwrap();
         fs::write(input.join("bad.noise"), "size = 0\n").unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "bad.noise");
         assert!(outcome.failures[0].message.contains("size must be"));
@@ -704,7 +739,7 @@ mod tests {
         png(&input.join("a.png"), 1, 1);
         png(&input.join("a.PNG"), 1, 1);
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 2);
         assert!(outcome.failures[0].message.contains("collides"));
         assert!(outcome.summary().ends_with("(2 errors)"));
@@ -723,7 +758,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut outcome = run(&input, &output, &textures).unwrap();
+        let mut outcome = run(&input, &output, &with_textures(&textures)).unwrap();
         outcome.built.sort_by(|a, b| a.source.cmp(&b.source));
         let built: Vec<_> = outcome
             .built
@@ -773,7 +808,7 @@ mod tests {
             ..Default::default()
         };
 
-        let outcome = run(&input, &output, &textures).unwrap();
+        let outcome = run(&input, &output, &with_textures(&textures)).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         let lines: Vec<_> = outcome
             .built
@@ -832,7 +867,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(outcome.built[0].source, "gold.mat.toml");
         assert_eq!(outcome.built[0].detail, "material: no textures");
@@ -863,7 +898,7 @@ mod tests {
         )
         .unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(
             level0(&output.join("wall/wall.n.ktx2")).1,
@@ -902,7 +937,7 @@ mod tests {
             for (name, text) in files {
                 fs::write(input.join(name), text).unwrap();
             }
-            let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+            let outcome = run(&input, &output, &config::Config::default()).unwrap();
             assert!(
                 outcome
                     .failures
@@ -921,7 +956,7 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         gray(&input.join("m.r.png"), 4, 4, 1);
         gray(&input.join("m.ao.png"), 2, 2, 1);
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert!(outcome.failures[0].message.contains("differ in size"));
         assert_eq!(outcome.failures[0].source, "m.ao.png, m.r.png");
@@ -933,7 +968,7 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         gray(&input.join("m.r.png"), 1, 1, 1);
         png(&input.join("m.orm.png"), 1, 1);
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(
             outcome
                 .failures
@@ -948,9 +983,9 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         fs::create_dir_all(&input).unwrap();
         fs::write(input.join("a.mat.toml"), "").unwrap();
-        run(&input, &output, &config::Textures::default()).unwrap();
+        run(&input, &output, &config::Config::default()).unwrap();
         fs::remove_file(input.join("a.mat.toml")).unwrap();
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.removed, ["a.amat"]);
     }
 
@@ -965,7 +1000,7 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            run(&input, &output, &textures),
+            run(&input, &output, &with_textures(&textures)),
             Err(Error::Pattern(_))
         ));
         assert!(!output.exists());
@@ -980,7 +1015,7 @@ mod tests {
         png(&input.join("old/deep/gone.png"), 1, 1);
         png(&input.join("shared/gone.png"), 1, 1);
         png(&input.join("shared/stays.png"), 1, 1);
-        run(&input, &output, &textures).unwrap();
+        run(&input, &output, &with_textures(&textures)).unwrap();
 
         fs::remove_dir_all(input.join("old")).unwrap();
         fs::remove_file(input.join("shared/gone.png")).unwrap();
@@ -988,7 +1023,7 @@ mod tests {
         fs::write(output.join(".hidden.ktx2"), "mine").unwrap();
         fs::create_dir_all(output.join("empty")).unwrap();
 
-        let outcome = run(&input, &output, &textures).unwrap();
+        let outcome = run(&input, &output, &with_textures(&textures)).unwrap();
         let mut removed = outcome.removed.clone();
         removed.sort();
         assert_eq!(removed, ["old/deep/gone.ktx2", "shared/gone.ktx2"]);
@@ -1001,7 +1036,7 @@ mod tests {
         assert!(output.join(".hidden.ktx2").is_file());
         assert!(output.join("empty").is_dir());
 
-        let again = run(&input, &output, &textures).unwrap();
+        let again = run(&input, &output, &with_textures(&textures)).unwrap();
         assert!(again.removed.is_empty());
         assert_eq!(again.summary(), "Built 2 textures (0 skipped)");
     }
@@ -1014,7 +1049,7 @@ mod tests {
         fs::create_dir_all(&output).unwrap();
         fs::write(output.join("grass.KTX2"), "older build").unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.removed.is_empty());
         assert!(output.join("grass.KTX2").is_file());
     }
@@ -1028,7 +1063,7 @@ mod tests {
         fs::create_dir_all(&output).unwrap();
         fs::write(output.join("stale.ktx2"), "x").unwrap();
 
-        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert!(outcome.removed.is_empty());
         assert!(output.join("stale.ktx2").is_file());
@@ -1043,7 +1078,7 @@ mod tests {
         for output in [dir.path().to_path_buf(), input.clone(), input.join("..")] {
             assert!(
                 matches!(
-                    run(&input, &output, &textures),
+                    run(&input, &output, &with_textures(&textures)),
                     Err(Error::OutputContainsInput(_))
                 ),
                 "{}",
@@ -1060,7 +1095,7 @@ mod tests {
         let result = run(
             &dir.path().join("nope"),
             &dir.path().join("build"),
-            &config::Textures::default(),
+            &config::Config::default(),
         );
         assert!(matches!(result, Err(Error::MissingInput(_))));
     }

@@ -261,7 +261,11 @@ fn load_uri(uri: &str, dir: &Path) -> Result<Vec<u8>, String> {
 }
 
 /// Compiles the model in `file`, whose asset path is `asset_path` (`P`).
-pub fn compile(file: &Path, asset_path: &str) -> Result<Compiled, String> {
+pub fn compile(
+    file: &Path,
+    asset_path: &str,
+    limits: amesh::MeshletLimits,
+) -> Result<Compiled, String> {
     let data = std::fs::read(file).map_err(|e| e.to_string())?;
     let gltf = parse(&data)?;
     let document = &gltf.document;
@@ -333,7 +337,13 @@ pub fn compile(file: &Path, asset_path: &str) -> Result<Compiled, String> {
         .iter()
         .map(|(_, name)| fnv1a64(format!("{asset_path}/{name}.amat").as_bytes()))
         .collect();
-    let (mesh, summary) = amesh::encode(&primitives, &material_ids, skeleton.as_deref(), tangents);
+    let (mesh, summary) = amesh::encode(
+        &primitives,
+        &material_ids,
+        skeleton.as_deref(),
+        tangents,
+        limits,
+    );
 
     // Animations, for the skeleton.
     let mut clip_count = 0;
@@ -833,7 +843,7 @@ mod tests {
         assert_eq!(outputs.materials, [(0, "Paint".to_owned())]);
         assert!(!outputs.animation);
 
-        let compiled = compile(&file, "props/tri").unwrap();
+        let compiled = compile(&file, "props/tri", amesh::MeshletLimits::default()).unwrap();
         assert!(compiled.animation.is_none());
         assert_eq!(compiled.materials[0].0, "Paint");
         assert_eq!(compiled.materials[0].1.base_color, [1.0, 0.0, 0.0, 1.0]);

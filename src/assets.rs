@@ -91,7 +91,7 @@ mod tests {
         build::run(
             &project.input_dir().unwrap(),
             &project.output_dir().unwrap(),
-            &config::Textures::default(),
+            &config::Config::default(),
         )
         .unwrap();
         project

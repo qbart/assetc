@@ -19,6 +19,15 @@ output = \"build\"
 # [textures]
 # linear = [\"**/*_n.png\"]
 # no_mipmaps = [\"ui/**\"]
+
+# [meshes]
+# meshlet_max_vertices = 64
+# meshlet_max_triangles = 124
+#
+# [[meshes.overrides]]
+# match = [\"characters/**\"]
+# meshlet_max_vertices = 128
+# meshlet_max_triangles = 256
 ";
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -29,6 +38,7 @@ pub struct Config {
     /// Compiled assets directory, relative to the project root.
     pub output: PathBuf,
     pub textures: Textures,
+    pub meshes: Meshes,
 }
 
 /// Per-texture settings, see docs/features/textures.md.
@@ -43,12 +53,45 @@ pub struct Textures {
     pub volume_luts: Vec<String>,
 }
 
+/// Mesh build settings, see docs/spec/assetc.toml.md#meshes.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Meshes {
+    pub meshlet_max_vertices: u32,
+    pub meshlet_max_triangles: u32,
+    /// Per-model values; the last matching one setting a value wins.
+    pub overrides: Vec<MeshOverride>,
+}
+
+impl Default for Meshes {
+    fn default() -> Self {
+        Self {
+            meshlet_max_vertices: 64,
+            meshlet_max_triangles: 124,
+            overrides: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MeshOverride {
+    /// Globs of model paths, as in `[textures]`.
+    #[serde(rename = "match")]
+    pub patterns: Vec<String>,
+    #[serde(default)]
+    pub meshlet_max_vertices: Option<u32>,
+    #[serde(default)]
+    pub meshlet_max_triangles: Option<u32>,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
             input: "assets".into(),
             output: "build".into(),
             textures: Textures::default(),
+            meshes: Meshes::default(),
         }
     }
 }
@@ -218,6 +261,31 @@ mod tests {
         assert_eq!(config.textures.linear, ["**/*_n.png"]);
         assert_eq!(config.textures.no_mipmaps, ["ui/**"]);
         assert!(toml::from_str::<Config>("[textures]\nlinaer = []\n").is_err());
+    }
+
+    #[test]
+    fn parses_mesh_settings() {
+        let config: Config = toml::from_str(
+            "[meshes]\nmeshlet_max_vertices = 96\n\n[[meshes.overrides]]\nmatch = [\"a/**\"]\nmeshlet_max_triangles = 64\n",
+        )
+        .unwrap();
+        assert_eq!(config.meshes.meshlet_max_vertices, 96);
+        assert_eq!(config.meshes.meshlet_max_triangles, 124);
+        assert_eq!(config.meshes.overrides[0].patterns, ["a/**"]);
+        assert_eq!(config.meshes.overrides[0].meshlet_max_triangles, Some(64));
+        assert!(
+            toml::from_str::<Config>("[[meshes.overrides]]\nmeshlet_max_vertices = 8\n").is_err()
+        );
+        assert!(toml::from_str::<Config>("[meshes]\nmax = 1\n").is_err());
+        // The template's commented settings parse once uncommented.
+        let uncommented: String = TEMPLATE
+            .lines()
+            .map(|l| l.strip_prefix("# ").unwrap_or(l))
+            .filter(|l| !l.starts_with("assetc") && !l.starts_with("See") && *l != "#")
+            .collect::<Vec<_>>()
+            .join("\n");
+        let template: Config = toml::from_str(&uncommented).unwrap();
+        assert_eq!(template.meshes.overrides[0].meshlet_max_vertices, Some(128));
     }
 
     #[test]
