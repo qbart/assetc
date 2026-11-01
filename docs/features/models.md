@@ -1,8 +1,8 @@
 # Models
 
-glTF 2.0 files in the Input tree can be inspected and previewed in 3D. They
-are not compiled yet: the build ignores them, so they have no output and no
-assets.
+glTF 2.0 files in the Input tree can be inspected, previewed in 3D, and
+compiled into a mesh, its materials and textures, and its animations (see
+[Build](#build)).
 
 ## Kind
 
@@ -34,6 +34,17 @@ images are not read for these rows.
 | Animations | number of animations                                               |
 
 Counts are per mesh, not per instance: a mesh used by two nodes counts once.
+After them, **Asset path** and **Output** (the `.amesh`; `(not built)`
+appended when it does not exist), as for source textures.
+
+Compiled files in the Output tree:
+
+- **Compiled mesh** (`*.amesh`): Vertices, Triangles, Submeshes, Meshlets,
+  Materials, Levels of detail (`2` or `none`), Skin (`<n> joints` or `none`),
+  Bounds (`min – max`), Asset path, Asset ID. A file that does not read shows
+  an Error row.
+- **Compiled animation** (`*.aanim`): Clips (names with durations), Channels,
+  Keys, Asset path, Asset ID.
 A file that fails to parse shows an **Error** row (`not a valid glTF file:
 <reason>`) and the canvas shows the message as "No preview".
 
@@ -88,3 +99,89 @@ plays.
   when the model is reloaded.
 - The model is fitted once, in its rest pose; animations can move it out of
   that box.
+
+## Build
+
+Every `*.gltf` / `*.glb` (any case) in `input` compiles into several assets.
+With `P` the input-relative path without the extension (e.g. `models/Fox`):
+
+| Output (in `output`)        | Asset kind | Asset path        | When                                   |
+|-----------------------------|------------|-------------------|----------------------------------------|
+| `P.amesh`                   | mesh       | `P.amesh`         | always ([spec](../spec/amesh.md))       |
+| `P/<material>.amat`         | material   | `P/<material>.amat` | per material a submesh uses ([spec](../spec/amat.md)) |
+| `P/<image>.ktx2`            | texture    | `P/<image>`       | per image used as base color, normal or emissive texture |
+| `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
+| `P.aanim`                   | animation  | `P.aanim`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.md)) |
+
+Like other assets, each gets the FNV-1a-64 of its asset path as ID and a
+manifest entry; collisions are build errors as usual. The build prints one
+line per model, e.g.
+`models/Fox.glb -> models/Fox.amesh (1728 vertices, 576 triangles, 1 submesh, 12 meshlets, 24 joints, 3 clips, 1 material, 1 texture)`.
+
+### Names
+
+- `<material>` is the glTF material's name when it is non-empty, unique among
+  the file's materials and usable as a file name (no `/` or `\`, not `.` or
+  `..`); otherwise `material_<index>` (its index in the file). The same rule
+  gives `<image>` (`image_<index>`). Case is kept.
+
+### Geometry
+
+- The file's default scene (or its first) is walked from its root nodes.
+  Every node with a mesh contributes each of its **triangle** primitives
+  (`TRIANGLES`, `TRIANGLE_STRIP`, `TRIANGLE_FAN`, converted to lists; points
+  and lines are skipped) as one **submesh**, in traversal order (depth-first,
+  children in file order).
+- **Static** primitives are baked into world space with the node's world
+  transform (normals by the inverse transpose, tangent handedness flipped
+  when the transform mirrors). Primitives of a **skinned** node (one with a
+  `skin`) are left in mesh space, as glTF ignores their node transform.
+- Attributes: `POSITION` (required); `NORMAL` (missing: flat normals, the
+  triangles' own); `TEXCOORD_0` (missing: `0, 0`); `TANGENT` (missing:
+  generated with MikkTSpace when there are UVs, otherwise zero and
+  `DESC.flags` bit 0 cleared); `JOINTS_0` / `WEIGHTS_0` for skinning.
+  Weights are renormalized to sum 1.
+- Per submesh: the vertex order is optimized for the GPU's vertex cache, then
+  the submesh is split into **meshlets** of at most 64 vertices and 124
+  triangles (cone weight 0.25) with their bounds, and simplified into two
+  **levels of detail** at about 50% and 25% of its triangles, all with
+  [meshoptimizer](https://github.com/zeux/meshoptimizer). Simplification
+  starts with a 5% error limit, raises it by 5% up to three times while it
+  makes no progress, and then falls back to sloppy (topology-ignoring)
+  simplification.
+- A file without any triangle primitive fails (`no triangles in the default
+  scene`).
+
+### Skinning and animations
+
+- The first skin of the file is used (a later skin's primitives are bound to
+  it as if rigid); its joints become the `.amesh` skeleton, with the joints'
+  bind-pose transforms and inverse bind matrices (identity when missing).
+- With a skin and animations, `P.aanim` holds every clip, keeping channels
+  that target the skin's joints (translation, rotation, scale). Animations
+  of a file without a skin are not compiled.
+
+### Materials and textures
+
+Each used glTF material becomes an `.amat` with:
+
+| `.amat` field          | From glTF                                                   |
+|------------------------|-------------------------------------------------------------|
+| `base_color`           | `baseColorFactor`                                           |
+| `base_color_texture`   | `baseColorTexture` → `P/<image>.ktx2`, sRGB                 |
+| `metallic`, `roughness` | `metallicFactor`, `roughnessFactor`                        |
+| `orm_texture`          | `P/<material>.orm.ktx2` (linear): R from `occlusionTexture`'s R (255 without one), G and B from `metallicRoughnessTexture` (255 without one); `0` when neither exists |
+| `occlusion_strength`   | `occlusionTexture.strength` (1 without one)                 |
+| `normal_texture`, `normal_scale` | `normalTexture` → `P/<image>.ktx2`, linear; its `scale` |
+| `emissive`, `emissive_texture` | `emissiveFactor`; `emissiveTexture` → `P/<image>.ktx2`, sRGB |
+| `emissive_strength`    | `KHR_materials_emissive_strength` (1 without it)            |
+| `alpha_mode`, `alpha_cutoff`, double-sided | `alphaMode`, `alphaCutoff` (0.5), `doubleSided` |
+| height fields          | none: no height texture, scale 0, midlevel 0.5, parallax    |
+
+- Images are read from the GLB's binary chunk, a data URI or a file next to
+  the `.gltf` (PNG or JPEG), decoded to RGBA8 and written with a full mip
+  chain. An image used in two color spaces keeps the first use's.
+- When occlusion and metallic-roughness are different images they must have
+  the same size, otherwise the build fails for the model.
+- `texCoord` sets other than 0 and `KHR_texture_transform` are ignored.
+- Submeshes without a material have none (`0xFFFFFFFF`).

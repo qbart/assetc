@@ -1,7 +1,10 @@
-# `.mat` materials
+# `.amat` materials
 
 One compiled PBR material (glTF 2.0 metallic-roughness), written to
-`<output>/<dir>/<name>.mat`; see [`docs/features/materials.md`](../features/materials.md).
+`<output>/<dir>/<name>.amat` (from `*.mat.toml` and texture groups), or
+`<output>/<model>/<material>.amat` (from a glTF model); see
+[`docs/features/materials.md`](../features/materials.md) and
+[`docs/features/models.md`](../features/models.md#build).
 
 The file is a single fixed-size record, so it can be read straight into a
 struct or uploaded to a GPU buffer. Textures are referenced by asset ID and

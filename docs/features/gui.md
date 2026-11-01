@@ -98,7 +98,8 @@ The icon follows the entry's type, by extension (any case):
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `noise`                      | `image-play`              |
 | gradient: `gradient`                          | `swatch-book`             |
-| mesh: `gltf`, `glb`, `obj`                    | `torus`                   |
+| mesh: `gltf`, `glb`, `obj`, `amesh`          | `torus`                   |
+| animation: `aanim`                            | `film`                    |
 | anything else                                 | `file`                    |
 
 ## Tabs

@@ -36,7 +36,8 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.noise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
 | `*.gradient` (any case) | texture, generated | `<asset path>.ktx2`, see [`gradients.md`](gradients.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
-| `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.mat`, see [`materials.md`](materials.md) |
+| `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat`, see [`materials.md`](materials.md) |
+| `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh` and more, see [`models.md`](models.md#build) |
 | anything else      | —          | ignored, counted as skipped                   |
 
 Texture sources that belong to a material are compiled as that material
@@ -53,7 +54,9 @@ JPEGs are supported). Color space and mipmaps follow the `[textures]` settings, 
 <output>/
   assets.manifest            see docs/spec/manifest.md
   <asset path>.ktx2          one per texture (incl. <name>.orm.ktx2), same directory structure as input
-  <dir>/<name>.mat           one per material
+  <dir>/<name>.amat          one per material
+  <model>.amesh              one per glTF model, with <model>/… for its materials and textures
+  <model>.aanim              one per skinned, animated glTF model
 ```
 
 - Output directories are created as needed; existing files are overwritten.
@@ -73,7 +76,9 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | Asset kind | Output pattern |
   |------------|----------------|
   | texture    | `*.ktx2`       |
-  | material   | `*.mat`        |
+  | material   | `*.amat`       |
+  | mesh       | `*.amesh`      |
+  | animation  | `*.aanim`      |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assets.manifest` is rewritten, never removed. Entries starting with `.` and the contents of symlinked directories

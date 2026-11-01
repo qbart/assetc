@@ -54,7 +54,9 @@ back.
 | Value | Kind    | File format                  |
 |------:|---------|------------------------------|
 |     0 | texture | [`ktx2.md`](ktx2.md)         |
-|     1 | material | [`material.md`](material.md) |
+|     1 | material | [`amat.md`](amat.md)         |
+|     2 | mesh     | [`amesh.md`](amesh.md)       |
+|     3 | animation | [`aanim.md`](aanim.md)      |
 
 Other values are reserved. Readers should skip entries with unknown kinds.
 

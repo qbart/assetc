@@ -64,41 +64,6 @@ needs a crate such as `tobj` or a small parser of our own (positions,
 normals, UVs, faces; `.mtl` materials optional). The file tree already shows
 `.obj` files with the `torus` icon.
 
-## Compiling 3D files (`.amesh`, `.amat`, `.a<format>`)
-
-Compile glTF models (and later `.obj`) into runtime binaries, with
-[assetc-cpp](https://github.com/qbart/assetc-cpp) as the reference for what
-the output holds. Today models are only inspected and previewed (see
-`docs/features/models.md`); the build ignores them.
-
-What the output should cover:
-
-- **Meshes**: vertex streams (positions, normals, tangents, UVs, colors,
-  joints / weights), index buffers, one entry per primitive or submesh.
-- **Bounds**: per mesh (AABB and sphere), per meshlet, and for the model.
-- **Meshlets**: meshes split into meshlets (vertex / triangle lists, bounds,
-  cone data for culling).
-- **Materials**: the glTF materials, compiled like `*.mat.toml` materials,
-  with their textures compiled as KTX2 and referenced by asset ID.
-- **Skins**: joints, hierarchy and inverse bind matrices.
-- **Animations**: clips with their channels and keyframes.
-
-Naming: assetc's own binary formats use `.a` + the format name (`a` for
-"assetc"): `.amesh` for meshes, `.amat` for materials, and `.a<format>` for
-each further format (e.g. animations and skins). Each one gets a spec in
-`docs/spec/` and its own manifest kind, with every asset getting a hashed ID.
-
-Open:
-
-- Whether the existing compiled material format `.mat` is renamed to `.amat`
-  (with a spec and manifest update), so all assetc formats follow the scheme.
-  `.ktx2` stays as it is, since it is a standard format.
-- How one glTF splits into files: one file per mesh / material / animation,
-  or one container per model with several assets (the Inspector's Assets tab
-  already expects containers to list several).
-- Meshlet parameters (vertex and triangle limits) and whether they belong in
-  `assetc.toml`.
-
 ## Modifiers for gradients
 
 Let `.gradient` files carry modifiers like `.noise` files (Invert, Levels,

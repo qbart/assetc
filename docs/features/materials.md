@@ -3,7 +3,7 @@
 PBR materials in the glTF 2.0 **metallic-roughness** model. A material is
 built from texture files that follow a naming convention, an optional
 `<name>.mat.toml` holding its scalar values and overrides, or both. Each
-material compiles to one `.mat` file (see [`docs/spec/material.md`](../spec/material.md))
+material compiles to one `.amat` file (see [`docs/spec/amat.md`](../spec/amat.md))
 that references its textures by asset ID.
 
 ## Slots
@@ -40,7 +40,7 @@ suffixed slot file. A lone `grass.png` stays a plain texture, and so does
 samples/brick/
   brick.jpg       base_color   ┐
   brick.n.jpg     normal       │
-  brick.r.jpg     roughness    ├ material brick/brick.mat
+  brick.r.jpg     roughness    ├ material brick/brick.amat
   brick.ao.jpg    occlusion    │
   brick.h.jpg     height       │
   brick.mat.toml  (optional)   ┘
@@ -126,11 +126,11 @@ Height is stored as height: white is high. Engines that expect a depth map
 
 ## IDs and outputs
 
-- **Material asset path**: `<dir>/<name>.mat`, e.g. `brick/brick.mat`, and
-  ID = FNV-1a-64 of it, as for every asset. The `.mat` keeps it distinct from
+- **Material asset path**: `<dir>/<name>.amat`, e.g. `brick/brick.amat`, and
+  ID = FNV-1a-64 of it, as for every asset. The `.amat` keeps it distinct from
   the base color texture `brick/brick`.
-- **Output**: `<output>/<dir>/<name>.mat`. The file name is the asset path
-  itself, since it already ends in `.mat`.
+- **Output**: `<output>/<dir>/<name>.amat`. The file name is the asset path
+  itself, since it already ends in `.amat`.
 - Manifest entries: one `material` per material, plus one `texture` per
   compiled slot texture and per ORM texture.
 - Asset path collisions (e.g. a source `brick.orm.png` next to a material
@@ -154,7 +154,7 @@ The material fails, and with it the build (no manifest is written), when:
 brick/brick.jpg -> brick/brick.ktx2 (srgb, 11 levels)
 brick/brick.n.jpg -> brick/brick.n.ktx2 (linear, 11 levels)
 brick/brick.ao.jpg, brick/brick.r.jpg -> brick/brick.orm.ktx2 (linear, 11 levels)
-brick/brick.* -> brick/brick.mat (material: base_color, normal, orm, height)
+brick/brick.* -> brick/brick.amat (material: base_color, normal, orm, height)
 Built 4 textures, 1 material (3 skipped)
 ```
 
@@ -166,14 +166,14 @@ otherwise `<dir>/<name>.*`.
 - **Material source** (Input `*.mat.toml`): Asset path, Asset ID, Output
   (with `(not built)` when missing); an Error row if the file is invalid.
 - **Source texture** that belongs to a material gets a **Material** row,
-  e.g. `brick/brick.mat (roughness)`. Its **Color** row is the slot's color space;
+  e.g. `brick/brick.amat (roughness)`. Its **Color** row is the slot's color space;
   for ORM inputs, **Output** shows the ORM texture, e.g.
   `brick/brick.orm.ktx2 (channel G)`.
-- **Compiled material** (Output `*.mat`): every value from the `.mat` file,
+- **Compiled material** (Output `*.amat`): every value from the `.amat` file,
   one row each (Base color, Metallic, Roughness, Occlusion, Normal scale,
   Emissive, Height mode, Height scale, Height midlevel, Alpha, Double-sided),
   and each texture slot's asset ID (or `—`).
-- The Assets tab is enabled for `.mat` files too and lists the material.
+- The Assets tab is enabled for `.amat` files too and lists the material.
 
 ## Keybindings
 
