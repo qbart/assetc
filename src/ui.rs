@@ -910,6 +910,10 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
     let painter = ui.painter_at(bar);
     painter.rect_filled(bar, 0.0, BG_PANEL);
     painter.hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, STROKE));
+    // An environment map only exists in 3D: nothing to choose.
+    if shown == Shown::Environment {
+        return;
+    }
     let font = FontId::proportional(13.0);
     let label = painter.text(
         pos2(bar.left() + 12.0, bar.center().y),
@@ -938,13 +942,9 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
     for (i, (option, width)) in ViewMode::ALL.into_iter().zip(widths).enumerate() {
         let rect = Rect::from_min_size(pos2(x, group.top()), vec2(width, HEIGHT));
         x += width;
-        // The mode only applies to images; an environment map is always 3D.
+        // The mode only applies to images.
         let enabled = shown == Shown::Image;
-        let active = match shown {
-            Shown::Image => *mode == option,
-            Shown::Environment => option == ViewMode::ThreeD,
-            Shown::Other => false,
-        };
+        let active = enabled && *mode == option;
         let sense = if enabled {
             Sense::click()
         } else {
