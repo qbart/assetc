@@ -32,7 +32,8 @@ frame that later features plug into; it has no asset functionality of its own.
   file, see [`inspector.md`](inspector.md).
 - **Status bar** (bottom, fixed height): status message on the left
   (see [`cli.md`](cli.md) and [`build.md`](build.md#gui)), `assetc <version>` on the right in weak text.
-- **Center**: the canvas, previewing the selected file with zoom and pan, see
+- **Center**: the canvas, previewing the selected file in 2D (zoom, pan,
+  tiling) or 3D (on a rotating shape), with a view bar on top; see
   [`canvas.md`](canvas.md).
 
 ## Menus
@@ -99,7 +100,8 @@ All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
-toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `folder`, `folder-open`, `file`,
+toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
+(canvas 3D shapes), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 

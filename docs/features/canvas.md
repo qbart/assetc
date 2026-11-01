@@ -5,6 +5,35 @@ The center pane previews the selected file (see
 looked at before the build transforms it and compared with what the build
 produced.
 
+## View bar
+
+A 36 px bar across the top of the canvas (`BG_PANEL`, 1 px `STROKE` line at
+its bottom), always shown:
+
+```
+View  [ 2D | 3D ]
+```
+
+- `View` in `TEXT_WEAK`, 13 px, 12 px from the left edge, then a segmented
+  group of text buttons (13 px text, 10 px horizontal padding, 24 px tall,
+  `BG_BAR` fill, 4 px rounded corners).
+- The active mode is filled with `ACCENT` with `BG_BAR` text; others use
+  `TEXT_WEAK` text, `TEXT` and a `BG_HEADER` fill on hover.
+- **2D** is the default. The mode is global (not per image) and lasts for the
+  session.
+
+The rest of the canvas, below the bar, shows the selection in the chosen
+mode. Everything below ("canvas") means that area.
+
+| Mode | Shows |
+|------|-------|
+| 2D   | the image flat, with zoom, pan and tiling; see [2D](#2d) |
+| 3D   | the image as the texture of a slowly rotating shape, with an orbit camera; see [3D](#3d) |
+
+Both modes show the same messages when there is no image to show.
+
+# 2D
+
 ## What is shown
 
 | Selection                         | Canvas                                    |
@@ -33,7 +62,7 @@ Messages are weak text centered in the canvas.
 
 ## View
 
-The view is a **zoom** (screen pixels per image pixel) and a **pan** (the
+In 2D, the view is a **zoom** (screen pixels per image pixel) and a **pan** (the
 image center's offset from the canvas center). With [tiling](#tiling) on,
 "the image" below means the whole 3 × 3 block.
 
@@ -50,7 +79,8 @@ image center's offset from the canvas center). With [tiling](#tiling) on,
 
 ## Controls
 
-Only while the pointer is over the canvas; see also [`KEYS.md`](../../KEYS.md).
+2D controls, only while the pointer is over the canvas; see also
+[`KEYS.md`](../../KEYS.md). For 3D see [3D controls](#3d-controls).
 
 | Input                                   | Action                                         |
 |-----------------------------------------|------------------------------------------------|
@@ -64,7 +94,7 @@ Horizontal scrolling does nothing.
 ## Zoom bar
 
 A small bar in the canvas' bottom-right corner, 8 px from both edges, shown
-while an image is previewed:
+in 2D while an image is previewed:
 
 ```
 [ − ][ 100% ][ + ][ Fit ]
@@ -107,9 +137,16 @@ shown only while an image is previewed:
 - Each button shows its name as a tooltip.
 - The toolbar takes the pointer like the zoom bar.
 
+The first group depends on the mode: **Tile** in 2D, **Shape** in 3D (see
+[3D](#3d)). The Channels group is the same in both.
+
 | Group    | Button | Icon                            | Kind   | Action                        |
 |----------|--------|---------------------------------|--------|-------------------------------|
-| View     | Tile   | `grid-3x3`                      | toggle | [tiling](#tiling) on / off    |
+| View (2D) | Tile  | `grid-3x3`                      | toggle | [tiling](#tiling) on / off    |
+| Shape (3D) | Box  | `box`                           | radio  | render on a cube              |
+| Shape (3D) | Sphere | `globe`                       | radio  | render on a UV sphere         |
+| Shape (3D) | Cylinder | `cylinder`                  | radio  | render on a capped cylinder   |
+| Shape (3D) | Torus | `torus`                        | radio  | render on a torus             |
 | Channels | RGB    | three circles, all filled       | radio  | all channels ([channels](#channels)) |
 | Channels | R      | three circles, red filled       | radio  | red channel only              |
 | Channels | G      | three circles, green filled     | radio  | green channel only            |
@@ -169,3 +206,53 @@ visible seams.
 - Tiling is remembered **per image** (by its path) for the rest of the
   session: switching to another image shows that image's own setting, and
   coming back restores it. It starts off for every image.
+
+# 3D
+
+The image is used as the base color texture of a lit 3D shape, rendered by
+Bevy into the canvas area (below the view bar) behind the egui overlay.
+
+## Scene
+
+- **Shapes** (pick with the Shape group, Box by default; global for the
+  session):
+
+  | Shape    | Geometry                                           | UVs                                   |
+  |----------|----------------------------------------------------|---------------------------------------|
+  | Box      | cube, 1.2 units                                    | the whole image on each face          |
+  | Sphere   | UV sphere, radius 0.75, 48 × 24 segments           | U around, V pole to pole              |
+  | Cylinder | radius 0.6, height 1.4, 48 segments, capped        | U around the side, V along the height |
+  | Torus    | ring radius 0.6, tube radius 0.25                  | U around the ring, V around the tube  |
+
+- The shape **rotates** about the vertical axis at 20°/s, except while it is
+  being orbited (dragged). The rotation continues from where it was.
+- **Lighting**: one white directional light from the upper left behind the
+  camera, plus ambient light, so the shape reads as 3D; base color texture
+  only (no normal, ORM or height maps), roughness 0.8, not metallic.
+- The texture is sampled with linear filtering and repeat addressing and
+  uploaded as sRGB, so the colors match the 2D view.
+- **Channels**: the Channels group works as in 2D: RGB shows the image, R / G
+  / B / A the chosen channel as opaque grayscale. In RGB, an image with alpha
+  is rendered alpha-blended over the background; otherwise the shape is opaque.
+- Background: `BG_CENTER`. No checkerboard.
+- The zoom bar is not shown; tiling does not apply.
+
+## Camera
+
+An orbit camera looks at the shape's center.
+
+- Starts at yaw 30°, pitch 20° (looking slightly down), distance 3.5 units,
+  45° vertical field of view.
+- Pitch is limited to −85°…85°, distance to 1.5…10.
+- The camera persists across selections and mode switches for the session;
+  double-click resets it to the start position.
+
+## 3D controls
+
+While the pointer is over the canvas (see also [`KEYS.md`](../../KEYS.md)):
+
+| Input                         | Action                                                     |
+|-------------------------------|------------------------------------------------------------|
+| Left or right drag            | orbit: horizontal → yaw, vertical → pitch, 0.3° per point  |
+| Scroll wheel, pinch           | dolly: distance ÷ 1.2 per notch toward the shape (× 1.2 away) |
+| Double-click (left)           | reset the camera                                           |
