@@ -24,7 +24,13 @@ material `rock`).
 | Curl                 | `noise/curl`          |
 
 Each generator has its own parameters; nothing is shared between types
-except the image `size`.
+except the image `size`. The noises expose full control, where it applies:
+seed, basis noise, separate X / Y frequency, translation, fractal octaves /
+lacunarity / gain, domain warp, and their own extras (interpolation for
+Value, jitter / metric / output for Voronoi, dimension / offset for the
+multifractals, …); the full list is in the
+[spec](../spec/noise.md#generators). Every setting keeps the texture
+tileable.
 
 ## Creating
 
