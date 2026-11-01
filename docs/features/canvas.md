@@ -227,7 +227,7 @@ Bevy into the canvas area (below the view bar) behind the egui overlay.
 ## Scene
 
 - **Shapes** (pick with the Shape group, Box by default; global for the
-  session):
+  session; [environment maps](#environment-maps) keep their own choice):
 
   | Shape    | Geometry                                           | UVs                                   |
   |----------|----------------------------------------------------|---------------------------------------|
@@ -296,7 +296,10 @@ A folder named `*.env` (any case) is a cubemap given as six face images:
   - as the only **light** (image-based lighting filtered at runtime,
     intensity 1000): the directional and ambient lights are off.
 - The shape is a mirror-like material (white, metallic, roughness 0.2) so the
-  lighting and reflections are visible; the Shape group, auto-rotation and
-  the orbit camera work as for images. The Channels group is not shown.
+  lighting and reflections are visible; auto-rotation and the orbit camera
+  work as for images. The Shape group picks the shape as for images, but
+  environment maps keep their own choice, **Sphere** by default (global for
+  the session), so picking a shape here does not change the one images use
+  and vice versa. The Channels group is not shown.
 - This is a preview only: the build still compiles each face as a plain
   texture.
