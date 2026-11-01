@@ -1146,14 +1146,19 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
     }
     // Same size, color and text inset as `menu_row`.
     ui.spacing_mut().button_padding = vec2(24.0, 7.0);
-    ui.menu_button(RichText::new("New Noise").size(14.0).color(TEXT), |ui| {
-        for kind in GeneratorKind::ALL {
-            if menu_item(ui, kind.name(), None).clicked() {
-                *action = Some(TreeAction::Op(FileOp::NewNoise(dir.to_path_buf(), kind)));
-                ui.close();
+    for (title, group) in [("New Noise", "noise/"), ("New Pattern", "pattern/")] {
+        ui.menu_button(RichText::new(title).size(14.0).color(TEXT), |ui| {
+            for kind in GeneratorKind::ALL
+                .into_iter()
+                .filter(|k| k.key().starts_with(group))
+            {
+                if menu_item(ui, kind.name(), None).clicked() {
+                    *action = Some(TreeAction::Op(FileOp::NewNoise(dir.to_path_buf(), kind)));
+                    ui.close();
+                }
             }
-        }
-    });
+        });
+    }
 }
 
 fn tree(ui: &mut Ui, nodes: &[Node], depth: usize, cx: &mut TreeCx) {
