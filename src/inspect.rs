@@ -245,7 +245,7 @@ fn color_lut(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let list = |v: [f32; 3]| v.map(|c| c.to_string()).join(", ");
     out.rows
         .push(("Title", lut.title.clone().unwrap_or_else(|| "—".into())));
-    out.rows.push(("Size", format!("{n} × {n} × {n}")));
+    out.rows.push(("LUT size", format!("{n} × {n} × {n}")));
     out.rows.push((
         "Domain",
         format!("{} – {}", list(lut.domain_min), list(lut.domain_max)),
@@ -622,7 +622,7 @@ mod tests {
         let i = inspect(&project, Location::Input, &file);
         assert_eq!(row(&i, "Kind"), "Color LUT");
         assert_eq!(row(&i, "Title"), "Warm");
-        assert_eq!(row(&i, "Size"), "2 × 2 × 2");
+        assert_eq!(row(&i, "LUT size"), "2 × 2 × 2");
         assert_eq!(row(&i, "Domain"), "0, 0, 0 – 1, 1, 1");
         assert!(i.lut.is_some());
 
