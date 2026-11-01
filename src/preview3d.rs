@@ -372,7 +372,14 @@ fn sync(
     mut ambient: ResMut<GlobalAmbientLight>,
     mut camera: Single<(Entity, &mut Camera, &mut Transform), With<PreviewCamera>>,
     mut overlay: Query<&mut Camera, (With<Camera2d>, Without<PreviewCamera>)>,
-    mut shape: Single<ShapeQuery, (With<PreviewShape>, Without<PreviewCamera>)>,
+    mut shape: Single<
+        ShapeQuery,
+        (
+            With<PreviewShape>,
+            Without<PreviewCamera>,
+            Without<DirectionalLight>,
+        ),
+    >,
     mut lights: Query<&mut Visibility, With<DirectionalLight>>,
     mut environment_on: Local<bool>,
 ) {
