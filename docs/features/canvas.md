@@ -82,18 +82,26 @@ while an image is previewed:
 
 ## Toolbar
 
-Button groups in the canvas' top-right corner, 8 px from the top and right
-edges, laid out left to right with an 8 px gap between groups, shown only
-while an image is previewed:
+A vertical column of button groups in the canvas' top-right corner, 8 px
+from the top and right edges, groups stacked top to bottom with an 8 px gap,
+shown only while an image is previewed:
 
 ```
-[ ▦ ]  [ RGB | R | G | B ]
+[ ▦ ]
+     8 px
+[RGB]
+[ R ]
+[ G ]
+[ B ]
+[ A ]
 ```
 
-- Each group: `BG_BAR` fill, 6 px rounded corners, buttons 36 × 32 px edge to
-  edge with an 18 px icon, separated by 1 px `STROKE` lines.
-- A button that is on is filled with `ACCENT` (its outer corners rounded with
-  the group) and its icon outline is drawn in `BG_BAR`. A button that is off
+- Each group: `BG_BAR` fill, 6 px rounded corners, buttons 36 × 32 px stacked
+  edge to edge with an 18 px icon, separated by 1 px horizontal `STROKE`
+  lines.
+- A button that is on is filled with `ACCENT` (the group's top corners
+  rounded on its first button, bottom corners on its last) and its icon
+  outline is drawn in `BG_BAR`. A button that is off
   draws its outline in `TEXT_WEAK`; hover fills it with `BG_HEADER` and draws
   the outline in `TEXT`.
 - Each button shows its name as a tooltip.
@@ -106,6 +114,7 @@ while an image is previewed:
 | Channels | R      | three circles, red filled       | radio  | red channel only              |
 | Channels | G      | three circles, green filled     | radio  | green channel only            |
 | Channels | B      | three circles, blue filled      | radio  | blue channel only             |
+| Channels | A      | three circles, none filled      | radio  | alpha channel only            |
 
 Exactly one Channels button is on; clicking it again keeps it on.
 
@@ -122,9 +131,10 @@ only the outline.
 
 - **RGB** (default): the image as stored, including alpha over the
   checkerboard.
-- **R**, **G**, **B**: that channel alone, shown as **grayscale** (the value
-  in all three color channels) and **opaque** (alpha ignored), so data maps
-  such as the packed ORM channels can be read directly.
+- **R**, **G**, **B**, **A**: that channel alone, shown as **grayscale** (the
+  value in all three color channels) and **opaque**, so data maps such as the
+  packed ORM channels, or an alpha mask, can be read directly. Images without
+  alpha (e.g. JPEGs) show white for A.
 - Like tiling, the choice is remembered per image for the session and
   starts at RGB; it combines with tiling.
 - The single-channel image is built on the CPU from the loaded pixels when
