@@ -1681,6 +1681,14 @@ fn property_style(ui: &mut Ui) {
     ui.spacing_mut().item_spacing.y = 6.0;
 }
 
+/// Whether a section card folds, and how it starts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Fold {
+    Never,
+    Open,
+    Folded,
+}
+
 /// A section card, see docs/features/gui.md#property-editor. When `collapsible`, a chevron
 /// starts the header; `leading` draws next (before the title), `trailing` on the right, told
 /// whether the card is open.
@@ -1688,14 +1696,15 @@ fn property_style(ui: &mut Ui) {
 fn prop_section(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
-    collapsible: bool,
+    fold: Fold,
     title: RichText,
     leading: impl FnOnce(&mut Ui),
     trailing: impl FnOnce(&mut Ui, bool),
     body: impl FnOnce(&mut Ui),
 ) -> Rect {
     let id = ui.make_persistent_id(id);
-    let open = !collapsible || ui.data(|d| d.get_temp::<bool>(id).unwrap_or(true));
+    let collapsible = fold != Fold::Never;
+    let open = !collapsible || ui.data(|d| d.get_temp::<bool>(id).unwrap_or(fold == Fold::Open));
     let card = Frame::new()
         .fill(BG_HEADER)
         .corner_radius(6)
@@ -1847,7 +1856,7 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                 prop_section(
                     ui,
                     "generator",
-                    true,
+                    Fold::Open,
                     RichText::new("Generator"),
                     |_| {},
                     |_, _| {},
@@ -1885,7 +1894,7 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                 prop_section(
                     ui,
                     ("generator_params", noise.kind),
-                    true,
+                    Fold::Open,
                     RichText::new(noise.kind.name()),
                     |_| {},
                     |_, _| {},
@@ -1972,7 +1981,7 @@ fn gradient_output_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradien
                 prop_section(
                     ui,
                     "gradient_output",
-                    true,
+                    Fold::Open,
                     RichText::new("Output"),
                     |_| {},
                     |_, _| {},
@@ -2057,7 +2066,7 @@ fn gradients_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                     rects.push(prop_section(
                         ui,
                         ("gradient", i),
-                        true,
+                        Fold::Folded,
                         RichText::new(title),
                         |ui| {
                             let grip = drag_handle(ui);
@@ -2456,7 +2465,7 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                     cards.push(prop_section(
                         ui,
                         ("modifier", i, m.kind.key()),
-                        false,
+                        Fold::Never,
                         title,
                         |ui| {
                             let grip = drag_handle(ui);
