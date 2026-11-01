@@ -265,6 +265,7 @@ impl MeshDisplay {
     }
 }
 
+/// An entity of the compiled mesh: a material part, or a [`CompiledOverlay`].
 #[derive(Component)]
 struct CompiledPart;
 
@@ -705,8 +706,7 @@ fn sync_compiled(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut parts: Query<&mut Visibility, (With<CompiledPart>, Without<CompiledOverlay>)>,
-    mut overlays: Query<(&CompiledOverlay, &mut Visibility), Without<CompiledPart>>,
+    mut parts: Query<(&mut Visibility, Option<&CompiledOverlay>), With<CompiledPart>>,
 ) {
     if let Some(upload) = preview.compiled.take() {
         if let Some(old) = scene.compiled.take() {
@@ -741,14 +741,14 @@ fn sync_compiled(
         }
     };
     let compiled = preview.viewport.is_some() && preview.compiled_shown && !preview.environment;
-    let wanted = visible(compiled && preview.display == MeshDisplay::Material);
-    for mut visibility in &mut parts {
-        if *visibility != wanted {
-            *visibility = wanted;
-        }
-    }
-    for (overlay, mut visibility) in &mut overlays {
-        let wanted = visible(compiled && preview.overlays[overlay.0]);
+    for (mut visibility, overlay) in &mut parts {
+        let wanted = visible(
+            compiled
+                && match overlay {
+                    Some(overlay) => preview.overlays[overlay.0],
+                    None => preview.display == MeshDisplay::Material,
+                },
+        );
         if *visibility != wanted {
             *visibility = wanted;
         }
@@ -1063,6 +1063,7 @@ fn build_compiled(
         overlays.push(
             commands
                 .spawn((
+                    CompiledPart,
                     CompiledOverlay(i),
                     Mesh3d(mesh),
                     MeshMaterial3d(unlit.clone()),
