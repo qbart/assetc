@@ -38,8 +38,8 @@ Plan so far:
 - **Storage**: an optional sidecar next to the image,
   `<file.ext>.amod` (e.g. `brick.jpg.amod`), TOML holding only
   `[[modifiers]]` tables in the `.noise` format (spec in
-  `docs/spec/amod.md`). The tree shows it with its image, and the build
-  skips it as a source of its own.
+  `docs/spec/amod.md`). The build does not treat it as a source of its
+  own.
 - **Editing**: the Inspector's Modifiers tab is enabled for `.png` / `.jpg`
   files in the Input tree; adding the first modifier creates the sidecar,
   removing the last deletes it.
