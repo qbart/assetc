@@ -65,6 +65,8 @@ struct UiState {
     confirm_delete: Option<PathBuf>,
     /// A failed file operation, shown in the status bar until the next operation or build.
     notice: Option<String>,
+    /// Per `.noise` file: parameters of generator types switched away from this session.
+    noise_memory: HashMap<PathBuf, HashMap<GeneratorKind, Params>>,
     /// Canvas toolbar state of each image, by path.
     canvas_options: HashMap<PathBuf, CanvasOptions>,
 }
@@ -272,6 +274,7 @@ impl Default for UiState {
             rename: None,
             confirm_delete: None,
             notice: None,
+            noise_memory: HashMap::new(),
             canvas_options: HashMap::new(),
         }
     }
@@ -542,7 +545,6 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
                 .map(|n| NoiseEdit {
                     edit: n.clone(),
                     saved: n,
-                    others: HashMap::new(),
                 })
         });
     let max_side = ctx.input(|i| i.max_texture_side) as u32;
@@ -1271,7 +1273,11 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                     Some(selection),
                 ) => {
                     let save = if tab == InspectorTab::Parameters {
-                        parameters_tab(ui, inspected)
+                        let others = state
+                            .noise_memory
+                            .entry(selection.path.clone())
+                            .or_default();
+                        parameters_tab(ui, inspected, others)
                     } else {
                         modifiers_tab(ui, inspected)
                     };
@@ -1296,8 +1302,6 @@ struct NoiseEdit {
     edit: Noise,
     /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
     saved: Noise,
-    /// Parameters of other generator types set this session, restored when switching back.
-    others: HashMap<GeneratorKind, Params>,
 }
 
 /// The noise being edited, or a placeholder with why there is none.
@@ -1485,7 +1489,13 @@ fn param_row(ui: &mut Ui, spec: &ParamSpec, value: &mut Value) {
 }
 
 /// Generator and its parameters; see docs/features/noise.md#parameters-tab.
-fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
+/// `others` holds the file's parameters of other generator types set this session; saving
+/// re-inspects the file, so they live outside [`Inspected`].
+fn parameters_tab(
+    ui: &mut Ui,
+    inspected: &mut Inspected,
+    others: &mut HashMap<GeneratorKind, Params>,
+) -> Option<Noise> {
     let edit = noise_edit(ui, inspected)?;
     egui::ScrollArea::vertical()
         .auto_shrink(false)
@@ -1530,12 +1540,11 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                 );
                 if kind != noise.kind {
                     // Each type keeps its own parameters for the session.
-                    let params = edit
-                        .others
+                    let params = others
                         .remove(&kind)
                         .unwrap_or_else(|| Params::defaults(kind.specs()));
                     let old = std::mem::replace(&mut noise.params, params);
-                    edit.others.insert(noise.kind, old);
+                    others.insert(noise.kind, old);
                     noise.kind = kind;
                 }
                 let specs = noise.kind.specs();
