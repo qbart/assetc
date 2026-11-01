@@ -359,7 +359,10 @@ const MODIFIER_THRESHOLD: &[ParamSpec] = &[
     float("softness", "Softness", 0.0, 0.5, 0.0),
 ];
 const MODIFIER_POSTERIZE: &[ParamSpec] = &[int("steps", "Steps", 2, 32, 4)];
-const MODIFIER_BLUR: &[ParamSpec] = &[int("radius", "Radius", 1, 64, 2)];
+const MODIFIER_BLUR: &[ParamSpec] = &[
+    int("radius", "Radius", 1, 64, 2),
+    choice("edges", "Edges", &["wrap", "clamp"], 0),
+];
 const MODIFIER_COLORIZE: &[ParamSpec] = &[COLOR_A, COLOR_B];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -629,14 +632,7 @@ impl Noise {
         };
         let modifiers = match table.remove("modifiers") {
             None => Vec::new(),
-            Some(toml::Value::Array(items)) => items
-                .into_iter()
-                .enumerate()
-                .map(|(i, item)| {
-                    parse_modifier(item).map_err(|e| format!("modifier {}: {e}", i + 1))
-                })
-                .collect::<Result<_, _>>()?,
-            Some(_) => return Err("modifiers must be an array of tables".into()),
+            Some(value) => parse_modifiers(value)?,
         };
         let mut sections = Vec::new();
         for (group, value) in table {
@@ -691,14 +687,7 @@ impl Noise {
                 params.write(kind.specs(), &mut out);
             }
         }
-        for m in &self.modifiers {
-            out.push_str(&format!(
-                "\n[[modifiers]]\ntype = {}\nenabled = {}\n",
-                toml::Value::String(m.kind.key().into()),
-                m.enabled
-            ));
-            m.params.write(m.kind.specs(), &mut out);
-        }
+        write_modifiers(&self.modifiers, &mut out);
         out
     }
 
@@ -716,7 +705,7 @@ impl Noise {
         let size = self.size as usize;
         let mut pixels = generate_field(self.kind, &self.params, size);
         for m in self.modifiers.iter().filter(|m| m.enabled) {
-            apply_modifier(m, &mut pixels, size);
+            apply_modifier(m, &mut pixels, size, size);
         }
         Image {
             width: self.size,
@@ -729,6 +718,57 @@ impl Noise {
                 })
                 .collect(),
         }
+    }
+}
+
+/// A `modifiers` array of tables, as in `.noise` files and `.amod` sidecars.
+pub fn parse_modifiers(value: toml::Value) -> Result<Vec<Modifier>, String> {
+    let toml::Value::Array(items) = value else {
+        return Err("modifiers must be an array of tables".into());
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| parse_modifier(item).map_err(|e| format!("modifier {}: {e}", i + 1)))
+        .collect()
+}
+
+/// Appends `[[modifiers]]` tables, each after a blank line.
+pub fn write_modifiers(modifiers: &[Modifier], out: &mut String) {
+    for m in modifiers {
+        out.push_str(&format!(
+            "\n[[modifiers]]\ntype = {}\nenabled = {}\n",
+            toml::Value::String(m.kind.key().into()),
+            m.enabled
+        ));
+        m.params.write(m.kind.specs(), out);
+    }
+}
+
+/// `Levels, Blur (off)`, or `none`.
+pub fn modifier_summary(modifiers: &[Modifier]) -> String {
+    if modifiers.is_empty() {
+        return "none".into();
+    }
+    modifiers
+        .iter()
+        .map(|m| {
+            let off = if m.enabled { "" } else { " (off)" };
+            format!("{}{off}", m.kind.name())
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Runs the enabled modifiers on a `width × height` RGB image (0–1 per channel).
+pub fn apply_modifiers(
+    modifiers: &[Modifier],
+    pixels: &mut [[f64; 3]],
+    width: usize,
+    height: usize,
+) {
+    for m in modifiers.iter().filter(|m| m.enabled) {
+        apply_modifier(m, pixels, width, height);
     }
 }
 
@@ -1158,7 +1198,7 @@ fn voronoi(
 
 // ---- Modifiers ------------------------------------------------------------------------
 
-fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], size: usize) {
+fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], width: usize, height: usize) {
     let specs = m.kind.specs();
     let float = |key| match m.params.get(specs, key) {
         Value::Float(v) => *v,
@@ -1212,9 +1252,10 @@ fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], size: usize) {
         }
         ModifierKind::Blur => {
             let radius = int("radius") as usize;
+            let wrap = matches!(m.params.get(specs, "edges"), Value::Choice(0));
             for _ in 0..3 {
-                box_blur(pixels, size, radius, true);
-                box_blur(pixels, size, radius, false);
+                box_blur(pixels, width, height, radius, true, wrap);
+                box_blur(pixels, width, height, radius, false, wrap);
             }
         }
         ModifierKind::Normalize => {
@@ -1236,26 +1277,46 @@ fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], size: usize) {
     }
 }
 
-/// One `(2 radius + 1)`-wide box blur pass along rows or columns, wrapping at the edges.
-fn box_blur(pixels: &mut [[f64; 3]], size: usize, radius: usize, rows: bool) {
-    let width = (2 * radius + 1) as f64;
+/// One `(2 radius + 1)`-wide box blur pass along rows or columns of a `width × height` image;
+/// past the edges it wraps around or repeats the edge pixel.
+fn box_blur(
+    pixels: &mut [[f64; 3]],
+    width: usize,
+    height: usize,
+    radius: usize,
+    rows: bool,
+    wrap: bool,
+) {
+    let (lines, length) = if rows {
+        (height, width)
+    } else {
+        (width, height)
+    };
+    let span = (2 * radius + 1) as f64;
     let index = |line: usize, k: usize| {
         if rows {
-            line * size + k
+            line * width + k
         } else {
-            k * size + line
+            k * width + line
         }
     };
-    let mut out = vec![[0.0; 3]; size];
-    for line in 0..size {
-        let at = |k: isize| pixels[index(line, k.rem_euclid(size as isize) as usize)];
+    let mut out = vec![[0.0; 3]; length];
+    for line in 0..lines {
+        let at = |k: isize| {
+            let k = if wrap {
+                k.rem_euclid(length as isize)
+            } else {
+                k.clamp(0, length as isize - 1)
+            };
+            pixels[index(line, k as usize)]
+        };
         let mut sum = [0.0; 3];
         for k in -(radius as isize)..=radius as isize {
             let p = at(k);
             (0..3).for_each(|c| sum[c] += p[c]);
         }
         for (k, slot) in out.iter_mut().enumerate() {
-            *slot = sum.map(|s| s / width);
+            *slot = sum.map(|s| s / span);
             let (enter, leave) = (
                 at(k as isize + radius as isize + 1),
                 at(k as isize - radius as isize),
@@ -1270,6 +1331,32 @@ fn box_blur(pixels: &mut [[f64; 3]], size: usize, radius: usize, rows: bool) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blur_works_on_any_size_with_either_edge() {
+        // A 4 × 2 image, white in the leftmost column only.
+        let image = || {
+            (0..8)
+                .map(|i| if i % 4 == 0 { [1.0; 3] } else { [0.0; 3] })
+                .collect::<Vec<_>>()
+        };
+        let mut blur = Modifier::new(ModifierKind::Blur);
+        blur.params.0[0] = Value::Int(1);
+        let mut wrapped = image();
+        apply_modifiers(std::slice::from_ref(&blur), &mut wrapped, 4, 2);
+        blur.params.0[1] = Value::Choice(1);
+        let mut clamped = image();
+        apply_modifiers(std::slice::from_ref(&blur), &mut clamped, 4, 2);
+        // Wrapping carries the left column into the right one; clamping does not.
+        assert!(wrapped[3][0] > clamped[3][0]);
+        // Rows stay alike: the blur is per line of the right length.
+        assert_eq!(wrapped[0], wrapped[4]);
+        // Disabled modifiers are skipped.
+        blur.enabled = false;
+        let mut untouched = image();
+        apply_modifiers(&[blur], &mut untouched, 4, 2);
+        assert_eq!(untouched, image());
+    }
+
     use super::*;
 
     fn small(kind: GeneratorKind) -> Noise {
@@ -1440,7 +1527,7 @@ mod tests {
                 m.params.0[*i] = v.clone();
             }
             let mut pixels = vec![input; 4];
-            apply_modifier(&m, &mut pixels, 2);
+            apply_modifier(&m, &mut pixels, 2, 2);
             pixels[0]
         };
         assert_eq!(apply(ModifierKind::Invert, &[], [0.25; 3]), [0.75; 3]);
@@ -1468,12 +1555,12 @@ mod tests {
         );
         let mut pixels = vec![[0.0; 3]; 16];
         pixels[5] = [1.0; 3];
-        apply_modifier(&Modifier::new(ModifierKind::Blur), &mut pixels, 4);
+        apply_modifier(&Modifier::new(ModifierKind::Blur), &mut pixels, 4, 4);
         let total: f64 = pixels.iter().map(|c| c[0]).sum();
         assert!((total - 1.0).abs() < 1e-9 && pixels[5][0] < 1.0);
         // Normalize stretches to 0..1.
         let mut pixels = vec![[0.2; 3], [0.6; 3]];
-        apply_modifier(&Modifier::new(ModifierKind::Normalize), &mut pixels, 1);
+        apply_modifier(&Modifier::new(ModifierKind::Normalize), &mut pixels, 2, 1);
         assert_eq!(pixels, [[0.0; 3], [1.0; 3]]);
     }
 

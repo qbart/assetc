@@ -7,21 +7,40 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::amesh::MeshPatch;
+use crate::noise::{self, Modifier};
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Amod {
     /// `[mesh]`: meshoptimizer settings of a glTF model.
     pub mesh: MeshPatch,
+    /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
+    pub modifiers: Vec<Modifier>,
+}
+
+/// The tables read with serde.
+#[derive(Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Tables {
+    mesh: MeshPatch,
 }
 
 impl Amod {
     pub fn is_empty(&self) -> bool {
-        self.mesh.is_empty()
+        self.mesh.is_empty() && self.modifiers.is_empty()
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
-        toml::from_str(text).map_err(|e| e.message().to_owned())
+        let mut table: toml::Table = text
+            .parse()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
+        let modifiers = match table.remove("modifiers") {
+            None => Vec::new(),
+            Some(value) => noise::parse_modifiers(value)?,
+        };
+        let Tables { mesh } = toml::Value::Table(table)
+            .try_into()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
+        Ok(Self { mesh, modifiers })
     }
 
     /// The written form, see docs/spec/amod.md#written-form.
@@ -31,7 +50,9 @@ impl Amod {
             out += "[mesh]\n";
             out += &self.mesh.to_toml();
         }
-        out
+        noise::write_modifiers(&self.modifiers, &mut out);
+        // Each table after a blank line, but not the first.
+        out.trim_start_matches('\n').to_owned()
     }
 }
 
@@ -90,6 +111,7 @@ mod tests {
                 lod_ratios: Some(vec![0.5, 0.1]),
                 ..Default::default()
             },
+            ..Default::default()
         };
         let text = amod.to_toml();
         assert_eq!(
@@ -100,6 +122,21 @@ mod tests {
         assert_eq!(Amod::parse("").unwrap(), Amod::default());
         assert!(Amod::parse("[mesh]\nmax = 1\n").is_err());
         assert!(Amod::parse("[sound]\n").is_err());
+
+        // Modifiers, after the mesh table, in the .noise form.
+        let mut with_modifiers = amod.clone();
+        with_modifiers
+            .modifiers
+            .push(Modifier::new(noise::ModifierKind::Invert));
+        let text = with_modifiers.to_toml();
+        assert!(text.ends_with("\n\n[[modifiers]]\ntype = \"invert\"\nenabled = true\n"));
+        assert_eq!(Amod::parse(&text).unwrap(), with_modifiers);
+        let only = Amod {
+            modifiers: with_modifiers.modifiers.clone(),
+            ..Default::default()
+        };
+        assert!(only.to_toml().starts_with("[[modifiers]]"));
+        assert!(Amod::parse("[[modifiers]]\ntype = \"sharpen\"\n").is_err());
     }
 
     #[test]

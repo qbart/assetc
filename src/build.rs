@@ -326,7 +326,45 @@ pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType)
         .decode()
         .map_err(|e| e.to_string())?;
     let color = decoded.color();
-    Ok((decoded.to_rgba8(), color))
+    let mut image = decoded.to_rgba8();
+    let color = apply_sidecar(source, &mut image, color)?;
+    Ok((image, color))
+}
+
+/// Runs the image's `.amod` modifiers on it, returning its color type after them; see
+/// docs/features/textures.md#modifiers.
+fn apply_sidecar(
+    source: &Path,
+    image: &mut image::RgbaImage,
+    color: image::ColorType,
+) -> Result<image::ColorType, String> {
+    let Some(amod) = crate::amod::read(source)? else {
+        return Ok(color);
+    };
+    let modifiers = &amod.modifiers;
+    if !modifiers.iter().any(|m| m.enabled) {
+        return Ok(color);
+    }
+    let (width, height) = (image.width() as usize, image.height() as usize);
+    let mut pixels: Vec<[f64; 3]> = image
+        .pixels()
+        .map(|p| [0, 1, 2].map(|c| f64::from(p[c]) / 255.0))
+        .collect();
+    crate::noise::apply_modifiers(modifiers, &mut pixels, width, height);
+    for (p, rgb) in image.pixels_mut().zip(pixels) {
+        for c in 0..3 {
+            p[c] = (rgb[c].clamp(0.0, 1.0) * 255.0).round() as u8;
+        }
+    }
+    // Colorize turns a grayscale image into a colored one.
+    let colorized = modifiers
+        .iter()
+        .any(|m| m.enabled && m.kind == crate::noise::ModifierKind::Colorize);
+    Ok(match (color.has_color(), colorized, color.has_alpha()) {
+        (false, true, true) => image::ColorType::Rgba8,
+        (false, true, false) => image::ColorType::Rgb8,
+        _ => color,
+    })
 }
 
 /// Writes every output of a glTF model; see docs/features/models.md#build.
@@ -356,6 +394,11 @@ fn compile_model(
         write_texture(image, &dest, ColorSpace::Linear, true)?;
     }
     Ok(model.detail)
+}
+
+/// An image file (`png`, `jpg`, `jpeg`), as opposed to generated texture sources.
+pub fn is_image(file: &Path) -> bool {
+    is_texture_source(file) && !is_noise(file) && !is_gradient(file)
 }
 
 pub fn is_lut(file: &Path) -> bool {
@@ -803,6 +846,38 @@ mod tests {
         let ktx = fs::read(output.join("rock_n.ktx2")).unwrap();
         let header = ::ktx2::Reader::new(&ktx[..]).unwrap().header();
         assert_eq!(header.format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+    }
+
+    #[test]
+    fn image_sidecars_modify_what_is_built() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("a.png"), 2, 2);
+        gray(&input.join("g.png"), 2, 2, 64);
+        fs::write(input.join("a.png.amod"), "[[modifiers]]\ntype = \"invert\"\n").unwrap();
+        fs::write(
+            input.join("g.png.amod"),
+            "[[modifiers]]\ntype = \"colorize\"\ncolor_a = [1.0, 0.0, 0.0]\ncolor_b = [1.0, 0.0, 0.0]\n",
+        )
+        .unwrap();
+
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        // Sidecars are not sources of their own.
+        assert!(!output.join("a.png.ktx2").exists());
+        // Inverted (x = 0, y = 0, b = 7), alpha kept.
+        let (_, pixels) = level0(&output.join("a.ktx2"));
+        assert_eq!(pixels[..4], [255, 255, 248, 255]);
+        // Colorize turns the grayscale image red.
+        let (image, color) = load_source(&input.join("g.png")).unwrap();
+        assert!(color.has_color());
+        assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
+
+        // A broken sidecar fails its image.
+        fs::write(input.join("a.png.amod"), "[[modifiers]]\ntype = \"sharpen\"\n").unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert!(outcome.failures[0].message.contains("a.png.amod: modifier 1"));
     }
 
     fn gray(path: &Path, w: u32, h: u32, value: u8) {

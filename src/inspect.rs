@@ -218,6 +218,14 @@ fn source_texture(
     let asset_path = strip_extension(rel);
     out.rows
         .push(("Dimensions", format!("{width} × {height} px")));
+    if !is_noise(file)
+        && !is_gradient(file)
+        && let Ok(Some(amod)) = crate::amod::read(file)
+        && !amod.modifiers.is_empty()
+    {
+        out.rows
+            .push(("Modifiers", crate::noise::modifier_summary(&amod.modifiers)));
+    }
     asset_rows(asset_path, out);
 
     let color_name = |color| match color {
@@ -314,22 +322,8 @@ fn noise_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     for (i, spec) in specs.iter().enumerate() {
         out.rows.push((spec.label, n.params.display(specs, i)));
     }
-    let modifiers: Vec<String> = n
-        .modifiers
-        .iter()
-        .map(|m| {
-            let off = if m.enabled { "" } else { " (off)" };
-            format!("{}{off}", m.kind.name())
-        })
-        .collect();
-    out.rows.push((
-        "Modifiers",
-        if modifiers.is_empty() {
-            "none".into()
-        } else {
-            modifiers.join(", ")
-        },
-    ));
+    out.rows
+        .push(("Modifiers", crate::noise::modifier_summary(&n.modifiers)));
     Ok(())
 }
 

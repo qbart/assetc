@@ -145,6 +145,8 @@ struct Inspected {
     gradient: Option<Result<GradientEdit, String>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
     mesh: Option<Result<MeshEdit, String>>,
+    /// An image's `.amod` (its modifiers) being edited, or why it can't be read.
+    sidecar: Option<Result<SidecarEdit, String>>,
     lut_compare: Option<CompareCache>,
     uploaded_color_cube: bool,
     /// A glTF model's input-relative path and this inspection's generation, for the 3D view.
@@ -411,7 +413,9 @@ impl InspectorTab {
                     && s.path.is_file()
             }),
             Self::Modifiers => selection.is_some_and(|s| {
-                s.location == Location::Input && build::is_noise(&s.path) && s.path.is_file()
+                s.location == Location::Input
+                    && (build::is_noise(&s.path) || build::is_image(&s.path))
+                    && s.path.is_file()
             }),
             Self::Gradients => selection.is_some_and(|s| {
                 s.location == Location::Input && gradient::is_gradient(&s.path) && s.path.is_file()
@@ -691,6 +695,7 @@ struct Prepared {
     gradient: Option<Result<Gradients, String>>,
     /// A model's sidecar and the meshlet limits the project gives it.
     mesh: Option<Result<(Amod, MeshOptions), String>>,
+    sidecar: Option<Result<Amod, String>>,
     model: Option<(PathBuf, u64)>,
     compiled_mesh: Option<crate::amesh::Preview>,
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
@@ -769,7 +774,11 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
             let amod = amod::read(&selection.path)?.unwrap_or_default();
             Ok((amod, settings.options(&rel)))
         });
+    // Images carry modifiers in their sidecar; see docs/features/textures.md#modifiers.
+    let sidecar = (selection.location == Location::Input && build::is_image(&selection.path))
+        .then(|| Ok(amod::read(&selection.path)?.unwrap_or_default()));
     Prepared {
+        sidecar,
         compiled_mesh: inspection.compiled_mesh.take(),
         compiled_materials: std::mem::take(&mut inspection.compiled_materials),
         compiled_bytes: inspection.compiled_bytes.take(),
@@ -844,12 +853,23 @@ fn inspected(
     prepared: Prepared,
     previous: Option<Inspected>,
 ) -> Inspected {
-    let (kept, kept_gradient, kept_mesh) = previous.map_or((None, None, None), |p| {
-        (
-            p.noise.and_then(Result::ok),
-            p.gradient.and_then(Result::ok),
-            p.mesh.and_then(Result::ok),
-        )
+    let (kept, kept_gradient, kept_mesh, kept_sidecar) =
+        previous.map_or((None, None, None, None), |p| {
+            (
+                p.noise.and_then(Result::ok),
+                p.gradient.and_then(Result::ok),
+                p.mesh.and_then(Result::ok),
+                p.sidecar.and_then(Result::ok),
+            )
+        });
+    let sidecar = prepared.sidecar.map(|parsed| {
+        parsed.map(|amod| match kept_sidecar {
+            Some(edit) if edit.saved == amod => edit,
+            _ => SidecarEdit {
+                edit: amod.clone(),
+                saved: amod,
+            },
+        })
     });
     let mesh = prepared.mesh.map(|parsed| {
         parsed.map(|(amod, project)| match kept_mesh {
@@ -905,6 +925,7 @@ fn inspected(
         noise,
         gradient,
         mesh,
+        sidecar,
         compiled_mesh: prepared.compiled_mesh,
         compiled_materials: prepared.compiled_materials,
         uploaded_lod: None,
@@ -1784,6 +1805,19 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
             match (state.inspector_tab, &mut state.inspected, &state.selection) {
                 (_, _, None) => placeholder(ui, "Nothing selected"),
                 (_, None, Some(_)) => placeholder(ui, "Loading…"),
+                (InspectorTab::Modifiers, Some(inspected), Some(_))
+                    if inspected.sidecar.is_some() =>
+                {
+                    if let Some(amod) = image_modifiers_tab(ui, inspected) {
+                        match amod::write(&inspected.path, &amod) {
+                            Ok(()) => {
+                                state.reinspect = true;
+                                state.rescan = true;
+                            }
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (InspectorTab::Parameters, Some(inspected), Some(_))
                     if inspected.mesh.is_some() =>
                 {
@@ -2144,6 +2178,13 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
             });
         });
     noise_commit(ui, edit)
+}
+
+/// An image's `.amod` being edited; see docs/features/textures.md#modifiers.
+struct SidecarEdit {
+    edit: Amod,
+    /// As last written.
+    saved: Amod,
 }
 
 /// A model's `.amod` mesh settings being edited; see docs/features/models.md#parameters-tab.
@@ -2971,15 +3012,38 @@ enum ModifierAction {
     Remove(usize),
 }
 
-/// The modifier list; see docs/features/noise.md#modifiers-tab.
+/// A `.noise` file's modifiers; see docs/features/noise.md#modifiers-tab.
 fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
     let edit = noise_edit(ui, inspected)?;
+    modifier_list(ui, &mut edit.edit.modifiers);
+    noise_commit(ui, edit)
+}
+
+/// An image's modifiers, kept in its sidecar; see docs/features/textures.md#modifiers.
+fn image_modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
+    let edit = match &mut inspected.sidecar {
+        Some(Ok(edit)) => edit,
+        Some(Err(e)) => {
+            placeholder(ui, e);
+            return None;
+        }
+        None => return None,
+    };
+    modifier_list(ui, &mut edit.edit.modifiers);
+    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+    (!busy && edit.edit != edit.saved).then(|| {
+        edit.saved = edit.edit.clone();
+        edit.edit.clone()
+    })
+}
+
+/// The modifier cards and the Add button; see docs/features/noise.md#modifiers-tab.
+fn modifier_list(ui: &mut Ui, modifiers: &mut Vec<Modifier>) {
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
-                let modifiers = &mut edit.edit.modifiers;
                 // Set from the header closures, applied after the list is drawn.
                 let action = std::cell::Cell::new(None);
                 let dragging = std::cell::Cell::new(None);
@@ -3054,7 +3118,6 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                 });
             });
         });
-    noise_commit(ui, edit)
 }
 
 fn info(ui: &mut Ui, inspection: &Inspection) {
