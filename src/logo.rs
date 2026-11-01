@@ -3,7 +3,7 @@
 use bevy_egui::egui::{self, ColorImage, TextureHandle, TextureOptions};
 use image::{RgbaImage, imageops};
 
-const PNG: &[u8] = include_bytes!("../assets/icons/logo.png");
+const PNG: &[u8] = include_bytes!("../assets/icons/pipe_logo.png");
 pub const HEIGHT: f32 = 16.0;
 /// Pixels at or below this alpha are treated as empty when trimming.
 const ALPHA_THRESHOLD: u8 = 8;
@@ -63,6 +63,6 @@ mod tests {
     fn embedded_logo_is_wider_than_tall_after_trim() {
         let image = image::load_from_memory(PNG).unwrap().to_rgba8();
         let trimmed = trim(&image);
-        assert_eq!(trimmed.dimensions(), (1223, 587));
+        assert_eq!(trimmed.dimensions(), (59, 45));
     }
 }
