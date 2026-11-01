@@ -295,7 +295,10 @@ mod tests {
         assert_eq!(config.meshes.defaults.meshlet_max_vertices, 96);
         assert_eq!(config.meshes.defaults.meshlet_max_triangles, 124);
         assert_eq!(config.meshes.overrides[0].patterns, ["a/**"]);
-        assert_eq!(config.meshes.overrides[0].patch.meshlet_max_triangles, Some(64));
+        assert_eq!(
+            config.meshes.overrides[0].patch.meshlet_max_triangles,
+            Some(64)
+        );
         assert!(
             toml::from_str::<Config>("[[meshes.overrides]]\nmeshlet_max_vertices = 8\n").is_err()
         );
@@ -308,7 +311,10 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let template: Config = toml::from_str(&uncommented).unwrap();
-        assert_eq!(template.meshes.overrides[0].patch.meshlet_max_vertices, Some(128));
+        assert_eq!(
+            template.meshes.overrides[0].patch.meshlet_max_vertices,
+            Some(128)
+        );
     }
 
     #[test]
