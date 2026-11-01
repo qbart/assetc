@@ -267,7 +267,10 @@ struct Sdf {
 }
 
 /// The outline's straight segments in pixels, y up.
-fn segments(font: &FontRef, id: GlyphId, scale: f32) -> Option<(Vec<[[f32; 2]; 2]>, [f32; 4])> {
+/// Straight segments, start and end point.
+type Segment = [[f32; 2]; 2];
+
+fn segments(font: &FontRef, id: GlyphId, scale: f32) -> Option<(Vec<Segment>, [f32; 4])> {
     let outline = font.outline(id)?;
     let p = |q: ab_glyph::Point| [q.x * scale, q.y * scale];
     let mut lines = Vec::new();
@@ -497,8 +500,10 @@ pub fn compile(data: &[u8], atlas_id: u64) -> Result<Compiled, String> {
     })
 }
 
+pub type Rows = Vec<(&'static str, String)>;
+
 /// Info rows of an `.afont` and its atlas's asset ID; see docs/features/fonts.md#compiled-fonts.
-pub fn afont_rows(bytes: &[u8]) -> Result<(Vec<(&'static str, String)>, u64), String> {
+pub fn afont_rows(bytes: &[u8]) -> Result<(Rows, u64), String> {
     let reader = crate::chunks::Reader::parse(bytes, FORMAT)?;
     if reader.version != VERSION {
         return Err(format!("unsupported {FORMAT} version {}", reader.version));
