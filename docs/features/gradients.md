@@ -22,20 +22,36 @@ The file tree shows `.gradient` files with the `swatch-book` icon.
 ## Parameters tab
 
 The Inspector's **Parameters** tab (`sliders-vertical`) edits the selected
-`.gradient` file from the Input tree (the Modifiers tab does not apply). It
-uses the [property editor](gui.md#property-editor) look:
+`.gradient` file's image layout (the Modifiers tab does not apply). It uses
+the [property editor](gui.md#property-editor) look, with one **Output**
+section (collapsible):
 
-- **Output** section (collapsible): **Width**, **Height** (integer fields,
-  1–4096), **Cell width** (1–Width) and **Cell height** (1–Height), drag or
-  type, then a weak line `<n> of <m> cells used (<columns> × <rows>)`. A
-  change that would leave too few cells for the gradients is undone, so the
-  editor never writes an invalid file.
-- One card per gradient, in order (non-collapsible, like modifier cards):
-  - Header: a **drag handle** (`grip-horizontal`) to reorder gradients
-    exactly as modifiers are reordered (see
-    [`noise.md`](noise.md#modifiers-tab)), the title (the name, or
-    `Gradient <n>` when it is empty), and a **remove** (`trash-2`) icon
-    button on the right.
+- **Width**, **Height** (integer fields, 1–4096), **Cell width** (1–Width)
+  and **Cell height** (1–Height): the image and the size of each gradient's
+  cell, drag or type.
+- **Layout**: dropdown "Rows (left to right, then down)" / "Columns (top to
+  bottom, then right)": the order the gradients fill the cells in.
+- A weak line `<n> of <m> cells used (<columns> × <rows>)`.
+
+A size change that would leave too few cells for the gradients is undone, so
+the editor never writes an invalid file.
+
+## Gradients tab
+
+The Inspector's **Gradients** tab (`palette`) lists the selected
+`.gradient` file's gradients, one card each, in order:
+
+- Cards **fold** like property sections: a chevron (or a click on the title)
+  folds and unfolds the card, open by default, remembered for the session.
+- Header: the chevron, a **drag handle** (`grip-horizontal`) to reorder
+  gradients exactly as modifiers are reordered (see
+  [`noise.md`](noise.md#modifiers-tab)), and the title (the name, or
+  `Gradient <n>` when it is empty). On the right:
+  - unfolded: a **remove** (`trash-2`) icon button;
+  - folded: a small preview of the gradient instead (48 × 12 px, 3 px
+    corners, over a checkerboard, first stop on the left as in the bar), and
+    no remove button.
+- Body (unfolded):
   - **Name**: text field.
   - **Dither**: dropdown None / Crosshatch / Pixel.
   - The [gradient editor](#gradient-editor).
@@ -44,9 +60,9 @@ uses the [property editor](gui.md#property-editor) look:
   every cell is used, with the tooltip "No room: enlarge the image or shrink
   the cells".
 - With no gradients, a weak "No gradients" line precedes the button.
-- If the file does not parse, the tab shows the error instead.
+- If the file does not parse, both tabs show the error instead.
 
-Edits are saved like noise parameters (see [`noise.md`](noise.md#saving)):
+Edits in both tabs are saved like noise parameters (see [`noise.md`](noise.md#saving)):
 written to the file in the [written form](../spec/gradient.md#written-form)
 once nothing is being dragged or typed, then inspected again in the
 background.

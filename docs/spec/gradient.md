@@ -13,6 +13,7 @@ width = 256
 height = 256
 cell_width = 16
 cell_height = 64
+layout = "rows"
 
 [[gradients]]
 name = "Sunset"
@@ -33,7 +34,7 @@ stops = [
 ```
 
 assetc writes files exactly in this form: `width`, `height`, `cell_width`,
-`cell_height`, a blank line, then one `[[gradients]]` table per gradient (separated by blank
+`cell_height`, `layout`, a blank line, then one `[[gradients]]` table per gradient (separated by blank
 lines) with `name`, `dither` and `stops` (one inline table per line, sorted
 by `at`). Numbers are written in their shortest form that reads back to the
 same value (`0.0`, `0.25`, `0.333`).
@@ -46,6 +47,7 @@ same value (`0.0`, `0.25`, `0.333`).
 | `height`      | integer | 1–4096       | 256     | image height, px                    |
 | `cell_width`  | integer | 1–`width`    | 16      | width of each gradient's cell, px   |
 | `cell_height` | integer | 1–`height`   | 64      | height of each gradient's cell, px  |
+| `layout`      | string  | `rows`, `columns` | `rows` | the order cells are filled in, see [Image](#image) |
 | `gradients`   | array of tables | —    | empty   | the gradients, in cell order        |
 
 The grid has `columns = floor(width / cell_width)` and
@@ -78,10 +80,16 @@ color that is not one of the two forms, a missing key, or any other key.
 ## Image
 
 The image is `width × height` RGBA8 (straight alpha), starting fully
-transparent (`0 0 0 0`). Cells are filled left to right, then top to
-bottom: gradient `i` (from 0) fills the cell at column `i mod columns`, row
-`floor(i / columns)`, whose top-left pixel is
-`(column × cell_width, row × cell_height)`. Unused cells, and any columns or
+transparent (`0 0 0 0`). Gradient `i` (from 0) fills one cell, whose
+top-left pixel is `(column × cell_width, row × cell_height)`, in the order
+`layout` gives:
+
+| `layout`  | Order                              | Cell of gradient `i`                              |
+|-----------|------------------------------------|---------------------------------------------------|
+| `rows`    | left to right, then top to bottom  | column `i mod columns`, row `floor(i / columns)`  |
+| `columns` | top to bottom, then left to right  | row `i mod rows`, column `floor(i / rows)`        |
+
+ Unused cells, and any columns or
 rows the grid does not cover, stay transparent.
 
 Gradients run **vertically**, the first stop at the bottom: within a cell,

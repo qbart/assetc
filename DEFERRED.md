@@ -98,3 +98,31 @@ Open:
   already expects containers to list several).
 - Meshlet parameters (vertex and triangle limits) and whether they belong in
   `assetc.toml`.
+
+## Modifiers for gradients
+
+Let `.gradient` files carry modifiers like `.noise` files (Invert, Levels,
+Brightness / Contrast, Threshold, Posterize, Blur, Normalize, Colorize), so
+a gradient atlas can be adjusted without editing every stop.
+
+Plan so far:
+
+- **Storage**: `[[modifiers]]` tables in the `.gradient` file, in the
+  `.noise` written form (spec in `docs/spec/gradient.md`).
+- **Editing**: the Inspector's Modifiers tab is enabled for `.gradient`
+  files too.
+- **Applying**: after the cells are rendered, before the build and the
+  canvas use the image, so the preview is what is exported. The gradient
+  editor's bars keep showing the stops as authored.
+- **Needed in code**: modifiers become their own module (shared with noise,
+  and with modifiers on input images, see above), working on RGBA (noise
+  modifiers assume a square grayscale-or-RGB image today), and `blur` must
+  handle non-square images.
+
+Open:
+
+- Per file (the whole atlas) or per gradient (each cell on its own, in its
+  card)? Per gradient fits the cards and keeps blur from bleeding between
+  cells.
+- Whether modifiers apply to alpha, and how blur treats cell edges (clamp
+  inside the cell).

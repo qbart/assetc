@@ -19,9 +19,10 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Five icon tabs, top to bottom: **Info** (`info`), **Parameters**
-(`sliders-vertical`) for `.noise` and `.gradient` files and **Modifiers**
-(`wrench`) for `.noise` files, both only in the Input tree (see
+Six icon tabs, top to bottom: **Info** (`info`), **Parameters**
+(`sliders-vertical`) for `.noise` and `.gradient` files, **Modifiers**
+(`wrench`) for `.noise` files and **Gradients** (`palette`) for `.gradient`
+files, all three only in the Input tree (see
 [`noise.md`](noise.md#parameters-tab), [`gradients.md`](gradients.md#parameters-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), and **Assets** (`files`). Hovering
