@@ -1,9 +1,9 @@
 # Build
 
 Compiles the project's `input` directory into its `output` directory (both
-from [`assetc.toml`](../spec/assetc.toml.md)). This first version handles
-textures only and establishes the pieces every later asset type builds on:
-asset IDs, output layout, and the manifest.
+from [`assetc.toml`](../spec/assetc.toml.md)): textures and
+[materials](materials.md), with asset IDs, output layout, and the manifest
+shared by every asset type.
 
 ## Asset IDs
 
@@ -22,6 +22,8 @@ id = FNV-1a-64(utf8(asset path))
   different image format later keeps the same ID.
 - Two sources with the same asset path are a build error, e.g. `a/b.png` and
   `a/b.PNG`, or `a/b.png` and `a/b.jpg`.
+- ID `0` is reserved (it means "no texture" in materials); an asset path that
+  hashes to it is a build error.
 
 ## Inputs
 
@@ -31,7 +33,11 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | Source             | Asset kind | Output                                        |
 |--------------------|------------|-----------------------------------------------|
 | `*.png`, `*.jpg`, `*.jpeg` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
+| `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.mat`, see [`materials.md`](materials.md) |
 | anything else      | —          | ignored, counted as skipped                   |
+
+Texture sources that belong to a material are compiled as that material
+describes (slot color space, ORM packing), see [`materials.md`](materials.md).
 
 Textures are decoded to 8-bit RGBA (other bit depths and color types are
 converted; JPEGs, having no alpha, get alpha 255; baseline and progressive
@@ -43,7 +49,8 @@ JPEGs are supported). Color space and mipmaps follow the `[textures]` settings, 
 ```
 <output>/
   assets.manifest            see docs/spec/manifest.md
-  <asset path>.ktx2          one per texture, same directory structure as input
+  <asset path>.ktx2          one per texture (incl. <name>.orm.ktx2), same directory structure as input
+  <dir>/<name>.mat           one per material
 ```
 
 - Output directories are created as needed; existing files are overwritten.
@@ -63,6 +70,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | Asset kind | Output pattern |
   |------------|----------------|
   | texture    | `*.ktx2`       |
+  | material   | `*.mat`        |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assets.manifest` is rewritten, never removed. Entries starting with `.` and the contents of symlinked directories
@@ -101,6 +109,10 @@ removed textures/old.ktx2
 Built 2 textures (1 skipped, 1 removed) into /path/to/project/build
 ```
 
+Each built asset prints `<source> -> <output> (<details>)`; see
+[`materials.md`](materials.md#cli) for material and ORM lines. The summary
+counts textures and materials: `Built 4 textures, 1 material (3 skipped)`.
+
 Errors are printed as `error: <source>: <message>`; exit code is non-zero if
 the build failed.
 
@@ -111,7 +123,8 @@ the build failed.
   project is open.
 - The build runs on a background thread; the UI stays responsive.
 - Status bar shows `Building…` while running, then either
-  `Built N textures (M skipped)` (with `, K removed` added inside the
+  `Built N textures, K materials (M skipped)` (the materials part only when
+  there are materials; singular nouns for 1) (with `, K removed` added inside the
   parentheses when stale outputs were removed) or `Build failed: <first error>` (with the
   error count when more than one).
 - When the build finishes, both file trees are rescanned.

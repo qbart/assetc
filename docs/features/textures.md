@@ -6,6 +6,9 @@ How a texture source is turned into a `.ktx2` file
 
 ## Settings
 
+Textures used by a [material](materials.md) take their color space from the
+material slot instead of `linear`; `no_mipmaps` still applies to them.
+
 Per-texture settings come from the `[textures]` table in
 [`assetc.toml`](../spec/assetc.toml.md). Each setting is a list of glob
 patterns matched against the source path relative to `input`, `/`-separated,

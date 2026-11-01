@@ -54,6 +54,7 @@ back.
 | Value | Kind    | File format                  |
 |------:|---------|------------------------------|
 |     0 | texture | [`ktx2.md`](ktx2.md)         |
+|     1 | material | [`material.md`](material.md) |
 
 Other values are reserved. Readers should skip entries with unknown kinds.
 

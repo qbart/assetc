@@ -47,8 +47,10 @@ The kind is decided by tab and file name, the same way the build decides it
 | Tab    | File                       | Kind               |
 |--------|----------------------------|--------------------|
 | Input  | `*.png`, `*.jpg`, `*.jpeg` (any case) | Source texture |
+| Input  | `*.mat.toml`               | Material source    |
 | Input  | anything else              | Ignored            |
 | Output | `*.ktx2` (any case)        | Compiled texture   |
+| Output | `*.mat`                    | Compiled material  |
 | Output | `assets.manifest` at the output root | Manifest |
 | Output | anything else              | File               |
 
@@ -79,6 +81,9 @@ instead.
 | Asset path | output-relative path without extension                              |
 | Asset ID   | as above                                                            |
 
+Material sources, compiled materials, and source textures used by a material
+get extra rows, see [`materials.md`](materials.md#inspector).
+
 **Manifest:** Version, Entries (count).
 
 **Ignored / File:** Kind and Size only.
@@ -94,14 +99,15 @@ manifest), the details show the rows that are still known (Kind, Size) and an
 Lists the assets a file contains, as recorded in `<output>/assets.manifest`
 (see [`docs/spec/manifest.md`](../spec/manifest.md)).
 
-- Enabled only for **compiled textures** (`.ktx2` selected in the Output
-  tree) for now. A `.ktx2` holds exactly one asset; later container formats
+- Enabled only for compiled files (`.ktx2` or `.mat` selected in the Output
+  tree) for now. Each holds exactly one asset; later container formats
   (e.g. meshes with embedded materials) will list several.
 - The manifest is read when the app opens and on every rescan (rescan button,
   or after a build finishes). A failed build does not write a manifest, so the
   tab reflects the last successful build.
 - One row per manifest entry whose output path is the selected file: `image`
-  icon (textures), the asset path (strong), then weak `Texture` and the asset
+  icon (textures) or `file` icon (materials), the asset path (strong), then
+  weak kind (`Texture`, `Material`) and the asset
   ID (`0x` + 16 hex digits, selectable). Rows sorted by asset path.
 - Placeholders (weak text) instead of rows:
   - no manifest: "Not built yet"
