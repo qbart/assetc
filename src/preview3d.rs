@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use bevy::asset::{AssetPath, LoadState, RenderAssetUsages};
 use bevy::camera::{ClearColorConfig, Viewport};
+use bevy::core_pipeline::fullscreen_material::{FullscreenMaterial, FullscreenMaterialPlugin};
 use bevy::gltf::Gltf;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::{GeneratedEnvironmentMapLight, Skybox};
@@ -13,14 +14,19 @@ use bevy::math::Affine3A;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{CylinderMeshBuilder, Indices, PrimitiveTopology};
 use bevy::prelude::*;
+use bevy::render::RenderApp;
+use bevy::render::extract_component::ExtractComponent;
 use bevy::render::render_resource::{
-    Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+    Extent3d, ShaderType, TextureDimension, TextureFormat, TextureViewDescriptor,
+    TextureViewDimension,
 };
+use bevy::shader::ShaderRef;
 
 use bevy::transform::TransformSystems;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady};
 
 use crate::theme::BG_CENTER;
+use crate::vision::Vision;
 
 /// Asset source for the project's input directory, registered at startup; models load from it.
 pub const INPUT_SOURCE: &str = "input";
@@ -31,7 +37,9 @@ pub struct Preview3dPlugin;
 
 impl Plugin for Preview3dPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Preview3d>()
+        bevy::asset::embedded_asset!(app, "vision.wgsl");
+        app.add_plugins(FullscreenMaterialPlugin::<VisionFilter>::default())
+            .init_resource::<Preview3d>()
             .insert_resource(GlobalAmbientLight {
                 brightness: AMBIENT_BRIGHTNESS,
                 ..default()
@@ -41,7 +49,7 @@ impl Plugin for Preview3dPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    (sync_compiled, sync, sync_model)
+                    (sync_compiled, sync, sync_model, sync_vision)
                         .chain()
                         .before(TransformSystems::Propagate),
                     fit_model.after(TransformSystems::Propagate),
@@ -163,6 +171,43 @@ pub struct Preview3d {
     pub display: MeshDisplay,
     /// Which [`MeshOverlay`]s are drawn, by index in [`MeshOverlay::ALL`].
     pub overlays: [bool; 6],
+    /// The color vision the view simulates; `None` is normal vision.
+    pub vision: Option<Vision>,
+}
+
+/// The color vision simulation pass on the preview camera; see
+/// docs/features/canvas.md#color-vision.
+#[derive(Component, ExtractComponent, Clone, Copy, ShaderType, Default, PartialEq)]
+#[extract_app(RenderApp)]
+struct VisionFilter {
+    r: Vec4,
+    g: Vec4,
+    b: Vec4,
+}
+
+impl FullscreenMaterial for VisionFilter {
+    fn fragment_shader() -> ShaderRef {
+        "embedded://assetc/vision.wgsl".into()
+    }
+}
+
+/// Adds, changes or removes the camera's [`VisionFilter`] to match [`Preview3d::vision`].
+fn sync_vision(
+    mut commands: Commands,
+    preview: Res<Preview3d>,
+    camera: Single<(Entity, Option<&VisionFilter>), With<PreviewCamera>>,
+) {
+    let (entity, current) = *camera;
+    let wanted = preview.vision.map(|vision| {
+        let [r, g, b] = vision.matrix().map(|row| Vec3::from(row).extend(0.0));
+        VisionFilter { r, g, b }
+    });
+    if current.copied() != wanted {
+        match wanted {
+            Some(filter) => commands.entity(entity).insert(filter),
+            None => commands.entity(entity).remove::<VisionFilter>(),
+        };
+    }
 }
 
 /// A compiled mesh and its material slots, see docs/features/models.md#compiled-mesh-preview.

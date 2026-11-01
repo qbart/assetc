@@ -39,6 +39,7 @@ use crate::theme::{
     CHECKER_DARK, CHECKER_LIGHT, STROKE, TEXT, TEXT_WEAK,
 };
 use crate::tree::{FileTrees, Listing, Node};
+use crate::vision::Vision;
 use crate::{chart, preview3d};
 
 pub struct UiPlugin;
@@ -97,6 +98,8 @@ struct UiState {
     font_atlas: bool,
     /// The Manifest view's filter.
     data_filter: String,
+    /// The color vision the canvas simulates; `None` is normal vision.
+    vision: Option<Vision>,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -144,6 +147,8 @@ struct Inspected {
     preview: Option<egui::TextureHandle>,
     /// Single-channel view of `pixels`, built on demand.
     channel_preview: Option<(Channels, egui::TextureHandle)>,
+    /// What the shown channels look like to a color vision deficiency, built on demand.
+    vision_preview: Option<((Channels, Vision), egui::TextureHandle)>,
     /// Channels last sent to the 3D preview.
     uploaded_3d: Option<Channels>,
     /// Environment map faces, kept to upload to the 3D preview.
@@ -175,6 +180,7 @@ struct Inspected {
 struct CompareCache {
     /// Path of the source image; `None` for the reference chart.
     key: Option<PathBuf>,
+    vision: Option<Vision>,
     before: egui::TextureHandle,
     after: egui::TextureHandle,
 }
@@ -332,6 +338,7 @@ impl Default for UiState {
             mesh_in_3d: true,
             font_atlas: true,
             data_filter: String::new(),
+            vision: None,
             mesh_chunk: "DESC".into(),
         }
     }
@@ -562,6 +569,7 @@ fn shell(
     preview3d.colors = false;
     preview3d.model = None;
     preview3d.compiled_shown = false;
+    preview3d.vision = state.vision;
     let shown = Shown::of(state.inspected.as_ref());
     let show_3d = match shown {
         Shown::Image => state.mode == ViewMode::ThreeD,
@@ -625,9 +633,13 @@ fn shell(
                 return;
             }
             match (shown, state.mode) {
-                (Shown::Environment, _) => {
-                    canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
-                }
+                (Shown::Environment, _) => canvas_environment(
+                    ui,
+                    rect,
+                    state.inspected.as_mut(),
+                    &mut preview3d,
+                    &mut state.vision,
+                ),
                 (Shown::CompiledMesh, _) | (Shown::CompiledFont, _)
                     if shown == Shown::CompiledMesh && !state.mesh_in_3d
                         || shown == Shown::CompiledFont && !state.font_atlas =>
@@ -654,6 +666,7 @@ fn shell(
                         &mut state.mesh_display,
                         &mut state.mesh_overlays,
                         lod,
+                        &mut state.vision,
                     )
                 }
                 (Shown::Model, _) => {
@@ -662,7 +675,7 @@ fn shell(
                         .and_then(|i| state.animations.get(&i.path).copied())
                         .flatten();
                     preview3d.animation = animation;
-                    canvas_model(ui, rect, inspected, &mut preview3d)
+                    canvas_model(ui, rect, inspected, &mut preview3d, &mut state.vision)
                 }
                 (Shown::Lut, _) => canvas_lut(
                     ui,
@@ -671,6 +684,7 @@ fn shell(
                     &mut state.lut,
                     state.last_image.as_ref(),
                     &mut preview3d,
+                    &mut state.vision,
                 ),
                 (Shown::Data, _) => {
                     if let Some(table) = state
@@ -687,6 +701,7 @@ fn shell(
                     state.inspected.as_mut(),
                     &mut state.view,
                     &mut state.canvas_options,
+                    &mut state.vision,
                 ),
                 (_, ViewMode::ThreeD) => canvas_3d(
                     ui,
@@ -694,6 +709,7 @@ fn shell(
                     state.inspected.as_mut(),
                     &mut state.canvas_options,
                     &mut preview3d,
+                    &mut state.vision,
                 ),
             }
         });
@@ -988,6 +1004,7 @@ fn inspected(
         shown_level: 0,
         preview,
         channel_preview: None,
+        vision_preview: None,
         uploaded_3d: None,
         cubemap: prepared.cubemap,
         uploaded_cubemap: false,
@@ -1019,6 +1036,7 @@ fn show_level(ctx: &egui::Context, inspected: &mut Inspected, level: usize) -> O
     inspected.preview = Some(load_preview(ctx, "canvas_preview", &image, &image.pixels));
     inspected.pixels = Some(image);
     inspected.channel_preview = None;
+    inspected.vision_preview = None;
     inspected.uploaded_3d = None;
     inspected.shown_level = level;
     Some(before)
@@ -3823,6 +3841,7 @@ fn canvas(
     inspected: Option<&mut Inspected>,
     view: &mut View,
     all_options: &mut HashMap<PathBuf, CanvasOptions>,
+    vision: &mut Option<Vision>,
 ) {
     let Some(inspected) = shown_image(ui, rect, inspected) else {
         return;
@@ -3831,16 +3850,32 @@ fn canvas(
     let (Some(preview), Some(pixels)) = (&inspected.preview, &inspected.pixels) else {
         return;
     };
-    let texture = if options.channels.index().is_none() {
-        preview.clone()
-    } else {
-        let cached = &mut inspected.channel_preview;
-        if cached.as_ref().is_none_or(|(c, _)| *c != options.channels) {
-            let gray = channel_pixels(pixels, options.channels);
-            let texture = load_preview(ui.ctx(), "canvas_channel", pixels, &gray);
-            *cached = Some((options.channels, texture));
+    let texture = match *vision {
+        // As a color vision deficiency sees the shown channels.
+        Some(seen) => {
+            let key = (options.channels, seen);
+            let cached = &mut inspected.vision_preview;
+            if cached.as_ref().is_none_or(|(k, _)| *k != key) {
+                let shown = if options.channels.index().is_none() {
+                    seen.simulate(&pixels.pixels)
+                } else {
+                    seen.simulate(&channel_pixels(pixels, options.channels))
+                };
+                let texture = load_preview(ui.ctx(), "canvas_vision", pixels, &shown);
+                *cached = Some((key, texture));
+            }
+            cached.as_ref().unwrap().1.clone()
         }
-        cached.as_ref().unwrap().1.clone()
+        None if options.channels.index().is_none() => preview.clone(),
+        None => {
+            let cached = &mut inspected.channel_preview;
+            if cached.as_ref().is_none_or(|(c, _)| *c != options.channels) {
+                let gray = channel_pixels(pixels, options.channels);
+                let texture = load_preview(ui.ctx(), "canvas_channel", pixels, &gray);
+                *cached = Some((options.channels, texture));
+            }
+            cached.as_ref().unwrap().1.clone()
+        }
     };
 
     let ppp = ui.ctx().pixels_per_point();
@@ -3907,6 +3942,11 @@ fn canvas(
 
     // Drawn last so they sit on top; their clicks apply next frame.
     if inspected.inspection.specimen {
+        let seen = vision_tools(*vision);
+        if let Some((_, button)) = toolbar(ui, rect, &[&seen]) {
+            toggle_vision(vision, button);
+            ui.ctx().request_repaint();
+        }
         if zoom_bar(ui, rect, view, fit) {
             ui.ctx().request_repaint();
         }
@@ -3920,11 +3960,13 @@ fn canvas(
     }];
     let choices = channel_choices(&inspected.inspection);
     let channels = channel_tools(&choices, options.channels);
-    if let Some((group, button)) = toolbar(ui, rect, &[&tile, &channels]) {
+    let seen = vision_tools(*vision);
+    if let Some((group, button)) = toolbar(ui, rect, &[&tile, &channels, &seen]) {
         let options = all_options.entry(inspected.path.clone()).or_default();
         match group {
             0 => options.tiled = !options.tiled,
-            _ => options.channels = choices[button].0,
+            1 => options.channels = choices[button].0,
+            _ => toggle_vision(vision, button),
         }
         ui.ctx().request_repaint();
     }
@@ -3941,6 +3983,7 @@ fn canvas_3d(
     inspected: Option<&mut Inspected>,
     all_options: &mut HashMap<PathBuf, CanvasOptions>,
     preview: &mut Preview3d,
+    vision: &mut Option<Vision>,
 ) {
     let Some(inspected) = shown_image(ui, rect, inspected) else {
         return;
@@ -3963,13 +4006,15 @@ fn canvas_3d(
     let shapes = shape_tools(preview.shape);
     let choices = channel_choices(&inspected.inspection);
     let channels = channel_tools(&choices, options.channels);
-    if let Some((group, button)) = toolbar(ui, rect, &[&shapes, &channels]) {
+    let seen = vision_tools(*vision);
+    if let Some((group, button)) = toolbar(ui, rect, &[&shapes, &channels, &seen]) {
         match group {
             0 => preview.shape = Shape::ALL[button],
-            _ => {
+            1 => {
                 let options = all_options.entry(inspected.path.clone()).or_default();
                 options.channels = choices[button].0;
             }
+            _ => toggle_vision(vision, button),
         }
         ui.ctx().request_repaint();
     }
@@ -3983,6 +4028,7 @@ fn canvas_lut(
     lut_ui: &mut LutUi,
     last_image: Option<&LastImage>,
     preview: &mut Preview3d,
+    vision: &mut Option<Vision>,
 ) {
     let Some(Inspected {
         lut: Some(lut),
@@ -3994,7 +4040,7 @@ fn canvas_lut(
         return;
     };
     match lut_ui.view {
-        LutView::Compare => compare_view(ui, rect, lut, lut_compare, lut_ui, last_image),
+        LutView::Compare => compare_view(ui, rect, lut, lut_compare, lut_ui, last_image, vision),
         LutView::Cube => {
             if !*uploaded_color_cube {
                 let before = preview3d::color_cube(lut.size, |rgb| rgb);
@@ -4022,10 +4068,13 @@ fn canvas_lut(
                     enabled: true,
                 },
             ];
-            if let Some((_, button)) = toolbar(ui, rect, &[&tools]) {
-                lut_ui.cube_before = button == 0;
-                ui.ctx().request_repaint();
+            let seen = vision_tools(*vision);
+            match toolbar(ui, rect, &[&tools, &seen]) {
+                Some((0, button)) => lut_ui.cube_before = button == 0,
+                Some((_, button)) => toggle_vision(vision, button),
+                None => return,
             }
+            ui.ctx().request_repaint();
         }
         LutView::Curves => curves_view(ui, rect, lut),
     }
@@ -4045,18 +4094,33 @@ fn compare_view(
     cache: &mut Option<CompareCache>,
     lut_ui: &mut LutUi,
     last_image: Option<&LastImage>,
+    vision: &mut Option<Vision>,
 ) {
     let (key, image) = match (lut_ui.source, last_image) {
         (LutSource::Image, Some(last)) => (Some(&last.path), &last.image),
         _ => (None, &*chart::CHART),
     };
-    if cache.as_ref().is_none_or(|c| c.key.as_ref() != key) {
+    if cache
+        .as_ref()
+        .is_none_or(|c| c.key.as_ref() != key || c.vision != *vision)
+    {
         let graded = lut.grade(image);
         let linear = egui::TextureFilter::Linear;
+        let seen = |pixels: &[u8]| match *vision {
+            Some(seen) => seen.simulate(pixels),
+            None => pixels.to_vec(),
+        };
         *cache = Some(CompareCache {
             key: key.cloned(),
-            before: load_texture(ui.ctx(), "lut_before", image, &image.pixels, linear),
-            after: load_texture(ui.ctx(), "lut_after", &graded, &graded.pixels, linear),
+            vision: *vision,
+            before: load_texture(ui.ctx(), "lut_before", image, &seen(&image.pixels), linear),
+            after: load_texture(
+                ui.ctx(),
+                "lut_after",
+                &graded,
+                &seen(&graded.pixels),
+                linear,
+            ),
         });
     }
     let cache = cache.as_ref().unwrap();
@@ -4145,10 +4209,13 @@ fn compare_view(
             enabled: last_image.is_some(),
         },
     ];
-    if let Some((_, button)) = toolbar(ui, rect, &[&sources]) {
-        lut_ui.source = [LutSource::Chart, LutSource::Image][button];
-        ui.ctx().request_repaint();
+    let seen = vision_tools(*vision);
+    match toolbar(ui, rect, &[&sources, &seen]) {
+        Some((0, button)) => lut_ui.source = [LutSource::Chart, LutSource::Image][button],
+        Some((_, button)) => toggle_vision(vision, button),
+        None => return,
     }
+    ui.ctx().request_repaint();
 }
 
 /// Output R, G, B for gray input 0..1; see docs/features/lut.md#curves.
@@ -4207,6 +4274,7 @@ fn canvas_environment(
     rect: Rect,
     inspected: Option<&mut Inspected>,
     preview: &mut Preview3d,
+    vision: &mut Option<Vision>,
 ) {
     let Some(inspected) = inspected else {
         return;
@@ -4227,10 +4295,13 @@ fn canvas_environment(
     preview.environment = true;
     view_3d(ui, rect, preview);
     let shapes = shape_tools(preview.environment_shape());
-    if let Some((_, button)) = toolbar(ui, rect, &[&shapes]) {
-        preview.environment_shape = Some(Shape::ALL[button]);
-        ui.ctx().request_repaint();
+    let seen = vision_tools(*vision);
+    match toolbar(ui, rect, &[&shapes, &seen]) {
+        Some((0, button)) => preview.environment_shape = Some(Shape::ALL[button]),
+        Some((_, button)) => toggle_vision(vision, button),
+        None => return,
     }
+    ui.ctx().request_repaint();
 }
 
 /// A compiled mesh in the 3D view in one of its display modes; see
@@ -4243,6 +4314,7 @@ fn canvas_compiled_mesh(
     display: &mut MeshDisplay,
     overlays: &mut [bool; 6],
     lod: usize,
+    vision: &mut Option<Vision>,
 ) {
     let Some(inspected) = inspected else {
         return;
@@ -4310,13 +4382,18 @@ fn canvas_compiled_mesh(
             enabled: available(overlay),
         })
         .collect();
-    match toolbar(ui, rect, &[&tools, &bounds]) {
+    let seen = vision_tools(*vision);
+    match toolbar(ui, rect, &[&tools, &bounds, &seen]) {
         Some((0, button)) => {
             *display = MeshDisplay::ALL[button];
             ui.ctx().request_repaint();
         }
-        Some((_, button)) => {
+        Some((1, button)) => {
             overlays[button] = !overlays[button];
+            ui.ctx().request_repaint();
+        }
+        Some((_, button)) => {
+            toggle_vision(vision, button);
             ui.ctx().request_repaint();
         }
         None => {}
@@ -4591,7 +4668,13 @@ fn chunk_table(
 }
 
 /// A glTF model in the 3D view, see docs/features/models.md#preview.
-fn canvas_model(ui: &mut Ui, rect: Rect, inspected: Option<&Inspected>, preview: &mut Preview3d) {
+fn canvas_model(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: Option<&Inspected>,
+    preview: &mut Preview3d,
+    vision: &mut Option<Vision>,
+) {
     let Some(Inspected {
         model: Some(model), ..
     }) = inspected
@@ -4600,6 +4683,11 @@ fn canvas_model(ui: &mut Ui, rect: Rect, inspected: Option<&Inspected>, preview:
     };
     preview.model = Some(model.clone());
     view_3d(ui, rect, preview);
+    let seen = vision_tools(*vision);
+    if let Some((_, button)) = toolbar(ui, rect, &[&seen]) {
+        toggle_vision(vision, button);
+        ui.ctx().request_repaint();
+    }
     if let ModelStatus::Failed(error) = &preview.model_status {
         ui.painter().text(
             rect.center(),
@@ -4728,6 +4816,8 @@ fn wheel_notches(input: &egui::InputState) -> f32 {
 #[derive(Clone, Copy)]
 enum Glyph {
     Icon(Icon),
+    /// An eye with a ban sign in the deficiency's color as its pupil.
+    Vision(Vision),
     /// Three circles, filled for the shown channels.
     Channels(Channels),
 }
@@ -4737,6 +4827,25 @@ struct Tool {
     name: String,
     on: bool,
     enabled: bool,
+}
+
+/// The Color vision group: at most one on; see docs/features/canvas.md#color-vision.
+fn vision_tools(current: Option<Vision>) -> Vec<Tool> {
+    Vision::ALL
+        .into_iter()
+        .map(|seen| Tool {
+            glyph: Glyph::Vision(seen),
+            name: format!("{}\n{}", seen.name(), seen.hint()),
+            on: current == Some(seen),
+            enabled: true,
+        })
+        .collect()
+}
+
+/// Turns button `button` of the Color vision group on, or off when it already is.
+fn toggle_vision(vision: &mut Option<Vision>, button: usize) {
+    let seen = Vision::ALL[button];
+    *vision = (*vision != Some(seen)).then_some(seen);
 }
 
 /// A column of button groups in the canvas' top-right corner; returns the clicked `(group, button)`.
@@ -4814,6 +4923,21 @@ fn paint_glyph(
         Glyph::Icon(icon) => icon
             .image(18.0, tint)
             .paint_at(ui, Rect::from_center_size(center, vec2(18.0, 18.0))),
+        Glyph::Vision(seen) => {
+            Icon::EyeOutline
+                .image(18.0, tint)
+                .paint_at(ui, Rect::from_center_size(center, vec2(18.0, 18.0)));
+            let color = fill(match seen {
+                Vision::Protanopia => CHANNEL_R,
+                Vision::Deuteranopia => CHANNEL_G,
+                Vision::Tritanopia => CHANNEL_B,
+                Vision::Monochromacy => egui::Color32::from_rgb(0x8c, 0x8c, 0x8c),
+            });
+            let stroke = Stroke::new(1.5, color);
+            painter.circle_stroke(center, 3.5, stroke);
+            let d = 3.5 * std::f32::consts::FRAC_1_SQRT_2;
+            painter.line_segment([center - vec2(d, d), center + vec2(d, d)], stroke);
+        }
         Glyph::Channels(shown) => {
             // Red top, green bottom-left, blue bottom-right; see docs/features/canvas.md#channel-icons.
             let circles = [

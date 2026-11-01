@@ -27,6 +27,7 @@ mod texture;
 mod theme;
 mod tree;
 mod ui;
+mod vision;
 
 use std::env;
 use std::process::ExitCode;
