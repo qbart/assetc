@@ -140,7 +140,7 @@ static SRGB_TO_LINEAR: LazyLock<[f32; 256]> = LazyLock::new(|| {
     })
 });
 
-fn linear_to_srgb(v: f32) -> f32 {
+pub fn linear_to_srgb(v: f32) -> f32 {
     if v <= 0.0031308 {
         v * 12.92
     } else {

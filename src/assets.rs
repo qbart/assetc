@@ -138,7 +138,7 @@ mod tests {
                 .collect()
         };
         assert_eq!(in_file("build/textures/b.ktx2"), ["textures/b"]);
-        assert!(in_file("build/assets.manifest").is_empty());
+        assert!(in_file("build/assets.aman").is_empty());
         assert!(in_file("assets/textures/b.png").is_empty());
         assert!(Assets::NotBuilt.in_file(Path::new("x.ktx2")).is_empty());
     }

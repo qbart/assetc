@@ -1,9 +1,11 @@
-//! `assets.manifest` reader/writer, see docs/spec/manifest.md.
+//! `assets.aman` reader/writer, see docs/spec/aman.md.
 
 use std::fmt;
 
-pub const FILE_NAME: &str = "assets.manifest";
-const MAGIC: [u8; 4] = *b"ACMF";
+pub const FILE_NAME: &str = "assets.aman";
+/// The manifest's name before, removed by builds; see docs/features/build.md.
+pub const LEGACY_FILE_NAME: &str = "assets.manifest";
+pub const MAGIC: [u8; 4] = *b"AMAN";
 pub const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 16;
 const ENTRY_SIZE: usize = 16;
@@ -180,7 +182,7 @@ mod tests {
     fn matches_spec_example_layout() {
         let bytes = encode(&[entry(0x0102_0304_0506_0708, "textures/dirt.ktx2")]);
         let mut expected = Vec::new();
-        expected.extend_from_slice(b"ACMF");
+        expected.extend_from_slice(b"AMAN");
         expected.extend_from_slice(&[1, 0, 0, 0, 1, 0, 0, 0, 18, 0, 0, 0]);
         expected.extend_from_slice(&[8, 7, 6, 5, 4, 3, 2, 1]);
         expected.extend_from_slice(&[0, 0, 0, 0, 18, 0, 0, 0]);

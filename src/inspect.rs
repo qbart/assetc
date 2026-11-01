@@ -50,8 +50,31 @@ pub struct Inspection {
     pub compiled_materials: Vec<Option<MaterialPreview>>,
     /// `compiled_bytes` is an `.afont`, and `preview` its atlas (if found).
     pub compiled_font: bool,
+    /// The file's data as a table, for files without a preview (manifest, `.amat`).
+    pub data: Option<DataTable>,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
+}
+
+/// A file's data as a table, for the canvas; see docs/features/inspector.md#data-tables.
+#[derive(Debug, Clone, Default)]
+pub struct DataTable {
+    pub header: String,
+    pub columns: Vec<&'static str>,
+    pub rows: Vec<DataRow>,
+    /// Rows can be filtered by text (the manifest view).
+    pub filterable: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DataRow {
+    pub cells: Vec<String>,
+    /// Drawn in `TEXT_WEAK`.
+    pub weak: bool,
+    /// A color swatch (sRGB) before the text of the cell in this column.
+    pub swatch: Option<(usize, [u8; 3])>,
+    /// What the filter matches, lowercase.
+    pub filter: String,
 }
 
 /// Face file stems of an environment map folder, in cube layer order.
@@ -180,7 +203,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::Font => font_rows(project, file, &rel, &mut out),
         Kind::Model => model_rows(project, file, &rel, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
-        Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
+        Kind::CompiledMaterial => compiled_material(project, file, &rel, &mut out),
         Kind::CompiledMesh => fs::read(file)
             .map_err(|e| e.to_string())
             .and_then(|bytes| Ok((amesh::rows(&bytes)?, amesh::preview(&bytes)?, bytes)))
@@ -205,7 +228,11 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
     if let Err(message) = result {
         out.preview = None;
         // A LUT has no image to fall back on, so the canvas shows the error itself.
-        out.note = matches!(kind, Kind::ColorLut | Kind::CompiledMesh).then(|| message.clone());
+        out.note = matches!(
+            kind,
+            Kind::ColorLut | Kind::CompiledMesh | Kind::CompiledMaterial | Kind::Manifest
+        )
+        .then(|| message.clone());
         out.rows.push(("Error", message));
     }
     out
@@ -656,9 +683,19 @@ fn material_source(
     Ok(())
 }
 
-fn compiled_material(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), String> {
+fn compiled_material(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+    out: &mut Inspection,
+) -> Result<(), String> {
     let bytes = fs::read(file).map_err(|e| e.to_string())?;
     let m = material::decode(&bytes)?;
+    let entries = project
+        .output_dir()
+        .and_then(|output| fs::read(output.join(manifest::FILE_NAME)).ok())
+        .and_then(|bytes| manifest::decode(&bytes).ok());
+    out.data = Some(material_table(&bytes, entries.as_deref()));
     asset_rows(manifest::Kind::Material.asset_path(rel), out);
     let list = |values: &[f32]| {
         values
@@ -719,7 +756,144 @@ fn manifest(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let entries = manifest::decode(&bytes).map_err(|e| e.to_string())?;
     out.rows.push(("Version", manifest::VERSION.to_string()));
     out.rows.push(("Entries", entries.len().to_string()));
+    let output = file.parent().unwrap_or(file);
+    out.data = Some(DataTable {
+        header: format!(
+            "{}   v{}   {} entries   {}",
+            String::from_utf8_lossy(&manifest::MAGIC),
+            manifest::VERSION,
+            entries.len(),
+            format_size(bytes.len() as u64)
+        ),
+        columns: vec!["#", "Asset ID", "Kind", "Asset path", "File"],
+        rows: entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let asset_path = e.kind.asset_path(&e.path).to_owned();
+                let missing = !output.join(&e.path).is_file();
+                DataRow {
+                    filter: format!("{asset_path}\n{}", e.path).to_lowercase(),
+                    cells: vec![
+                        i.to_string(),
+                        format!("{:#018x}", e.id),
+                        e.kind.name().into(),
+                        asset_path,
+                        if missing {
+                            format!("{} (missing)", e.path)
+                        } else {
+                            e.path.clone()
+                        },
+                    ],
+                    weak: missing,
+                    swatch: None,
+                }
+            })
+            .collect(),
+        filterable: true,
+    });
     Ok(())
+}
+
+/// The `.amat` record field by field; see docs/features/inspector.md#material-view.
+fn material_table(bytes: &[u8], entries: Option<&[manifest::Entry]>) -> DataTable {
+    let f = |at: usize| {
+        bytes
+            .get(at..at + 4)
+            .map_or(0.0, |b| f32::from_le_bytes(b.try_into().unwrap()))
+    };
+    let u = |at: usize| {
+        bytes
+            .get(at..at + 4)
+            .map_or(0, |b| u32::from_le_bytes(b.try_into().unwrap()))
+    };
+    let floats = |at: usize, n: usize| {
+        (0..n)
+            .map(|k| format!("{:.3}", f(at + k * 4)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let swatch = |at: usize| {
+        [0, 1, 2].map(|k| {
+            (crate::texture::linear_to_srgb(f(at + k * 4).clamp(0.0, 1.0)) * 255.0).round() as u8
+        })
+    };
+    let flags = u(68);
+    let flag_text = format!(
+        "{flags:#04x} ({}, {}, {})",
+        ["opaque", "mask", "blend", "reserved"][(flags & 3) as usize],
+        if flags & 4 != 0 {
+            "double-sided"
+        } else {
+            "single-sided"
+        },
+        if flags & 8 != 0 {
+            "displacement"
+        } else {
+            "parallax"
+        },
+    );
+    let texture = |at: usize| {
+        let id = bytes
+            .get(at..at + 8)
+            .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()));
+        if id == 0 {
+            return "—".to_owned();
+        }
+        let file = entries
+            .and_then(|entries| entries.iter().find(|e| e.id == id))
+            .map_or("(not in manifest)", |e| e.path.as_str());
+        format!("{id:#018x}  {file}")
+    };
+    let row = |at: usize, name: &str, value: String, color: bool| DataRow {
+        cells: vec![at.to_string(), name.into(), value],
+        swatch: color.then(|| (2, swatch(at))),
+        ..Default::default()
+    };
+    let mut rows = vec![
+        row(
+            0,
+            "magic",
+            String::from_utf8_lossy(&bytes[..4.min(bytes.len())]).into(),
+            false,
+        ),
+        row(4, "version", u(4).to_string(), false),
+        row(8, "base_color", floats(8, 4), true),
+        row(24, "emissive", floats(24, 3), true),
+    ];
+    for (at, name) in [
+        (36, "emissive_strength"),
+        (40, "metallic"),
+        (44, "roughness"),
+        (48, "occlusion_strength"),
+        (52, "normal_scale"),
+        (56, "height_scale"),
+        (60, "height_midlevel"),
+        (64, "alpha_cutoff"),
+    ] {
+        rows.push(row(at, name, format!("{:.3}", f(at)), false));
+    }
+    rows.push(row(68, "flags", flag_text, false));
+    for (at, name) in [
+        (72, "base_color_texture"),
+        (80, "normal_texture"),
+        (88, "orm_texture"),
+        (96, "emissive_texture"),
+        (104, "height_texture"),
+    ] {
+        rows.push(row(at, name, texture(at), false));
+    }
+    DataTable {
+        header: format!(
+            "{}   v{}   {}",
+            String::from_utf8_lossy(&bytes[..4.min(bytes.len())]),
+            u(4),
+            format_size(bytes.len() as u64)
+        ),
+        columns: vec!["Offset", "Field", "Value"],
+        rows,
+        filterable: false,
+    }
 }
 
 fn asset_rows(asset_path: &str, out: &mut Inspection) {
@@ -869,6 +1043,15 @@ mod tests {
         );
         assert_eq!(row(&m, "Kind"), "Manifest");
         assert_eq!(row(&m, "Entries"), "1");
+        let data = m.data.unwrap();
+        assert!(
+            data.header.starts_with("AMAN   v1   1 entries"),
+            "{}",
+            data.header
+        );
+        assert_eq!(data.rows.len(), 1);
+        assert_eq!(data.rows[0].cells[2], "Texture");
+        assert!(!data.rows[0].weak);
     }
 
     #[test]
@@ -1083,6 +1266,28 @@ mod tests {
             format!("{:#018x}", fnv1a64(b"brick/brick.orm"))
         );
         assert_eq!(row(&mat, "Normal map"), "—");
+        let data = mat.data.unwrap();
+        let field = |name: &str| {
+            data.rows
+                .iter()
+                .find(|r| r.cells[1] == name)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(field("roughness").cells[2], "0.500");
+        assert_eq!(
+            field("flags").cells[2],
+            "0x01 (mask, single-sided, parallax)"
+        );
+        assert_eq!(
+            field("orm_texture").cells[2],
+            format!(
+                "{:#018x}  brick/brick.orm.ktx2",
+                fnv1a64(b"brick/brick.orm")
+            )
+        );
+        assert_eq!(field("normal_texture").cells[2], "—");
+        assert!(field("base_color").swatch.is_some());
 
         fs::write(file("assets/brick/brick.mat.toml"), "roughness = 3.0").unwrap();
         let bad = inspect(
@@ -1172,7 +1377,7 @@ mod tests {
         let i = inspect(&project, Location::Output, &fake);
         assert_eq!(row(&i, "Error"), "not a KTX2 file");
 
-        let nested_manifest = dir.path().join("build/sub/assets.manifest");
+        let nested_manifest = dir.path().join("build/sub/assets.aman");
         fs::create_dir_all(nested_manifest.parent().unwrap()).unwrap();
         fs::write(&nested_manifest, "x").unwrap();
         let i = inspect(&project, Location::Output, &nested_manifest);

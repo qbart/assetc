@@ -92,6 +92,8 @@ struct UiState {
     mesh_chunk: String,
     /// A compiled font shows its atlas, else its chunks.
     font_atlas: bool,
+    /// The Manifest view's filter.
+    data_filter: String,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -324,6 +326,7 @@ impl Default for UiState {
             lod_levels: HashMap::new(),
             mesh_in_3d: true,
             font_atlas: true,
+            data_filter: String::new(),
             mesh_chunk: "DESC".into(),
         }
     }
@@ -553,7 +556,7 @@ fn shell(
         Shown::Environment | Shown::Model => true,
         Shown::CompiledMesh => state.mesh_in_3d,
         Shown::Lut => state.lut.view == LutView::Cube,
-        Shown::Specimen | Shown::CompiledFont | Shown::Other => false,
+        Shown::Specimen | Shown::CompiledFont | Shown::Data | Shown::Other => false,
     };
     let fill = if show_3d {
         egui::Color32::TRANSPARENT
@@ -585,7 +588,9 @@ fn shell(
                     Some(usize::from(!state.font_atlas)),
                     true,
                 ),
-                Shown::Environment | Shown::Specimen | Shown::Model => (&[], None, false),
+                Shown::Environment | Shown::Specimen | Shown::Model | Shown::Data => {
+                    (&[], None, false)
+                }
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -655,6 +660,15 @@ fn shell(
                     state.last_image.as_ref(),
                     &mut preview3d,
                 ),
+                (Shown::Data, _) => {
+                    if let Some(table) = state
+                        .inspected
+                        .as_ref()
+                        .and_then(|i| i.inspection.data.as_ref())
+                    {
+                        data_view(ui, rect, table, &mut state.data_filter);
+                    }
+                }
                 (Shown::Specimen | Shown::CompiledFont, _) | (_, ViewMode::TwoD) => canvas(
                     ui,
                     rect,
@@ -3394,6 +3408,8 @@ enum Shown {
     /// An `.afont` from the Output tree: its atlas (like a specimen) or its chunks.
     CompiledFont,
     Lut,
+    /// A file shown as a table of its data (manifest, `.amat`).
+    Data,
     Other,
 }
 
@@ -3407,6 +3423,7 @@ impl Shown {
             Some(i) if i.lut.is_some() => Self::Lut,
             Some(i) if i.inspection.specimen && i.preview.is_some() => Self::Specimen,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
+            Some(i) if i.inspection.data.is_some() => Self::Data,
             _ => Self::Other,
         }
     }
@@ -4022,6 +4039,89 @@ fn canvas_compiled_mesh(
         galley,
         TEXT,
     );
+}
+
+/// A file's data as a table; see docs/features/inspector.md#data-tables.
+fn data_view(ui: &mut Ui, rect: Rect, table: &inspect::DataTable, filter: &mut String) {
+    use egui_extras::{Column, TableBuilder};
+    let area = rect.shrink(10.0);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(&table.header)
+                    .monospace()
+                    .size(13.0)
+                    .color(TEXT),
+            );
+            if table.filterable {
+                ui.add_space(12.0);
+                ui.add(
+                    egui::TextEdit::singleline(filter)
+                        .hint_text("Filter path…")
+                        .desired_width(240.0),
+                );
+            }
+        });
+        ui.add_space(6.0);
+        let needle = filter.to_lowercase();
+        let rows: Vec<&inspect::DataRow> = table
+            .rows
+            .iter()
+            .filter(|r| !table.filterable || needle.is_empty() || r.filter.contains(&needle))
+            .collect();
+        let text = |s: &str| RichText::new(s).monospace().size(12.0);
+        egui::ScrollArea::horizontal()
+            .id_salt("data_table_wide")
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                let mut builder = TableBuilder::new(ui)
+                    .id_salt(("data_table", &table.header))
+                    .striped(true)
+                    .resizable(true)
+                    .auto_shrink(false)
+                    .cell_layout(Layout::left_to_right(Align::Center));
+                for _ in 1..table.columns.len() {
+                    builder = builder.column(Column::auto().at_least(40.0));
+                }
+                builder
+                    .column(Column::remainder().at_least(40.0))
+                    .header(20.0, |mut header| {
+                        for name in &table.columns {
+                            header.col(|ui| {
+                                ui.label(text(name).color(TEXT_WEAK));
+                            });
+                        }
+                    })
+                    .body(|body| {
+                        body.rows(20.0, rows.len(), |mut row| {
+                            let data = rows[row.index()];
+                            let color = if data.weak { TEXT_WEAK } else { TEXT };
+                            for (column, cell) in data.cells.iter().enumerate() {
+                                row.col(|ui| {
+                                    if let Some((at, [r, g, b])) = data.swatch
+                                        && at == column
+                                    {
+                                        let (swatch, _) = ui
+                                            .allocate_exact_size(vec2(12.0, 12.0), Sense::hover());
+                                        ui.painter().rect_filled(
+                                            swatch,
+                                            2,
+                                            egui::Color32::from_rgb(r, g, b),
+                                        );
+                                        ui.painter().rect_stroke(
+                                            swatch,
+                                            2,
+                                            Stroke::new(1.0, STROKE),
+                                            egui::StrokeKind::Inside,
+                                        );
+                                    }
+                                    ui.add(egui::Label::new(text(cell).color(color)).extend());
+                                });
+                            }
+                        });
+                    });
+            });
+    });
 }
 
 /// How the Chunks view reads one chunked format.

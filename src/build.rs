@@ -194,6 +194,11 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
             .map(|a| a.output.to_lowercase())
             .collect();
         outcome.removed = remove_stale(output, &produced)?;
+        let legacy = output.join(manifest::LEGACY_FILE_NAME);
+        if legacy.is_file() {
+            fs::remove_file(&legacy).map_err(|e| Error::Io(legacy, e))?;
+            outcome.removed.push(manifest::LEGACY_FILE_NAME.into());
+        }
     }
     Ok(outcome)
 }
@@ -618,6 +623,19 @@ mod tests {
         assert_eq!(entries[0].id, fnv1a64(b"ui/monogram.afont"));
         assert_eq!(entries[1].path, "ui/monogram.ktx2");
         assert_eq!(entries[1].id, atlas);
+    }
+
+    #[test]
+    fn removes_the_legacy_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("a.png"), 1, 1);
+        fs::create_dir_all(&output).unwrap();
+        fs::write(output.join(manifest::LEGACY_FILE_NAME), "old").unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert_eq!(outcome.removed, [manifest::LEGACY_FILE_NAME]);
+        assert!(!output.join(manifest::LEGACY_FILE_NAME).exists());
+        assert!(output.join(manifest::FILE_NAME).is_file());
     }
 
     #[test]
