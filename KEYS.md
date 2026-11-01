@@ -9,8 +9,7 @@ Active while the pointer is over the canvas (see
 
 | Input                                  | Action                           |
 |----------------------------------------|----------------------------------|
-| Scroll (mouse wheel, two-finger swipe) | Pan                              |
-| `Shift` + scroll                       | Pan horizontally                 |
+| Scroll wheel                           | Zoom around the pointer          |
 | `Ctrl` + scroll, pinch                 | Zoom around the pointer          |
-| Left or middle drag                    | Pan                              |
+| Right drag                             | Pan                              |
 | Double-click                           | Fit image to the canvas          |

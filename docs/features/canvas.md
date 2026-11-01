@@ -34,7 +34,8 @@ Messages are weak text centered in the canvas.
 ## View
 
 The view is a **zoom** (screen pixels per image pixel) and a **pan** (the
-image center's offset from the canvas center).
+image center's offset from the canvas center). With [tiling](#tiling) on,
+"the image" below means the whole 3 × 3 block.
 
 - Zoom range: 1/32 (3.125%) to 64 (6400%).
 - **Fit**: the largest zoom at which the whole image fits the canvas with a
@@ -53,10 +54,12 @@ Only while the pointer is over the canvas; see also [`KEYS.md`](../../KEYS.md).
 
 | Input                                   | Action                                         |
 |-----------------------------------------|------------------------------------------------|
-| Scroll (mouse wheel, two-finger swipe)  | pan (vertical; horizontal with `Shift` or a horizontal swipe) |
-| `Ctrl` + scroll, pinch                  | zoom around the pointer: the image point under the pointer stays under it |
-| Drag with left or middle button         | pan                                            |
-| Double-click                            | fit                                            |
+| Scroll wheel (vertical scroll)          | zoom around the pointer: the image point under the pointer stays under it. One wheel notch zooms by about ×1.2 |
+| `Ctrl` + scroll, pinch                  | zoom around the pointer, as above              |
+| Drag with the right button              | pan                                            |
+| Double-click (left)                     | fit                                            |
+
+Horizontal scrolling does nothing.
 
 ## Zoom bar
 
@@ -76,3 +79,40 @@ while an image is previewed:
   around the canvas center.
 - `Fit`: fit.
 - The bar takes the pointer: scrolling or dragging on it does not pan.
+
+## Toolbar
+
+A button group in the canvas' top-right corner, 8 px from both edges, shown
+only while an image is previewed:
+
+```
+[ ▦ ]
+```
+
+- `BG_BAR` fill, 6 px rounded corners, buttons 36 × 32 px edge to edge with an
+  18 px icon, separated by 1 px `STROKE` lines.
+- Toggle buttons: when on, the button is filled with `ACCENT` (its outer
+  corners rounded with the group) and its icon is drawn in `BG_BAR`; when off,
+  the icon is `TEXT_WEAK`, and hover fills the button with `BG_HEADER` and
+  draws the icon in `TEXT`.
+- Each button shows its name as a tooltip.
+- The toolbar takes the pointer like the zoom bar.
+
+| Button | Icon       | Action                    |
+|--------|------------|---------------------------|
+| Tile   | `grid-3x3` | toggles [tiling](#tiling) |
+
+## Tiling
+
+Shows the image 3 × 3 times, edge to edge, to check that it tiles without
+visible seams.
+
+- The tiles touch exactly, with no gap or overlap, and are drawn identically
+  (the center tile is the image itself).
+- The checkerboard covers the whole 3 × 3 block.
+- Fit, zoom and the pan clamp use the 3 × 3 block. Toggling tiling while the
+  view is still the automatic fit refits; otherwise the zoom stays and the
+  pan is clamped again.
+- Tiling is remembered **per image** (by its path) for the rest of the
+  session: switching to another image shows that image's own setting, and
+  coming back restores it. It starts off for every image.

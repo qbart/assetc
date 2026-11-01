@@ -99,7 +99,7 @@ All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
-toggles), `folder`, `folder-open`, `file`,
+toggles), `grid-3x3` (canvas tiling), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 
