@@ -265,7 +265,7 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
 }
 
 /// Texture source extensions, matched case-insensitively: images, and generated noise.
-const TEXTURE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "noise", "gradient"];
+const TEXTURE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "tga", "noise", "gradient"];
 
 pub fn is_texture_source(file: &Path) -> bool {
     file.extension().is_some_and(|ext| {
@@ -423,7 +423,7 @@ fn compile_font(input: &Path, source: &str, output: &Path) -> Result<String, Str
     ))
 }
 
-/// An image file (`png`, `jpg`, `jpeg`), as opposed to generated texture sources.
+/// An image file (`png`, `jpg`, `jpeg`, `tga`), as opposed to generated texture sources.
 pub fn is_image(file: &Path) -> bool {
     is_texture_source(file) && !is_noise(file) && !is_gradient(file)
 }
@@ -674,6 +674,59 @@ mod tests {
             "{texel:?}"
         );
         assert_eq!(texel[3], 255);
+    }
+
+    /// A TGA file: uncompressed (type 2) or RLE (type 10) true color, 24-bit BGR rows.
+    fn tga(image_type: u8, width: u16, height: u16, top_left: bool, data: &[u8]) -> Vec<u8> {
+        let mut out = vec![0, 0, image_type, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        out.extend(width.to_le_bytes());
+        out.extend(height.to_le_bytes());
+        out.extend([24, if top_left { 0x20 } else { 0 }]);
+        out.extend(data);
+        out
+    }
+
+    #[test]
+    fn builds_tga_in_both_origins_and_rle() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        // 1 × 2, bottom-left origin: the bottom row (red) comes first.
+        fs::write(
+            input.join("bottom.tga"),
+            tga(2, 1, 2, false, &[0, 0, 255, 0, 255, 0]),
+        )
+        .unwrap();
+        // Same image, top-left origin: the top row (green) comes first.
+        fs::write(
+            input.join("top.TGA"),
+            tga(2, 1, 2, true, &[0, 255, 0, 0, 0, 255]),
+        )
+        .unwrap();
+        // 2 × 1 RLE: one packet repeating blue twice.
+        fs::write(
+            input.join("rle.tga"),
+            tga(10, 2, 1, true, &[0x81, 255, 0, 0]),
+        )
+        .unwrap();
+
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(outcome.built.len(), 3);
+        for name in ["bottom", "top"] {
+            let (image, color) = load_source(&input.join(if name == "top" {
+                "top.TGA"
+            } else {
+                "bottom.tga"
+            }))
+            .unwrap();
+            assert!(color.has_color() && !color.has_alpha());
+            assert_eq!(image.get_pixel(0, 0).0, [0, 255, 0, 255], "{name}");
+            assert_eq!(image.get_pixel(0, 1).0, [255, 0, 0, 255], "{name}");
+            assert!(output.join(format!("{name}.ktx2")).is_file());
+        }
+        let (image, _) = load_source(&input.join("rle.tga")).unwrap();
+        assert_eq!(image.as_raw()[..], [0, 0, 255, 255, 0, 0, 255, 255]);
     }
 
     #[test]
