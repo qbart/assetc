@@ -41,8 +41,9 @@ renaming it.
 - **Delete** in the menu, or the **Delete** key on the selected Input row,
   opens a confirmation dialog: `Delete <name>?`, with `This permanently
   deletes it and everything inside it.` for folders or `This permanently
-  deletes the file.` for files, and buttons **Cancel** and **Delete**
-  (`ACCENT` fill). Escape or clicking outside cancels.
+  deletes the file.` for files, and buttons **Cancel** and **Delete** (the
+  confirming button), in the [dialog look](gui.md#dialogs). Escape or
+  clicking outside cancels.
 - Deleting is permanent (not moved to a trash).
 - On success the tree is rescanned and the selection is cleared.
 

@@ -136,6 +136,22 @@ property sheet, inside 8 px margins:
   **Sliders** take the control column minus 64 px, followed by a 56 px value
   box (a number field) 8 px to their right.
 
+## Dialogs
+
+Modal dialogs (e.g. the delete confirmation) dim the window behind them and
+share one look:
+
+- **Frame**: `BG_PANEL` fill, 1 px `STROKE` border, 8 px rounded corners,
+  window shadow, 24 px inner margin; content 360 px wide.
+- **Title**: 16 px, `TEXT`. **Message**: 14 px, `TEXT_WEAK`, 8 px below the
+  title, wrapping.
+- **Buttons**: right-aligned in one row 24 px below the message, 8 px apart,
+  each at least 96 × 34 px with 6 px rounded corners and 14 px text. The
+  confirming button is last (rightmost) with `ACCENT` fill and `BG_BAR`
+  text; **Cancel** has `BG_HEADER` fill, a 1 px `STROKE` border and `TEXT`.
+  Hovering brightens either fill.
+- Escape or clicking outside the dialog cancels.
+
 ## Look
 
 Colors live as constants in `src/theme.rs`.
