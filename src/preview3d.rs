@@ -187,8 +187,8 @@ pub enum MeshDisplay {
 impl MeshDisplay {
     pub const ALL: [Self; 6] = [
         Self::Material,
-        Self::Wireframe,
         Self::Shaded,
+        Self::Wireframe,
         Self::Meshlets,
         Self::MaterialId,
         Self::Submeshes,
