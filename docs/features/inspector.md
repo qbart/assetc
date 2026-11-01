@@ -19,15 +19,18 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Four icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Five icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) and **Modifiers** (`wrench`), both only for `.noise`
-files in the Input tree (see [`noise.md`](noise.md#parameters-tab)), and
-**Assets** (`files`). Hovering a tab shows its name.
+files in the Input tree (see [`noise.md`](noise.md#parameters-tab)),
+**Animations** (`film`), only for models with animations (see
+[`models.md`](models.md#animations-tab)), and **Assets** (`files`). Hovering
+a tab shows its name.
 
 Only tabs that apply to the selected file are shown, stacked from the top in
 the order above with no gaps; the others are hidden (with nothing selected,
-only Info). If the active tab stops applying after a new selection, the
-Inspector switches to Info.
+only Info). If the active tab does not apply to the newly inspected file, the
+Inspector switches to Info (while a new selection is still loading, the
+active tab is kept).
 
 ## Info tab
 

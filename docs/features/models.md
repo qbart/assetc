@@ -60,3 +60,29 @@ a shape.
   fails the canvas shows `Could not load the model: <error>`.
 - Each new inspection of the file (selecting it, a rescan) reloads it from
   disk, so changes made in another program show up.
+
+## Animations tab
+
+The Inspector's **Animations** tab (`film`) is shown for a model with at
+least one animation. It switches which animation the [preview](#preview)
+plays.
+
+- A list of full-width rows, 28 px tall, inside 8 px margins: first
+  **Rest pose**, then the file's animations in file order. Each row shows the
+  animation's name (14 px, `TEXT`; `Animation <n>` counting from 1 when it
+  has none) and, right-aligned, its duration (13 px, `TEXT_WEAK`, two
+  decimals, e.g. `1.25 s`).
+- The duration is the largest `max` of the animation's sampler input
+  accessors (glTF requires them), read with the other
+  [Info rows](#inspector).
+- Hovering a row fills it with `BG_HEADER`; the chosen row is filled with
+  `ACCENT` at 25% opacity with a 2 px `ACCENT` bar on its left edge, like the
+  file tree's selection. Clicking a row chooses it.
+- **Rest pose** (the default) shows the model as loaded, without animation.
+  Choosing an animation plays it from its start, looping, at normal speed;
+  auto-rotation and the orbit camera keep working. Switching to another
+  animation or back to Rest pose first returns the model to its rest pose.
+- The choice is remembered per model (by path) for the session, and kept
+  when the model is reloaded.
+- The model is fitted once, in its rest pose; animations can move it out of
+  that box.
