@@ -8,6 +8,7 @@ use egui::{
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use crate::assets::Assets;
 use crate::build::{self, Outcome};
@@ -54,6 +55,7 @@ struct UiState {
     selection: Option<Selection>,
     /// Set when the selection changed or the trees were rescanned.
     reinspect: bool,
+    inspector: Inspector,
     inspected: Option<Inspected>,
     view: View,
     mode: ViewMode,
@@ -249,7 +251,8 @@ impl Channels {
 
 enum BuildStatus {
     Idle,
-    Running(JoinHandle<Result<Outcome, build::Error>>),
+    /// The build thread and when it started.
+    Running(JoinHandle<Result<Outcome, build::Error>>, Instant),
     Finished(String),
 }
 
@@ -265,6 +268,7 @@ impl Default for UiState {
             build: BuildStatus::Idle,
             selection: None,
             reinspect: false,
+            inspector: Inspector::default(),
             inspected: None,
             view: View::default(),
             mode: ViewMode::default(),
@@ -406,7 +410,23 @@ fn shell(
     egui::Panel::bottom("status_bar")
         .frame(bar_frame())
         .show(&mut root, |ui| {
-            status_bar(ui, &project, &state.build, state.notice.as_deref())
+            let busy_since = [
+                match &state.build {
+                    BuildStatus::Running(_, since) => Some(*since),
+                    _ => None,
+                },
+                state.inspector.running.as_ref().map(|(_, since, _)| *since),
+            ]
+            .into_iter()
+            .flatten()
+            .min();
+            status_bar(
+                ui,
+                &project,
+                &state.build,
+                busy_since,
+                state.notice.as_deref(),
+            )
         });
 
     if state.show_left_sidebar {
@@ -470,6 +490,16 @@ fn shell(
                 }
             }
             let rect = Rect::from_min_max(pos2(full.left(), bar.bottom()), full.max);
+            if state.inspected.is_none() && state.selection.is_some() {
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    "Loading…",
+                    FontId::proportional(14.0),
+                    TEXT_WEAK,
+                );
+                return;
+            }
             match (shown, state.mode) {
                 (Shown::Environment, _) => {
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
@@ -513,58 +543,156 @@ fn shell(
         state.reinspect = true;
     }
     if std::mem::take(&mut state.reinspect) {
-        state.inspected = state
-            .selection
-            .as_ref()
-            .map(|selection| inspect_selection(&ctx, &project, selection));
-        // Remembered as the LUT compare view's "Image" source.
-        if let Some(inspected) = &state.inspected
-            && let Some(pixels) = &inspected.pixels
-        {
-            state.last_image = Some(LastImage {
-                path: inspected.path.clone(),
-                name: inspected.inspection.name.clone(),
-                image: pixels.clone(),
-            });
-        }
-        ctx.request_repaint();
+        request_inspection(&ctx, &mut state, &project);
     }
+    poll_inspection(&ctx, &mut state, &project);
 
     Ok(())
 }
 
-fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selection) -> Inspected {
+/// Background inspection, latest wins; see docs/features/inspector.md#loading.
+#[derive(Default)]
+struct Inspector {
+    /// The inspection being made, and when it started.
+    running: Option<(Selection, Instant, JoinHandle<Prepared>)>,
+    /// The newest request made while one was running.
+    waiting: Option<Selection>,
+}
+
+/// The part of an [`Inspected`] made off the UI thread.
+struct Prepared {
+    inspection: Inspection,
+    pixels: Option<Image>,
+    cubemap: Option<Vec<Image>>,
+    lut: Option<Lut>,
+    noise: Option<Result<Noise, String>>,
+}
+
+fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
+    let Some(selection) = state.selection.clone() else {
+        state.inspector.waiting = None;
+        state.inspected = None;
+        return;
+    };
+    // A different file: never show (or edit) the previous file's result for it.
+    if state
+        .inspected
+        .as_ref()
+        .is_some_and(|i| i.path != selection.path)
+    {
+        state.inspected = None;
+    }
+    if state.inspector.running.is_some() {
+        state.inspector.waiting = Some(selection);
+    } else {
+        start_inspection(ctx, &mut state.inspector, project, selection);
+    }
+}
+
+fn start_inspection(
+    ctx: &egui::Context,
+    inspector: &mut Inspector,
+    project: &Project,
+    selection: Selection,
+) {
+    let max_side = ctx.input(|i| i.max_texture_side) as u32;
+    let (project, job) = (project.clone(), selection.clone());
+    let handle = std::thread::spawn(move || prepare(&project, &job, max_side));
+    inspector.running = Some((selection, Instant::now(), handle));
+}
+
+fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared {
     let mut inspection = inspect::inspect(project, selection.location, &selection.path);
-    let cubemap = inspection.cubemap.take();
-    let lut = inspection.lut.take();
     let noise =
         (selection.location == Location::Input && build::is_noise(&selection.path)).then(|| {
             std::fs::read_to_string(&selection.path)
                 .map_err(|e| e.to_string())
                 .and_then(|text| Noise::parse(&text))
-                .map(|n| NoiseEdit {
-                    edit: n.clone(),
-                    saved: n,
-                })
         });
-    let max_side = ctx.input(|i| i.max_texture_side) as u32;
-    let pixels = inspection
-        .preview
-        .take()
-        .map(|image| inspect::fit_within(image, max_side));
-    let preview = pixels
+    Prepared {
+        pixels: inspection
+            .preview
+            .take()
+            .map(|image| inspect::fit_within(image, max_side)),
+        cubemap: inspection.cubemap.take(),
+        lut: inspection.lut.take(),
+        noise,
+        inspection,
+    }
+}
+
+fn poll_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
+    let Some((_, _, handle)) = &state.inspector.running else {
+        return;
+    };
+    if !handle.is_finished() {
+        ctx.request_repaint();
+        return;
+    }
+    let Some((selection, _, handle)) = state.inspector.running.take() else {
+        return;
+    };
+    let prepared = handle.join();
+    // A newer request supersedes this result.
+    if let Some(next) = state.inspector.waiting.take() {
+        start_inspection(ctx, &mut state.inspector, project, next);
+        return;
+    }
+    if state.selection.as_ref() != Some(&selection) {
+        return;
+    }
+    let Ok(prepared) = prepared else {
+        state.notice = Some("Inspecting failed: inspector thread panicked".into());
+        state.inspected = None;
+        return;
+    };
+    let previous = state.inspected.take().filter(|i| i.path == selection.path);
+    state.inspected = Some(inspected(ctx, &selection, prepared, previous));
+    // Remembered as the LUT compare view's "Image" source.
+    if let Some(inspected) = &state.inspected
+        && let Some(pixels) = &inspected.pixels
+    {
+        state.last_image = Some(LastImage {
+            path: inspected.path.clone(),
+            name: inspected.inspection.name.clone(),
+            image: pixels.clone(),
+        });
+    }
+    ctx.request_repaint();
+}
+
+/// Uploads a finished inspection. `previous` is the current result for the same file, whose
+/// noise edit is kept when the file still holds what it saved (so edits in progress survive).
+fn inspected(
+    ctx: &egui::Context,
+    selection: &Selection,
+    prepared: Prepared,
+    previous: Option<Inspected>,
+) -> Inspected {
+    let kept = previous.and_then(|p| p.noise).and_then(Result::ok);
+    let noise = prepared.noise.map(|parsed| {
+        parsed.map(|n| match kept {
+            Some(edit) if edit.saved == n => edit,
+            _ => NoiseEdit {
+                edit: n.clone(),
+                saved: n,
+            },
+        })
+    });
+    let preview = prepared
+        .pixels
         .as_ref()
         .map(|image| load_preview(ctx, "canvas_preview", image, &image.pixels));
     Inspected {
         path: selection.path.clone(),
-        inspection,
-        pixels,
+        inspection: prepared.inspection,
+        pixels: prepared.pixels,
         preview,
         channel_preview: None,
         uploaded_3d: None,
-        cubemap,
+        cubemap: prepared.cubemap,
         uploaded_cubemap: false,
-        lut,
+        lut: prepared.lut,
         noise,
         lut_compare: None,
         uploaded_color_cube: false,
@@ -600,26 +728,27 @@ fn load_texture(
 }
 
 fn start_build(state: &mut UiState, project: &Project) {
-    if matches!(state.build, BuildStatus::Running(_)) {
+    if matches!(state.build, BuildStatus::Running(..)) {
         return;
     }
     let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
         return;
     };
     let textures = project.config.textures.clone();
-    state.build = BuildStatus::Running(std::thread::spawn(move || {
-        build::run(&input, &output, &textures)
-    }));
+    state.build = BuildStatus::Running(
+        std::thread::spawn(move || build::run(&input, &output, &textures)),
+        Instant::now(),
+    );
 }
 
 fn poll_build(state: &mut UiState) {
-    let BuildStatus::Running(handle) = &state.build else {
+    let BuildStatus::Running(handle, _) = &state.build else {
         return;
     };
     if !handle.is_finished() {
         return;
     }
-    let BuildStatus::Running(handle) = std::mem::replace(&mut state.build, BuildStatus::Idle)
+    let BuildStatus::Running(handle, _) = std::mem::replace(&mut state.build, BuildStatus::Idle)
     else {
         unreachable!();
     };
@@ -746,11 +875,30 @@ fn menu_row(ui: &mut Ui, label: &str, check: Option<bool>, interactive: bool) ->
     response
 }
 
-fn status_bar(ui: &mut Ui, project: &Project, build: &BuildStatus, notice: Option<&str>) {
+/// Background work shows the loader only after this long, so quick work does not flicker it.
+const LOADER_DELAY: Duration = Duration::from_millis(150);
+
+fn status_bar(
+    ui: &mut Ui,
+    project: &Project,
+    build: &BuildStatus,
+    busy_since: Option<Instant>,
+    notice: Option<&str>,
+) {
     ui.horizontal(|ui| {
+        if busy_since.is_some_and(|since| since.elapsed() >= LOADER_DELAY) {
+            // One turn per second.
+            let angle = (ui.input(|i| i.time) % 1.0) as f32 * std::f32::consts::TAU;
+            let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+            Icon::Loader
+                .image(14.0, TEXT_WEAK)
+                .rotate(angle, Vec2::splat(0.5))
+                .paint_at(ui, rect);
+            ui.ctx().request_repaint();
+        }
         match build {
             _ if let Some(notice) = notice => ui.label(notice),
-            BuildStatus::Running(_) => ui.label("Building…"),
+            BuildStatus::Running(..) => ui.label("Building…"),
             BuildStatus::Finished(message) => ui.label(message),
             BuildStatus::Idle if project.root.is_some() => ui.label("Ready"),
             BuildStatus::Idle => ui.label("No assetc.toml found (run assetc init)"),
@@ -779,7 +927,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
         if icon_button(ui, Icon::RefreshCw, "Rescan", true).clicked() {
             state.rescan = true;
         }
-        let can_build = project.root.is_some() && !matches!(state.build, BuildStatus::Running(_));
+        let can_build = project.root.is_some() && !matches!(state.build, BuildStatus::Running(..));
         if icon_button(ui, Icon::Hammer, "Build", can_build).clicked() {
             state.start_build = true;
         }
@@ -1332,7 +1480,8 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
         .frame(Frame::new().fill(BG_PANEL))
         .show(ui, |ui| {
             match (state.inspector_tab, &mut state.inspected, &state.selection) {
-                (_, None, _) | (_, _, None) => placeholder(ui, "Nothing selected"),
+                (_, _, None) => placeholder(ui, "Nothing selected"),
+                (_, None, Some(_)) => placeholder(ui, "Loading…"),
                 (
                     tab @ (InspectorTab::Parameters | InspectorTab::Modifiers),
                     Some(inspected),
@@ -1348,7 +1497,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                         modifiers_tab(ui, inspected)
                     };
                     if let Some(noise) = save {
-                        match std::fs::write(&selection.path, noise.to_toml()) {
+                        match std::fs::write(&inspected.path, noise.to_toml()) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }

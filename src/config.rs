@@ -21,7 +21,7 @@ output = \"build\"
 # no_mipmaps = [\"ui/**\"]
 ";
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Source assets directory, relative to the project root.
@@ -52,7 +52,7 @@ impl Default for Config {
 }
 
 /// The loaded project: its root (the directory holding `assetc.toml`) and config.
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Clone, Default, Resource)]
 pub struct Project {
     pub root: Option<PathBuf>,
     pub config: Config,
