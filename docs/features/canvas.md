@@ -118,6 +118,21 @@ shown only while an image is previewed:
 
 Exactly one Channels button is on; clicking it again keeps it on.
 
+A channel button is **disabled** when the shown file has no such channel:
+
+| Source                               | Disabled       |
+|--------------------------------------|----------------|
+| RGB (e.g. JPEG, RGB PNG)             | A              |
+| grayscale                            | R, G, B, A     |
+| grayscale + alpha                    | R, G, B        |
+| RGBA, and every compiled `.ktx2`     | none           |
+
+(A grayscale image's single channel is what RGB shows.) A disabled button is
+dimmed: outline in `TEXT_WEAK` at 50% opacity and its fill color at 35%; it
+does not react to hover or clicks, and its tooltip adds "(not in this
+image)". If an image's remembered channel is not available (the file changed),
+RGB is shown.
+
 ### Channel icons
 
 Three Lucide `circle-small` icons, each 16 px, arranged as a trefoil inside
