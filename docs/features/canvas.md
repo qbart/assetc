@@ -240,7 +240,9 @@ Bevy into the canvas area (below the view bar) behind the egui overlay.
   camera, plus ambient light, so the shape reads as 3D; base color texture
   only (no normal, ORM or height maps), roughness 0.8, not metallic.
 - The texture is sampled with linear filtering and repeat addressing and
-  uploaded as sRGB, so the colors match the 2D view.
+  uploaded as sRGB, and the 3D camera applies no tonemapping, so the colors
+  match the 2D view (and an environment map's background looks like its
+  faces).
 - **Channels**: the Channels group works as in 2D: RGB shows the image, R / G
   / B / A the chosen channel as opaque grayscale. In RGB, an image with alpha
   is rendered alpha-blended over the background; otherwise the shape is opaque.
