@@ -19,13 +19,15 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Six icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Seven icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise` and `.gradient` files, **Modifiers**
 (`wrench`) for `.noise` files and **Gradients** (`palette`) for `.gradient`
 files, all three only in the Input tree (see
 [`noise.md`](noise.md#parameters-tab), [`gradients.md`](gradients.md#parameters-tab)),
 **Animations** (`film`), only for models with animations (see
-[`models.md`](models.md#animations-tab)), and **Assets** (`files`). Hovering
+[`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
+compiled textures with more than one mip level (see
+[Mipmaps tab](#mipmaps-tab)), and **Assets** (`files`). Hovering
 a tab shows its name.
 
 Only tabs that apply to the selected file are shown, stacked from the top in
@@ -122,6 +124,25 @@ square, the same size, and a power of two.
 If the file cannot be read or decoded (corrupt PNG, not a KTX2 file, bad
 manifest), the details show the rows that are still known (Kind, Size) and an
 **Error** row with the message. The canvas shows no image.
+
+## Mipmaps tab
+
+Shown for a compiled texture (`.ktx2` in the Output tree) in assetc's own
+format (see [`ktx2.md`](../spec/ktx2.md)) with more than one mip level. It
+switches which level the [canvas](canvas.md) shows.
+
+- One full-width row per level, 28 px tall, inside 8 px margins: `Level <n>`
+  (14 px, `TEXT`) and, right-aligned, its size `W × H` (13 px, `TEXT_WEAK`).
+  Rows look and react like the [Animations tab](models.md#animations-tab)'s:
+  `BG_HEADER` on hover, the chosen one filled with `ACCENT` at 25% opacity.
+- Level 0 is chosen to start with. The choice is remembered per file (by
+  path) for the session; a rescan keeps it while the level still exists.
+- The canvas shows the chosen level as the image, in 2D and 3D, with the
+  toolbar (tiling, channels) working as usual. Switching levels keeps the
+  image's size on screen (the zoom is scaled by the size ratio, or the view
+  stays fitted), so levels can be compared in place; the zoom bar's
+  percentage is in the shown level's pixels.
+- The Info tab keeps describing the whole file (Dimensions are level 0's).
 
 ## Assets tab
 
