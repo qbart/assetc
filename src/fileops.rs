@@ -3,6 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::gradient::Gradients;
 use crate::noise::{GeneratorKind, Noise};
 
 /// Creates `New Folder` (or `New Folder 2`, …) in `dir`.
@@ -18,6 +19,15 @@ pub fn create_noise(input: &Path, dir: &Path, kind: GeneratorKind) -> Result<Pat
     check_inside(input, dir, true)?;
     let path = unique(dir, kind.file_stem(), ".noise");
     fs::write(&path, Noise::new(kind).to_toml()).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// Creates `gradient.gradient` (or `gradient 2.gradient`, …) in `dir`; see
+/// docs/features/gradients.md#creating.
+pub fn create_gradient(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "gradient", ".gradient");
+    fs::write(&path, Gradients::new().to_toml()).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -111,6 +121,10 @@ mod tests {
         assert_eq!(again, input.join("sub/perlin-worley 2.noise"));
         let parsed = Noise::parse(&fs::read_to_string(&noise).unwrap()).unwrap();
         assert_eq!(parsed, Noise::new(GeneratorKind::PerlinWorley));
+        let gradient = create_gradient(&input, &input).unwrap();
+        assert_eq!(gradient, input.join("gradient.gradient"));
+        let parsed = Gradients::parse(&fs::read_to_string(&gradient).unwrap()).unwrap();
+        assert_eq!(parsed, Gradients::new());
     }
 
     #[test]

@@ -33,6 +33,7 @@ pub enum Icon {
     RefreshCw,
     SlidersVertical,
     SunMedium,
+    SwatchBook,
     Torus,
     Trash2,
     Type,
@@ -40,7 +41,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 32] = [
+const SVGS: [(&str, &str); 33] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
@@ -90,6 +91,10 @@ const SVGS: [(&str, &str); 32] = [
         include_str!("../assets/icons/sliders-vertical.svg"),
     ),
     ("sun-medium", include_str!("../assets/icons/sun-medium.svg")),
+    (
+        "swatch-book",
+        include_str!("../assets/icons/swatch-book.svg"),
+    ),
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
     ("type", include_str!("../assets/icons/type.svg")),

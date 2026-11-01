@@ -1,9 +1,11 @@
 mod assets;
 mod build;
 mod chart;
+mod color_picker;
 mod config;
 mod fileops;
 mod font;
+mod gradient;
 mod hash;
 mod icons;
 mod inspect;

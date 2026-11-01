@@ -8,6 +8,7 @@ use std::path::Path;
 
 use crate::build::{Error, Failure, is_noise, is_texture_source, relative, strip_extension};
 use crate::config;
+use crate::gradient::is_gradient;
 use crate::hash::fnv1a64;
 use crate::manifest::Kind;
 use crate::material::{self, Material, NormalY, Slot, TextureIds};
@@ -262,7 +263,8 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
             job: Job::Texture {
                 source: rel.clone(),
                 color,
-                mipmaps: settings.mipmaps(rel),
+                // Smaller levels would blend neighbouring gradient stripes.
+                mipmaps: settings.mipmaps(rel) && !is_gradient(Path::new(rel)),
                 flip_green,
             },
         });

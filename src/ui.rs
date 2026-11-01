@@ -13,8 +13,10 @@ use std::time::{Duration, Instant};
 
 use crate::assets::Assets;
 use crate::build::{self, Outcome};
+use crate::color_picker::{self, Picker};
 use crate::config::Project;
 use crate::fileops;
+use crate::gradient::{self, Dither, Gradient, Gradients, Stop};
 use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
@@ -121,6 +123,8 @@ struct Inspected {
     lut: Option<Lut>,
     /// A `.noise` file's parameters: (being edited, as saved), or why they can't be read.
     noise: Option<Result<NoiseEdit, String>>,
+    /// A `.gradient` file being edited, or why it can't be read.
+    gradient: Option<Result<GradientEdit, String>>,
     lut_compare: Option<CompareCache>,
     uploaded_color_cube: bool,
     /// A glTF model's input-relative path and this inspection's generation, for the 3D view.
@@ -353,7 +357,12 @@ impl InspectorTab {
             Self::Animations => {
                 inspected.is_some_and(|i| i.model.is_some() && !i.inspection.animations.is_empty())
             }
-            Self::Parameters | Self::Modifiers => selection.is_some_and(|s| {
+            Self::Parameters => selection.is_some_and(|s| {
+                s.location == Location::Input
+                    && (build::is_noise(&s.path) || gradient::is_gradient(&s.path))
+                    && s.path.is_file()
+            }),
+            Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input && build::is_noise(&s.path) && s.path.is_file()
             }),
             // Only compiled files are asset containers for now.
@@ -578,6 +587,7 @@ struct Prepared {
     cubemap: Option<Vec<Image>>,
     lut: Option<Lut>,
     noise: Option<Result<Noise, String>>,
+    gradient: Option<Result<Gradients, String>>,
     model: Option<(PathBuf, u64)>,
 }
 
@@ -635,7 +645,15 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
                 .map(Path::to_path_buf)
         })
         .map(|path| (path, GENERATION.fetch_add(1, Ordering::Relaxed)));
+    let gradient = (selection.location == Location::Input
+        && gradient::is_gradient(&selection.path))
+    .then(|| {
+        std::fs::read_to_string(&selection.path)
+            .map_err(|e| e.to_string())
+            .and_then(|text| Gradients::parse(&text))
+    });
     Prepared {
+        gradient,
         model,
         pixels: inspection
             .preview
@@ -697,7 +715,22 @@ fn inspected(
     prepared: Prepared,
     previous: Option<Inspected>,
 ) -> Inspected {
-    let kept = previous.and_then(|p| p.noise).and_then(Result::ok);
+    let (kept, kept_gradient) = previous.map_or((None, None), |p| {
+        (
+            p.noise.and_then(Result::ok),
+            p.gradient.and_then(Result::ok),
+        )
+    });
+    let gradient = prepared.gradient.map(|parsed| {
+        parsed.map(|g| match kept_gradient {
+            Some(edit) if edit.saved == g => edit,
+            _ => GradientEdit {
+                edit: g.clone(),
+                saved: g,
+                cards: Vec::new(),
+            },
+        })
+    });
     let noise = prepared.noise.map(|parsed| {
         parsed.map(|n| match kept {
             Some(edit) if edit.saved == n => edit,
@@ -722,6 +755,7 @@ fn inspected(
         uploaded_cubemap: false,
         lut: prepared.lut,
         noise,
+        gradient,
         lut_compare: None,
         uploaded_color_cube: false,
         model: prepared.model,
@@ -1138,6 +1172,7 @@ fn select(state: &mut UiState, location: Location, path: PathBuf) {
 enum FileOp {
     NewFolder(PathBuf),
     NewNoise(PathBuf, GeneratorKind),
+    NewGradient(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -1189,6 +1224,10 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
             }
         });
     }
+    if menu_item(ui, "New Gradient", None).clicked() {
+        *action = Some(TreeAction::Op(FileOp::NewGradient(dir.to_path_buf())));
+        ui.close();
+    }
 }
 
 /// The row icon by type, see docs/features/gui.md#tree-icons.
@@ -1211,6 +1250,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "ttf" | "otf" | "woff" | "woff2" => Icon::Type,
         "cube" => Icon::Aperture,
         "noise" => Icon::ImagePlay,
+        "gradient" => Icon::SwatchBook,
         "gltf" | "glb" | "obj" => Icon::Torus,
         _ => Icon::File,
     }
@@ -1350,6 +1390,9 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             .map(|path| (dir, path)),
         FileOp::NewNoise(dir, kind) => fileops::create_noise(&input, &dir, kind)
             .map_err(|e| ("New Noise", e))
+            .map(|path| (dir, path)),
+        FileOp::NewGradient(dir) => fileops::create_gradient(&input, &dir)
+            .map_err(|e| ("New Gradient", e))
             .map(|path| (dir, path)),
         FileOp::Rename(path) => {
             let text = path
@@ -1535,6 +1578,16 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
             match (state.inspector_tab, &mut state.inspected, &state.selection) {
                 (_, _, None) => placeholder(ui, "Nothing selected"),
                 (_, None, Some(_)) => placeholder(ui, "Loading…"),
+                (InspectorTab::Parameters, Some(inspected), Some(_))
+                    if inspected.gradient.is_some() =>
+                {
+                    if let Some(gradients) = gradient_tab(ui, inspected) {
+                        match std::fs::write(&inspected.path, gradients.to_toml()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (
                     tab @ (InspectorTab::Parameters | InspectorTab::Modifiers),
                     Some(inspected),
@@ -1829,6 +1882,469 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
     noise_commit(ui, edit)
 }
 
+/// A `.gradient` file being edited; see docs/features/gradients.md#parameters-tab.
+struct GradientEdit {
+    edit: Gradients,
+    /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
+    saved: Gradients,
+    /// Editor state of each gradient card, in the same order.
+    cards: Vec<GradientCard>,
+}
+
+/// One gradient card's editor state, see docs/features/gradients.md#gradient-editor.
+#[derive(Default)]
+struct GradientCard {
+    selected: usize,
+    drag: Option<StopDrag>,
+    /// When a press last added a stop, so that gesture's double-click does not remove it.
+    added_at: f64,
+    /// The rendered bar: what it shows, its size in pixels, and the texture.
+    bar: Option<(Gradient, [usize; 2], egui::TextureHandle)>,
+    picker: Picker,
+}
+
+struct StopDrag {
+    index: usize,
+    /// Pointer x at the press, and the stop's offset from it.
+    start: f32,
+    offset: f32,
+    moved: bool,
+    /// Pulled far enough below the handles that releasing removes it.
+    removing: bool,
+}
+
+enum CardAction {
+    Remove(usize),
+}
+
+/// Output size and one card per gradient; see docs/features/gradients.md#parameters-tab.
+fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
+    let edit = match &mut inspected.gradient {
+        Some(Ok(edit)) => edit,
+        Some(Err(e)) => {
+            placeholder(ui, e);
+            return None;
+        }
+        None => {
+            placeholder(ui, "No parameters");
+            return None;
+        }
+    };
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let file = &mut edit.edit;
+                let cards = &mut edit.cards;
+                cards.resize_with(file.gradients.len(), GradientCard::default);
+                let count = file.gradients.len().max(1) as u32;
+                prop_section(
+                    ui,
+                    "gradient_output",
+                    true,
+                    RichText::new("Output"),
+                    |_| {},
+                    |_| {},
+                    |ui| {
+                        prop_row(ui, "Width", |ui, width| {
+                            ui.add_sized(
+                                vec2(width, 22.0),
+                                egui::DragValue::new(&mut file.width).range(1..=4096),
+                            );
+                        });
+                        // Limits keep the gradients fitting, so the file stays valid.
+                        let needed = (file.gradients.len() as u32 * file.stripe).max(1);
+                        prop_row(ui, "Height", |ui, width| {
+                            ui.add_sized(
+                                vec2(width, 22.0),
+                                egui::DragValue::new(&mut file.height).range(needed..=4096),
+                            );
+                        });
+                        let most = (file.height / count).max(1);
+                        prop_row(ui, "Stripe", |ui, width| {
+                            ui.add_sized(
+                                vec2(width, 22.0),
+                                egui::DragValue::new(&mut file.stripe).range(1..=most),
+                            );
+                        });
+                        ui.weak(format!(
+                            "{} of {} stripes used",
+                            file.gradients.len(),
+                            file.capacity()
+                        ));
+                    },
+                );
+
+                let action = std::cell::Cell::new(None);
+                let dragging = std::cell::Cell::new(None);
+                let dropped = std::cell::Cell::new(None);
+                let mut rects = Vec::with_capacity(file.gradients.len());
+                for (i, (gradient, card)) in
+                    file.gradients.iter_mut().zip(cards.iter_mut()).enumerate()
+                {
+                    let title = if gradient.name.is_empty() {
+                        format!("Gradient {}", i + 1)
+                    } else {
+                        gradient.name.clone()
+                    };
+                    rects.push(prop_section(
+                        ui,
+                        ("gradient", i),
+                        false,
+                        RichText::new(title),
+                        |ui| {
+                            let grip = drag_handle(ui);
+                            if grip.dragged() {
+                                dragging.set(Some(i));
+                            }
+                            if grip.drag_stopped() {
+                                dropped.set(Some(i));
+                            }
+                        },
+                        |ui| {
+                            if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
+                                action.set(Some(CardAction::Remove(i)));
+                            }
+                        },
+                        |ui| {
+                            prop_row(ui, "Name", |ui, width| {
+                                ui.add_sized(
+                                    vec2(width, 22.0),
+                                    egui::TextEdit::singleline(&mut gradient.name),
+                                );
+                            });
+                            prop_row(ui, "Dither", |ui, width| {
+                                egui::ComboBox::from_id_salt(("gradient_dither", i))
+                                    .width(width - 8.0)
+                                    .selected_text(gradient.dither.name())
+                                    .show_ui(ui, |ui| {
+                                        for d in Dither::ALL {
+                                            ui.selectable_value(&mut gradient.dither, d, d.name());
+                                        }
+                                    });
+                            });
+                            ui.add_space(4.0);
+                            ui.push_id(("gradient_editor", i), |ui| {
+                                gradient_editor(ui, gradient, card);
+                            });
+                        },
+                    ));
+                }
+                if let Some((from, to)) = card_reorder(ui, &rects, dragging.get(), dropped.get()) {
+                    let gradient = file.gradients.remove(from);
+                    file.gradients.insert(to, gradient);
+                    let card = cards.remove(from);
+                    cards.insert(to, card);
+                }
+                if let Some(CardAction::Remove(i)) = action.take() {
+                    file.gradients.remove(i);
+                    cards.remove(i);
+                }
+                if file.gradients.is_empty() {
+                    ui.weak("No gradients");
+                    ui.add_space(6.0);
+                }
+                let room = file.gradients.len() < file.capacity();
+                let button =
+                    egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add gradient");
+                let added = ui
+                    .add_enabled(room, button)
+                    .on_disabled_hover_text("No room: raise Height or lower Stripe")
+                    .clicked();
+                if added {
+                    let name = format!("Gradient {}", file.gradients.len() + 1);
+                    file.gradients.push(Gradient::new(name));
+                    cards.push(GradientCard::default());
+                }
+            });
+        });
+    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+    (!busy && edit.edit != edit.saved).then(|| {
+        edit.saved = edit.edit.clone();
+        edit.edit.clone()
+    })
+}
+
+/// Moves stop `index` to `at`, keeping the stops ordered; returns its new index.
+fn move_stop(stops: &mut Vec<Stop>, index: usize, at: f64) -> usize {
+    let mut stop = stops.remove(index);
+    stop.at = at;
+    // Ties keep their order: the stop goes after equal ones that were before it.
+    let to = stops
+        .iter()
+        .enumerate()
+        .filter(|(j, s)| s.at < at || (s.at == at && *j < index))
+        .count();
+    stops.insert(to, stop);
+    to
+}
+
+/// Bar, stop handles and the selected stop's fields; see docs/features/gradients.md#gradient-editor.
+fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient, card: &mut GradientCard) {
+    const REMOVE_DISTANCE: f32 = 36.0;
+    let stops = &mut gradient.stops;
+    card.selected = card.selected.min(stops.len() - 1);
+    let width = ui.available_width();
+    let (bar, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
+    let (track, _) = ui.allocate_exact_size(vec2(width, 20.0), Sense::hover());
+    let response = ui.interact(
+        bar.union(track),
+        ui.id().with("stops"),
+        Sense::click_and_drag(),
+    );
+    let x_of = |at: f64| bar.left() + at as f32 * bar.width();
+    let at_of = |x: f32| {
+        let at = f64::from(((x - bar.left()) / bar.width()).clamp(0.0, 1.0));
+        (at * 10_000.0).round() / 10_000.0
+    };
+    // The handle under a point: the nearest within half a handle, selected first.
+    let handle_at = |stops: &[Stop], p: egui::Pos2| {
+        if !track.expand(2.0).contains(p) {
+            return None;
+        }
+        (0..stops.len())
+            .filter(|&i| (x_of(stops[i].at) - p.x).abs() <= 7.0)
+            .min_by(|&a, &b| {
+                let d = |i: usize| (x_of(stops[i].at) - p.x).abs();
+                d(a).total_cmp(&d(b))
+            })
+    };
+    let (now, pressed, down, pointer) = ui.input(|i| {
+        (
+            i.time,
+            i.pointer.primary_pressed(),
+            i.pointer.primary_down(),
+            i.pointer.latest_pos(),
+        )
+    });
+
+    if pressed
+        && response.hovered()
+        && let Some(p) = pointer
+    {
+        let index = match handle_at(stops, p) {
+            Some(index) => index,
+            None => {
+                // Added in the color the gradient has there, and dragged on.
+                let at = at_of(p.x);
+                let color = gradient_color_at(stops, at);
+                let index = stops.iter().filter(|s| s.at <= at).count();
+                stops.insert(index, Stop { at, color });
+                card.added_at = now;
+                index
+            }
+        };
+        card.selected = index;
+        card.drag = Some(StopDrag {
+            index,
+            start: p.x,
+            offset: x_of(stops[index].at) - p.x,
+            moved: false,
+            removing: false,
+        });
+    }
+    if let Some(drag) = &mut card.drag {
+        if let Some(p) = pointer {
+            drag.moved |= (p.x - drag.start).abs() >= 1.0;
+            if drag.moved {
+                drag.index = move_stop(stops, drag.index, at_of(p.x + drag.offset));
+                card.selected = drag.index;
+            }
+            drag.removing = stops.len() > 2 && p.y > track.bottom() + REMOVE_DISTANCE;
+        }
+        if !down {
+            if drag.removing {
+                stops.remove(drag.index);
+                card.selected = drag.index.saturating_sub(1);
+            }
+            card.drag = None;
+        }
+    }
+    if response.double_clicked()
+        && now - card.added_at > 0.5
+        && stops.len() > 2
+        && let Some(i) = pointer.and_then(|p| handle_at(stops, p))
+    {
+        stops.remove(i);
+        card.selected = i.saturating_sub(1);
+        card.drag = None;
+    }
+
+    // Bar: the gradient as rendered, at its size in screen pixels.
+    let ppp = ui.ctx().pixels_per_point();
+    let size = [
+        (bar.width() * ppp).round().max(1.0) as usize,
+        (bar.height() * ppp).round().max(1.0) as usize,
+    ];
+    if card
+        .bar
+        .as_ref()
+        .is_none_or(|(shown, shown_size, _)| shown != &*gradient || *shown_size != size)
+    {
+        let pixels = gradient.render(size[0] as u32, size[1] as u32);
+        let image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+        let texture = ui
+            .ctx()
+            .load_texture("gradient_bar", image, egui::TextureOptions::NEAREST);
+        card.bar = Some((gradient.clone(), size, texture));
+    }
+    color_picker::checker(ui, bar, 4);
+    if let Some((_, _, texture)) = &card.bar {
+        egui::Image::from_texture((texture.id(), bar.size()))
+            .corner_radius(4)
+            .paint_at(ui, bar);
+    }
+
+    // Handles, the selected one last so it is on top.
+    let stops = &mut gradient.stops;
+    let mut order: Vec<usize> = (0..stops.len()).filter(|&i| i != card.selected).collect();
+    order.push(card.selected);
+    for i in order {
+        let stop = stops[i];
+        let selected = i == card.selected;
+        let removing = card
+            .drag
+            .as_ref()
+            .is_some_and(|d| d.index == i && d.removing);
+        let fade = if removing { 0.4 } else { 1.0 };
+        let x = x_of(stop.at);
+        let edge = if selected { ACCENT } else { TEXT_WEAK }.gamma_multiply(fade);
+        let painter = ui.painter();
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                pos2(x, track.top() + 1.0),
+                pos2(x + 4.0, track.top() + 6.0),
+                pos2(x - 4.0, track.top() + 6.0),
+            ],
+            edge,
+            Stroke::NONE,
+        ));
+        let square = Rect::from_min_size(pos2(x - 6.0, track.top() + 6.0), vec2(12.0, 12.0));
+        if stop.color[3] < 255 && !removing {
+            color_picker::checker(ui, square, 2);
+        }
+        let stroke = if selected {
+            Stroke::new(2.0, edge)
+        } else {
+            Stroke::new(1.0, edge)
+        };
+        ui.painter().rect(
+            square,
+            2,
+            color_picker::to_color32(stop.color).gamma_multiply(fade),
+            stroke,
+            egui::StrokeKind::Outside,
+        );
+    }
+    let hovered_stop = pointer
+        .filter(|_| card.drag.is_none())
+        .and_then(|p| handle_at(stops, p));
+    if card.drag.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if hovered_stop.is_some() && response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    if let Some(i) = hovered_stop
+        && response.hovered()
+    {
+        let stop = stops[i];
+        response.on_hover_text_at_pointer(format!(
+            "{} @ {:.1}%",
+            gradient::format_color(stop.color),
+            stop.at * 100.0
+        ));
+    }
+    ui.add_space(6.0);
+
+    // The selected stop.
+    let selected = card.selected;
+    card.picker.show(ui, &mut stops[selected].color);
+    ui.add_space(4.0);
+    let mut percent = stops[selected].at * 100.0;
+    prop_row(ui, "Position", |ui, width| {
+        slider_box(ui, width, &mut percent, 0.0..=100.0, Some(1));
+    });
+    if percent != stops[selected].at * 100.0 {
+        let at = (percent / 100.0 * 10_000.0).round() / 10_000.0;
+        card.selected = move_stop(stops, selected, at.clamp(0.0, 1.0));
+    }
+    ui.horizontal(|ui| {
+        if ui
+            .button("Reverse")
+            .on_hover_text("Mirror the stops")
+            .clicked()
+        {
+            for stop in stops.iter_mut() {
+                stop.at = ((1.0 - stop.at) * 10_000.0).round() / 10_000.0;
+            }
+            stops.reverse();
+            card.selected = stops.len() - 1 - card.selected;
+        }
+        if ui
+            .button("Distribute")
+            .on_hover_text("Space the stops evenly")
+            .clicked()
+        {
+            let last = (stops.len() - 1) as f64;
+            for (i, stop) in stops.iter_mut().enumerate() {
+                stop.at = (i as f64 / last * 10_000.0).round() / 10_000.0;
+            }
+        }
+        let remove = egui::Button::image_and_text(Icon::Trash2.image(14.0, TEXT), "Remove stop");
+        if ui
+            .add_enabled(stops.len() > 2, remove)
+            .on_disabled_hover_text("A gradient needs at least two stops")
+            .clicked()
+        {
+            stops.remove(card.selected);
+            card.selected = card.selected.saturating_sub(1);
+        }
+    });
+}
+
+/// The undithered color of `stops` at `at`.
+fn gradient_color_at(stops: &[Stop], at: f64) -> [u8; 4] {
+    Gradient {
+        name: String::new(),
+        dither: Dither::None,
+        stops: stops.to_vec(),
+    }
+    .color_at(at)
+}
+
+/// Drag-to-reorder for a column of cards (see docs/features/noise.md#modifiers-tab): draws the
+/// dragged card's outline and the drop line, and on drop returns (from, to) for remove/insert.
+fn card_reorder(
+    ui: &Ui,
+    cards: &[Rect],
+    dragging: Option<usize>,
+    dropped: Option<usize>,
+) -> Option<(usize, usize)> {
+    let from = dragging.or(dropped)?;
+    let pointer = ui.ctx().pointer_latest_pos().map_or(0.0, |p| p.y);
+    let to = cards.iter().filter(|r| r.center().y < pointer).count();
+    let moves = to != from && to != from + 1;
+    if dropped.is_some() {
+        return moves.then_some((from, if to > from { to - 1 } else { to }));
+    }
+    let painter = ui.painter();
+    painter.rect_stroke(
+        cards[from],
+        6,
+        Stroke::new(1.0, ACCENT),
+        egui::StrokeKind::Inside,
+    );
+    if moves {
+        // In the middle of the 8 px gap above card `to` (or below the last).
+        let y = cards
+            .get(to)
+            .map_or_else(|| cards[to - 1].bottom() + 4.0, |r| r.top() - 4.0);
+        painter.hline(cards[from].x_range(), y, Stroke::new(2.0, ACCENT));
+    }
+    None
+}
+
 enum ModifierAction {
     Toggle(usize),
     Remove(usize),
@@ -1890,31 +2406,9 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                         },
                     ));
                 }
-                if let Some(from) = dragging.get().or(dropped.get()) {
-                    let pointer = ui.ctx().pointer_latest_pos().map_or(0.0, |p| p.y);
-                    let to = cards.iter().filter(|r| r.center().y < pointer).count();
-                    if dropped.get().is_some() {
-                        if to != from && to != from + 1 {
-                            let m = modifiers.remove(from);
-                            modifiers.insert(if to > from { to - 1 } else { to }, m);
-                        }
-                    } else {
-                        let painter = ui.painter();
-                        painter.rect_stroke(
-                            cards[from],
-                            6,
-                            Stroke::new(1.0, ACCENT),
-                            egui::StrokeKind::Inside,
-                        );
-                        if to != from && to != from + 1 {
-                            // In the middle of the 8 px gap above card `to` (or below the last).
-                            let y = cards
-                                .get(to)
-                                .map_or_else(|| cards[to - 1].bottom() + 4.0, |r| r.top() - 4.0);
-                            let rect = cards[from];
-                            painter.hline(rect.x_range(), y, Stroke::new(2.0, ACCENT));
-                        }
-                    }
+                if let Some((from, to)) = card_reorder(ui, &cards, dragging.get(), dropped.get()) {
+                    let m = modifiers.remove(from);
+                    modifiers.insert(to, m);
                 }
                 match action.take() {
                     Some(ModifierAction::Toggle(i)) => modifiers[i].enabled ^= true,

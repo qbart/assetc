@@ -7,6 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::config;
+use crate::gradient::{Gradients, is_gradient};
 use crate::manifest::{self, Kind};
 use crate::material;
 use crate::noise::Noise;
@@ -245,7 +246,7 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
 }
 
 /// Texture source extensions, matched case-insensitively: images, and generated noise.
-const TEXTURE_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "noise"];
+const TEXTURE_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "noise", "gradient"];
 
 pub fn is_texture_source(file: &Path) -> bool {
     file.extension().is_some_and(|ext| {
@@ -290,6 +291,19 @@ pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType)
         let generated = noise.generate();
         let image = image::RgbaImage::from_raw(generated.width, generated.height, generated.pixels)
             .expect("noise image size");
+        return Ok((image, color));
+    }
+    if is_gradient(source) {
+        let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
+        let gradients = Gradients::parse(&text)?;
+        let color = if gradients.has_alpha() {
+            image::ColorType::Rgba8
+        } else {
+            image::ColorType::Rgb8
+        };
+        let rendered = gradients.render()?;
+        let image = image::RgbaImage::from_raw(rendered.width, rendered.height, rendered.pixels)
+            .expect("gradient image size");
         return Ok((image, color));
     }
     let decoded = image::ImageReader::open(source)

@@ -5,6 +5,7 @@ use std::path::Path;
 
 use crate::build::{is_noise, is_texture_source, load_source as decode, relative, strip_extension};
 use crate::config::Project;
+use crate::gradient::{Gradients, is_gradient};
 use crate::hash::fnv1a64;
 use crate::lut::Lut;
 use crate::material::{self, AlphaMode, HeightMode};
@@ -56,6 +57,7 @@ pub fn is_environment_map(dir: &Path) -> bool {
 enum Kind {
     SourceTexture,
     Noise,
+    Gradient,
     MaterialSource,
     ColorLut,
     Font,
@@ -72,6 +74,7 @@ impl Kind {
         match self {
             Self::SourceTexture => "Source texture",
             Self::Noise => "Noise",
+            Self::Gradient => "Gradient",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
@@ -131,6 +134,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if material_name.is_some() => Kind::MaterialSource,
         Location::Input if has_ext("cube") => Kind::ColorLut,
         Location::Input if is_noise(file) => Kind::Noise,
+        Location::Input if is_gradient(file) => Kind::Gradient,
         Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if model::is_model(file) => Kind::Model,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
@@ -148,6 +152,8 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::Noise => {
             noise_rows(file, &mut out).and_then(|()| source_texture(project, file, &rel, &mut out))
         }
+        Kind::Gradient => gradient_rows(file, &mut out)
+            .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(file, &mut out),
         Kind::Font => font_rows(file, &mut out),
@@ -284,6 +290,16 @@ fn noise_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
             modifiers.join(", ")
         },
     ));
+    Ok(())
+}
+
+fn gradient_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let gradients = Gradients::parse(&text)?;
+    out.rows
+        .push(("Gradients", gradients.gradients.len().to_string()));
+    out.rows
+        .push(("Stripe", format!("{} px", gradients.stripe)));
     Ok(())
 }
 
@@ -690,6 +706,30 @@ mod tests {
         fs::write(&file, "type = \"noise/fbm\"\n[noise.fbm]\noctaves = 99\n").unwrap();
         let i = inspect(&project, Location::Input, &file);
         assert!(row(&i, "Error").contains("octaves"));
+        assert!(i.preview.is_none());
+    }
+
+    #[test]
+    fn gradient_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        let file = dir.path().join("assets/sky.gradient");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, Gradients::new().to_toml()).unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Kind"), "Gradient");
+        assert_eq!(row(&i, "Gradients"), "1");
+        assert_eq!(row(&i, "Stripe"), "8 px");
+        assert_eq!(row(&i, "Dimensions"), "256 × 64 px");
+        assert_eq!(row(&i, "Asset path"), "sky");
+        assert_eq!(row(&i, "Color"), "sRGB");
+        // Never mipmapped: levels would blend stripes.
+        assert_eq!(row(&i, "Mip levels"), "1");
+        assert_eq!(i.channels, [true, true, true, false]);
+
+        fs::write(&file, "stripe = 99\n").unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert!(row(&i, "Error").contains("stripe"));
         assert!(i.preview.is_none());
     }
 
