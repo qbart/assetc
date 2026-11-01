@@ -36,7 +36,7 @@ impl Plugin for UiPlugin {
         let [r, g, b, _] = BG_CENTER.to_array();
         app.insert_resource(ClearColor(Color::srgb_u8(r, g, b)))
             .init_resource::<UiState>()
-            .add_systems(Startup, (scan_trees, set_title))
+            .add_systems(Startup, scan_trees)
             .add_systems(EguiPrimaryContextPass, shell);
     }
 }
@@ -357,12 +357,6 @@ fn scan_trees(mut commands: Commands, project: Res<Project>) {
     commands.insert_resource(Assets::load(&project));
 }
 
-fn set_title(project: Res<Project>, mut window: Single<&mut Window>) {
-    if let Some(name) = project.root.as_deref().and_then(|r| r.file_name()) {
-        window.title = format!("assetc — {}", name.to_string_lossy());
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn shell(
     mut contexts: EguiContexts,
@@ -457,7 +451,7 @@ fn shell(
         .show(&mut root, |ui| {
             let state = &mut *state;
             let full = ui.max_rect();
-            let bar = Rect::from_min_size(full.min, vec2(full.width(), 36.0));
+            let bar = Rect::from_min_size(full.min, vec2(full.width(), 32.0));
             let modes = ViewMode::ALL.map(ViewMode::name);
             let mode = ViewMode::ALL.iter().position(|m| *m == state.mode);
             let lut_views = LutView::ALL.map(LutView::name);
