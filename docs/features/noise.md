@@ -52,6 +52,7 @@ disabled. Controls, in a two-column grid like Info (weak labels left):
 
 ## Inspector Info
 
-Kind `Noise`, then the parameters as rows (Type, Size, Seed, Frequency,
-Octaves, Gain, Invert), then the usual source texture rows (Dimensions, Asset
-path, Asset ID, Material, Color, Mip levels, Output).
+Kind `Noise`, the file Size, then the parameters as rows (Type, Seed,
+Frequency, Octaves, Gain, Invert; the generated size is the Dimensions row),
+then the usual source texture rows (Dimensions, Asset path, Asset ID,
+Material, Color, Mip levels, Output).
