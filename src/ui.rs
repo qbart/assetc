@@ -110,10 +110,11 @@ enum Channels {
     R,
     G,
     B,
+    A,
 }
 
 impl Channels {
-    const ALL: [Self; 4] = [Self::Rgb, Self::R, Self::G, Self::B];
+    const ALL: [Self; 5] = [Self::Rgb, Self::R, Self::G, Self::B, Self::A];
 
     fn name(self) -> &'static str {
         match self {
@@ -121,6 +122,7 @@ impl Channels {
             Self::R => "Red",
             Self::G => "Green",
             Self::B => "Blue",
+            Self::A => "Alpha",
         }
     }
 
@@ -131,6 +133,7 @@ impl Channels {
             Self::R => Some(0),
             Self::G => Some(1),
             Self::B => Some(2),
+            Self::A => Some(3),
         }
     }
 }
@@ -1005,29 +1008,22 @@ struct Tool {
     on: bool,
 }
 
-/// Button groups in the canvas' top-right corner; returns the clicked `(group, button)`.
+/// A column of button groups in the canvas' top-right corner; returns the clicked `(group, button)`.
 fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usize)> {
     const BUTTON: Vec2 = vec2(36.0, 32.0);
     const RADIUS: u8 = 6;
     const GAP: f32 = 8.0;
-    let total: f32 = groups
-        .iter()
-        .map(|g| BUTTON.x * g.len() as f32)
-        .sum::<f32>()
-        + GAP * (groups.len() - 1) as f32;
     let painter = ui.painter_at(canvas);
-    let mut x = canvas.right() - 8.0 - total;
+    let x = canvas.right() - 8.0 - BUTTON.x;
+    let mut y = canvas.top() + 8.0;
     let mut clicked = None;
     for (g, tools) in groups.iter().enumerate() {
-        let bar = Rect::from_min_size(
-            pos2(x, canvas.top() + 8.0),
-            vec2(BUTTON.x * tools.len() as f32, BUTTON.y),
-        );
-        x = bar.right() + GAP;
+        let bar = Rect::from_min_size(pos2(x, y), vec2(BUTTON.x, BUTTON.y * tools.len() as f32));
+        y = bar.bottom() + GAP;
         painter.rect_filled(bar, RADIUS, BG_BAR);
         let last = tools.len() - 1;
         for (i, tool) in tools.iter().enumerate() {
-            let rect = Rect::from_min_size(bar.min + vec2(BUTTON.x * i as f32, 0.0), BUTTON);
+            let rect = Rect::from_min_size(bar.min + vec2(0.0, BUTTON.y * i as f32), BUTTON);
             let response = ui
                 .interact(
                     rect,
@@ -1039,8 +1035,8 @@ fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usiz
             let outer = |edge: bool| if edge { RADIUS } else { 0 };
             let radius = egui::CornerRadius {
                 nw: outer(i == 0),
-                sw: outer(i == 0),
-                ne: outer(i == last),
+                ne: outer(i == 0),
+                sw: outer(i == last),
                 se: outer(i == last),
             };
             let tint = if tool.on {
@@ -1053,7 +1049,7 @@ fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usiz
                 TEXT_WEAK
             };
             if i > 0 {
-                painter.vline(rect.left(), rect.y_range(), Stroke::new(1.0, STROKE));
+                painter.hline(rect.x_range(), rect.top(), Stroke::new(1.0, STROKE));
             }
             paint_glyph(ui, &painter, tool.glyph, rect.center(), tint);
             if response.clicked() {
