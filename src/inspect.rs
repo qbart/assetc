@@ -306,6 +306,7 @@ fn gradient_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
         "Grid",
         format!("{} × {}", gradients.columns(), gradients.rows()),
     ));
+    out.rows.push(("Layout", gradients.layout.key().into()));
     Ok(())
 }
 
@@ -727,6 +728,7 @@ mod tests {
         assert_eq!(row(&i, "Gradients"), "1");
         assert_eq!(row(&i, "Cell"), "16 × 64 px");
         assert_eq!(row(&i, "Grid"), "16 × 4");
+        assert_eq!(row(&i, "Layout"), "rows");
         assert_eq!(row(&i, "Dimensions"), "256 × 256 px");
         assert_eq!(row(&i, "Asset path"), "sky");
         assert_eq!(row(&i, "Color"), "sRGB");

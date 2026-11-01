@@ -16,7 +16,7 @@ use crate::build::{self, Outcome};
 use crate::color_picker::{self, Picker};
 use crate::config::Project;
 use crate::fileops;
-use crate::gradient::{self, Dither, Gradient, Gradients, Stop};
+use crate::gradient::{self, Dither, Gradient, Gradients, Layout as GradientLayout, Stop};
 use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
@@ -318,15 +318,17 @@ enum InspectorTab {
     Info,
     Parameters,
     Modifiers,
+    Gradients,
     Animations,
     Assets,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Info,
         Self::Parameters,
         Self::Modifiers,
+        Self::Gradients,
         Self::Animations,
         Self::Assets,
     ];
@@ -336,6 +338,7 @@ impl InspectorTab {
             Self::Info => Icon::Info,
             Self::Parameters => Icon::SlidersVertical,
             Self::Modifiers => Icon::Wrench,
+            Self::Gradients => Icon::Palette,
             Self::Animations => Icon::Film,
             Self::Assets => Icon::Files,
         }
@@ -346,6 +349,7 @@ impl InspectorTab {
             Self::Info => "Info",
             Self::Parameters => "Parameters",
             Self::Modifiers => "Modifiers",
+            Self::Gradients => "Gradients",
             Self::Animations => "Animations",
             Self::Assets => "Assets",
         }
@@ -364,6 +368,9 @@ impl InspectorTab {
             }),
             Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input && build::is_noise(&s.path) && s.path.is_file()
+            }),
+            Self::Gradients => selection.is_some_and(|s| {
+                s.location == Location::Input && gradient::is_gradient(&s.path) && s.path.is_file()
             }),
             // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
@@ -1578,10 +1585,17 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
             match (state.inspector_tab, &mut state.inspected, &state.selection) {
                 (_, _, None) => placeholder(ui, "Nothing selected"),
                 (_, None, Some(_)) => placeholder(ui, "Loading…"),
-                (InspectorTab::Parameters, Some(inspected), Some(_))
-                    if inspected.gradient.is_some() =>
-                {
-                    if let Some(gradients) = gradient_tab(ui, inspected) {
+                (
+                    tab @ (InspectorTab::Parameters | InspectorTab::Gradients),
+                    Some(inspected),
+                    Some(_),
+                ) if inspected.gradient.is_some() => {
+                    let save = if tab == InspectorTab::Parameters {
+                        gradient_output_tab(ui, inspected)
+                    } else {
+                        gradients_tab(ui, inspected)
+                    };
+                    if let Some(gradients) = save {
                         match std::fs::write(&inspected.path, gradients.to_toml()) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
@@ -1605,6 +1619,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                         }
                     }
                 }
+                (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
                 (InspectorTab::Animations, Some(inspected), Some(_)) => {
                     let choice = state.animations.entry(inspected.path.clone()).or_default();
                     animations_tab(ui, &inspected.inspection.animations, choice);
@@ -1667,7 +1682,8 @@ fn property_style(ui: &mut Ui) {
 }
 
 /// A section card, see docs/features/gui.md#property-editor. When `collapsible`, a chevron
-/// starts the header; `leading` draws next (before the title), `trailing` on the right.
+/// starts the header; `leading` draws next (before the title), `trailing` on the right, told
+/// whether the card is open.
 #[allow(clippy::too_many_arguments)]
 fn prop_section(
     ui: &mut Ui,
@@ -1675,7 +1691,7 @@ fn prop_section(
     collapsible: bool,
     title: RichText,
     leading: impl FnOnce(&mut Ui),
-    trailing: impl FnOnce(&mut Ui),
+    trailing: impl FnOnce(&mut Ui, bool),
     body: impl FnOnce(&mut Ui),
 ) -> Rect {
     let id = ui.make_persistent_id(id);
@@ -1710,13 +1726,15 @@ fn prop_section(
                     } else {
                         title
                     });
-                    if chevron.is_some_and(|c| c.clicked()) || (collapsible && title.clicked()) {
+                    let toggled =
+                        chevron.is_some_and(|c| c.clicked()) || (collapsible && title.clicked());
+                    if toggled {
                         ui.data_mut(|d| d.insert_temp(id, !open));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
                         ui.add_space(4.0);
-                        trailing(ui);
+                        trailing(ui, open);
                     });
                 },
             );
@@ -1832,7 +1850,7 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                     true,
                     RichText::new("Generator"),
                     |_| {},
-                    |_| {},
+                    |_, _| {},
                     |ui| {
                         prop_row(ui, "Type", |ui, width| {
                             egui::ComboBox::from_id_salt("noise_type")
@@ -1870,7 +1888,7 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                     true,
                     RichText::new(noise.kind.name()),
                     |_| {},
-                    |_| {},
+                    |_, _| {},
                     |ui| {
                         for (spec, value) in specs.iter().zip(&mut noise.params.0) {
                             param_row(ui, spec, value);
@@ -1898,8 +1916,9 @@ struct GradientCard {
     drag: Option<StopDrag>,
     /// When a press last added a stop, so that gesture's double-click does not remove it.
     added_at: f64,
-    /// The rendered bar: what it shows, its size in pixels, and the texture.
+    /// The rendered bar and folded preview: what they show, their size in pixels, the texture.
     bar: Option<(Gradient, [usize; 2], egui::TextureHandle)>,
+    mini: Option<(Gradient, [usize; 2], egui::TextureHandle)>,
     picker: Picker,
 }
 
@@ -1917,34 +1936,46 @@ enum CardAction {
     Remove(usize),
 }
 
-/// Output size and one card per gradient; see docs/features/gradients.md#parameters-tab.
-fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
-    let edit = match &mut inspected.gradient {
-        Some(Ok(edit)) => edit,
+/// The gradient file being edited, or a placeholder with why there is none.
+fn gradient_edit<'a>(ui: &mut Ui, inspected: &'a mut Inspected) -> Option<&'a mut GradientEdit> {
+    match &mut inspected.gradient {
+        Some(Ok(edit)) => Some(edit),
         Some(Err(e)) => {
             placeholder(ui, e);
-            return None;
+            None
         }
         None => {
             placeholder(ui, "No parameters");
-            return None;
+            None
         }
-    };
+    }
+}
+
+/// The gradients to write once nothing is being dragged or typed into, as for noise.
+fn gradient_commit(ui: &Ui, edit: &mut GradientEdit) -> Option<Gradients> {
+    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+    (!busy && edit.edit != edit.saved).then(|| {
+        edit.saved = edit.edit.clone();
+        edit.edit.clone()
+    })
+}
+
+/// Image size, cells and layout; see docs/features/gradients.md#parameters-tab.
+fn gradient_output_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
+    let edit = gradient_edit(ui, inspected)?;
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
                 let file = &mut edit.edit;
-                let cards = &mut edit.cards;
-                cards.resize_with(file.gradients.len(), GradientCard::default);
                 prop_section(
                     ui,
                     "gradient_output",
                     true,
                     RichText::new("Output"),
                     |_| {},
-                    |_| {},
+                    |_, _| {},
                     |ui| {
                         // A change that leaves too few cells is undone, so the file stays valid.
                         let before = (file.width, file.height, file.cell_width, file.cell_height);
@@ -1968,6 +1999,20 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                         if file.validate().is_err() {
                             (file.width, file.height, file.cell_width, file.cell_height) = before;
                         }
+                        prop_row(ui, "Layout", |ui, width| {
+                            egui::ComboBox::from_id_salt("gradient_layout")
+                                .width(width - 8.0)
+                                .selected_text(file.layout.name())
+                                .show_ui(ui, |ui| {
+                                    for layout in GradientLayout::ALL {
+                                        ui.selectable_value(
+                                            &mut file.layout,
+                                            layout,
+                                            layout.name(),
+                                        );
+                                    }
+                                });
+                        });
                         ui.weak(format!(
                             "{} of {} cells used ({} × {})",
                             file.gradients.len(),
@@ -1977,7 +2022,22 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                         ));
                     },
                 );
+            });
+        });
+    gradient_commit(ui, edit)
+}
 
+/// One foldable card per gradient; see docs/features/gradients.md#gradients-tab.
+fn gradients_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
+    let edit = gradient_edit(ui, inspected)?;
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let file = &mut edit.edit;
+                let cards = &mut edit.cards;
+                cards.resize_with(file.gradients.len(), GradientCard::default);
                 let action = std::cell::Cell::new(None);
                 let dragging = std::cell::Cell::new(None);
                 let dropped = std::cell::Cell::new(None);
@@ -1990,10 +2050,13 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                     } else {
                         gradient.name.clone()
                     };
+                    // Folded cards show a small preview where the remove button would be.
+                    let shown = gradient.clone();
+                    let mut mini = card.mini.take();
                     rects.push(prop_section(
                         ui,
                         ("gradient", i),
-                        false,
+                        true,
                         RichText::new(title),
                         |ui| {
                             let grip = drag_handle(ui);
@@ -2004,9 +2067,20 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                                 dropped.set(Some(i));
                             }
                         },
-                        |ui| {
-                            if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
-                                action.set(Some(CardAction::Remove(i)));
+                        |ui, open| {
+                            if open {
+                                if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
+                                    action.set(Some(CardAction::Remove(i)));
+                                }
+                            } else {
+                                ui.add_space(4.0);
+                                let (rect, _) =
+                                    ui.allocate_exact_size(vec2(48.0, 12.0), Sense::hover());
+                                color_picker::checker(ui, rect, 3);
+                                let texture = gradient_texture(ui, &mut mini, &shown, rect.size());
+                                egui::Image::from_texture((texture.id(), rect.size()))
+                                    .corner_radius(3)
+                                    .paint_at(ui, rect);
                             }
                         },
                         |ui| {
@@ -2032,6 +2106,7 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                             });
                         },
                     ));
+                    card.mini = mini;
                 }
                 if let Some((from, to)) = card_reorder(ui, &rects, dragging.get(), dropped.get()) {
                     let gradient = file.gradients.remove(from);
@@ -2061,11 +2136,36 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                 }
             });
         });
-    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
-    (!busy && edit.edit != edit.saved).then(|| {
-        edit.saved = edit.edit.clone();
-        edit.edit.clone()
-    })
+    gradient_commit(ui, edit)
+}
+
+/// `gradient` on its side at `size` points, rendered at screen pixels; re-rendered only
+/// when it or the size changed.
+fn gradient_texture(
+    ui: &Ui,
+    cache: &mut Option<(Gradient, [usize; 2], egui::TextureHandle)>,
+    gradient: &Gradient,
+    size: Vec2,
+) -> egui::TextureHandle {
+    let ppp = ui.ctx().pixels_per_point();
+    let pixels = [
+        (size.x * ppp).round().max(1.0) as usize,
+        (size.y * ppp).round().max(1.0) as usize,
+    ];
+    match cache {
+        Some((shown, shown_size, texture)) if shown == gradient && *shown_size == pixels => {
+            texture.clone()
+        }
+        _ => {
+            let rgba = gradient.render_sideways(pixels[0] as u32, pixels[1] as u32);
+            let image = egui::ColorImage::from_rgba_unmultiplied(pixels, &rgba);
+            let texture =
+                ui.ctx()
+                    .load_texture("gradient_bar", image, egui::TextureOptions::NEAREST);
+            *cache = Some((gradient.clone(), pixels, texture.clone()));
+            texture
+        }
+    }
 }
 
 /// Moves stop `index` to `at`, keeping the stops ordered; returns its new index.
@@ -2174,29 +2274,11 @@ fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient, card: &mut GradientCard
     }
 
     // Bar: the gradient as rendered, at its size in screen pixels.
-    let ppp = ui.ctx().pixels_per_point();
-    let size = [
-        (bar.width() * ppp).round().max(1.0) as usize,
-        (bar.height() * ppp).round().max(1.0) as usize,
-    ];
-    if card
-        .bar
-        .as_ref()
-        .is_none_or(|(shown, shown_size, _)| shown != &*gradient || *shown_size != size)
-    {
-        let pixels = gradient.render_sideways(size[0] as u32, size[1] as u32);
-        let image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
-        let texture = ui
-            .ctx()
-            .load_texture("gradient_bar", image, egui::TextureOptions::NEAREST);
-        card.bar = Some((gradient.clone(), size, texture));
-    }
     color_picker::checker(ui, bar, 4);
-    if let Some((_, _, texture)) = &card.bar {
-        egui::Image::from_texture((texture.id(), bar.size()))
-            .corner_radius(4)
-            .paint_at(ui, bar);
-    }
+    let texture = gradient_texture(ui, &mut card.bar, gradient, bar.size());
+    egui::Image::from_texture((texture.id(), bar.size()))
+        .corner_radius(4)
+        .paint_at(ui, bar);
 
     // Handles, the selected one last so it is on top.
     let stops = &mut gradient.stops;
@@ -2392,7 +2474,7 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                                 action.set(Some(ModifierAction::Toggle(i)));
                             }
                         },
-                        |ui| {
+                        |ui, _| {
                             if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
                                 action.set(Some(ModifierAction::Remove(i)));
                             }

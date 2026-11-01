@@ -54,6 +54,34 @@ impl Dither {
     }
 }
 
+/// The order gradients fill the grid's cells in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Layout {
+    /// Left to right, then top to bottom.
+    #[default]
+    Rows,
+    /// Top to bottom, then left to right.
+    Columns,
+}
+
+impl Layout {
+    pub const ALL: [Self; 2] = [Self::Rows, Self::Columns];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Rows => "rows",
+            Self::Columns => "columns",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rows => "Rows (left to right, then down)",
+            Self::Columns => "Columns (top to bottom, then right)",
+        }
+    }
+}
+
 /// A color at a position; `color` is straight (not premultiplied) RGBA.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Stop {
@@ -183,6 +211,7 @@ pub struct Gradients {
     pub height: u32,
     pub cell_width: u32,
     pub cell_height: u32,
+    pub layout: Layout,
     pub gradients: Vec<Gradient>,
 }
 
@@ -194,6 +223,7 @@ impl Gradients {
             height: 256,
             cell_width: 16,
             cell_height: 64,
+            layout: Layout::Rows,
             gradients: vec![Gradient::new("Gradient 1".into())],
         }
     }
@@ -204,6 +234,15 @@ impl Gradients {
 
     pub fn rows(&self) -> u32 {
         self.height / self.cell_height.max(1)
+    }
+
+    /// Column and row of gradient `i`'s cell.
+    pub fn cell(&self, i: usize) -> (u32, u32) {
+        let i = i as u32;
+        match self.layout {
+            Layout::Rows => (i % self.columns(), i / self.columns()),
+            Layout::Columns => (i / self.rows(), i % self.rows()),
+        }
     }
 
     /// How many cells the grid has.
@@ -250,11 +289,8 @@ impl Gradients {
         let (cell_width, cell_height) = (self.cell_width, self.cell_height);
         let mut pixels = vec![0; (width * height * 4) as usize];
         for (i, gradient) in self.gradients.iter().enumerate() {
-            let i = i as u32;
-            let (left, top) = (
-                i % self.columns() * cell_width,
-                i / self.columns() * cell_height,
-            );
+            let (column, row) = self.cell(i);
+            let (left, top) = (column * cell_width, row * cell_height);
             let cell = gradient.render(cell_width, cell_height);
             let row_bytes = (cell_width * 4) as usize;
             for (y, row) in cell.chunks_exact(row_bytes).enumerate() {
@@ -287,6 +323,13 @@ impl Gradients {
         let height = size("height", 256)?;
         let cell_width = size("cell_width", 16)?;
         let cell_height = size("cell_height", 64)?;
+        let layout = match table.remove("layout") {
+            None => Layout::Rows,
+            Some(v) => v
+                .as_str()
+                .and_then(|key| Layout::ALL.into_iter().find(|l| l.key() == key))
+                .ok_or_else(|| format!("unknown layout {v} (use rows or columns)"))?,
+        };
         let gradients = match table.remove("gradients") {
             None => Vec::new(),
             Some(toml::Value::Array(items)) => items
@@ -306,6 +349,7 @@ impl Gradients {
             height,
             cell_width,
             cell_height,
+            layout,
             gradients,
         };
         gradients.validate()?;
@@ -315,8 +359,12 @@ impl Gradients {
     /// The written form, see docs/spec/gradient.md#written-form.
     pub fn to_toml(&self) -> String {
         let mut out = format!(
-            "width = {}\nheight = {}\ncell_width = {}\ncell_height = {}\n",
-            self.width, self.height, self.cell_width, self.cell_height
+            "width = {}\nheight = {}\ncell_width = {}\ncell_height = {}\nlayout = \"{}\"\n",
+            self.width,
+            self.height,
+            self.cell_width,
+            self.cell_height,
+            self.layout.key()
         );
         for gradient in &self.gradients {
             out += "\n[[gradients]]\n";
@@ -451,6 +499,7 @@ mod tests {
 height = 64
 cell_width = 16
 cell_height = 32
+layout = "rows"
 
 [[gradients]]
 name = "Sunset"
@@ -508,6 +557,14 @@ stops = [
         assert_eq!(pixel(&image, 31, 0)[3], 0);
         // Unused cells (the second row): transparent.
         assert_eq!(pixel(&image, 5, 40), [0; 4]);
+
+        // Columns fill top to bottom first: the second gradient goes below the first.
+        let mut columns = Gradients::parse(SAMPLE).unwrap();
+        columns.layout = Layout::Columns;
+        let image = columns.render().unwrap();
+        assert_eq!(pixel(&image, 0, 63), [255, 255, 255, 255]);
+        assert_eq!(pixel(&image, 16, 31), [0; 4]);
+        assert_eq!(columns.cell(1), (0, 1));
     }
 
     #[test]
@@ -562,6 +619,7 @@ stops = [
         let err = |text: &str| Gradients::parse(text).unwrap_err();
         assert_eq!(err("depth = 1"), "unknown key depth");
         assert_eq!(err("cell_height = 300"), "cell_height 300 is outside 1–256");
+        assert!(err("layout = \"spiral\"").starts_with("unknown layout"));
         assert!(
             err("[[gradients]]\nstops = [{ at = 0, color = \"#000000\" }]")
                 .contains("at least two")
