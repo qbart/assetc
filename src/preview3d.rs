@@ -4,7 +4,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::mesh::CylinderMeshBuilder;
+use bevy::mesh::{CylinderMeshBuilder, Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
@@ -126,6 +126,40 @@ struct Scene {
     material: Handle<StandardMaterial>,
 }
 
+/// Cube with the whole image on each face, upright on the sides (Bevy's `Cuboid` turns some
+/// faces); see docs/features/canvas.md#scene.
+fn cube(size: f32) -> Mesh {
+    // (normal, right, up) per face; right × up = normal, so corners in order are counter-clockwise.
+    let faces = [
+        (Vec3::Z, Vec3::X, Vec3::Y),
+        (Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y),
+        (Vec3::X, Vec3::NEG_Z, Vec3::Y),
+        (Vec3::NEG_X, Vec3::Z, Vec3::Y),
+        (Vec3::Y, Vec3::X, Vec3::NEG_Z),
+        (Vec3::NEG_Y, Vec3::X, Vec3::Z),
+    ];
+    let half = size / 2.0;
+    let (mut positions, mut normals, mut uvs, mut indices) = (vec![], vec![], vec![], vec![]);
+    for (normal, right, up) in faces {
+        let base = positions.len() as u32;
+        // Bottom-left, bottom-right, top-right, top-left; UV v grows downward.
+        for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+            positions.push(((normal + right * x + up * y) * half).to_array());
+            normals.push(normal.to_array());
+            uvs.push([(x + 1.0) / 2.0, (1.0 - y) / 2.0]);
+        }
+        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices))
+}
+
 type ShapeQuery = (&'static mut Mesh3d, &'static mut Transform);
 
 /// Auto-rotation, radians per second.
@@ -138,8 +172,14 @@ fn setup(
 ) {
     let [r, g, b, _] = BG_CENTER.to_array();
     let meshes = [
-        meshes.add(Cuboid::new(1.2, 1.2, 1.2)),
-        meshes.add(Sphere::new(0.75).mesh().uv(48, 24)),
+        meshes.add(cube(1.2)),
+        // Bevy's UV sphere has its poles on Z; stand it up so rows of the image run around.
+        meshes.add(
+            Sphere::new(0.75)
+                .mesh()
+                .uv(48, 24)
+                .rotated_by(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        ),
         meshes.add(CylinderMeshBuilder::new(0.6, 1.4, 48)),
         meshes.add(Torus::new(0.35, 0.85)),
     ];
@@ -261,6 +301,36 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cube_faces_wind_outward_and_stand_upright() {
+        let mesh = cube(2.0);
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .unwrap()
+            .as_float3()
+            .unwrap();
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("no indices");
+        };
+        for triangle in indices.as_chunks::<3>().0 {
+            let [a, b, c] = triangle.map(|i| Vec3::from(positions[i as usize]));
+            let center = (a + b + c) / 3.0;
+            // Counter-clockwise seen from outside: the face normal points away from the center.
+            assert!((b - a).cross(c - a).dot(center) > 0.0, "{triangle:?}");
+        }
+        // Side faces: the top edge (v = 0) is the upper one.
+        let Some(bevy::mesh::VertexAttributeValues::Float32x2(uvs)) =
+            mesh.attribute(Mesh::ATTRIBUTE_UV_0)
+        else {
+            panic!("no uvs");
+        };
+        for face in 0..4 {
+            for v in face * 4..face * 4 + 4 {
+                assert_eq!(uvs[v][1] == 0.0, positions[v][1] > 0.0);
+            }
+        }
+    }
 
     #[test]
     fn orbit_limits() {
