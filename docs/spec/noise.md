@@ -86,8 +86,7 @@ gamma = 1.0
 ## Generators
 
 Parameter types: *int* (TOML integer), *float*, *choice* (a string from the
-list), *gray* (float `0..=1`), *color* (array of 3 floats `0..=1`). All ranges
-are inclusive; a value outside its range is an error.
+list), *gray* (float `0..=1`). All ranges are inclusive; a value outside its range is an error.
 
 Most generators share these parameters (listed per generator below, in this
 order where present):
@@ -250,7 +249,23 @@ each.
 | `posterize`           | `steps`: int 2–32, 4                                             | `round(c × (steps − 1)) / (steps − 1)` |
 | `blur`                | `radius`: int 1–64, 2 · `edges`: choice `wrap` / `clamp`, `wrap` | three passes of a `(2 radius + 1)`-wide box blur, horizontal then vertical each pass; past the image's edges it reads the opposite side (`wrap`, for tiling textures) or repeats the edge pixel (`clamp`) |
 | `normalize`           | —                                                              | over all channels of all pixels: `(c − min) / (max − min)` (unchanged if `max = min`) |
-| `colorize`            | `color_a`: color, `[0, 0, 0]` · `color_b`: color, `[1, 1, 1]`    | `l = (R + G + B) / 3`; result `color_a + (color_b − color_a) × l` |
+| `colorize`            | `hue`: float 0–360, 180 · `saturation`: float 0–1, 0.5 · `lightness`: float −1–1, 0 | see [Colorize](#colorize) |
 
 The image is grayscale (one channel) unless the generator is `noise/curl` or
 an enabled `colorize` is present.
+
+### Colorize
+
+Like GIMP's *Colors → Colorize*: every pixel takes one hue and saturation,
+keeping its brightness.
+
+1. `l = 0.2126 R + 0.7152 G + 0.0722 B` (Rec. 709 luminance).
+2. Lightness shifts it: `l × (1 − lightness) + lightness` when `lightness > 0`,
+   `l × (1 + lightness)` when `lightness < 0`.
+3. The result is the HSL color (`hue` in degrees, `saturation`, `l`) in RGB:
+   with `C = (1 − |2 l − 1|) × saturation`, `h = hue / 60`,
+   `X = C × (1 − |h mod 2 − 1|)` and `m = l − C / 2`, `(R, G, B)` is
+   `(C, X, 0)`, `(X, C, 0)`, `(0, C, X)`, `(0, X, C)`, `(X, 0, C)` or
+   `(C, 0, X)` for `h` in `[0, 1)`, `[1, 2)` … `[5, 6]`, plus `m`.
+
+`saturation = 0` gives gray; `hue = 0` is red, 120 green, 240 blue.

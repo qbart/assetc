@@ -56,8 +56,7 @@ the [property editor](gui.md#property-editor) look, with two sections:
   - *int* with a range up to 256 and *float*: slider plus value box;
   - `seed`: a full-width integer field (drag or type);
   - *choice*: dropdown;
-  - *gray*: slider plus value box (0–1);
-  - *color*: color button.
+  - *gray*: slider plus value box (0–1).
 
   A generator without parameters besides `seed` still shows its section.
 
@@ -97,7 +96,7 @@ The **Modifiers** tab (`wrench`) edits the selected `.noise` file's modifiers
 
 Edits are **written to the file** in the
 [written form](../spec/noise.md#written-form) when committed: dropdowns,
-checkboxes, color changes and the modifier buttons (add, remove, enable)
+checkboxes and the modifier buttons (add, remove, enable)
 and drops immediately; sliders and fields when the pointer is released (or
 Enter is pressed). Writing the file happens at once, on the UI thread (it
 is a few hundred bytes); the file is then
