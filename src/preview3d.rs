@@ -280,6 +280,11 @@ type ShapeQuery = (
     &'static mut Transform,
     &'static mut Visibility,
 );
+type ShapeFilter = (
+    With<PreviewShape>,
+    Without<PreviewCamera>,
+    Without<DirectionalLight>,
+);
 
 /// Auto-rotation, radians per second.
 const SPIN: f32 = 20.0 * std::f32::consts::PI / 180.0;
@@ -374,14 +379,7 @@ fn sync(
     mut ambient: ResMut<GlobalAmbientLight>,
     mut camera: Single<(Entity, &mut Camera, &mut Transform), With<PreviewCamera>>,
     mut overlay: Query<&mut Camera, (With<Camera2d>, Without<PreviewCamera>)>,
-    mut shape: Single<
-        ShapeQuery,
-        (
-            With<PreviewShape>,
-            Without<PreviewCamera>,
-            Without<DirectionalLight>,
-        ),
-    >,
+    mut shape: Single<ShapeQuery, ShapeFilter>,
     mut lights: Query<&mut Visibility, With<DirectionalLight>>,
     mut environment_on: Local<bool>,
 ) {
