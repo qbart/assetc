@@ -55,3 +55,11 @@ Plan so far:
   today). Environment-map faces (`*.env`) are left out.
 - **Open**: whether blur should wrap at the edges (fine for tiling textures)
   or clamp for non-tiling images, perhaps as a modifier parameter.
+
+## `.obj` models
+
+Preview (and later compile) Wavefront OBJ files like glTF models (see
+`docs/features/models.md`). Nothing in the dependency tree reads OBJ: it
+needs a crate such as `tobj` or a small parser of our own (positions,
+normals, UVs, faces; `.mtl` materials optional). The file tree already shows
+`.obj` files with the `torus` icon.

@@ -29,6 +29,8 @@ View  [ 2D | 3D ]
     empty (no `View` label, no buttons);
   - a font's [specimen](fonts.md#specimen) only exists in 2D, so the bar is
     empty too;
+  - a [model](models.md#preview) only exists in 3D, so the bar is empty
+    too;
   - with anything else (or nothing) selected, both buttons are disabled
     (`TEXT_WEAK` at 50%, no hover or clicks) and neither is active.
 
@@ -54,6 +56,7 @@ Both modes show the same messages when there is no image to show.
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
 | an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
 | a font (Input `*.ttf`, `*.otf`)   | its specimen sheet, without the toolbar, see [`fonts.md`](fonts.md#specimen) |
+| a model (Input `*.gltf`, `*.glb`) | the model, in 3D, see [`models.md`](models.md#preview) |
 | any other file or folder          | "No preview"                              |
 | a selected file that disappeared  | "<name> no longer exists"                 |
 
