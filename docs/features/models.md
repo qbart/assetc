@@ -158,8 +158,8 @@ The **Chunks** view shows the data inside the `.amesh`
 - **Table** on the right: a header line `<NAME> — <description>   @<offset>
   <size> bytes` (13 px monospace), then the chunk's data as a table with a
   header row (`TEXT_WEAK`) and striped rows, 20 px tall, 12 px monospace;
-  long tables scroll (only visible rows are drawn). Columns size to their
-  content and can be resized.
+  long tables scroll (only visible rows are drawn), wide ones scroll
+  sideways. Columns size to their content and can be resized.
 - Records (`DESC`, `BOUNDS`) show one row per field: **Field**, **Value**
   (the spec's field names; sizes in bytes as `28 B`, flags as `0x07
   (tangents, skinned, levels of detail)`). Arrays show one row per element,
