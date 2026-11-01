@@ -2401,13 +2401,34 @@ fn compare_view(
     let cache = cache.as_ref().unwrap();
     let shown = fit_rect(rect, cache.before.size_vec2());
 
-    let response = ui.interact(rect, ui.id().with("lut_compare"), Sense::click_and_drag());
-    if (response.clicked() || response.dragged_by(PointerButton::Primary))
-        && let Some(pointer) = response.interact_pointer_pos()
-    {
-        lut_ui.split = ((pointer.x - shown.left()) / shown.width()).clamp(0.0, 1.0);
+    // Drag the grab handle or the line to move the divider.
+    let x = shown.left() + shown.width() * lut_ui.split;
+    let handle = Rect::from_center_size(
+        pos2(
+            x,
+            shown
+                .center()
+                .y
+                .clamp(rect.top() + 20.0, rect.bottom() - 20.0),
+        ),
+        vec2(24.0, 40.0),
+    );
+    let line = Rect::from_x_y_ranges(x - 4.0..=x + 4.0, shown.y_range());
+    let id = ui.id().with("lut_split");
+    let response = ui.interact(handle, id.with("handle"), Sense::drag())
+        | ui.interact(line, id.with("line"), Sense::drag());
+    if response.dragged_by(PointerButton::Primary) {
+        let delta = response.drag_delta().x / shown.width();
+        lut_ui.split = (lut_ui.split + delta).clamp(0.0, 1.0);
+    }
+    let active = response.hovered() || response.dragged();
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
     let x = shown.left() + shown.width() * lut_ui.split;
+    let handle = handle.translate(vec2(x - handle.center().x, 0.0));
     let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
     let painter = ui.painter_at(rect);
     let left = Rect::from_min_max(shown.min, pos2(x, shown.bottom()));
@@ -2420,6 +2441,19 @@ fn compare_view(
         .with_clip_rect(right.intersect(rect))
         .image(cache.after.id(), shown, uv, white);
     painter.vline(x, shown.y_range(), Stroke::new(2.0, TEXT));
+    let tint = if active { ACCENT } else { TEXT };
+    let border = if active { ACCENT } else { STROKE };
+    painter.rect(
+        handle,
+        12.0,
+        BG_BAR,
+        Stroke::new(1.0, border),
+        StrokeKind::Inside,
+    );
+    Icon::GripVertical.image(16.0, tint).paint_at(
+        ui,
+        Rect::from_center_size(handle.center(), vec2(16.0, 16.0)),
+    );
     let pill = |text: &str, anchor: egui::Pos2, align: Align2| {
         let galley = painter.layout_no_wrap(text.into(), FontId::proportional(12.0), TEXT);
         let body = align.anchor_size(anchor, galley.size() + vec2(12.0, 6.0));
