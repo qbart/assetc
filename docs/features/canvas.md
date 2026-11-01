@@ -200,12 +200,21 @@ Every canvas view that shows colors ends its toolbar with a **Color vision**
 group, the last group of the column, to check how the content looks to
 people with color vision deficiencies:
 
-| Button       | Ban color | Tooltip |
-|--------------|-----------|---------|
-| Protanopia   | red (`CHANNEL_R`)   | `Protanopia` and, below it, `Red-Green Color Blindness: The most common form (including deuteranomaly and protanomaly), affecting about 8% of males and 0.5% of females of Northern European descent.` |
-| Deuteranopia | green (`CHANNEL_G`) | `Deuteranopia` and the same Red-Green text |
-| Tritanopia   | blue (`CHANNEL_B`)  | `Tritanopia` and `Blue-Yellow Color Blindness (Tritan-type): Much rarer (affecting roughly 0.01% to 0.03% of the population) and affects men and women equally.` |
-| Monochromacy | gray (`#8c8c8c`)    | `Monochromacy` and `Complete Color Blindness (Achromatopsia): Extremely rare, affecting a tiny fraction of the global population.` |
+| Button       | Ban color           |
+|--------------|---------------------|
+| Protanopia   | red (`CHANNEL_R`)   |
+| Deuteranopia | green (`CHANNEL_G`) |
+| Tritanopia   | blue (`CHANNEL_B`)  |
+| Monochromacy | gray (`#8c8c8c`)    |
+
+Each tooltip is the name, then on the next line what it is and how common
+it is (prevalence figures from population surveys; they vary by population
+and study, so they are given as approximations):
+
+- **Protanopia**: Red-Green Color Blindness (protan): no working red (L) cones, so reds look darker and are confused with greens. Protanopia affects roughly 1% of males; all red-green forms together (including the milder protanomaly and deuteranomaly) affect about 8% of males and 0.5% of females of Northern European descent.
+- **Deuteranopia**: Red-Green Color Blindness (deutan): no working green (M) cones, so reds, oranges and greens are confused. Deuteranopia affects roughly 1% of males; its milder form, deuteranomaly, is the most common color vision deficiency (about 5% of males). All red-green forms together affect about 8% of males and 0.5% of females of Northern European descent.
+- **Tritanopia**: Blue-Yellow Color Blindness (tritan): no working blue (S) cones, so blue and green, and yellow and pink, are confused. Very rare when inherited (estimates range from about 1 in 10,000 to 1 in 20,000 people, roughly 0.005% to 0.01%) and affects men and women equally, as it is not X-linked. Acquired tritan defects (ageing, eye disease) are more common.
+- **Monochromacy**: Complete Color Blindness (achromatopsia, rod monochromacy): no working cones, so everything is seen in shades of gray, usually with light sensitivity and low sharpness. About 1 in 30,000 people; blue cone monochromacy is rarer, about 1 in 100,000.
 
 - **Icon**: the outline of Lucide's `eye` without its pupil (tinted like any
   toolbar icon), with a small "ban" sign in place of the pupil: a circle of
