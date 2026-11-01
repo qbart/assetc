@@ -133,8 +133,9 @@ line per model, e.g.
   and lines are skipped) as one **submesh**, in traversal order (depth-first,
   children in file order).
 - **Static** primitives are baked into world space with the node's world
-  transform (normals by the inverse transpose, tangent handedness flipped
-  when the transform mirrors). Primitives of a **skinned** node (one with a
+  transform (normals by the inverse transpose; when the transform mirrors,
+  tangent handedness is flipped and each triangle's winding reversed so it
+  stays front-facing, as glTF specifies). Primitives of a **skinned** node (one with a
   `skin`) are left in mesh space, as glTF ignores their node transform.
 - Attributes: `POSITION` (required); `NORMAL` (missing: flat normals, the
   triangles' own); `TEXCOORD_0` (missing: `0, 0`); `TANGENT` (missing:
