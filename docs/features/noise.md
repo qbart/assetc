@@ -94,8 +94,12 @@ Edits are **written to the file** in the
 [written form](../spec/noise.md#written-form) when committed: dropdowns,
 checkboxes, color changes and the modifier buttons (add, remove, enable)
 and drops immediately; sliders and fields when the pointer is released (or
-Enter is pressed). The file is then inspected again, so the canvas and Info
-update. If the file does not parse, both tabs show the error instead.
+Enter is pressed). Writing the file happens at once, on the UI thread (it
+is a few hundred bytes); the file is then
+[inspected again in the background](inspector.md#loading), so the image is
+generated off the UI thread and the canvas and Info update when it is
+done; quick successive edits only generate the latest. If the file does not
+parse, both tabs show the error instead.
 
 ## Build
 

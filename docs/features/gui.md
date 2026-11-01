@@ -32,7 +32,11 @@ frame that later features plug into; it has no asset functionality of its own.
   file, see [`inspector.md`](inspector.md).
 - **Status bar** (bottom, fixed height): status message on the left (a
   failed [file operation](file-operations.md#errors) shows there until the
-  next operation or build)
+  next operation or build), preceded by the **loader**: the `loader` icon
+  (14 px, `TEXT_WEAK`) spinning one turn per second while background work
+  runs (a [build](build.md#gui) or an [inspection](inspector.md#loading)).
+  It appears only once the work has run for 150 ms, so quick work does not
+  flicker it
   (see [`cli.md`](cli.md) and [`build.md`](build.md#gui)), `assetc <version>` on the right in weak text.
 - **Center**: the canvas, previewing the selected file in 2D (zoom, pan,
   tiling) or 3D (on a rotating shape), with a view bar on top; see
@@ -109,7 +113,8 @@ tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart), `eye`, `eye-off` (LUT cube before / after),
 `sliders-vertical` (Inspector Parameters tab), `wrench`,
-`grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab), `folder`, `folder-open`, `file`,
+`grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab), `loader`
+(status bar), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 

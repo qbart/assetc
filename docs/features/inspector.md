@@ -142,8 +142,22 @@ otherwise "Nothing selected".
 
 ## Loading
 
-The selected file is read and decoded on the UI thread when it is selected or
-rescanned. There is no file watching.
+Inspecting a file (reading and decoding it, generating a `.noise` image,
+loading an environment map's faces, parsing a LUT) runs on a background
+thread, so the UI never waits for it. There is no file watching.
+
+- **When**: the selection changes, after a rescan (button or finished build),
+  after a file operation that touches the selection, and after an edit in the
+  Parameters / Modifiers tabs is saved.
+- **Latest wins**: at most one inspection runs at a time, and at most one
+  waits. A new request replaces the waiting one (each inspection rebuilds
+  everything, so only the newest matters). When the running one finishes
+  while another waits, its result is dropped and the waiting one starts.
+- **While loading**: a new selection shows weak "Loading…" in the Inspector
+  and the canvas until its result arrives. Re-inspecting the same file keeps
+  showing the current result (canvas, Info, tabs) until the new one replaces
+  it; edits in progress in the Parameters / Modifiers tabs are kept.
+- The status bar shows the [loader](gui.md#layout) while an inspection runs.
 
 ## Keybindings
 
