@@ -171,9 +171,9 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   differ), saturation 0.65, value 0.9. Triangles are lit as usual (the
   file's normals), so shapes stay readable.
 - Left of the toolbar, level with its first button, a label shows the
-  level of detail drawn: `LOD 0` to start, 13 px `TEXT` on a `BG_BAR` pill
-  (32 px tall like a toolbar button, 6 px corners, 10 px side padding), 8 px
-  from the toolbar.
+  level of detail drawn: `LOD 0` to start, plain 13 px `TEXT` without a
+  background, centered vertically on the 32 px button and ending 8 px from
+  the toolbar.
 - **Level of detail**: the view shows the level chosen in the
   [Levels of detail tab](#levels-of-detail-tab) (LOD 0, the full mesh, to
   start with), in every mode. Meshlets exist only for LOD 0: with another
