@@ -155,20 +155,24 @@ The first group depends on the mode: **Tile** in 2D, **Shape** in 3D (see
 
 Exactly one Channels button is on; clicking it again keeps it on.
 
-A channel button is **disabled** when the shown file has no such channel:
+The buttons depend on the shown file's channels:
 
-| Source                               | Disabled       |
-|--------------------------------------|----------------|
-| RGB (e.g. JPEG, RGB PNG)             | A              |
-| grayscale                            | R, G, B, A     |
-| grayscale + alpha                    | R, G, B        |
-| RGBA, and every compiled `.ktx2`     | none           |
+| Source                               | Channels group                    |
+|--------------------------------------|-----------------------------------|
+| RGBA, and every compiled `.ktx2`     | RGB, R, G, B, A                   |
+| RGB (e.g. JPEG, RGB PNG)             | RGB, R, G, B, A (A disabled)      |
+| grayscale                            | Gray                              |
+| grayscale + alpha                    | Gray, A                           |
 
-(A grayscale image's single channel is what RGB shows.) A disabled button is
+**Gray** is a single button for grayscale (single-channel, typically linear
+data) images: its icon is the same trefoil with the circles filled black
+(top), `TEXT_WEAK` gray (bottom-left) and white (bottom-right). It shows the
+image as stored (like RGB) and is always on when there is no other channel
+choice. A disabled button is
 dimmed: outline in `TEXT_WEAK` at 50% opacity and its fill color at 35%; it
 does not react to hover or clicks, and its tooltip adds "(not in this
 image)". If an image's remembered channel is not available (the file changed),
-RGB is shown.
+RGB (or Gray) is shown.
 
 ### Channel icons
 
