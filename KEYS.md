@@ -32,3 +32,4 @@ See [`docs/features/lut.md`](docs/features/lut.md#views).
 | View    | Input              | Action                              |
 |---------|--------------------|-------------------------------------|
 | Compare | Left click / drag  | Move the before / after divider     |
+| Cube    | as Canvas (3D)     | Orbit, move closer / farther, reset |
