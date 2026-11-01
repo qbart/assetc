@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::noise::{Noise, NoiseType};
+use crate::noise::{GeneratorKind, Noise};
 
 /// Creates `New Folder` (or `New Folder 2`, …) in `dir`.
 pub fn create_folder(input: &Path, dir: &Path) -> Result<PathBuf, String> {
@@ -13,15 +13,11 @@ pub fn create_folder(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Creates `<type>.noise` (or `<type> 2.noise`, …) in `dir` with default parameters.
-pub fn create_noise(input: &Path, dir: &Path, kind: NoiseType) -> Result<PathBuf, String> {
+/// Creates `<name>.noise` (or `<name> 2.noise`, …) in `dir` with the generator's defaults.
+pub fn create_noise(input: &Path, dir: &Path, kind: GeneratorKind) -> Result<PathBuf, String> {
     check_inside(input, dir, true)?;
-    let path = unique(dir, &kind.name().to_lowercase(), ".noise");
-    let noise = Noise {
-        kind,
-        ..Default::default()
-    };
-    fs::write(&path, noise.to_toml()).map_err(|e| e.to_string())?;
+    let path = unique(dir, kind.file_stem(), ".noise");
+    fs::write(&path, Noise::new(kind).to_toml()).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -109,12 +105,12 @@ mod tests {
             create_folder(&input, &input).unwrap(),
             input.join("New Folder 2")
         );
-        let noise = create_noise(&input, &input.join("sub"), NoiseType::Worley).unwrap();
-        assert_eq!(noise, input.join("sub/worley.noise"));
-        let again = create_noise(&input, &input.join("sub"), NoiseType::Worley).unwrap();
-        assert_eq!(again, input.join("sub/worley 2.noise"));
+        let noise = create_noise(&input, &input.join("sub"), GeneratorKind::PerlinWorley).unwrap();
+        assert_eq!(noise, input.join("sub/perlin-worley.noise"));
+        let again = create_noise(&input, &input.join("sub"), GeneratorKind::PerlinWorley).unwrap();
+        assert_eq!(again, input.join("sub/perlin-worley 2.noise"));
         let parsed = Noise::parse(&fs::read_to_string(&noise).unwrap()).unwrap();
-        assert_eq!(parsed.kind, NoiseType::Worley);
+        assert_eq!(parsed, Noise::new(GeneratorKind::PerlinWorley));
     }
 
     #[test]

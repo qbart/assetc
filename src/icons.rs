@@ -5,6 +5,8 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 /// Lucide icons vendored in assets/icons, see docs/features/gui.md.
 #[derive(Clone, Copy)]
 pub enum Icon {
+    ArrowDown,
+    ArrowUp,
     Box,
     Check,
     ChevronDown,
@@ -23,14 +25,19 @@ pub enum Icon {
     Image,
     Info,
     Palette,
+    Plus,
     RefreshCw,
     Settings,
     SlidersVertical,
     Torus,
+    Trash2,
+    Wrench,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 22] = [
+const SVGS: [(&str, &str); 27] = [
+    ("arrow-down", include_str!("../assets/icons/arrow-down.svg")),
+    ("arrow-up", include_str!("../assets/icons/arrow-up.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
     (
@@ -61,6 +68,7 @@ const SVGS: [(&str, &str); 22] = [
     ("image", include_str!("../assets/icons/image.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
+    ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("settings", include_str!("../assets/icons/settings.svg")),
     (
@@ -68,6 +76,8 @@ const SVGS: [(&str, &str); 22] = [
         include_str!("../assets/icons/sliders-vertical.svg"),
     ),
     ("torus", include_str!("../assets/icons/torus.svg")),
+    ("trash-2", include_str!("../assets/icons/trash-2.svg")),
+    ("wrench", include_str!("../assets/icons/wrench.svg")),
 ];
 
 // Rendered white so `Image::tint` can color them.

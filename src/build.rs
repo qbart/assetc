@@ -281,10 +281,16 @@ fn decode(source: &Path) -> Result<image::RgbaImage, String> {
 pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType), String> {
     if is_noise(source) {
         let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
-        let generated = Noise::parse(&text)?.generate();
+        let noise = Noise::parse(&text)?;
+        let color = if noise.has_color() {
+            image::ColorType::Rgb8
+        } else {
+            image::ColorType::L8
+        };
+        let generated = noise.generate();
         let image = image::RgbaImage::from_raw(generated.width, generated.height, generated.pixels)
             .expect("noise image size");
-        return Ok((image, image::ColorType::L8));
+        return Ok((image, color));
     }
     let decoded = image::ImageReader::open(source)
         .map_err(|e| e.to_string())?

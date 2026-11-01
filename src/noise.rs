@@ -1,145 +1,639 @@
-//! Procedural `.noise` textures, see docs/spec/noise.md.
+//! Procedural `.noise` textures: generators, modifiers and the file format.
+//! See docs/spec/noise.md; parameters are declared once per type in tables, and parsing,
+//! writing and the editor are driven by them.
 
 use std::f64::consts::{FRAC_1_SQRT_2, TAU};
 
-use serde::{Deserialize, Serialize};
-
 use crate::texture::Image;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NoiseType {
-    White,
+/// The type of a parameter, with its range and default.
+#[derive(Debug, Clone, Copy)]
+pub enum ParamKind {
+    Int {
+        min: i64,
+        max: i64,
+        default: i64,
+    },
+    Float {
+        min: f64,
+        max: f64,
+        default: f64,
+    },
+    Choice {
+        options: &'static [&'static str],
+        default: usize,
+    },
+    /// A float in 0..=1.
+    Gray {
+        default: f64,
+    },
+    Color {
+        default: [f64; 3],
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParamSpec {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub kind: ParamKind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Value {
+    Int(i64),
+    /// Floats and grays.
+    Float(f64),
+    Choice(usize),
+    Color([f64; 3]),
+}
+
+/// Parameter values, in the order of their [`ParamSpec`]s.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Params(pub Vec<Value>);
+
+const fn int(
+    key: &'static str,
+    label: &'static str,
+    min: i64,
+    max: i64,
+    default: i64,
+) -> ParamSpec {
+    ParamSpec {
+        key,
+        label,
+        kind: ParamKind::Int { min, max, default },
+    }
+}
+
+const fn float(
+    key: &'static str,
+    label: &'static str,
+    min: f64,
+    max: f64,
+    default: f64,
+) -> ParamSpec {
+    ParamSpec {
+        key,
+        label,
+        kind: ParamKind::Float { min, max, default },
+    }
+}
+
+const fn choice(
+    key: &'static str,
+    label: &'static str,
+    options: &'static [&'static str],
+    default: usize,
+) -> ParamSpec {
+    ParamSpec {
+        key,
+        label,
+        kind: ParamKind::Choice { options, default },
+    }
+}
+
+const SEED: ParamSpec = int("seed", "Seed", 0, u32::MAX as i64, 0);
+const fn frequency(default: i64) -> ParamSpec {
+    int("frequency", "Frequency", 1, 256, default)
+}
+const fn octaves(default: i64) -> ParamSpec {
+    int("octaves", "Octaves", 1, 8, default)
+}
+const LACUNARITY: ParamSpec = int("lacunarity", "Lacunarity", 2, 4, 2);
+const DIMENSION: ParamSpec = float("dimension", "Dimension", 0.0, 2.0, 1.0);
+
+const GENERATOR_CHECKERBOARD: &[ParamSpec] = &[
+    int("cells", "Cells", 1, 256, 8),
+    ParamSpec {
+        key: "color_a",
+        label: "Color A",
+        kind: ParamKind::Gray { default: 0.0 },
+    },
+    ParamSpec {
+        key: "color_b",
+        label: "Color B",
+        kind: ParamKind::Gray { default: 1.0 },
+    },
+];
+const GENERATOR_UNIFORM: &[ParamSpec] = &[SEED];
+const GENERATOR_LATTICE: &[ParamSpec] = &[SEED, frequency(8)];
+const GENERATOR_FBM: &[ParamSpec] = &[
+    SEED,
+    choice("basis", "Basis", &["value", "perlin", "simplex"], 1),
+    frequency(4),
+    octaves(5),
+    LACUNARITY,
+    float("gain", "Gain", 0.0, 1.0, 0.5),
+];
+const GENERATOR_VORONOI: &[ParamSpec] = &[
+    SEED,
+    frequency(8),
+    float("jitter", "Jitter", 0.0, 1.0, 1.0),
+    choice(
+        "metric",
+        "Metric",
+        &["euclidean", "manhattan", "chebyshev"],
+        0,
+    ),
+    choice("output", "Output", &["f1", "edge", "cell"], 0),
+];
+const GENERATOR_PERLIN_WORLEY: &[ParamSpec] = &[SEED, frequency(4), octaves(4)];
+const GENERATOR_MUSGRAVE: &[ParamSpec] = &[SEED, frequency(4), octaves(6), LACUNARITY, DIMENSION];
+const GENERATOR_RIDGED: &[ParamSpec] = &[
+    SEED,
+    frequency(4),
+    octaves(6),
+    LACUNARITY,
+    DIMENSION,
+    float("offset", "Offset", 0.0, 2.0, 1.0),
+    float("gain", "Gain", 0.0, 4.0, 2.0),
+];
+const GENERATOR_CURL: &[ParamSpec] = &[SEED, frequency(4), octaves(2)];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum GeneratorKind {
+    Checkerboard,
+    Uniform,
     Value,
     #[default]
     Perlin,
-    Worley,
+    Simplex,
+    Fbm,
+    Voronoi,
+    PerlinWorley,
+    Musgrave,
+    Ridged,
+    Curl,
 }
 
-impl NoiseType {
-    pub const ALL: [Self; 4] = [Self::White, Self::Value, Self::Perlin, Self::Worley];
+impl GeneratorKind {
+    pub const ALL: [Self; 11] = [
+        Self::Checkerboard,
+        Self::Uniform,
+        Self::Value,
+        Self::Perlin,
+        Self::Simplex,
+        Self::Fbm,
+        Self::Voronoi,
+        Self::PerlinWorley,
+        Self::Musgrave,
+        Self::Ridged,
+        Self::Curl,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::White => "White",
+            Self::Checkerboard => "Checkerboard",
+            Self::Uniform => "Uniform",
             Self::Value => "Value",
             Self::Perlin => "Perlin",
-            Self::Worley => "Worley",
+            Self::Simplex => "Simplex",
+            Self::Fbm => "fBm",
+            Self::Voronoi => "Voronoi",
+            Self::PerlinWorley => "Perlin-Worley",
+            Self::Musgrave => "Musgrave",
+            Self::Ridged => "Ridged",
+            Self::Curl => "Curl",
+        }
+    }
+
+    /// The `type` value in the file.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Checkerboard => "checkerboard",
+            Self::Uniform => "noise/uniform",
+            Self::Value => "noise/value",
+            Self::Perlin => "noise/perlin",
+            Self::Simplex => "noise/simplex",
+            Self::Fbm => "noise/fbm",
+            Self::Voronoi => "noise/voronoi",
+            Self::PerlinWorley => "noise/perlin-worley",
+            Self::Musgrave => "noise/musgrave",
+            Self::Ridged => "noise/ridged",
+            Self::Curl => "noise/curl",
+        }
+    }
+
+    /// File name for a new file: the last part of the type.
+    pub fn file_stem(self) -> &'static str {
+        self.key().rsplit('/').next().unwrap_or("noise")
+    }
+
+    pub fn specs(self) -> &'static [ParamSpec] {
+        match self {
+            Self::Checkerboard => GENERATOR_CHECKERBOARD,
+            Self::Uniform => GENERATOR_UNIFORM,
+            Self::Value | Self::Perlin | Self::Simplex => GENERATOR_LATTICE,
+            Self::Fbm => GENERATOR_FBM,
+            Self::Voronoi => GENERATOR_VORONOI,
+            Self::PerlinWorley => GENERATOR_PERLIN_WORLEY,
+            Self::Musgrave => GENERATOR_MUSGRAVE,
+            Self::Ridged => GENERATOR_RIDGED,
+            Self::Curl => GENERATOR_CURL,
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.key() == key)
+    }
+}
+
+const COLOR_A: ParamSpec = ParamSpec {
+    key: "color_a",
+    label: "Color A",
+    kind: ParamKind::Color { default: [0.0; 3] },
+};
+const COLOR_B: ParamSpec = ParamSpec {
+    key: "color_b",
+    label: "Color B",
+    kind: ParamKind::Color { default: [1.0; 3] },
+};
+const MODIFIER_NONE: &[ParamSpec] = &[];
+const MODIFIER_LEVELS: &[ParamSpec] = &[
+    float("black", "Black", 0.0, 1.0, 0.0),
+    float("white", "White", 0.0, 1.0, 1.0),
+    float("gamma", "Gamma", 0.1, 10.0, 1.0),
+];
+const MODIFIER_BRIGHTNESS_CONTRAST: &[ParamSpec] = &[
+    float("brightness", "Brightness", -1.0, 1.0, 0.0),
+    float("contrast", "Contrast", -1.0, 1.0, 0.0),
+];
+const MODIFIER_THRESHOLD: &[ParamSpec] = &[
+    float("level", "Level", 0.0, 1.0, 0.5),
+    float("softness", "Softness", 0.0, 0.5, 0.0),
+];
+const MODIFIER_POSTERIZE: &[ParamSpec] = &[int("steps", "Steps", 2, 32, 4)];
+const MODIFIER_BLUR: &[ParamSpec] = &[int("radius", "Radius", 1, 64, 2)];
+const MODIFIER_COLORIZE: &[ParamSpec] = &[COLOR_A, COLOR_B];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModifierKind {
+    Invert,
+    Levels,
+    BrightnessContrast,
+    Threshold,
+    Posterize,
+    Blur,
+    Normalize,
+    Colorize,
+}
+
+impl ModifierKind {
+    pub const ALL: [Self; 8] = [
+        Self::Invert,
+        Self::Levels,
+        Self::BrightnessContrast,
+        Self::Threshold,
+        Self::Posterize,
+        Self::Blur,
+        Self::Normalize,
+        Self::Colorize,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Invert => "Invert",
+            Self::Levels => "Levels",
+            Self::BrightnessContrast => "Brightness / Contrast",
+            Self::Threshold => "Threshold",
+            Self::Posterize => "Posterize",
+            Self::Blur => "Blur",
+            Self::Normalize => "Normalize",
+            Self::Colorize => "Colorize",
+        }
+    }
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Invert => "invert",
+            Self::Levels => "levels",
+            Self::BrightnessContrast => "brightness-contrast",
+            Self::Threshold => "threshold",
+            Self::Posterize => "posterize",
+            Self::Blur => "blur",
+            Self::Normalize => "normalize",
+            Self::Colorize => "colorize",
+        }
+    }
+
+    pub fn specs(self) -> &'static [ParamSpec] {
+        match self {
+            Self::Invert | Self::Normalize => MODIFIER_NONE,
+            Self::Levels => MODIFIER_LEVELS,
+            Self::BrightnessContrast => MODIFIER_BRIGHTNESS_CONTRAST,
+            Self::Threshold => MODIFIER_THRESHOLD,
+            Self::Posterize => MODIFIER_POSTERIZE,
+            Self::Blur => MODIFIER_BLUR,
+            Self::Colorize => MODIFIER_COLORIZE,
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.key() == key)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Modifier {
+    pub kind: ModifierKind,
+    pub enabled: bool,
+    pub params: Params,
+}
+
+impl Modifier {
+    pub fn new(kind: ModifierKind) -> Self {
+        Self {
+            kind,
+            enabled: true,
+            params: Params::defaults(kind.specs()),
         }
     }
 }
 
-/// The parameters of a `.noise` file; field order is the written order.
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(default, deny_unknown_fields)]
+/// A `.noise` file.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Noise {
-    #[serde(rename = "type")]
-    pub kind: NoiseType,
+    pub kind: GeneratorKind,
     pub size: u32,
-    pub seed: u32,
-    pub frequency: u32,
-    pub octaves: u32,
-    pub gain: f64,
-    pub invert: bool,
+    pub params: Params,
+    pub modifiers: Vec<Modifier>,
 }
 
 impl Default for Noise {
     fn default() -> Self {
-        Self {
-            kind: NoiseType::default(),
-            size: 512,
-            seed: 0,
-            frequency: 4,
-            octaves: 4,
-            gain: 0.5,
-            invert: false,
-        }
+        Self::new(GeneratorKind::default())
     }
 }
 
-/// Second independent value from the same lattice point.
-const SECOND: u32 = 0x5bd1e995;
+impl Params {
+    pub fn defaults(specs: &[ParamSpec]) -> Self {
+        Self(
+            specs
+                .iter()
+                .map(|spec| match spec.kind {
+                    ParamKind::Int { default, .. } => Value::Int(default),
+                    ParamKind::Float { default, .. } | ParamKind::Gray { default } => {
+                        Value::Float(default)
+                    }
+                    ParamKind::Choice { default, .. } => Value::Choice(default),
+                    ParamKind::Color { default } => Value::Color(default),
+                })
+                .collect(),
+        )
+    }
+
+    /// Reads `specs` from `table` (removing them); missing keys get defaults.
+    fn take(specs: &[ParamSpec], table: &mut toml::Table) -> Result<Self, String> {
+        let mut params = Self::defaults(specs);
+        for (spec, value) in specs.iter().zip(&mut params.0) {
+            let Some(raw) = table.remove(spec.key) else {
+                continue;
+            };
+            let bad = || format!("{} has an invalid value {raw}", spec.key);
+            *value = match spec.kind {
+                ParamKind::Int { min, max, .. } => {
+                    let v = raw.as_integer().ok_or_else(bad)?;
+                    in_range(spec.key, v as f64, min as f64, max as f64)?;
+                    Value::Int(v)
+                }
+                ParamKind::Float { min, max, .. } => {
+                    let v = number(&raw).ok_or_else(bad)?;
+                    in_range(spec.key, v, min, max)?;
+                    Value::Float(v)
+                }
+                ParamKind::Gray { .. } => {
+                    let v = number(&raw).ok_or_else(bad)?;
+                    in_range(spec.key, v, 0.0, 1.0)?;
+                    Value::Float(v)
+                }
+                ParamKind::Choice { options, .. } => {
+                    let v = raw.as_str().ok_or_else(bad)?;
+                    let i = options.iter().position(|o| *o == v).ok_or_else(|| {
+                        format!("{} must be one of {}", spec.key, options.join(", "))
+                    })?;
+                    Value::Choice(i)
+                }
+                ParamKind::Color { .. } => {
+                    let array = raw.as_array().filter(|a| a.len() == 3).ok_or_else(bad)?;
+                    let mut rgb = [0.0; 3];
+                    for (c, v) in rgb.iter_mut().zip(array) {
+                        *c = number(v).ok_or_else(bad)?;
+                        in_range(spec.key, *c, 0.0, 1.0)?;
+                    }
+                    Value::Color(rgb)
+                }
+            };
+        }
+        Ok(params)
+    }
+
+    fn write(&self, specs: &[ParamSpec], out: &mut String) {
+        for (spec, value) in specs.iter().zip(&self.0) {
+            let value = match (value, spec.kind) {
+                (Value::Int(v), _) => toml::Value::Integer(*v),
+                (Value::Float(v), _) => toml::Value::Float(*v),
+                (Value::Choice(i), ParamKind::Choice { options, .. }) => {
+                    toml::Value::String(options[*i].into())
+                }
+                (Value::Color(rgb), _) => {
+                    toml::Value::Array(rgb.iter().map(|c| toml::Value::Float(*c)).collect())
+                }
+                (Value::Choice(_), _) => unreachable!("choice without options"),
+            };
+            out.push_str(&format!("{} = {value}\n", spec.key));
+        }
+    }
+
+    /// The value of `key` as text, as shown in the Inspector.
+    pub fn display(&self, specs: &[ParamSpec], i: usize) -> String {
+        match (&self.0[i], specs[i].kind) {
+            (Value::Int(v), _) => v.to_string(),
+            (Value::Float(v), _) => format!("{v:.2}"),
+            (Value::Choice(c), ParamKind::Choice { options, .. }) => options[*c].into(),
+            (Value::Color(rgb), _) => rgb.map(|c| format!("{c:.2}")).join(", "),
+            (Value::Choice(c), _) => c.to_string(),
+        }
+    }
+
+    fn get<'a>(&'a self, specs: &[ParamSpec], key: &str) -> &'a Value {
+        let i = specs.iter().position(|s| s.key == key);
+        &self.0[i.unwrap_or_else(|| panic!("no parameter {key}"))]
+    }
+}
+
+fn number(value: &toml::Value) -> Option<f64> {
+    value
+        .as_float()
+        .or_else(|| value.as_integer().map(|i| i as f64))
+        .filter(|f| f.is_finite())
+}
+
+fn in_range(key: &str, v: f64, min: f64, max: f64) -> Result<(), String> {
+    if (min..=max).contains(&v) {
+        Ok(())
+    } else {
+        Err(format!("{key} must be {min}..={max}, not {v}"))
+    }
+}
 
 impl Noise {
+    pub fn new(kind: GeneratorKind) -> Self {
+        Self {
+            kind,
+            size: 512,
+            params: Params::defaults(kind.specs()),
+            modifiers: Vec::new(),
+        }
+    }
+
     pub fn parse(text: &str) -> Result<Self, String> {
-        let noise: Self = toml::from_str(text).map_err(|e| e.message().to_owned())?;
-        let check = |ok: bool, what: &str| if ok { Ok(()) } else { Err(what.to_owned()) };
-        check((1..=4096).contains(&noise.size), "size must be 1..=4096")?;
-        check(
-            (1..=256).contains(&noise.frequency),
-            "frequency must be 1..=256",
-        )?;
-        check((1..=8).contains(&noise.octaves), "octaves must be 1..=8")?;
-        check(
-            noise.gain.is_finite() && (0.0..=1.0).contains(&noise.gain),
-            "gain must be 0..=1",
-        )?;
-        Ok(noise)
-    }
-
-    /// The written form: every key, in order.
-    pub fn to_toml(&self) -> String {
-        toml::to_string(self).expect("noise parameters serialize")
-    }
-
-    /// The grayscale image, see docs/spec/noise.md#generated-image.
-    pub fn generate(&self) -> Image {
-        let size = self.size;
-        let mut pixels = Vec::with_capacity((size * size * 4) as usize);
-        for py in 0..size {
-            for px in 0..size {
-                let u = (px as f64 + 0.5) / size as f64;
-                let v = (py as f64 + 0.5) / size as f64;
-                let value = match self.kind {
-                    NoiseType::White => unit(hash(px, py, self.seed)),
-                    _ => self.octaves_at(u, v),
-                };
-                let value = if self.invert { 1.0 - value } else { value };
-                let gray = (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-                pixels.extend_from_slice(&[gray, gray, gray, 255]);
+        let mut table: toml::Table = text
+            .parse()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
+        let kind = match table.remove("type") {
+            None => GeneratorKind::default(),
+            Some(v) => v
+                .as_str()
+                .and_then(GeneratorKind::from_key)
+                .ok_or_else(|| format!("unknown type {v}"))?,
+        };
+        let size = match table.remove("size") {
+            None => 512,
+            Some(v) => {
+                let v = v.as_integer().ok_or("size must be an integer")?;
+                in_range("size", v as f64, 1.0, 4096.0)?;
+                v as u32
             }
+        };
+        let modifiers = match table.remove("modifiers") {
+            None => Vec::new(),
+            Some(toml::Value::Array(items)) => items
+                .into_iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    parse_modifier(item).map_err(|e| format!("modifier {}: {e}", i + 1))
+                })
+                .collect::<Result<_, _>>()?,
+            Some(_) => return Err("modifiers must be an array of tables".into()),
+        };
+        let params = Params::take(kind.specs(), &mut table)?;
+        if let Some(key) = table.keys().next() {
+            return Err(format!("{} has no parameter {key}", kind.key()));
+        }
+        Ok(Self {
+            kind,
+            size,
+            params,
+            modifiers,
+        })
+    }
+
+    /// The written form, see docs/spec/noise.md#written-form.
+    pub fn to_toml(&self) -> String {
+        let mut out = format!(
+            "type = {}\nsize = {}\n",
+            toml::Value::String(self.kind.key().into()),
+            self.size
+        );
+        self.params.write(self.kind.specs(), &mut out);
+        for m in &self.modifiers {
+            out.push_str(&format!(
+                "\n[[modifiers]]\ntype = {}\nenabled = {}\n",
+                toml::Value::String(m.kind.key().into()),
+                m.enabled
+            ));
+            m.params.write(m.kind.specs(), &mut out);
+        }
+        out
+    }
+
+    /// Whether the generated image has color (otherwise R = G = B).
+    pub fn has_color(&self) -> bool {
+        self.kind == GeneratorKind::Curl
+            || self
+                .modifiers
+                .iter()
+                .any(|m| m.enabled && m.kind == ModifierKind::Colorize)
+    }
+
+    /// The image, see docs/spec/noise.md#generated-image.
+    pub fn generate(&self) -> Image {
+        let size = self.size as usize;
+        let mut pixels = generate_field(self.kind, &self.params, size);
+        for m in self.modifiers.iter().filter(|m| m.enabled) {
+            apply_modifier(m, &mut pixels, size);
         }
         Image {
-            width: size,
-            height: size,
-            pixels,
+            width: self.size,
+            height: self.size,
+            pixels: pixels
+                .iter()
+                .flat_map(|c| {
+                    let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                    [r, g, b, 255]
+                })
+                .collect(),
         }
-    }
-
-    fn octaves_at(&self, u: f64, v: f64) -> f64 {
-        let (mut sum, mut total, mut weight) = (0.0, 0.0, 1.0);
-        for o in 0..self.octaves {
-            let period = self.frequency << o;
-            let seed = self.seed.wrapping_add(o);
-            let (x, y) = (u * period as f64, v * period as f64);
-            let n = match self.kind {
-                NoiseType::Value => value(x, y, period, seed),
-                NoiseType::Perlin => perlin(x, y, period, seed),
-                NoiseType::Worley => worley(x, y, period, seed),
-                NoiseType::White => unreachable!("white has no octaves"),
-            };
-            sum += weight * n;
-            total += weight;
-            weight *= self.gain;
-        }
-        sum / total
     }
 }
 
-pub fn hash(x: u32, y: u32, s: u32) -> u64 {
-    let key = (s as u64) << 32 | ((x as u64) & 0xFFFF) << 16 | ((y as u64) & 0xFFFF);
-    splitmix64(key)
+fn parse_modifier(item: toml::Value) -> Result<Modifier, String> {
+    let toml::Value::Table(mut table) = item else {
+        return Err("not a table".into());
+    };
+    let kind = table
+        .remove("type")
+        .and_then(|v| v.as_str().and_then(ModifierKind::from_key))
+        .ok_or("missing or unknown type")?;
+    let enabled = match table.remove("enabled") {
+        None => true,
+        Some(v) => v.as_bool().ok_or("enabled must be true or false")?,
+    };
+    let params = Params::take(kind.specs(), &mut table)?;
+    if let Some(key) = table.keys().next() {
+        return Err(format!("{} has no parameter {key}", kind.key()));
+    }
+    Ok(Modifier {
+        kind,
+        enabled,
+        params,
+    })
 }
 
-fn splitmix64(z: u64) -> u64 {
+// ---- Hashing --------------------------------------------------------------------------
+
+const SECOND: u32 = 0x5bd1e995;
+
+pub fn splitmix64(z: u64) -> u64 {
     let z = z.wrapping_add(0x9E3779B97F4A7C15);
     let z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
     let z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
     z ^ (z >> 31)
 }
 
+fn hash(x: u32, y: u32, s: u32) -> u64 {
+    splitmix64(splitmix64((s as u64) << 32 | x as u64) ^ y as u64)
+}
+
+fn hash4(i: i64, j: i64, k: i64, l: i64, s: u32) -> u64 {
+    let h = splitmix64(s as u64 ^ i as u64);
+    let h = splitmix64(h ^ j as u64);
+    let h = splitmix64(h ^ k as u64);
+    splitmix64(h ^ l as u64)
+}
+
 fn unit(h: u64) -> f64 {
     (h >> 40) as f64 / (1u64 << 24) as f64
+}
+
+// ---- Basic noises ---------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+enum Basis {
+    Value,
+    Perlin,
+    Simplex,
 }
 
 fn fade(t: f64) -> f64 {
@@ -150,12 +644,10 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a + (b - a) * t
 }
 
-/// Lattice index `i` wrapped to the period.
-fn wrap(i: i64, period: u32) -> u32 {
+fn wrap(i: i64, period: u64) -> u32 {
     i.rem_euclid(period as i64) as u32
 }
 
-/// Interpolates `corner(i, j, dx, dy)` over the cell containing `(x, y)` with the fade.
 fn interpolate(x: f64, y: f64, corner: impl Fn(i64, i64, f64, f64) -> f64) -> f64 {
     let (i, j) = (x.floor() as i64, y.floor() as i64);
     let (fx, fy) = (x - i as f64, y - j as f64);
@@ -168,44 +660,409 @@ fn interpolate(x: f64, y: f64, corner: impl Fn(i64, i64, f64, f64) -> f64) -> f6
     )
 }
 
-fn value(x: f64, y: f64, period: u32, seed: u32) -> f64 {
-    interpolate(x, y, |i, j, _, _| {
-        unit(hash(wrap(i, period), wrap(j, period), seed))
-    })
+/// Basic noise of `basis` with period `p` at image position `(u, v)`, in 0..1.
+fn basic(basis: Basis, u: f64, v: f64, p: u64, s: u32) -> f64 {
+    let (x, y) = (u * p as f64, v * p as f64);
+    match basis {
+        Basis::Value => interpolate(x, y, |i, j, _, _| unit(hash(wrap(i, p), wrap(j, p), s))),
+        Basis::Perlin => {
+            let n = interpolate(x, y, |i, j, dx, dy| {
+                let angle = TAU * unit(hash(wrap(i, p), wrap(j, p), s));
+                angle.cos() * dx + angle.sin() * dy
+            });
+            (0.5 + n * FRAC_1_SQRT_2).clamp(0.0, 1.0)
+        }
+        Basis::Simplex => {
+            let r = p as f64 / TAU;
+            let (a, b) = (TAU * u, TAU * v);
+            let n = simplex4([r * a.cos(), r * a.sin(), r * b.cos(), r * b.sin()], s);
+            (0.5 + 0.5 * n).clamp(0.0, 1.0)
+        }
+    }
 }
 
-fn perlin(x: f64, y: f64, period: u32, seed: u32) -> f64 {
-    let n = interpolate(x, y, |i, j, dx, dy| {
-        let angle = TAU * unit(hash(wrap(i, period), wrap(j, period), seed));
-        angle.cos() * dx + angle.sin() * dy
-    });
-    (0.5 + n * FRAC_1_SQRT_2).clamp(0.0, 1.0)
-}
-
-fn worley(x: f64, y: f64, period: u32, seed: u32) -> f64 {
+fn worley(u: f64, v: f64, p: u64, s: u32) -> f64 {
+    let (x, y) = (u * p as f64, v * p as f64);
     let (i, j) = (x.floor() as i64, y.floor() as i64);
     let mut nearest = f64::MAX;
     for dj in -1..=1 {
         for di in -1..=1 {
             let (ci, cj) = (i + di, j + dj);
-            let (wi, wj) = (wrap(ci, period), wrap(cj, period));
-            let fx = ci as f64 + unit(hash(wi, wj, seed));
-            let fy = cj as f64 + unit(hash(wi, wj, seed ^ SECOND));
+            let (wi, wj) = (wrap(ci, p), wrap(cj, p));
+            let fx = ci as f64 + unit(hash(wi, wj, s));
+            let fy = cj as f64 + unit(hash(wi, wj, s ^ SECOND));
             nearest = nearest.min((fx - x).hypot(fy - y));
         }
     }
     nearest.clamp(0.0, 1.0)
 }
 
+/// Gradient `index` (0..32): permutations of (0, ±1, ±1, ±1), zero position first.
+fn grad4(index: u64) -> [f64; 4] {
+    let zero = (index / 8) as usize;
+    let signs = index % 8;
+    let mut g = [0.0; 4];
+    let mut bit = 2;
+    for (axis, c) in g.iter_mut().enumerate() {
+        if axis == zero {
+            continue;
+        }
+        *c = if signs >> bit & 1 == 1 { -1.0 } else { 1.0 };
+        bit -= 1;
+    }
+    g
+}
+
+/// 4D simplex noise (Gustavson), about −1..1.
+fn simplex4(c: [f64; 4], s: u32) -> f64 {
+    let f4 = (5f64.sqrt() - 1.0) / 4.0;
+    let g4 = (5.0 - 5f64.sqrt()) / 20.0;
+    let skew = c.iter().sum::<f64>() * f4;
+    let cell = c.map(|v| (v + skew).floor() as i64);
+    let unskew = cell.iter().sum::<i64>() as f64 * g4;
+    let d0: [f64; 4] = std::array::from_fn(|a| c[a] - (cell[a] as f64 - unskew));
+    let mut rank = [0; 4];
+    for a in 0..4 {
+        for b in a + 1..4 {
+            if d0[a] > d0[b] {
+                rank[a] += 1;
+            } else {
+                rank[b] += 1;
+            }
+        }
+    }
+    let mut n = 0.0;
+    for corner in 0..5i64 {
+        let offset: [i64; 4] = match corner {
+            0 => [0; 4],
+            4 => [1; 4],
+            k => rank.map(|r| (r >= 4 - k) as i64),
+        };
+        let d: [f64; 4] = std::array::from_fn(|a| d0[a] - offset[a] as f64 + corner as f64 * g4);
+        let t = 0.6 - d.iter().map(|v| v * v).sum::<f64>();
+        if t > 0.0 {
+            let p: [i64; 4] = std::array::from_fn(|a| cell[a] + offset[a]);
+            let g = grad4(hash4(p[0], p[1], p[2], p[3], s) % 32);
+            let dot: f64 = (0..4).map(|a| g[a] * d[a]).sum();
+            n += t * t * t * t * dot;
+        }
+    }
+    27.0 * n
+}
+
+/// Weighted octave average, octave `o` at period `frequency × lacunarity^o`, seed `seed + o`.
+fn fbm(
+    noise: impl Fn(u64, u32) -> f64,
+    frequency: u64,
+    octaves: u32,
+    lacunarity: u64,
+    gain: f64,
+    seed: u32,
+) -> f64 {
+    let (mut sum, mut total, mut weight) = (0.0, 0.0, 1.0);
+    for o in 0..octaves {
+        sum += weight * noise(frequency * lacunarity.pow(o), seed.wrapping_add(o));
+        total += weight;
+        weight *= gain;
+    }
+    sum / total
+}
+
+// ---- Generators -----------------------------------------------------------------------
+
+fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64; 3]> {
+    let specs = kind.specs();
+    let int = |key| match params.get(specs, key) {
+        Value::Int(v) => *v,
+        _ => unreachable!(),
+    };
+    let float = |key| match params.get(specs, key) {
+        Value::Float(v) => *v,
+        _ => unreachable!(),
+    };
+    let choice = |key| match params.get(specs, key) {
+        Value::Choice(c) => *c,
+        _ => unreachable!(),
+    };
+    let seed = || int("seed") as u32;
+    let frequency = || int("frequency") as u64;
+    let octaves = || int("octaves") as u32;
+    let lacunarity = || int("lacunarity") as u64;
+
+    let gray = |f: &dyn Fn(f64, f64, usize, usize) -> f64| -> Vec<[f64; 3]> {
+        (0..size * size)
+            .map(|i| {
+                let (px, py) = (i % size, i / size);
+                let u = (px as f64 + 0.5) / size as f64;
+                let v = (py as f64 + 0.5) / size as f64;
+                [f(u, v, px, py); 3]
+            })
+            .collect()
+    };
+    let perlin = |u, v| move |p, s| basic(Basis::Perlin, u, v, p, s);
+    let multifractal_weight = |o: u32| (lacunarity() as f64).powf(-float("dimension") * o as f64);
+
+    match kind {
+        GeneratorKind::Checkerboard => {
+            let cells = int("cells") as f64;
+            let (a, b) = (float("color_a"), float("color_b"));
+            gray(&|u, v, _, _| {
+                let parity = ((u * cells).floor() + (v * cells).floor()) as i64 % 2;
+                if parity == 0 { a } else { b }
+            })
+        }
+        GeneratorKind::Uniform => gray(&|_, _, px, py| unit(hash(px as u32, py as u32, seed()))),
+        GeneratorKind::Value => gray(&|u, v, _, _| basic(Basis::Value, u, v, frequency(), seed())),
+        GeneratorKind::Perlin => {
+            gray(&|u, v, _, _| basic(Basis::Perlin, u, v, frequency(), seed()))
+        }
+        GeneratorKind::Simplex => {
+            gray(&|u, v, _, _| basic(Basis::Simplex, u, v, frequency(), seed()))
+        }
+        GeneratorKind::Fbm => {
+            let basis = [Basis::Value, Basis::Perlin, Basis::Simplex][choice("basis")];
+            gray(&|u, v, _, _| {
+                fbm(
+                    |p, s| basic(basis, u, v, p, s),
+                    frequency(),
+                    octaves(),
+                    lacunarity(),
+                    float("gain"),
+                    seed(),
+                )
+            })
+        }
+        GeneratorKind::Voronoi => {
+            let (jitter, metric, output) = (float("jitter"), choice("metric"), choice("output"));
+            gray(&|u, v, _, _| voronoi(u, v, frequency(), seed(), jitter, metric, output))
+        }
+        GeneratorKind::PerlinWorley => gray(&|u, v, _, _| {
+            let p = fbm(perlin(u, v), frequency(), octaves(), 2, 0.5, seed());
+            let w = 1.0
+                - fbm(
+                    |p, s| worley(u, v, p, s),
+                    frequency(),
+                    3,
+                    2,
+                    0.5,
+                    seed().wrapping_add(100),
+                );
+            ((p - w + 1.0) / (2.0 - w)).clamp(0.0, 1.0)
+        }),
+        GeneratorKind::Musgrave => gray(&|u, v, _, _| {
+            let (mut value, mut max) = (1.0, 1.0);
+            for o in 0..octaves() {
+                let n = 2.0
+                    * perlin(u, v)(frequency() * lacunarity().pow(o), seed().wrapping_add(o))
+                    - 1.0;
+                let w = multifractal_weight(o);
+                value *= 1.0 + n * w;
+                max *= 1.0 + w;
+            }
+            value / max
+        }),
+        GeneratorKind::Ridged => {
+            let (offset, gain) = (float("offset"), float("gain"));
+            gray(&|u, v, _, _| {
+                let signal = |o: u32| {
+                    let n = 2.0
+                        * perlin(u, v)(frequency() * lacunarity().pow(o), seed().wrapping_add(o))
+                        - 1.0;
+                    (offset - n.abs()).powi(2)
+                };
+                let mut previous = signal(0);
+                let (mut sum, mut max) = (previous, offset * offset);
+                for o in 1..octaves() {
+                    let weight = (previous * gain).clamp(0.0, 1.0);
+                    previous = signal(o) * weight;
+                    let w = multifractal_weight(o);
+                    sum += previous * w;
+                    max += offset * offset * w;
+                }
+                if max > 0.0 {
+                    (sum / max).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }
+            })
+        }
+        GeneratorKind::Curl => {
+            let psi: Vec<f64> = gray(&|u, v, _, _| {
+                2.0 * fbm(perlin(u, v), frequency(), octaves(), 2, 0.5, seed()) - 1.0
+            })
+            .iter()
+            .map(|c| c[0])
+            .collect();
+            let at = |x: usize, y: usize| psi[(y % size) * size + x % size];
+            let vectors: Vec<[f64; 2]> = (0..size * size)
+                .map(|i| {
+                    let (x, y) = (i % size, i / size);
+                    let dx = (at(x + 1, y) - at(x + size - 1, y)) / 2.0;
+                    let dy = (at(x, y + 1) - at(x, y + size - 1)) / 2.0;
+                    [dy, -dx]
+                })
+                .collect();
+            let longest = vectors.iter().map(|[x, y]| x.hypot(*y)).fold(0.0, f64::max);
+            let scale = if longest > 0.0 { 1.0 / longest } else { 1.0 };
+            vectors
+                .iter()
+                .map(|[x, y]| [0.5 + 0.5 * x * scale, 0.5 + 0.5 * y * scale, 0.0])
+                .collect()
+        }
+    }
+}
+
+fn voronoi(u: f64, v: f64, p: u64, s: u32, jitter: f64, metric: usize, output: usize) -> f64 {
+    let (x, y) = (u * p as f64, v * p as f64);
+    let (i, j) = (x.floor() as i64, y.floor() as i64);
+    let (mut f1, mut f2, mut nearest) = (f64::MAX, f64::MAX, (0, 0));
+    for dj in -2..=2 {
+        for di in -2..=2 {
+            let (ci, cj) = (i + di, j + dj);
+            let (wi, wj) = (wrap(ci, p), wrap(cj, p));
+            let fx = ci as f64 + 0.5 + jitter * (unit(hash(wi, wj, s)) - 0.5);
+            let fy = cj as f64 + 0.5 + jitter * (unit(hash(wi, wj, s ^ SECOND)) - 0.5);
+            let (dx, dy) = ((fx - x).abs(), (fy - y).abs());
+            let d = match metric {
+                0 => dx.hypot(dy),
+                1 => dx + dy,
+                _ => dx.max(dy),
+            };
+            if d < f1 {
+                (f2, f1, nearest) = (f1, d, (wi, wj));
+            } else if d < f2 {
+                f2 = d;
+            }
+        }
+    }
+    let value = match output {
+        0 => f1,
+        1 => f2 - f1,
+        _ => unit(hash(nearest.0, nearest.1, s ^ 0x2545F491)),
+    };
+    value.clamp(0.0, 1.0)
+}
+
+// ---- Modifiers ------------------------------------------------------------------------
+
+fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], size: usize) {
+    let specs = m.kind.specs();
+    let float = |key| match m.params.get(specs, key) {
+        Value::Float(v) => *v,
+        _ => unreachable!(),
+    };
+    let int = |key| match m.params.get(specs, key) {
+        Value::Int(v) => *v,
+        _ => unreachable!(),
+    };
+    let color = |key| match m.params.get(specs, key) {
+        Value::Color(c) => *c,
+        _ => unreachable!(),
+    };
+    let each = |pixels: &mut [[f64; 3]], f: &dyn Fn(f64) -> f64| {
+        for c in pixels.iter_mut().flatten() {
+            *c = f(*c).clamp(0.0, 1.0);
+        }
+    };
+    match m.kind {
+        ModifierKind::Invert => each(pixels, &|c| 1.0 - c),
+        ModifierKind::Levels => {
+            let (black, white, gamma) = (float("black"), float("white"), float("gamma"));
+            each(pixels, &|c| {
+                if white <= black {
+                    if c >= black { 1.0 } else { 0.0 }
+                } else {
+                    ((c - black) / (white - black))
+                        .clamp(0.0, 1.0)
+                        .powf(1.0 / gamma)
+                }
+            });
+        }
+        ModifierKind::BrightnessContrast => {
+            let (brightness, contrast) = (float("brightness"), float("contrast"));
+            each(pixels, &|c| (c - 0.5) * (1.0 + contrast) + 0.5 + brightness);
+        }
+        ModifierKind::Threshold => {
+            let (level, softness) = (float("level"), float("softness"));
+            each(pixels, &|c| {
+                if softness == 0.0 {
+                    if c >= level { 1.0 } else { 0.0 }
+                } else {
+                    let t = ((c - (level - softness)) / (2.0 * softness)).clamp(0.0, 1.0);
+                    t * t * (3.0 - 2.0 * t)
+                }
+            });
+        }
+        ModifierKind::Posterize => {
+            let steps = (int("steps") - 1) as f64;
+            each(pixels, &|c| (c * steps).round() / steps);
+        }
+        ModifierKind::Blur => {
+            let radius = int("radius") as usize;
+            for _ in 0..3 {
+                box_blur(pixels, size, radius, true);
+                box_blur(pixels, size, radius, false);
+            }
+        }
+        ModifierKind::Normalize => {
+            let (min, max) = pixels
+                .iter()
+                .flatten()
+                .fold((f64::MAX, f64::MIN), |(lo, hi), c| (lo.min(*c), hi.max(*c)));
+            if max > min {
+                each(pixels, &|c| (c - min) / (max - min));
+            }
+        }
+        ModifierKind::Colorize => {
+            let (a, b) = (color("color_a"), color("color_b"));
+            for c in pixels.iter_mut() {
+                let l = (c[0] + c[1] + c[2]) / 3.0;
+                *c = std::array::from_fn(|i| (a[i] + (b[i] - a[i]) * l).clamp(0.0, 1.0));
+            }
+        }
+    }
+}
+
+/// One `(2 radius + 1)`-wide box blur pass along rows or columns, wrapping at the edges.
+fn box_blur(pixels: &mut [[f64; 3]], size: usize, radius: usize, rows: bool) {
+    let width = (2 * radius + 1) as f64;
+    let index = |line: usize, k: usize| {
+        if rows {
+            line * size + k
+        } else {
+            k * size + line
+        }
+    };
+    let mut out = vec![[0.0; 3]; size];
+    for line in 0..size {
+        let at = |k: isize| pixels[index(line, k.rem_euclid(size as isize) as usize)];
+        let mut sum = [0.0; 3];
+        for k in -(radius as isize)..=radius as isize {
+            let p = at(k);
+            (0..3).for_each(|c| sum[c] += p[c]);
+        }
+        for (k, slot) in out.iter_mut().enumerate() {
+            *slot = sum.map(|s| s / width);
+            let (enter, leave) = (
+                at(k as isize + radius as isize + 1),
+                at(k as isize - radius as isize),
+            );
+            (0..3).for_each(|c| sum[c] += enter[c] - leave[c]);
+        }
+        for (k, value) in out.iter().enumerate() {
+            pixels[index(line, k)] = *value;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn noise(kind: NoiseType) -> Noise {
+    fn small(kind: GeneratorKind) -> Noise {
         Noise {
-            kind,
             size: 32,
-            ..Default::default()
+            ..Noise::new(kind)
         }
     }
 
@@ -214,74 +1071,96 @@ mod tests {
     }
 
     #[test]
-    fn hash_reference_values() {
-        // splitmix64(0) is the well-known first output of SplitMix64 seeded with 0.
-        assert_eq!(hash(0, 0, 0), 0xE220A8397B1DCDAF);
+    fn splitmix_reference() {
+        // The first output of SplitMix64 seeded with 0.
+        assert_eq!(splitmix64(0), 0xE220A8397B1DCDAF);
         assert_ne!(hash(1, 0, 0), hash(0, 1, 0));
-        assert_ne!(hash(0, 0, 1), hash(0, 0, 0));
+        assert_ne!(hash4(1, 0, 0, 0, 0), hash4(0, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn grad4_table() {
+        assert_eq!(grad4(0), [0.0, 1.0, 1.0, 1.0]);
+        assert_eq!(grad4(1), [0.0, 1.0, 1.0, -1.0]);
+        assert_eq!(grad4(4), [0.0, -1.0, 1.0, 1.0]);
+        assert_eq!(grad4(8), [1.0, 0.0, 1.0, 1.0]);
+        assert_eq!(grad4(31), [-1.0, -1.0, -1.0, 0.0]);
     }
 
     #[test]
     fn written_form_round_trips() {
-        let text = Noise::default().to_toml();
-        assert_eq!(
-            text,
-            "type = \"perlin\"\nsize = 512\nseed = 0\nfrequency = 4\noctaves = 4\ngain = 0.5\ninvert = false\n"
-        );
-        assert_eq!(Noise::parse(&text).unwrap(), Noise::default());
+        let mut noise = Noise::new(GeneratorKind::Fbm);
+        noise.modifiers.push(Modifier::new(ModifierKind::Levels));
+        let mut off = Modifier::new(ModifierKind::Colorize);
+        off.enabled = false;
+        noise.modifiers.push(off);
+        let text = noise.to_toml();
+        assert!(text.starts_with(
+            "type = \"noise/fbm\"\nsize = 512\nseed = 0\nbasis = \"perlin\"\nfrequency = 4\noctaves = 5\nlacunarity = 2\ngain = 0.5\n\n[[modifiers]]\ntype = \"levels\"\nenabled = true\nblack = 0.0\n"
+        ), "{text}");
+        assert!(text.contains("color_a = [0.0, 0.0, 0.0]"), "{text}");
+        assert_eq!(Noise::parse(&text).unwrap(), noise);
         assert_eq!(Noise::parse("").unwrap(), Noise::default());
     }
 
     #[test]
-    fn rejects_bad_parameters() {
+    fn parameters_belong_to_their_type() {
+        assert!(Noise::parse("type = \"checkerboard\"\nseed = 1").is_err());
+        assert!(Noise::parse("type = \"noise/perlin\"\noctaves = 3").is_err());
+        let ok = Noise::parse("type = \"noise/fbm\"\noctaves = 3\ngain = 1").unwrap();
+        assert_eq!(ok.params.display(GeneratorKind::Fbm.specs(), 3), "3");
         for bad in [
             "size = 0",
             "size = 5000",
+            "type = \"noise/blue\"",
             "frequency = 0",
-            "octaves = 9",
-            "gain = 1.5",
-            "type = \"simplex\"",
-            "colour = 1",
+            "type = \"noise/fbm\"\nbasis = \"cubic\"",
+            "type = \"noise/fbm\"\nlacunarity = 2.5",
+            "[[modifiers]]\ntype = \"levels\"\ngamma = 0",
+            "[[modifiers]]\ntype = \"blur\"\nsteps = 2",
+            "[[modifiers]]\ntype = \"sharpen\"",
         ] {
             assert!(Noise::parse(bad).is_err(), "{bad}");
         }
     }
 
     #[test]
-    fn generation_is_deterministic_gray_and_in_range() {
-        for kind in NoiseType::ALL {
-            let a = noise(kind).generate();
-            assert_eq!(a, noise(kind).generate(), "{kind:?}");
-            assert_eq!((a.width, a.height), (32, 32));
-            for p in a.pixels.as_chunks::<4>().0 {
-                assert!(p[0] == p[1] && p[1] == p[2] && p[3] == 255);
-            }
-            let distinct: std::collections::HashSet<_> = a.pixels.iter().collect();
-            assert!(distinct.len() > 8, "{kind:?} looks flat");
+    fn every_generator_is_deterministic_and_varied() {
+        for kind in GeneratorKind::ALL {
+            let a = small(kind).generate();
+            assert_eq!(a, small(kind).generate(), "{kind:?}");
+            assert_eq!(a.pixels.len(), 32 * 32 * 4);
+            let distinct: std::collections::HashSet<_> =
+                a.pixels.as_chunks::<4>().0.iter().collect();
+            assert!(distinct.len() >= 2, "{kind:?} is flat");
+            let is_gray = a
+                .pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|p| p[0] == p[1] && p[1] == p[2]);
+            assert_eq!(is_gray, kind != GeneratorKind::Curl, "{kind:?}");
+            assert_eq!(small(kind).has_color(), kind == GeneratorKind::Curl);
         }
-        let other_seed = Noise {
-            seed: 7,
-            ..noise(NoiseType::Perlin)
-        };
-        assert_ne!(other_seed.generate(), noise(NoiseType::Perlin).generate());
     }
 
     #[test]
-    fn tiles_seamlessly() {
-        // A 2× larger image with the same frequency samples the same lattice twice as
-        // densely; the octave lattices wrap, so value at u and u + 1 match. Check the
-        // generated edges continue each other: column 0 is close to column size-1.
-        for kind in [NoiseType::Value, NoiseType::Perlin, NoiseType::Worley] {
-            let n = Noise {
-                size: 256,
-                octaves: 1,
-                ..noise(kind)
-            };
-            let image = n.generate();
-            for y in (0..256).step_by(17) {
-                let (left, right) = (gray(&image, 0, y), gray(&image, 255, y));
+    fn noises_tile_seamlessly() {
+        for kind in GeneratorKind::ALL.into_iter().filter(|k| {
+            !matches!(
+                k,
+                GeneratorKind::Checkerboard | GeneratorKind::Uniform | GeneratorKind::Curl
+            )
+        }) {
+            let image = Noise {
+                size: 128,
+                ..Noise::new(kind)
+            }
+            .generate();
+            for y in (0..128).step_by(9) {
+                let (left, right) = (gray(&image, 0, y), gray(&image, 127, y));
                 assert!(
-                    left.abs_diff(right) < 24,
+                    left.abs_diff(right) < 40,
                     "{kind:?} y={y}: {left} vs {right}"
                 );
             }
@@ -289,16 +1168,71 @@ mod tests {
     }
 
     #[test]
-    fn invert_flips() {
-        let n = noise(NoiseType::Value);
-        let inverted = Noise {
-            invert: true,
-            ..n.clone()
+    fn simplex_stays_in_range() {
+        let image = Noise {
+            size: 64,
+            ..Noise::new(GeneratorKind::Simplex)
         }
         .generate();
-        let plain = n.generate();
-        for (a, b) in plain.pixels.iter().zip(&inverted.pixels).step_by(4) {
-            assert!((*a as i32 + *b as i32 - 255).abs() <= 1);
-        }
+        let values: Vec<u8> = image.pixels.iter().step_by(4).copied().collect();
+        let (lo, hi) = (values.iter().min().unwrap(), values.iter().max().unwrap());
+        assert!(*lo < 90 && *hi > 165, "{lo}..{hi}");
+    }
+
+    #[test]
+    fn modifiers() {
+        let apply = |kind: ModifierKind, set: &[(usize, Value)], input: [f64; 3]| {
+            let mut m = Modifier::new(kind);
+            for (i, v) in set {
+                m.params.0[*i] = v.clone();
+            }
+            let mut pixels = vec![input; 4];
+            apply_modifier(&m, &mut pixels, 2);
+            pixels[0]
+        };
+        assert_eq!(apply(ModifierKind::Invert, &[], [0.25; 3]), [0.75; 3]);
+        assert_eq!(
+            apply(ModifierKind::Levels, &[(0, Value::Float(0.5))], [0.75; 3]),
+            [0.5; 3]
+        );
+        assert_eq!(apply(ModifierKind::Threshold, &[], [0.6; 3]), [1.0; 3]);
+        assert_eq!(
+            apply(ModifierKind::Posterize, &[(0, Value::Int(2))], [0.4; 3]),
+            [0.0; 3]
+        );
+        assert_eq!(
+            apply(
+                ModifierKind::Colorize,
+                &[(0, Value::Color([1.0, 0.0, 0.0]))],
+                [0.0; 3]
+            ),
+            [1.0, 0.0, 0.0]
+        );
+        // Blur of a uniform image keeps it; blur spreads a single bright pixel.
+        assert_eq!(
+            apply(ModifierKind::Blur, &[], [0.3; 3]).map(|c| (c * 1e6).round()),
+            [300000.0; 3]
+        );
+        let mut pixels = vec![[0.0; 3]; 16];
+        pixels[5] = [1.0; 3];
+        apply_modifier(&Modifier::new(ModifierKind::Blur), &mut pixels, 4);
+        let total: f64 = pixels.iter().map(|c| c[0]).sum();
+        assert!((total - 1.0).abs() < 1e-9 && pixels[5][0] < 1.0);
+        // Normalize stretches to 0..1.
+        let mut pixels = vec![[0.2; 3], [0.6; 3]];
+        apply_modifier(&Modifier::new(ModifierKind::Normalize), &mut pixels, 1);
+        assert_eq!(pixels, [[0.0; 3], [1.0; 3]]);
+    }
+
+    #[test]
+    fn disabled_modifiers_are_skipped() {
+        let mut noise = small(GeneratorKind::Value);
+        let plain = noise.generate();
+        let mut invert = Modifier::new(ModifierKind::Invert);
+        invert.enabled = false;
+        noise.modifiers.push(invert);
+        assert_eq!(noise.generate(), plain);
+        noise.modifiers[0].enabled = true;
+        assert_ne!(noise.generate(), plain);
     }
 }

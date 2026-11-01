@@ -18,7 +18,9 @@ use crate::inspect::{self, Inspection, Location};
 use crate::logo;
 use crate::lut::Lut;
 use crate::manifest::Kind;
-use crate::noise::{Noise, NoiseType};
+use crate::noise::{
+    GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Params, Value,
+};
 use crate::preview3d::{CubemapUpload, Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
 use crate::theme::{
@@ -115,7 +117,7 @@ struct Inspected {
     uploaded_cubemap: bool,
     lut: Option<Lut>,
     /// A `.noise` file's parameters: (being edited, as saved), or why they can't be read.
-    noise: Option<Result<(Noise, Noise), String>>,
+    noise: Option<Result<NoiseEdit, String>>,
     lut_compare: Option<CompareCache>,
     uploaded_color_cube: bool,
 }
@@ -303,17 +305,25 @@ impl BrowserTab {
 enum InspectorTab {
     Info,
     Parameters,
+    Modifiers,
     Assets,
     Settings,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 4] = [Self::Info, Self::Parameters, Self::Assets, Self::Settings];
+    const ALL: [Self; 5] = [
+        Self::Info,
+        Self::Parameters,
+        Self::Modifiers,
+        Self::Assets,
+        Self::Settings,
+    ];
 
     fn icon(self) -> Icon {
         match self {
             Self::Info => Icon::Info,
             Self::Parameters => Icon::SlidersVertical,
+            Self::Modifiers => Icon::Wrench,
             Self::Assets => Icon::Files,
             Self::Settings => Icon::Settings,
         }
@@ -323,6 +333,7 @@ impl InspectorTab {
         match self {
             Self::Info => "Info",
             Self::Parameters => "Parameters",
+            Self::Modifiers => "Modifiers",
             Self::Assets => "Assets",
             Self::Settings => "Settings",
         }
@@ -331,7 +342,7 @@ impl InspectorTab {
     fn enabled(self, selection: Option<&Selection>) -> bool {
         match self {
             Self::Info | Self::Settings => true,
-            Self::Parameters => selection.is_some_and(|s| {
+            Self::Parameters | Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input && build::is_noise(&s.path) && s.path.is_file()
             }),
             // Only compiled files are asset containers for now.
@@ -528,7 +539,11 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
             std::fs::read_to_string(&selection.path)
                 .map_err(|e| e.to_string())
                 .and_then(|text| Noise::parse(&text))
-                .map(|n| (n.clone(), n))
+                .map(|n| NoiseEdit {
+                    edit: n.clone(),
+                    saved: n,
+                    others: HashMap::new(),
+                })
         });
     let max_side = ctx.input(|i| i.max_texture_side) as u32;
     let pixels = inspection
@@ -925,7 +940,7 @@ fn select(state: &mut UiState, location: Location, path: PathBuf) {
 /// A file operation requested from the Input tree, see docs/features/file-operations.md.
 enum FileOp {
     NewFolder(PathBuf),
-    NewNoise(PathBuf, NoiseType),
+    NewNoise(PathBuf, GeneratorKind),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -968,7 +983,7 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
         .text_styles
         .insert(egui::TextStyle::Button, FontId::proportional(14.0));
     ui.menu_button("New Noise", |ui| {
-        for kind in NoiseType::ALL {
+        for kind in GeneratorKind::ALL {
             if menu_item(ui, kind.name(), None).clicked() {
                 *action = Some(TreeAction::Op(FileOp::NewNoise(dir.to_path_buf(), kind)));
                 ui.close();
@@ -1250,8 +1265,17 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
         .show(ui, |ui| {
             match (state.inspector_tab, &mut state.inspected, &state.selection) {
                 (_, None, _) | (_, _, None) => placeholder(ui, "Nothing selected"),
-                (InspectorTab::Parameters, Some(inspected), Some(selection)) => {
-                    if let Some(noise) = parameters_tab(ui, inspected) {
+                (
+                    tab @ (InspectorTab::Parameters | InspectorTab::Modifiers),
+                    Some(inspected),
+                    Some(selection),
+                ) => {
+                    let save = if tab == InspectorTab::Parameters {
+                        parameters_tab(ui, inspected)
+                    } else {
+                        modifiers_tab(ui, inspected)
+                    };
+                    if let Some(noise) = save {
                         match std::fs::write(&selection.path, noise.to_toml()) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
@@ -1267,84 +1291,358 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
         });
 }
 
-/// Noise parameter editor; returns the parameters to write when a change is committed.
-/// See docs/features/noise.md#editing.
-fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
-    let (edit, saved) = match &mut inspected.noise {
-        Some(Ok((edit, saved))) => (edit, saved),
+/// A `.noise` file being edited in the Parameters / Modifiers tabs.
+struct NoiseEdit {
+    edit: Noise,
+    /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
+    saved: Noise,
+    /// Parameters of other generator types set this session, restored when switching back.
+    others: HashMap<GeneratorKind, Params>,
+}
+
+/// The noise being edited, or a placeholder with why there is none.
+fn noise_edit<'a>(ui: &mut Ui, inspected: &'a mut Inspected) -> Option<&'a mut NoiseEdit> {
+    match &mut inspected.noise {
+        Some(Ok(edit)) => Some(edit),
         Some(Err(e)) => {
             placeholder(ui, e);
-            return None;
+            None
         }
         None => {
             placeholder(ui, "No parameters");
-            return None;
+            None
         }
-    };
-    let mut interacting = false;
-    Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
-        egui::Grid::new("noise_parameters")
-            .num_columns(2)
-            .spacing(vec2(12.0, 6.0))
-            .show(ui, |ui| {
-                ui.weak("Type");
-                egui::ComboBox::from_id_salt("noise_type")
-                    .selected_text(edit.kind.name())
-                    .show_ui(ui, |ui| {
-                        for kind in NoiseType::ALL {
-                            ui.selectable_value(&mut edit.kind, kind, kind.name());
-                        }
-                    });
-                ui.end_row();
+    }
+}
 
-                ui.weak("Size");
-                egui::ComboBox::from_id_salt("noise_size")
-                    .selected_text(edit.size.to_string())
-                    .show_ui(ui, |ui| {
-                        for size in [64, 128, 256, 512, 1024, 2048, 4096] {
-                            ui.selectable_value(&mut edit.size, size, size.to_string());
-                        }
-                    });
-                ui.end_row();
-
-                let mut track = |response: Response| {
-                    interacting |= response.dragged() || response.has_focus();
-                };
-                ui.weak("Seed");
-                track(ui.add(egui::DragValue::new(&mut edit.seed).range(0..=u32::MAX)));
-                ui.end_row();
-
-                let octaves_apply = edit.kind != NoiseType::White;
-                ui.weak("Frequency");
-                track(
-                    ui.add_enabled(
-                        octaves_apply,
-                        egui::Slider::new(&mut edit.frequency, 1..=64)
-                            .clamping(egui::SliderClamping::Never),
-                    ),
-                );
-                ui.end_row();
-                ui.weak("Octaves");
-                track(ui.add_enabled(octaves_apply, egui::Slider::new(&mut edit.octaves, 1..=8)));
-                ui.end_row();
-                ui.weak("Gain");
-                track(ui.add_enabled(
-                    octaves_apply,
-                    egui::Slider::new(&mut edit.gain, 0.0..=1.0).fixed_decimals(2),
-                ));
-                ui.end_row();
-
-                ui.weak("Invert");
-                ui.checkbox(&mut edit.invert, "");
-                ui.end_row();
-            });
-    });
-    edit.frequency = edit.frequency.clamp(1, 256);
-    // Sliders and fields commit when released / unfocused; dropdowns and checkboxes at once.
-    (!interacting && edit != saved).then(|| {
-        *saved = edit.clone();
-        edit.clone()
+/// Returns the noise to write when an edit is committed: once nothing is being dragged or
+/// typed into, so sliders and fields save on release. See docs/features/noise.md#saving.
+fn noise_commit(ui: &Ui, edit: &mut NoiseEdit) -> Option<Noise> {
+    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+    (!busy && edit.edit != edit.saved).then(|| {
+        edit.saved = edit.edit.clone();
+        edit.edit.clone()
     })
+}
+
+/// Field look for the property editor: `BG_BAR` fill, 4 px corners.
+fn property_style(ui: &mut Ui) {
+    let visuals = ui.visuals_mut();
+    for widget in [
+        &mut visuals.widgets.inactive,
+        &mut visuals.widgets.hovered,
+        &mut visuals.widgets.active,
+        &mut visuals.widgets.open,
+    ] {
+        widget.corner_radius = 4.into();
+    }
+    visuals.widgets.inactive.bg_fill = BG_BAR;
+    visuals.widgets.inactive.weak_bg_fill = BG_BAR;
+    visuals.extreme_bg_color = BG_BAR;
+    ui.spacing_mut().item_spacing.y = 6.0;
+}
+
+/// A collapsible section card, see docs/features/gui.md#property-editor. `leading` draws
+/// after the chevron (before the title), `trailing` on the right of the header.
+fn prop_section(
+    ui: &mut Ui,
+    id: impl std::hash::Hash + std::fmt::Debug,
+    title: RichText,
+    leading: impl FnOnce(&mut Ui),
+    trailing: impl FnOnce(&mut Ui),
+    body: impl FnOnce(&mut Ui),
+) {
+    let id = ui.make_persistent_id(id);
+    let open = ui.data(|d| d.get_temp::<bool>(id).unwrap_or(true));
+    Frame::new()
+        .fill(BG_HEADER)
+        .corner_radius(6)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let width = ui.available_width();
+            ui.allocate_ui_with_layout(
+                vec2(width, 28.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.add_space(6.0);
+                    let (rect, chevron) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+                    let icon = if open {
+                        Icon::ChevronDown
+                    } else {
+                        Icon::ChevronRight
+                    };
+                    icon.image(14.0, TEXT_WEAK).paint_at(ui, rect.shrink(1.0));
+                    leading(ui);
+                    let title = ui.add(
+                        egui::Label::new(title.size(14.0))
+                            .selectable(false)
+                            .sense(Sense::click()),
+                    );
+                    if chevron.clicked() || title.clicked() {
+                        ui.data_mut(|d| d.insert_temp(id, !open));
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        ui.add_space(4.0);
+                        trailing(ui);
+                    });
+                },
+            );
+            if open {
+                Frame::new()
+                    .inner_margin(Margin {
+                        left: 10,
+                        right: 10,
+                        top: 2,
+                        bottom: 10,
+                    })
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        body(ui);
+                    });
+            }
+        });
+    ui.add_space(8.0);
+}
+
+/// A row: `label` right-aligned in the label column, then `control` given the rest of the width.
+fn prop_row(ui: &mut Ui, label: &str, control: impl FnOnce(&mut Ui, f32)) {
+    let width = ui.available_width();
+    let label_width = (width * 0.4).max(80.0);
+    ui.allocate_ui_with_layout(
+        vec2(width, 26.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (rect, _) = ui.allocate_exact_size(vec2(label_width - 8.0, 26.0), Sense::hover());
+            ui.painter().text(
+                rect.right_center(),
+                Align2::RIGHT_CENTER,
+                label,
+                FontId::proportional(13.0),
+                TEXT_WEAK,
+            );
+            control(ui, (width - label_width).max(40.0));
+        },
+    );
+}
+
+/// Slider plus a 56 px value box filling `width`.
+fn slider_box<N: egui::emath::Numeric>(
+    ui: &mut Ui,
+    width: f32,
+    value: &mut N,
+    range: std::ops::RangeInclusive<N>,
+    decimals: Option<usize>,
+) {
+    ui.spacing_mut().slider_width = (width - 64.0).max(20.0);
+    let mut slider = egui::Slider::new(value, range.clone()).show_value(false);
+    if let Some(d) = decimals {
+        slider = slider.fixed_decimals(d);
+    }
+    ui.add(slider);
+    let mut field = egui::DragValue::new(value).range(range);
+    if let Some(d) = decimals {
+        field = field.fixed_decimals(d).speed(0.01);
+    }
+    ui.add_sized(vec2(56.0, 22.0), field);
+}
+
+/// One parameter row, driven by its declaration.
+fn param_row(ui: &mut Ui, spec: &ParamSpec, value: &mut Value) {
+    prop_row(ui, spec.label, |ui, width| match (spec.kind, value) {
+        (ParamKind::Int { min, max, .. }, Value::Int(v)) if max - min > 256 => {
+            ui.add_sized(vec2(width, 22.0), egui::DragValue::new(v).range(min..=max));
+        }
+        (ParamKind::Int { min, max, .. }, Value::Int(v)) => {
+            slider_box(ui, width, v, min..=max, None)
+        }
+        (ParamKind::Float { min, max, .. }, Value::Float(v)) => {
+            slider_box(ui, width, v, min..=max, Some(2))
+        }
+        (ParamKind::Gray { .. }, Value::Float(v)) => slider_box(ui, width, v, 0.0..=1.0, Some(2)),
+        (ParamKind::Choice { options, .. }, Value::Choice(i)) => {
+            egui::ComboBox::from_id_salt(spec.key)
+                .width(width - 8.0)
+                .selected_text(options[*i])
+                .show_ui(ui, |ui| {
+                    for (k, option) in options.iter().enumerate() {
+                        ui.selectable_value(i, k, *option);
+                    }
+                });
+        }
+        (ParamKind::Color { .. }, Value::Color(rgb)) => {
+            let mut srgb = rgb.map(|c| (c * 255.0).round() as u8);
+            if ui.color_edit_button_srgb(&mut srgb).changed() {
+                *rgb = srgb.map(|c| c as f64 / 255.0);
+            }
+        }
+        _ => {
+            ui.weak("—");
+        }
+    });
+}
+
+/// Generator and its parameters; see docs/features/noise.md#parameters-tab.
+fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
+    let edit = noise_edit(ui, inspected)?;
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let noise = &mut edit.edit;
+                let mut kind = noise.kind;
+                prop_section(
+                    ui,
+                    "generator",
+                    RichText::new("Generator"),
+                    |_| {},
+                    |_| {},
+                    |ui| {
+                        prop_row(ui, "Type", |ui, width| {
+                            egui::ComboBox::from_id_salt("noise_type")
+                                .width(width - 8.0)
+                                .selected_text(kind.name())
+                                .show_ui(ui, |ui| {
+                                    for k in GeneratorKind::ALL {
+                                        ui.selectable_value(&mut kind, k, k.name());
+                                    }
+                                });
+                        });
+                        prop_row(ui, "Size", |ui, width| {
+                            egui::ComboBox::from_id_salt("noise_size")
+                                .width(width - 8.0)
+                                .selected_text(noise.size.to_string())
+                                .show_ui(ui, |ui| {
+                                    for size in [4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]
+                                    {
+                                        ui.selectable_value(
+                                            &mut noise.size,
+                                            size,
+                                            size.to_string(),
+                                        );
+                                    }
+                                });
+                        });
+                    },
+                );
+                if kind != noise.kind {
+                    // Each type keeps its own parameters for the session.
+                    let params = edit
+                        .others
+                        .remove(&kind)
+                        .unwrap_or_else(|| Params::defaults(kind.specs()));
+                    let old = std::mem::replace(&mut noise.params, params);
+                    edit.others.insert(noise.kind, old);
+                    noise.kind = kind;
+                }
+                let specs = noise.kind.specs();
+                prop_section(
+                    ui,
+                    ("generator_params", noise.kind),
+                    RichText::new(noise.kind.name()),
+                    |_| {},
+                    |_| {},
+                    |ui| {
+                        for (spec, value) in specs.iter().zip(&mut noise.params.0) {
+                            param_row(ui, spec, value);
+                        }
+                    },
+                );
+            });
+        });
+    noise_commit(ui, edit)
+}
+
+enum ModifierAction {
+    Toggle(usize),
+    Up(usize),
+    Down(usize),
+    Remove(usize),
+}
+
+/// The modifier list; see docs/features/noise.md#modifiers-tab.
+fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
+    let edit = noise_edit(ui, inspected)?;
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let modifiers = &mut edit.edit.modifiers;
+                let count = modifiers.len();
+                // Set from the header closures, applied after the list is drawn.
+                let action = std::cell::Cell::new(None);
+                for (i, m) in modifiers.iter_mut().enumerate() {
+                    let enabled = m.enabled;
+                    let title =
+                        RichText::new(m.kind.name()).color(if enabled { TEXT } else { TEXT_WEAK });
+                    prop_section(
+                        ui,
+                        ("modifier", i, m.kind.key()),
+                        title,
+                        |ui| {
+                            let (icon, tip) = if enabled {
+                                (Icon::Eye, "Disable")
+                            } else {
+                                (Icon::EyeOff, "Enable")
+                            };
+                            if icon_button(ui, icon, tip, true).clicked() {
+                                action.set(Some(ModifierAction::Toggle(i)));
+                            }
+                        },
+                        |ui| {
+                            if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
+                                action.set(Some(ModifierAction::Remove(i)));
+                            }
+                            if icon_button(ui, Icon::ArrowDown, "Move down", i + 1 < count)
+                                .clicked()
+                            {
+                                action.set(Some(ModifierAction::Down(i)));
+                            }
+                            if icon_button(ui, Icon::ArrowUp, "Move up", i > 0).clicked() {
+                                action.set(Some(ModifierAction::Up(i)));
+                            }
+                        },
+                        |ui| {
+                            let specs = m.kind.specs();
+                            if specs.is_empty() {
+                                ui.weak("No parameters");
+                            }
+                            for (spec, value) in specs.iter().zip(&mut m.params.0) {
+                                param_row(ui, spec, value);
+                            }
+                        },
+                    );
+                }
+                match action.take() {
+                    Some(ModifierAction::Toggle(i)) => modifiers[i].enabled ^= true,
+                    Some(ModifierAction::Up(i)) => modifiers.swap(i - 1, i),
+                    Some(ModifierAction::Down(i)) => modifiers.swap(i, i + 1),
+                    Some(ModifierAction::Remove(i)) => {
+                        modifiers.remove(i);
+                    }
+                    None => {}
+                }
+                if modifiers.is_empty() {
+                    ui.weak("No modifiers");
+                    ui.add_space(6.0);
+                }
+                let button =
+                    egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add modifier");
+                egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+                    for kind in ModifierKind::ALL {
+                        if menu_item(ui, kind.name(), None).clicked() {
+                            modifiers.push(Modifier::new(kind));
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        });
+    noise_commit(ui, edit)
 }
 
 fn info(ui: &mut Ui, inspection: &Inspection) {

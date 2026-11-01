@@ -249,14 +249,27 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
 fn noise_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
     let n = Noise::parse(&text)?;
-    out.rows.extend([
-        ("Type", n.kind.name().to_owned()),
-        ("Seed", n.seed.to_string()),
-        ("Frequency", n.frequency.to_string()),
-        ("Octaves", n.octaves.to_string()),
-        ("Gain", format!("{:.2}", n.gain)),
-        ("Invert", if n.invert { "yes" } else { "no" }.into()),
-    ]);
+    out.rows.push(("Type", n.kind.name().to_owned()));
+    let specs = n.kind.specs();
+    for (i, spec) in specs.iter().enumerate() {
+        out.rows.push((spec.label, n.params.display(specs, i)));
+    }
+    let modifiers: Vec<String> = n
+        .modifiers
+        .iter()
+        .map(|m| {
+            let off = if m.enabled { "" } else { " (off)" };
+            format!("{}{off}", m.kind.name())
+        })
+        .collect();
+    out.rows.push((
+        "Modifiers",
+        if modifiers.is_empty() {
+            "none".into()
+        } else {
+            modifiers.join(", ")
+        },
+    ));
     Ok(())
 }
 
@@ -625,18 +638,24 @@ mod tests {
         let project = project(dir.path(), Default::default());
         let file = dir.path().join("assets/clouds.noise");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, "type = \"value\"\nsize = 16\nseed = 3\n").unwrap();
+        fs::write(
+            &file,
+            "type = \"noise/value\"\nsize = 16\nseed = 3\n\n[[modifiers]]\ntype = \"blur\"\nenabled = false\n",
+        )
+        .unwrap();
         let i = inspect(&project, Location::Input, &file);
         assert_eq!(row(&i, "Kind"), "Noise");
         assert_eq!(row(&i, "Type"), "Value");
         assert_eq!(row(&i, "Seed"), "3");
+        assert_eq!(row(&i, "Frequency"), "8");
+        assert_eq!(row(&i, "Modifiers"), "Blur (off)");
         assert_eq!(row(&i, "Dimensions"), "16 × 16 px");
         assert_eq!(row(&i, "Asset path"), "clouds");
         assert_eq!(row(&i, "Color"), "linear");
         assert_eq!(i.channels, [false, false, false, false]);
         assert!(i.preview.is_some());
 
-        fs::write(&file, "octaves = 99\n").unwrap();
+        fs::write(&file, "type = \"noise/fbm\"\noctaves = 99\n").unwrap();
         let i = inspect(&project, Location::Input, &file);
         assert!(row(&i, "Error").contains("octaves"));
         assert!(i.preview.is_none());
