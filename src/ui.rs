@@ -1161,15 +1161,40 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
     }
 }
 
+/// The row icon by type, see docs/features/gui.md#tree-icons.
+fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
+    if is_dir {
+        return match (inspect::is_environment_map(path), open) {
+            (true, _) => Icon::SunMedium,
+            (false, true) => Icon::FolderOpen,
+            (false, false) => Icon::Folder,
+        };
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga" | "webp" | "tif" | "tiff" | "exr"
+        | "hdr" | "dds" | "ktx2" => Icon::Image,
+        "ttf" | "otf" | "woff" | "woff2" => Icon::Type,
+        "cube" => Icon::SwatchBook,
+        "gltf" | "glb" | "obj" => Icon::Torus,
+        _ => Icon::File,
+    }
+}
+
 fn tree(ui: &mut Ui, nodes: &[Node], depth: usize, cx: &mut TreeCx) {
     for node in nodes {
         let is_dir = node.children.is_some();
         let open = cx.open.contains(&node.path);
-        let (chevron, icon) = match (is_dir, open) {
-            (true, true) => (Some(Icon::ChevronDown), Icon::FolderOpen),
-            (true, false) => (Some(Icon::ChevronRight), Icon::Folder),
-            (false, _) => (None, Icon::File),
+        let chevron = match (is_dir, open) {
+            (true, true) => Some(Icon::ChevronDown),
+            (true, false) => Some(Icon::ChevronRight),
+            (false, _) => None,
         };
+        let icon = tree_icon(&node.path, is_dir, open);
         let selected = cx
             .selection
             .is_some_and(|s| s.location == cx.location && s.path == node.path);

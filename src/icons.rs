@@ -28,13 +28,16 @@ pub enum Icon {
     Plus,
     RefreshCw,
     SlidersVertical,
+    SunMedium,
+    SwatchBook,
     Torus,
     Trash2,
+    Type,
     Wrench,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 26] = [
+const SVGS: [(&str, &str); 29] = [
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
     (
@@ -76,8 +79,14 @@ const SVGS: [(&str, &str); 26] = [
         "sliders-vertical",
         include_str!("../assets/icons/sliders-vertical.svg"),
     ),
+    ("sun-medium", include_str!("../assets/icons/sun-medium.svg")),
+    (
+        "swatch-book",
+        include_str!("../assets/icons/swatch-book.svg"),
+    ),
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
+    ("type", include_str!("../assets/icons/type.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
 ];
 
@@ -109,6 +118,7 @@ mod tests {
         let names: Vec<_> = SVGS.iter().map(|(name, _)| *name).collect();
         assert_eq!(names[Icon::Info as usize], "info");
         assert_eq!(names[Icon::Image as usize], "image");
+        assert_eq!(names[Icon::Type as usize], "type");
         assert_eq!(names[Icon::Wrench as usize], "wrench");
         for (name, svg) in SVGS {
             assert!(svg.contains(&format!("lucide-{name}\"")), "{name}");
