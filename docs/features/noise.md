@@ -34,8 +34,10 @@ tileable.
 
 ## Creating
 
-In the Input tree's context menu, **New Noise** lists the generators by the
-names above (see [`file-operations.md`](file-operations.md)). Picking one
+In the Input tree's context menu, **New Noise** lists the `noise/…`
+generators and **New Pattern** the `pattern/…` ones (Checkerboard, which is
+not a noise), by the names above (see
+[`file-operations.md`](file-operations.md)). Picking one
 creates `<name>.noise` (the last part of `type`, e.g. `perlin-worley.noise`,
 `checkerboard.noise`; `<name> 2.noise`, … if taken) with that generator, its
 default parameters and no modifiers, selects it and starts renaming it.

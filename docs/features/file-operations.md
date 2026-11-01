@@ -13,7 +13,8 @@ Right-clicking an Input row, or the empty area below the last row (the
 | Item                 | Target                                    | Shown for          |
 |----------------------|-------------------------------------------|--------------------|
 | New Folder           | inside the folder, or the file's folder   | always             |
-| New Noise ▸ (the generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
+| New Noise ▸ (the `noise/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
+| New Pattern ▸ (the `pattern/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
 | Rename               | the row                                   | rows               |
 | Delete               | the row                                   | rows               |
 
