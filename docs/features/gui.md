@@ -99,7 +99,7 @@ All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
-toggles), `grid-3x3` (canvas tiling), `folder`, `folder-open`, `file`,
+toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 
@@ -129,6 +129,9 @@ selection and active elements.
 | `ACCENT`       | `#F0883E` | selection, active tab                 |
 | `CHECKER_LIGHT`| `#3A3A3E` | transparency checkerboard (light)     |
 | `CHECKER_DARK` | `#2E2E32` | transparency checkerboard (dark)      |
+| `CHANNEL_R`    | `#E5484D` | red channel icon                      |
+| `CHANNEL_G`    | `#46A758` | green channel icon                    |
+| `CHANNEL_B`    | `#3E8EED` | blue channel icon                     |
 
 ## Keybindings
 

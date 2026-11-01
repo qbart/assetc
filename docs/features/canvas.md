@@ -82,25 +82,53 @@ while an image is previewed:
 
 ## Toolbar
 
-A button group in the canvas' top-right corner, 8 px from both edges, shown
-only while an image is previewed:
+Button groups in the canvas' top-right corner, 8 px from the top and right
+edges, laid out left to right with an 8 px gap between groups, shown only
+while an image is previewed:
 
 ```
-[ ▦ ]
+[ ▦ ]  [ RGB | R | G | B ]
 ```
 
-- `BG_BAR` fill, 6 px rounded corners, buttons 36 × 32 px edge to edge with an
-  18 px icon, separated by 1 px `STROKE` lines.
-- Toggle buttons: when on, the button is filled with `ACCENT` (its outer
-  corners rounded with the group) and its icon is drawn in `BG_BAR`; when off,
-  the icon is `TEXT_WEAK`, and hover fills the button with `BG_HEADER` and
-  draws the icon in `TEXT`.
+- Each group: `BG_BAR` fill, 6 px rounded corners, buttons 36 × 32 px edge to
+  edge with an 18 px icon, separated by 1 px `STROKE` lines.
+- A button that is on is filled with `ACCENT` (its outer corners rounded with
+  the group) and its icon outline is drawn in `BG_BAR`. A button that is off
+  draws its outline in `TEXT_WEAK`; hover fills it with `BG_HEADER` and draws
+  the outline in `TEXT`.
 - Each button shows its name as a tooltip.
 - The toolbar takes the pointer like the zoom bar.
 
-| Button | Icon       | Action                    |
-|--------|------------|---------------------------|
-| Tile   | `grid-3x3` | toggles [tiling](#tiling) |
+| Group    | Button | Icon                            | Kind   | Action                        |
+|----------|--------|---------------------------------|--------|-------------------------------|
+| View     | Tile   | `grid-3x3`                      | toggle | [tiling](#tiling) on / off    |
+| Channels | RGB    | three circles, all filled       | radio  | all channels ([channels](#channels)) |
+| Channels | R      | three circles, red filled       | radio  | red channel only              |
+| Channels | G      | three circles, green filled     | radio  | green channel only            |
+| Channels | B      | three circles, blue filled      | radio  | blue channel only             |
+
+Exactly one Channels button is on; clicking it again keeps it on.
+
+### Channel icons
+
+Three Lucide `circle-small` icons, each 16 px, arranged as a trefoil inside
+the 18 px icon area: red at the top, green bottom-left, blue bottom-right,
+slightly overlapping (centers 3.2 px above, and 3.7 px left / right and 2.8 px
+below, the icon center). A circle that is "filled" is painted with its color
+(`CHANNEL_R`, `CHANNEL_G`, `CHANNEL_B`) inside its outline; the others show
+only the outline.
+
+## Channels
+
+- **RGB** (default): the image as stored, including alpha over the
+  checkerboard.
+- **R**, **G**, **B**: that channel alone, shown as **grayscale** (the value
+  in all three color channels) and **opaque** (alpha ignored), so data maps
+  such as the packed ORM channels can be read directly.
+- Like tiling, the choice is remembered per image for the session and
+  starts at RGB; it combines with tiling.
+- The single-channel image is built on the CPU from the loaded pixels when
+  the channel is chosen, and kept until the selection or channel changes.
 
 ## Tiling
 
