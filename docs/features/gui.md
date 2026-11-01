@@ -49,7 +49,9 @@ frame that later features plug into; it has no asset functionality of its own.
   180 px wide. Hovering highlights the whole row (`BG_HEADER`, square
   corners) and the whole row is clickable. A 24 px gutter on the left shows a
   `check` icon for toggles that are on (empty when off).
-- `File → Quit` exits the application.
+- `File → Quit` exits the application. Its shortcut, `Ctrl+Q` (`Cmd+Q` on
+  macOS), works anywhere, even while a text field has focus, and is shown
+  right-aligned in the item in `TEXT_WEAK`.
 - `Edit` contains no items yet (button shown disabled).
 - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar (check
   shown when visible); the menu stays open after toggling.
@@ -179,4 +181,4 @@ selection and active elements.
 
 ## Keybindings
 
-None. (Any added later must be documented in `KEYS.md`.)
+`Ctrl+Q` / `Cmd+Q` quits; see [`KEYS.md`](../../KEYS.md).

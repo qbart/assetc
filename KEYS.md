@@ -1,7 +1,15 @@
 # Keys
 
 Keyboard and mouse bindings in the assetc GUI. Keys only act when no text
-field has focus.
+field has focus, except the global ones.
+
+## Global
+
+See [`docs/features/gui.md`](docs/features/gui.md#menus).
+
+| Input                         | Action |
+|-------------------------------|--------|
+| `Ctrl+Q` (`Cmd+Q` on macOS)   | Quit   |
 
 ## File browser (Input tree)
 

@@ -672,8 +672,20 @@ fn menu_bar(
         egui::Image::new((logo.id(), size))
             .paint_at(ui, Rect::from_center_size(rect.center(), size));
         ui.add_space(4.0);
+        let quit = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
+        if ui.input_mut(|i| i.consume_shortcut(&quit)) {
+            exit.write(AppExit::Success);
+        }
         ui.menu_button("File", |ui| {
-            if menu_item(ui, "Quit", None).clicked() {
+            let response = menu_row(ui, "Quit", None, true);
+            ui.painter().text(
+                pos2(response.rect.right() - 12.0, response.rect.center().y),
+                Align2::RIGHT_CENTER,
+                ui.ctx().format_shortcut(&quit),
+                FontId::proportional(14.0),
+                TEXT_WEAK,
+            );
+            if response.clicked() {
                 exit.write(AppExit::Success);
             }
         });
