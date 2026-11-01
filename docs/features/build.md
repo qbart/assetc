@@ -35,6 +35,7 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
 | `*.noise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
 | `*.gradient` (any case) | texture, generated | `<asset path>.ktx2`, see [`gradients.md`](gradients.md#build) |
+| `*.palette` (any case) | texture, generated | `<asset path>.ktx2`, see [`palettes.md`](palettes.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
 | `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat`, see [`materials.md`](materials.md) |
 | `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh` and more, see [`models.md`](models.md#build) |

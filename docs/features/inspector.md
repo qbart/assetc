@@ -19,11 +19,14 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Eight icon tabs, top to bottom: **Info** (`info`), **Parameters**
-(`sliders-vertical`) for `.noise`, `.gradient` and model files, **Modifiers**
-(`wrench`) for `.noise` files and images (`.png`, `.jpg`, `.jpeg`, `.tga`) and **Gradients** (`palette`) for `.gradient`
-files, all three only in the Input tree (see
-[`noise.md`](noise.md#parameters-tab), [`gradients.md`](gradients.md#parameters-tab)),
+Nine icon tabs, top to bottom: **Info** (`info`), **Parameters**
+(`sliders-vertical`) for `.noise`, `.gradient`, `.palette` and model files,
+**Modifiers** (`wrench`) for `.noise` files and images (`.png`, `.jpg`,
+`.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and
+**Colors** (`palette`) for `.palette` files, all four only in the Input tree
+(see [`noise.md`](noise.md#parameters-tab),
+[`gradients.md`](gradients.md#parameters-tab),
+[`palettes.md`](palettes.md#colors-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
 compiled textures with more than one mip level (see
@@ -63,6 +66,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
 | Input  | `*.noise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |
 | Input  | `*.gradient` (any case)    | Gradient, see [`gradients.md`](gradients.md#inspector-info) |
+| Input  | `*.palette` (any case)     | Palette, see [`palettes.md`](palettes.md#inspector-info) |
 | Input  | `*.ttf`, `*.otf` (any case) | Font, see [`fonts.md`](fonts.md#inspector) |
 | Input  | `*.gltf`, `*.glb` (any case) | Model, see [`models.md`](models.md#inspector) |
 | Input  | anything else              | Ignored            |

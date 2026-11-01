@@ -28,7 +28,7 @@ frame that later features plug into; it has no asset functionality of its own.
 - **Right sidebar** (resizable, default width 320 px, min 220 px): the
   **Inspector** only, under an `Inspector` header row: a narrow vertical tab
   strip on the left with icon tabs (`Info`, `Parameters`, `Modifiers`,
-  `Gradients`, `Animations`, `Mipmaps`, `Levels of detail`, `Assets`, see [`inspector.md`](inspector.md#tabs)) and the active tab's content on the right. Shows the selected
+  `Gradients`, `Colors`, `Animations`, `Mipmaps`, `Levels of detail`, `Assets`, see [`inspector.md`](inspector.md#tabs)) and the active tab's content on the right. Shows the selected
   file, see [`inspector.md`](inspector.md).
 - **Status bar** (bottom, fixed height): status message on the left (a
   failed [file operation](file-operations.md#errors) shows there until the
@@ -105,6 +105,7 @@ The icon follows the entry's type, by extension (any case):
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `noise`                      | `image-play`              |
 | gradient: `gradient`                          | `swatch-book`             |
+| palette: `palette`                            | `palette`                 |
 | mesh: `gltf`, `glb`, `obj`, `amesh`          | `torus`                   |
 | animation: `aanim`                            | `film`                    |
 | per-file settings: `amod`                     | `settings-2` (dimmed)     |
@@ -138,7 +139,7 @@ tinted per use. In use: `info` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `film` (Inspector Animations tab), `images` (Inspector Mipmaps tab),
 `bring-to-front` (Inspector Levels of detail tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
-(canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients tab), `eye`, `eye-off` (LUT cube before / after),
+(canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after),
 `sliders-vertical` (Inspector Parameters tab), `wrench`,
 `grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab),
 `grip-vertical` (LUT compare divider), `box-checker`, `box-shaded`, `box`, `squares-unite`, `image`, `boxes` (compiled mesh display modes), `loader`
