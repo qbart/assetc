@@ -118,7 +118,7 @@ cross submeshes.
 |      0 |   12 | `center`      | f32 × 3, bounding sphere                                    |
 |     12 |    4 | `radius`      | f32                                                         |
 |     16 |   12 | `cone_axis`   | f32 × 3, normal cone for back-face culling                  |
-|     28 |    4 | `cone_cutoff` | f32: the meshlet faces away from a viewer when `dot(normalize(center − camera), cone_axis) ≥ cone_cutoff` |
+|     28 |    4 | `cone_cutoff` | f32: with `d = center − camera`, the meshlet faces away from the camera when `dot(d, cone_axis) ≥ cone_cutoff × length(d) + radius` |
 
 As computed by meshoptimizer's `meshopt_computeMeshletBounds`.
 
