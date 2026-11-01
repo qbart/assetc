@@ -1,8 +1,8 @@
 # Color LUTs
 
 Preview of 3D color lookup tables in the Adobe / Resolve `.cube` format, e.g.
-`samples/blue-and-pink.lut.cube`. Preview only: the build does not compile
-LUTs yet (they are skipped like other unknown files).
+`samples/blue-and-pink.lut.cube`, and their compilation to a KTX2 texture
+(see [Build](#build)).
 
 ## Format
 
@@ -29,8 +29,35 @@ alpha is kept.
 
 Kind `Color LUT` for `*.cube` (any case) in the Input tree, with rows
 **Title** (or `—`), **LUT size** `N × N × N` (the file size stays in **Size**), **Domain** `min – max` (e.g.
-`0, 0, 0 – 1, 1, 1`), or an **Error** row if the file does not parse. A file
-that fails to parse shows its error as the canvas message.
+`0, 0, 0 – 1, 1, 1`), then **Asset path**, **Asset ID** and **Output** as
+for source textures (see [`inspector.md`](inspector.md#details-by-file-kind)),
+or an **Error** row if the file does not parse. A file that fails to parse
+shows its error as the canvas message.
+
+## Build
+
+`*.cube` (any case) files in `input` are compiled to a **2D strip** texture
+(the layout game engines commonly use for color grading LUTs):
+
+- Asset path: the input-relative path without `.cube`, e.g.
+  `grades/blue-and-pink.lut.cube` → `grades/blue-and-pink.lut`, output
+  `<asset path>.ktx2`, a `texture` in the manifest.
+- `N² × N` pixels for `LUT_3D_SIZE N`: `N` slices of `N × N` side by side,
+  one per **blue** entry (left to right); within a slice **red** grows left
+  to right and **green** top to bottom. Pixel `(b × N + r, g)` holds entry
+  `(r, g, b)`, i.e. table index `r + g × N + b × N²`. Layout details in
+  [`ktx2.md`](../spec/ktx2.md#color-lut-strips).
+- Each entry is stored as is: `round(clamp(v, 0, 1) × 255)` per channel,
+  alpha 255, `R8G8B8A8_UNORM` (the values are already display encoded, so the
+  GPU must not convert them), one mip level (filtering between slices would
+  mix unrelated blues).
+- The domain is not stored: a runtime maps its input from `DOMAIN_MIN`…
+  `DOMAIN_MAX` (usually 0…1) to the strip itself.
+- `N` is limited to 128 (a 16384-pixel-wide strip, the common GPU maximum);
+  a larger LUT fails with `LUT_3D_SIZE <N> is too large to compile (at most
+  128)`. A file that does not parse fails like an undecodable image.
+- `[textures]` settings do not apply.
+
 
 ## Views
 

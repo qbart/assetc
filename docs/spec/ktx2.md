@@ -90,3 +90,19 @@ padding                     zero bytes to a multiple of 4
 ```
 
 `kvdByteLength` includes the padding.
+
+## Color LUT strips
+
+A compiled `.cube` LUT (see [`lut.md`](../features/lut.md#build)) uses the
+same profile with `VK_FORMAT_R8G8B8A8_UNORM`, `levelCount` `1`, and
+`pixelWidth` `N²`, `pixelHeight` `N` for a LUT of size `N`. Pixel `(x, y)`
+(`y` from the top row) holds the LUT entry for input
+
+```
+r = x mod N,  b = floor(x / N),  g = y        (indices 0 … N − 1)
+```
+
+as `round(clamp(value, 0, 1) × 255)` per channel and alpha `255`. To sample
+it, a shader picks the two blue slices around `b × (N − 1)`, samples each
+bilinearly at `(r, g)` (keeping half a texel inside each slice) and blends
+them.
