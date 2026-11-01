@@ -27,8 +27,8 @@ frame that later features plug into; it has no asset functionality of its own.
   (`refresh-cw` icon) buttons on the right. See [File browser](#file-browser).
 - **Right sidebar** (resizable, default width 320 px, min 220 px): the
   **Inspector** only, under an `Inspector` header row: a narrow vertical tab
-  strip on the left with icon tabs (`Info`, `Assets`, `Settings`, see
-  [Tabs](#tabs)) and the active tab's content on the right. Shows the selected
+  strip on the left with icon tabs (`Info`, `Parameters`, `Modifiers`,
+  `Assets`, see [`inspector.md`](inspector.md#tabs)) and the active tab's content on the right. Shows the selected
   file, see [`inspector.md`](inspector.md).
 - **Status bar** (bottom, fixed height): status message on the left (a
   failed [file operation](file-operations.md#errors) shows there until the
@@ -108,7 +108,7 @@ Tabs are attached to the pane they switch, not drawn as separate buttons:
 All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 `lucide-static` into `assets/icons/` together with Lucide's ISC `LICENSE`, and
 embedded in the binary. Their `currentColor` stroke is rendered white and
-tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
+tinted per use. In use: `info` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart), `eye`, `eye-off` (LUT cube before / after),
