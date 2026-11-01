@@ -28,7 +28,7 @@ alpha is kept.
 ## Inspector
 
 Kind `Color LUT` for `*.cube` (any case) in the Input tree, with rows
-**Title** (or `—`), **Size** `N × N × N`, **Domain** `min – max` (e.g.
+**Title** (or `—`), **LUT size** `N × N × N` (the file size stays in **Size**), **Domain** `min – max` (e.g.
 `0, 0, 0 – 1, 1, 1`), or an **Error** row if the file does not parse. A file
 that fails to parse shows its error as the canvas message.
 
