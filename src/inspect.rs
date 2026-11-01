@@ -28,7 +28,18 @@ pub struct Inspection {
     /// Which of R, G, B, A the previewed file actually has.
     pub channels: [bool; 4],
     /// Shown instead of a preview, e.g. for unsupported formats.
-    pub note: Option<&'static str>,
+    pub note: Option<String>,
+    /// Environment map faces in cube layer order (+X, −X, +Y, −Y, +Z, −Z).
+    pub cubemap: Option<Vec<Image>>,
+}
+
+/// Face file stems of an environment map folder, in cube layer order.
+pub const CUBE_FACES: [&str; 6] = ["px", "nx", "py", "ny", "pz", "nz"];
+
+/// Whether `dir` is an environment map folder (`*.env`, any case).
+pub fn is_environment_map(dir: &Path) -> bool {
+    dir.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("env"))
 }
 
 #[derive(Clone, Copy)]
@@ -72,6 +83,10 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
     };
     let meta = match fs::metadata(file) {
         Ok(meta) if meta.is_file() => meta,
+        Ok(meta) if meta.is_dir() => {
+            folder(location, file, &mut out);
+            return out;
+        }
         _ => {
             out.missing = true;
             return out;
@@ -128,16 +143,9 @@ fn source_texture(
     rel: &str,
     out: &mut Inspection,
 ) -> Result<(), String> {
-    let decoded = image::ImageReader::open(file)
-        .map_err(|e| e.to_string())?
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?
-        .decode()
-        .map_err(|e| e.to_string())?;
-    let color = decoded.color();
+    let (image, color) = decode(file)?;
     let rgb = color.has_color();
     out.channels = [rgb, rgb, rgb, color.has_alpha()];
-    let image = decoded.to_rgba8();
     let (width, height) = image.dimensions();
     let asset_path = strip_extension(rel);
     out.rows
@@ -218,9 +226,103 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
             out.preview = Some(to_image(image));
             out.channels = [true; 4];
         }
-        None => out.note = Some("No preview for this format"),
+        None => out.note = Some("No preview for this format".into()),
     }
     Ok(())
+}
+
+fn folder(location: Location, dir: &Path, out: &mut Inspection) {
+    if !is_environment_map(dir) {
+        out.rows.push(("Kind", "Folder".into()));
+        let items = fs::read_dir(dir).map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                .count()
+        });
+        match items {
+            Ok(n) => out.rows.push(("Items", n.to_string())),
+            Err(e) => out.rows.push(("Error", e.to_string())),
+        }
+        return;
+    }
+    out.rows.push(("Kind", "Environment map".into()));
+    if let Err(message) = environment_map(location, dir, out) {
+        out.rows.push(("Error", message.clone()));
+        out.note = Some(message);
+    }
+}
+
+/// Finds and decodes the six faces; see docs/features/canvas.md#environment-maps.
+fn environment_map(location: Location, dir: &Path, out: &mut Inspection) -> Result<(), String> {
+    let face_file = |stem: &str| {
+        let entries = fs::read_dir(dir).ok()?;
+        entries.flatten().map(|e| e.path()).find(|path| {
+            path.is_file()
+                && path.file_stem().is_some_and(|s| s == stem)
+                && match location {
+                    Location::Input => is_texture_source(path),
+                    Location::Output => path
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("ktx2")),
+                }
+        })
+    };
+    let files = CUBE_FACES.map(face_file);
+    let missing: Vec<_> = CUBE_FACES
+        .iter()
+        .zip(&files)
+        .filter(|(_, f)| f.is_none())
+        .map(|(stem, _)| *stem)
+        .collect();
+    let found = 6 - missing.len();
+    out.rows.push((
+        "Faces",
+        if missing.is_empty() {
+            "6 of 6".into()
+        } else {
+            format!("{found} of 6 (missing {})", missing.join(", "))
+        },
+    ));
+    if !missing.is_empty() {
+        return Err(format!("Missing faces: {}", missing.join(", ")));
+    }
+
+    let mut faces = Vec::with_capacity(6);
+    for (stem, file) in CUBE_FACES.iter().zip(files.into_iter().flatten()) {
+        let face = match location {
+            Location::Input => decode(&file).map(|(image, _)| to_image(image)),
+            Location::Output => fs::read(&file)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| ktx2::read(&bytes))
+                .and_then(|info| info.level0.ok_or_else(|| "unsupported KTX2 format".into())),
+        }
+        .map_err(|e| format!("Face {stem}: {e}"))?;
+        faces.push(face);
+    }
+    let (w, h) = (faces[0].width, faces[0].height);
+    out.rows.push(("Face size", format!("{w} × {h} px")));
+    if faces.iter().any(|f| (f.width, f.height) != (w, h)) {
+        return Err("Faces differ in size".into());
+    }
+    if w != h || !w.is_power_of_two() {
+        return Err(format!(
+            "Faces must be square with a power-of-two size, not {w} × {h}"
+        ));
+    }
+    out.cubemap = Some(faces);
+    Ok(())
+}
+
+fn decode(file: &Path) -> Result<(image::RgbaImage, image::ColorType), String> {
+    let decoded = image::ImageReader::open(file)
+        .map_err(|e| e.to_string())?
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?
+        .decode()
+        .map_err(|e| e.to_string())?;
+    let color = decoded.color();
+    Ok((decoded.to_rgba8(), color))
 }
 
 /// `Output` row: the output-relative path, `note`, and `(not built)` when missing.
@@ -481,6 +583,50 @@ mod tests {
         assert_eq!(channels("rgb.jpg"), [true, true, true, false]);
         assert_eq!(channels("gray.png"), [false; 4]);
         assert_eq!(channels("gray_alpha.png"), [false, false, false, true]);
+    }
+
+    #[test]
+    fn folders_and_environment_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        let env = dir.path().join("assets/sky.ENV");
+        for face in CUBE_FACES {
+            png(&env.join(format!("{face}.png")), 4, 4);
+        }
+        fs::write(env.join(".hidden"), "").unwrap();
+
+        let plain = inspect(&project, Location::Input, &dir.path().join("assets"));
+        assert_eq!(
+            plain.rows,
+            [("Kind", "Folder".into()), ("Items", "1".into())]
+        );
+        assert!(plain.cubemap.is_none());
+
+        let i = inspect(&project, Location::Input, &env);
+        assert_eq!(row(&i, "Kind"), "Environment map");
+        assert_eq!(row(&i, "Faces"), "6 of 6");
+        assert_eq!(row(&i, "Face size"), "4 × 4 px");
+        assert_eq!(i.cubemap.as_ref().map(Vec::len), Some(6));
+
+        fs::remove_file(env.join("nz.png")).unwrap();
+        fs::remove_file(env.join("pz.png")).unwrap();
+        let i = inspect(&project, Location::Input, &env);
+        assert_eq!(row(&i, "Faces"), "4 of 6 (missing pz, nz)");
+        assert_eq!(i.note.as_deref(), Some("Missing faces: pz, nz"));
+        assert!(i.cubemap.is_none());
+
+        png(&env.join("pz.png"), 4, 4);
+        png(&env.join("nz.png"), 3, 3);
+        let i = inspect(&project, Location::Input, &env);
+        assert_eq!(row(&i, "Error"), "Faces differ in size");
+
+        // Output side: compiled faces.
+        let output = dir.path().join("build");
+        png(&env.join("nz.png"), 4, 4);
+        build::run(&project.input_dir().unwrap(), &output, &Default::default()).unwrap();
+        let i = inspect(&project, Location::Output, &output.join("sky.ENV"));
+        assert_eq!(row(&i, "Faces"), "6 of 6");
+        assert!(i.cubemap.is_some());
     }
 
     #[test]

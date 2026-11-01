@@ -4,9 +4,12 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::{ClearColorConfig, Viewport};
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::light::{GeneratedEnvironmentMapLight, Skybox};
 use bevy::mesh::{CylinderMeshBuilder, Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::render::render_resource::{
+    Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
+};
 
 use crate::theme::BG_CENTER;
 
@@ -16,7 +19,7 @@ impl Plugin for Preview3dPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Preview3d>()
             .insert_resource(GlobalAmbientLight {
-                brightness: 600.0,
+                brightness: AMBIENT_BRIGHTNESS,
                 ..default()
             })
             .add_systems(Startup, setup)
@@ -111,6 +114,16 @@ pub struct Preview3d {
     pub dragging: bool,
     /// A new texture to show, taken by [`sync`].
     pub upload: Option<Upload>,
+    /// Show the environment map (skybox + lighting) instead of the textured shape.
+    pub environment: bool,
+    /// A new environment map, taken by [`sync`].
+    pub cubemap: Option<CubemapUpload>,
+}
+
+/// Six square RGBA8 sRGB faces in cube layer order (+X, −X, +Y, −Y, +Z, −Z), concatenated.
+pub struct CubemapUpload {
+    pub size: u32,
+    pub pixels: Vec<u8>,
 }
 
 #[derive(Component)]
@@ -123,8 +136,16 @@ struct PreviewShape;
 struct Scene {
     /// Same order as [`Shape::ALL`].
     meshes: [Handle<Mesh>; 4],
+    /// Textured with the shown image.
     material: Handle<StandardMaterial>,
+    /// Mirror-like, to show an environment map's lighting.
+    chrome: Handle<StandardMaterial>,
+    cubemap: Option<Handle<Image>>,
 }
+
+/// Skybox and image-based lighting strength for environment maps, cd/m².
+const ENVIRONMENT_BRIGHTNESS: f32 = 1000.0;
+const AMBIENT_BRIGHTNESS: f32 = 600.0;
 
 /// Cube with the whole image on each face, upright on the sides (Bevy's `Cuboid` turns some
 /// faces); see docs/features/canvas.md#scene.
@@ -160,7 +181,11 @@ fn cube(size: f32) -> Mesh {
     .with_inserted_indices(Indices::U32(indices))
 }
 
-type ShapeQuery = (&'static mut Mesh3d, &'static mut Transform);
+type ShapeQuery = (
+    &'static mut Mesh3d,
+    &'static mut MeshMaterial3d<StandardMaterial>,
+    &'static mut Transform,
+);
 
 /// Auto-rotation, radians per second.
 const SPIN: f32 = 20.0 * std::f32::consts::PI / 180.0;
@@ -186,6 +211,12 @@ fn setup(
     let material = materials.add(StandardMaterial {
         perceptual_roughness: 0.8,
         metallic: 0.0,
+        ..default()
+    });
+    let chrome = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        metallic: 1.0,
+        perceptual_roughness: 0.2,
         ..default()
     });
 
@@ -220,22 +251,32 @@ fn setup(
         MeshMaterial3d(material.clone()),
         Transform::default(),
     ));
-    commands.insert_resource(Scene { meshes, material });
+    commands.insert_resource(Scene {
+        meshes,
+        material,
+        chrome,
+        cubemap: None,
+    });
 }
 
 #[allow(clippy::too_many_arguments)]
 fn sync(
+    mut commands: Commands,
     mut preview: ResMut<Preview3d>,
-    scene: Res<Scene>,
+    mut scene: ResMut<Scene>,
     time: Res<Time>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut camera: Single<(&mut Camera, &mut Transform), With<PreviewCamera>>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut camera: Single<(Entity, &mut Camera, &mut Transform), With<PreviewCamera>>,
     mut overlay: Query<&mut Camera, (With<Camera2d>, Without<PreviewCamera>)>,
     mut shape: Single<ShapeQuery, (With<PreviewShape>, Without<PreviewCamera>)>,
+    mut lights: Query<&mut Visibility, With<DirectionalLight>>,
+    mut environment_on: Local<bool>,
 ) {
     let active = preview.viewport.is_some();
-    let (camera, camera_transform) = &mut *camera;
+    let (camera_entity, camera, camera_transform) = &mut *camera;
+    let camera_entity = *camera_entity;
     camera.is_active = active;
     camera.viewport = preview
         .viewport
@@ -252,6 +293,63 @@ fn sync(
         } else {
             ClearColorConfig::Default
         };
+    }
+
+    if let Some(upload) = preview.cubemap.take() {
+        let mut image = Image::new(
+            Extent3d {
+                width: upload.size,
+                height: upload.size,
+                depth_or_array_layers: 6,
+            },
+            TextureDimension::D2,
+            upload.pixels,
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+        image.texture_view_descriptor = Some(TextureViewDescriptor {
+            dimension: Some(TextureViewDimension::Cube),
+            ..default()
+        });
+        if let Some(old) = scene.cubemap.replace(images.add(image)) {
+            images.remove(&old);
+        }
+        // Re-insert so the lighting is generated from the new map.
+        *environment_on = false;
+    }
+
+    let environment = active && preview.environment && scene.cubemap.is_some();
+    if environment != *environment_on {
+        let mut camera = commands.entity(camera_entity);
+        match (&scene.cubemap, environment) {
+            (Some(cubemap), true) => {
+                camera.insert((
+                    Skybox {
+                        image: Some(cubemap.clone()),
+                        brightness: ENVIRONMENT_BRIGHTNESS,
+                        ..default()
+                    },
+                    GeneratedEnvironmentMapLight {
+                        environment_map: cubemap.clone(),
+                        intensity: ENVIRONMENT_BRIGHTNESS,
+                        ..default()
+                    },
+                ));
+            }
+            _ => {
+                camera.remove::<(Skybox, GeneratedEnvironmentMapLight)>();
+            }
+        }
+        // The environment is the only light.
+        for mut visibility in &mut lights {
+            *visibility = if environment {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            };
+        }
+        ambient.brightness = if environment { 0.0 } else { AMBIENT_BRIGHTNESS };
+        *environment_on = environment;
     }
 
     if let Some(upload) = preview.upload.take()
@@ -285,7 +383,15 @@ fn sync(
         };
     }
 
-    let (mesh, transform) = &mut *shape;
+    let (mesh, material, transform) = &mut *shape;
+    let wanted = if environment {
+        &scene.chrome
+    } else {
+        &scene.material
+    };
+    if material.0 != *wanted {
+        material.0 = wanted.clone();
+    }
     let index = Shape::ALL
         .iter()
         .position(|s| *s == preview.shape)

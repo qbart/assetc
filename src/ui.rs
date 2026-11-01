@@ -16,7 +16,7 @@ use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
 use crate::manifest::Kind;
-use crate::preview3d::{Orbit, Preview3d, Shape, Upload};
+use crate::preview3d::{CubemapUpload, Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
 use crate::theme::{
     self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHANNEL_B, CHANNEL_G, CHANNEL_R,
@@ -98,6 +98,9 @@ struct Inspected {
     channel_preview: Option<(Channels, egui::TextureHandle)>,
     /// Channels last sent to the 3D preview.
     uploaded_3d: Option<Channels>,
+    /// Environment map faces, kept to upload to the 3D preview.
+    cubemap: Option<Vec<Image>>,
+    uploaded_cubemap: bool,
 }
 
 /// Canvas view mode, see docs/features/canvas.md#view-bar.
@@ -244,6 +247,7 @@ impl InspectorTab {
             // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
                 s.location == Location::Output
+                    && s.path.is_file()
                     && s.path.extension().is_some_and(|ext| {
                         Kind::ALL
                             .iter()
@@ -322,11 +326,13 @@ fn shell(
     // In 3D the canvas is left transparent so the 3D camera's image shows through.
     preview3d.viewport = None;
     preview3d.dragging = false;
-    let show_3d = state.mode == ViewMode::ThreeD
-        && state
-            .inspected
-            .as_ref()
-            .is_some_and(|i| i.preview.is_some());
+    preview3d.environment = false;
+    let shown = Shown::of(state.inspected.as_ref());
+    let show_3d = match shown {
+        Shown::Image => state.mode == ViewMode::ThreeD,
+        Shown::Environment => true,
+        Shown::Other => false,
+    };
     let fill = if show_3d {
         egui::Color32::TRANSPARENT
     } else {
@@ -338,17 +344,20 @@ fn shell(
             let state = &mut *state;
             let full = ui.max_rect();
             let bar = Rect::from_min_size(full.min, vec2(full.width(), 36.0));
-            view_bar(ui, bar, &mut state.mode);
+            view_bar(ui, bar, &mut state.mode, shown);
             let rect = Rect::from_min_max(pos2(full.left(), bar.bottom()), full.max);
-            match state.mode {
-                ViewMode::TwoD => canvas(
+            match (shown, state.mode) {
+                (Shown::Environment, _) => {
+                    canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
+                }
+                (_, ViewMode::TwoD) => canvas(
                     ui,
                     rect,
                     state.inspected.as_mut(),
                     &mut state.view,
                     &mut state.canvas_options,
                 ),
-                ViewMode::ThreeD => canvas_3d(
+                (_, ViewMode::ThreeD) => canvas_3d(
                     ui,
                     rect,
                     state.inspected.as_mut(),
@@ -381,6 +390,7 @@ fn shell(
 
 fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selection) -> Inspected {
     let mut inspection = inspect::inspect(project, selection.location, &selection.path);
+    let cubemap = inspection.cubemap.take();
     let max_side = ctx.input(|i| i.max_texture_side) as u32;
     let pixels = inspection
         .preview
@@ -396,6 +406,8 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
         preview,
         channel_preview: None,
         uploaded_3d: None,
+        cubemap,
+        uploaded_cubemap: false,
     }
 }
 
@@ -733,8 +745,11 @@ fn tree(
                 } else {
                     (Icon::ChevronRight, Icon::Folder)
                 };
-                if tree_row(ui, depth, Some(chevron), icon, &node.name, false).clicked() {
+                let selected =
+                    selection.is_some_and(|s| s.location == location && s.path == node.path);
+                if tree_row(ui, depth, Some(chevron), icon, &node.name, selected).clicked() {
                     ui.data_mut(|d| d.insert_temp(id, !open));
+                    clicked = Some(node.path.clone());
                 }
                 if open {
                     clicked = tree(ui, children, depth + 1, location, selection).or(clicked);
@@ -891,7 +906,7 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
 }
 
 /// `View [2D | 3D]` across the top of the canvas, see docs/features/canvas.md#view-bar.
-fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode) {
+fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
     let painter = ui.painter_at(bar);
     painter.rect_filled(bar, 0.0, BG_PANEL);
     painter.hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, STROKE));
@@ -923,7 +938,19 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode) {
     for (i, (option, width)) in ViewMode::ALL.into_iter().zip(widths).enumerate() {
         let rect = Rect::from_min_size(pos2(x, group.top()), vec2(width, HEIGHT));
         x += width;
-        let response = ui.interact(rect, ui.id().with(("view_mode", i)), Sense::click());
+        // The mode only applies to images; an environment map is always 3D.
+        let enabled = shown == Shown::Image;
+        let active = match shown {
+            Shown::Image => *mode == option,
+            Shown::Environment => option == ViewMode::ThreeD,
+            Shown::Other => false,
+        };
+        let sense = if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let response = ui.interact(rect, ui.id().with(("view_mode", i)), sense);
         let outer = |edge: bool| if edge { RADIUS } else { 0 };
         let radius = egui::CornerRadius {
             nw: outer(i == 0),
@@ -931,9 +958,11 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode) {
             ne: outer(i == last),
             se: outer(i == last),
         };
-        let color = if *mode == option {
+        let color = if active {
             painter.rect_filled(rect, radius, ACCENT);
             BG_BAR
+        } else if !enabled {
+            TEXT_WEAK.gamma_multiply(0.5)
         } else if response.hovered() {
             painter.rect_filled(rect, radius, BG_HEADER);
             TEXT
@@ -947,8 +976,26 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode) {
             font.clone(),
             color,
         );
-        if response.clicked() {
+        if enabled && response.clicked() {
             *mode = option;
+        }
+    }
+}
+
+/// What the canvas shows for the selection.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shown {
+    Image,
+    Environment,
+    Other,
+}
+
+impl Shown {
+    fn of(inspected: Option<&Inspected>) -> Self {
+        match inspected {
+            Some(i) if i.cubemap.is_some() => Self::Environment,
+            Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
+            _ => Self::Other,
         }
     }
 }
@@ -962,9 +1009,11 @@ fn shown_image<'a>(
     let message = match inspected {
         None => "Select a file to preview".to_owned(),
         Some(i) if i.inspection.missing => format!("{} no longer exists", i.inspection.name),
-        Some(i) if i.preview.is_none() || i.pixels.is_none() => {
-            i.inspection.note.unwrap_or("No preview").to_owned()
-        }
+        Some(i) if i.preview.is_none() || i.pixels.is_none() => i
+            .inspection
+            .note
+            .clone()
+            .unwrap_or_else(|| "No preview".into()),
         Some(i) => return Some(i),
     };
     ui.painter().text(
@@ -1180,6 +1229,57 @@ fn canvas_3d(
         });
         inspected.uploaded_3d = Some(options.channels);
     }
+    view_3d(ui, rect, preview);
+
+    let shapes = shape_tools(preview.shape);
+    let choices = channel_choices(&inspected.inspection);
+    let channels = channel_tools(&choices, options.channels);
+    if let Some((group, button)) = toolbar(ui, rect, &[&shapes, &channels]) {
+        match group {
+            0 => preview.shape = Shape::ALL[button],
+            _ => {
+                let options = all_options.entry(inspected.path.clone()).or_default();
+                options.channels = choices[button].0;
+            }
+        }
+        ui.ctx().request_repaint();
+    }
+}
+
+/// 3D canvas for an environment map: the chosen shape lit by it, with it as the background.
+/// See docs/features/canvas.md#environment-maps.
+fn canvas_environment(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: Option<&mut Inspected>,
+    preview: &mut Preview3d,
+) {
+    let Some(inspected) = inspected else {
+        return;
+    };
+    let Some(faces) = &inspected.cubemap else {
+        return;
+    };
+    if !inspected.uploaded_cubemap {
+        preview.cubemap = Some(CubemapUpload {
+            size: faces[0].width,
+            pixels: faces
+                .iter()
+                .flat_map(|f| f.pixels.iter().copied())
+                .collect(),
+        });
+        inspected.uploaded_cubemap = true;
+    }
+    preview.environment = true;
+    view_3d(ui, rect, preview);
+    if let Some((_, button)) = toolbar(ui, rect, &[&shape_tools(preview.shape)]) {
+        preview.shape = Shape::ALL[button];
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Shows the 3D preview in `rect` and handles orbit input; see docs/features/canvas.md#3d-controls.
+fn view_3d(ui: &mut Ui, rect: Rect, preview: &mut Preview3d) {
     let ppp = ui.ctx().pixels_per_point();
     let min = (rect.min.to_vec2() * ppp).round();
     let size = (rect.size() * ppp).round().max(Vec2::splat(1.0));
@@ -1205,8 +1305,10 @@ fn canvas_3d(
             preview.orbit.dolly(factor);
         }
     }
+}
 
-    let shapes: Vec<Tool> = Shape::ALL
+fn shape_tools(current: Shape) -> Vec<Tool> {
+    Shape::ALL
         .iter()
         .map(|&shape| Tool {
             glyph: Glyph::Icon(match shape {
@@ -1216,22 +1318,10 @@ fn canvas_3d(
                 Shape::Torus => Icon::Torus,
             }),
             name: shape.name().into(),
-            on: preview.shape == shape,
+            on: current == shape,
             enabled: true,
         })
-        .collect();
-    let choices = channel_choices(&inspected.inspection);
-    let channels = channel_tools(&choices, options.channels);
-    if let Some((group, button)) = toolbar(ui, rect, &[&shapes, &channels]) {
-        match group {
-            0 => preview.shape = Shape::ALL[button],
-            _ => {
-                let options = all_options.entry(inspected.path.clone()).or_default();
-                options.channels = choices[button].0;
-            }
-        }
-        ui.ctx().request_repaint();
-    }
+        .collect()
 }
 
 /// Vertical wheel movement this frame in notches (lines); smooth scrolling counts 50 points
