@@ -1515,6 +1515,7 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
 
 /// A tree row; while `renaming`, its name is a text field. Returns the row response and,
 /// when the rename ends this frame, whether to commit it.
+#[allow(clippy::too_many_arguments)]
 fn tree_row(
     ui: &mut Ui,
     depth: usize,
