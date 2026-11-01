@@ -29,8 +29,9 @@ section (collapsible):
 - **Width**, **Height** (integer fields, 1–4096), **Cell width** (1–Width)
   and **Cell height** (1–Height): the image and the size of each gradient's
   cell, drag or type.
-- **Layout**: dropdown "Rows (left to right, then down)" / "Columns (top to
-  bottom, then right)": the order the gradients fill the cells in.
+- **Layout**: dropdown **Rows** / **Columns**, the order the gradients fill
+  the cells in; each option's tooltip says it ("Left to right, then down" /
+  "Top to bottom, then right").
 - A weak line `<n> of <m> cells used (<columns> × <rows>)`.
 
 A size change that would leave too few cells for the gradients is undone, so
