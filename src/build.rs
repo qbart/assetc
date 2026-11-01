@@ -497,7 +497,7 @@ mod tests {
         fs::write(input.join("clouds.noise"), "size = 16\n").unwrap();
         fs::write(
             input.join("rock/rock.h.noise"),
-            "size = 8\ntype = \"worley\"\n",
+            "size = 8\ntype = \"noise/voronoi\"\n",
         )
         .unwrap();
         fs::write(input.join("bad.noise"), "size = 0\n").unwrap();
