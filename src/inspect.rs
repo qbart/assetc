@@ -44,6 +44,8 @@ pub struct Inspection {
     pub mips: Vec<Image>,
     /// A compiled mesh's triangles by meshlet, for the canvas.
     pub compiled_mesh: Option<crate::amesh::Preview>,
+    /// Its material slots, as found in the output (`None` when missing or unreadable).
+    pub compiled_materials: Vec<Option<MaterialPreview>>,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
 }
@@ -178,6 +180,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             .map(|(rows, preview)| {
                 out.rows.extend(rows);
                 asset_rows(&rel, &mut out);
+                out.compiled_materials = compiled_materials(project, &preview.materials);
                 out.compiled_mesh = Some(preview);
             }),
         Kind::CompiledAnimation => fs::read(file)
@@ -378,6 +381,49 @@ fn model_rows(
     out.rows.push(("Asset path", mesh.clone()));
     output_row(project, &mesh, "", out);
     Ok(())
+}
+
+/// A compiled material with its textures, for the compiled mesh preview.
+#[derive(Debug, Clone)]
+pub struct MaterialPreview {
+    pub material: material::Material,
+    pub base_color: Option<Image>,
+    pub orm: Option<Image>,
+    pub normal: Option<Image>,
+    pub emissive: Option<Image>,
+}
+
+/// The `.amat` (and its textures) of each asset ID, through the output's manifest; see
+/// docs/features/models.md#compiled-mesh-preview.
+fn compiled_materials(project: &Project, ids: &[u64]) -> Vec<Option<MaterialPreview>> {
+    let Some(output) = project.output_dir() else {
+        return vec![None; ids.len()];
+    };
+    let entries = fs::read(output.join(manifest::FILE_NAME))
+        .ok()
+        .and_then(|bytes| manifest::decode(&bytes).ok())
+        .unwrap_or_default();
+    let file = |id: u64| {
+        let entry = entries.iter().find(|e| e.id == id && id != 0)?;
+        fs::read(output.join(&entry.path)).ok()
+    };
+    let texture = |id: u64| {
+        let level = ktx2::read(&file(id)?).ok()?.level0?;
+        Some(level)
+    };
+    ids.iter()
+        .map(|&id| {
+            let material = material::decode(&file(id)?).ok()?;
+            let t = material.textures;
+            Some(MaterialPreview {
+                base_color: texture(t.base_color),
+                orm: texture(t.orm),
+                normal: texture(t.normal),
+                emissive: texture(t.emissive),
+                material,
+            })
+        })
+        .collect()
 }
 
 /// The meshlet limits a model builds with: `assetc.toml` `[meshes]` and its `.amod`.

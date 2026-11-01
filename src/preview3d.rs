@@ -41,7 +41,9 @@ impl Plugin for Preview3dPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    (sync, sync_model).before(TransformSystems::Propagate),
+                    (sync_compiled, sync, sync_model)
+                        .chain()
+                        .before(TransformSystems::Propagate),
                     fit_model.after(TransformSystems::Propagate),
                 ),
             );
@@ -154,12 +156,79 @@ pub struct Preview3d {
     pub model_status: ModelStatus,
     /// The model's animation to play, by index in the file; `None` is the rest pose.
     pub animation: Option<usize>,
-    /// A compiled mesh to show instead of the shape, taken by [`sync`].
-    pub compiled: Option<crate::amesh::Preview>,
+    /// A compiled mesh to show instead of the shape, taken by [`sync_compiled`].
+    pub compiled: Option<CompiledUpload>,
     /// Show the last compiled mesh uploaded.
     pub compiled_shown: bool,
-    /// Color the compiled mesh by meshlet rather than plain gray.
-    pub meshlet_colors: bool,
+    pub display: MeshDisplay,
+}
+
+/// A compiled mesh and its material slots, see docs/features/models.md#compiled-mesh-preview.
+pub struct CompiledUpload {
+    /// The level of detail to show.
+    pub level: crate::amesh::Level,
+    /// Bounds of the full mesh (min, max), so every level is fitted alike.
+    pub bounds: [Vec3; 2],
+    pub materials: Vec<Option<crate::inspect::MaterialPreview>>,
+}
+
+/// How a compiled mesh is drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum MeshDisplay {
+    #[default]
+    Material,
+    Wireframe,
+    Shaded,
+    Meshlets,
+    MaterialId,
+    Submeshes,
+}
+
+impl MeshDisplay {
+    pub const ALL: [Self; 6] = [
+        Self::Material,
+        Self::Wireframe,
+        Self::Shaded,
+        Self::Meshlets,
+        Self::MaterialId,
+        Self::Submeshes,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Material => "Material",
+            Self::Wireframe => "Wireframe",
+            Self::Shaded => "Shaded",
+            Self::Meshlets => "Meshlets",
+            Self::MaterialId => "Material ID",
+            Self::Submeshes => "Submeshes",
+        }
+    }
+
+    /// Index of this mode's vertex-colored mesh, for the modes that use one.
+    fn colored(self) -> Option<usize> {
+        match self {
+            Self::Shaded => Some(0),
+            Self::Meshlets => Some(1),
+            Self::MaterialId => Some(2),
+            Self::Submeshes => Some(3),
+            Self::Material | Self::Wireframe => None,
+        }
+    }
+}
+
+#[derive(Component)]
+struct CompiledPart;
+
+/// A compiled mesh on the GPU: vertex-colored meshes, the wireframe, and one entity per
+/// material slot for the Material mode, with every asset they own.
+struct CompiledScene {
+    colored: [Handle<Mesh>; 4],
+    wire: Handle<Mesh>,
+    parts: Vec<Entity>,
+    meshes: Vec<Handle<Mesh>>,
+    materials: Vec<Handle<StandardMaterial>>,
+    images: Vec<Handle<Image>>,
 }
 
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -202,10 +271,11 @@ struct Scene {
     unlit: Handle<StandardMaterial>,
     /// Untransformed and LUT color cubes.
     color_cube: Option<(Handle<Mesh>, Handle<Mesh>)>,
-    /// A compiled mesh: gray, and colored by meshlet.
-    compiled: Option<[Handle<Mesh>; 2]>,
+    compiled: Option<CompiledScene>,
     /// Lit, showing vertex colors.
     vertex_colors: Handle<StandardMaterial>,
+    /// Unlit lines for wireframes.
+    wire: Handle<StandardMaterial>,
     cubemap: Option<Handle<Image>>,
 }
 
@@ -337,6 +407,12 @@ fn setup(
         perceptual_roughness: 0.8,
         ..default()
     });
+    let [tr, tg, tb, _] = crate::theme::TEXT.to_array();
+    let wire = materials.add(StandardMaterial {
+        base_color: Color::srgb_u8(tr, tg, tb),
+        unlit: true,
+        ..default()
+    });
 
     commands
         .spawn((
@@ -379,6 +455,7 @@ fn setup(
         color_cube: None,
         compiled: None,
         vertex_colors,
+        wire,
         cubemap: None,
     });
 }
@@ -517,21 +594,14 @@ fn sync(
         meshes.remove(&old.1);
     }
 
-    if let Some(compiled) = preview.compiled.take() {
-        let [gray, colored] = compiled_meshes(compiled);
-        if let Some(old) = scene
-            .compiled
-            .replace([meshes.add(gray), meshes.add(colored)])
-        {
-            for handle in old {
-                meshes.remove(&handle);
-            }
-        }
-    }
-
+    let compiled = scene
+        .compiled
+        .as_ref()
+        .filter(|_| preview.compiled_shown && !environment);
     let (mesh, material, transform, visibility) = &mut *shape;
-    // A model replaces the shape.
-    let wanted_visibility = if preview.model.is_some() {
+    // A model replaces the shape, as do a compiled mesh's material parts.
+    let parts_shown = compiled.is_some() && preview.display == MeshDisplay::Material;
+    let wanted_visibility = if preview.model.is_some() || parts_shown {
         Visibility::Hidden
     } else {
         Visibility::Inherited
@@ -545,15 +615,13 @@ fn sync(
         preview.shape
     };
     let index = Shape::ALL.iter().position(|s| *s == current).unwrap_or(0);
-    let compiled = scene
-        .compiled
-        .as_ref()
-        .filter(|_| preview.compiled_shown && !environment);
     let (wanted_mesh, wanted_material) = match &scene.color_cube {
-        _ if let Some(both) = compiled => (
-            &both[usize::from(preview.meshlet_colors)],
-            &scene.vertex_colors,
-        ),
+        _ if let Some(c) = compiled
+            && let Some(i) = preview.display.colored() =>
+        {
+            (&c.colored[i], &scene.vertex_colors)
+        }
+        _ if let Some(c) = compiled => (&c.wire, &scene.wire),
         Some((before, after)) if preview.colors => {
             let cube = if preview.colors_before { before } else { after };
             (cube, &scene.unlit)
@@ -575,46 +643,241 @@ fn sync(
     }
 }
 
-/// Gray and per-meshlet colored meshes of a compiled mesh, centered and scaled like a model;
-/// see docs/features/models.md#compiled-mesh-preview.
-fn compiled_meshes(preview: crate::amesh::Preview) -> [Mesh; 2] {
-    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
-    for p in &preview.positions {
-        (min, max) = (min.min(Vec3::from(*p)), max.max(Vec3::from(*p)));
+/// Uploads a compiled mesh and shows its material parts in the Material mode; see
+/// docs/features/models.md#compiled-mesh-preview.
+fn sync_compiled(
+    mut commands: Commands,
+    mut preview: ResMut<Preview3d>,
+    mut scene: ResMut<Scene>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut parts: Query<&mut Visibility, With<CompiledPart>>,
+) {
+    if let Some(upload) = preview.compiled.take() {
+        if let Some(old) = scene.compiled.take() {
+            for entity in old.parts {
+                commands.entity(entity).despawn();
+            }
+            for handle in old.meshes {
+                meshes.remove(&handle);
+            }
+            for handle in old.materials {
+                materials.remove(&handle);
+            }
+            for handle in old.images {
+                images.remove(&handle);
+            }
+        }
+        scene.compiled = Some(build_compiled(
+            upload,
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &mut images,
+        ));
     }
+    let shown = preview.viewport.is_some()
+        && preview.compiled_shown
+        && !preview.environment
+        && preview.display == MeshDisplay::Material;
+    let wanted = if shown {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut visibility in &mut parts {
+        if *visibility != wanted {
+            *visibility = wanted;
+        }
+    }
+}
+
+/// Color of index `i` in the ID modes: golden-ratio hues.
+fn id_color(i: u32) -> [f32; 4] {
+    let hue = (i as f32 * 0.618_034).fract() * 360.0;
+    Color::hsv(hue, 0.65, 0.9).to_linear().to_f32_array()
+}
+
+fn bevy_image(image: &crate::texture::Image, srgb: bool) -> Image {
+    let format = if srgb {
+        TextureFormat::Rgba8UnormSrgb
+    } else {
+        TextureFormat::Rgba8Unorm
+    };
+    let mut out = Image::new(
+        Extent3d {
+            width: image.width,
+            height: image.height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        image.pixels.clone(),
+        format,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    out.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        ..default()
+    });
+    out
+}
+
+fn build_compiled(
+    upload: CompiledUpload,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    images: &mut Assets<Image>,
+) -> CompiledScene {
+    let p = &upload.level;
+    // Centered and scaled like a model.
+    let [min, max] = upload.bounds;
     let size = (max - min).max_element();
     let scale = if size > 0.0 { MODEL_SIZE / size } else { 1.0 };
     let center = (min + max) / 2.0;
-    let positions: Vec<[f32; 3]> = preview
+    let positions: Vec<[f32; 3]> = p
         .positions
         .iter()
-        .map(|p| ((Vec3::from(*p) - center) * scale).to_array())
+        .map(|v| ((Vec3::from(*v) - center) * scale).to_array())
         .collect();
     let gray = Color::srgb(0.8, 0.8, 0.8).to_linear().to_f32_array();
-    let colors = |by_meshlet: bool| -> Vec<[f32; 4]> {
-        preview
-            .meshlets
-            .iter()
-            .flat_map(|&m| {
-                let color = if by_meshlet {
-                    let hue = (m as f32 * 0.618_034).fract() * 360.0;
-                    Color::hsv(hue, 0.65, 0.9).to_linear().to_f32_array()
-                } else {
-                    gray
-                };
-                [color; 3]
-            })
-            .collect()
+
+    // Shaded, Meshlets, Material ID, Submeshes.
+    let per_triangle = |color: &dyn Fn(usize) -> [f32; 4]| -> Vec<[f32; 4]> {
+        (0..p.triangles()).flat_map(|t| [color(t); 3]).collect()
     };
-    [false, true].map(|by_meshlet| {
-        Mesh::new(
+    let colors = [
+        per_triangle(&|_| gray),
+        // Reduced levels have no meshlets.
+        per_triangle(&|t| p.meshlets.get(t).map_or(gray, |&m| id_color(m))),
+        per_triangle(&|t| p.material_slots[t].map_or(gray, id_color)),
+        per_triangle(&|t| id_color(p.submeshes[t])),
+    ];
+    let mut owned_meshes = Vec::new();
+    let colored = colors.map(|colors| {
+        let mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
         )
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, preview.normals.clone())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors(by_meshlet))
-    })
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, p.normals.clone())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        let handle = meshes.add(mesh);
+        owned_meshes.push(handle.clone());
+        handle
+    });
+
+    // Every triangle edge.
+    let lines: Vec<[f32; 3]> = positions
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .flat_map(|[a, b, c]| [*a, *b, *b, *c, *c, *a])
+        .collect();
+    let wire = meshes.add(
+        Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, lines),
+    );
+    owned_meshes.push(wire.clone());
+
+    // Material mode: one part per material slot (and one for triangles without a material).
+    let mut slots: Vec<Option<u32>> = p.material_slots.clone();
+    slots.sort();
+    slots.dedup();
+    let (mut parts, mut owned_materials, mut owned_images) = (Vec::new(), Vec::new(), Vec::new());
+    for slot in slots {
+        let corners: Vec<usize> = (0..p.material_slots.len())
+            .filter(|&t| p.material_slots[t] == slot)
+            .flat_map(|t| [t * 3, t * 3 + 1, t * 3 + 2])
+            .collect();
+        let pick = |values: &[[f32; 3]]| corners.iter().map(|&c| values[c]).collect::<Vec<_>>();
+        let mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pick(&positions))
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, pick(&p.normals))
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_UV_0,
+            corners.iter().map(|&c| p.uvs[c]).collect::<Vec<_>>(),
+        )
+        .with_inserted_attribute(
+            Mesh::ATTRIBUTE_TANGENT,
+            corners.iter().map(|&c| p.tangents[c]).collect::<Vec<_>>(),
+        );
+        let found = slot.and_then(|s| upload.materials.get(s as usize).cloned().flatten());
+        let mut texture = |image: &Option<crate::texture::Image>, srgb: bool| {
+            image.as_ref().map(|i| {
+                let handle = images.add(bevy_image(i, srgb));
+                owned_images.push(handle.clone());
+                handle
+            })
+        };
+        let material = match (slot, &found) {
+            (None, _) => StandardMaterial {
+                base_color: Color::srgb(0.8, 0.8, 0.8),
+                perceptual_roughness: 0.8,
+                ..default()
+            },
+            (Some(_), None) => StandardMaterial {
+                perceptual_roughness: 1.0,
+                ..default()
+            },
+            (Some(_), Some(m)) => {
+                let a = &m.material;
+                let orm = texture(&m.orm, false);
+                let [r, g, b, alpha] = a.base_color;
+                let [er, eg, eb] = a.emissive.map(|c| c * a.emissive_strength);
+                StandardMaterial {
+                    base_color: Color::linear_rgba(r, g, b, alpha),
+                    base_color_texture: texture(&m.base_color, true),
+                    metallic: a.metallic,
+                    perceptual_roughness: a.roughness,
+                    metallic_roughness_texture: orm.clone(),
+                    occlusion_texture: orm,
+                    normal_map_texture: texture(&m.normal, false),
+                    emissive: LinearRgba::rgb(er, eg, eb),
+                    emissive_texture: texture(&m.emissive, true),
+                    alpha_mode: match a.alpha_mode {
+                        crate::material::AlphaMode::Opaque => AlphaMode::Opaque,
+                        crate::material::AlphaMode::Mask => AlphaMode::Mask(a.alpha_cutoff),
+                        crate::material::AlphaMode::Blend => AlphaMode::Blend,
+                    },
+                    double_sided: a.double_sided,
+                    cull_mode: (!a.double_sided)
+                        .then_some(bevy::render::render_resource::Face::Back),
+                    ..default()
+                }
+            }
+        };
+        let mesh = meshes.add(mesh);
+        let material = materials.add(material);
+        owned_meshes.push(mesh.clone());
+        owned_materials.push(material.clone());
+        parts.push(
+            commands
+                .spawn((
+                    CompiledPart,
+                    Mesh3d(mesh),
+                    MeshMaterial3d(material),
+                    Transform::default(),
+                    Visibility::Hidden,
+                ))
+                .id(),
+        );
+    }
+    CompiledScene {
+        colored,
+        wire,
+        parts,
+        meshes: owned_meshes,
+        materials: owned_materials,
+        images: owned_images,
+    }
 }
 
 /// The model being shown, see docs/features/models.md#preview.

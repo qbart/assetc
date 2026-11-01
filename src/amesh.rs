@@ -416,51 +416,164 @@ fn octahedral_decode([u, v]: [i16; 2]) -> [f32; 3] {
     [x / length, y / length, z / length]
 }
 
-/// A compiled mesh as triangles for the canvas: three corners per triangle and the meshlet
-/// each triangle belongs to; see docs/features/models.md#compiled-mesh-preview.
+/// One level of detail of a compiled mesh as triangles: three corners per triangle, and per
+/// triangle its meshlet (LOD 0 only), submesh and material slot; see
+/// docs/features/models.md#compiled-mesh-preview.
 #[derive(Clone, Debug, Default)]
-pub struct Preview {
+pub struct Level {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
-    /// One per triangle.
+    pub uvs: Vec<[f32; 2]>,
+    /// `w` is the handedness.
+    pub tangents: Vec<[f32; 4]>,
+    /// Empty for reduced levels.
     pub meshlets: Vec<u32>,
+    pub submeshes: Vec<u32>,
+    pub material_slots: Vec<Option<u32>>,
+    /// Every submesh reused the level before (it made no progress).
+    pub same_as_previous: bool,
+}
+
+impl Level {
+    pub fn triangles(&self) -> usize {
+        self.submeshes.len()
+    }
+}
+
+/// A compiled mesh for the canvas: LOD 0 (from its meshlets) and each reduced level.
+#[derive(Clone, Debug, Default)]
+pub struct Preview {
+    pub levels: Vec<Level>,
+    /// Asset IDs of the material slots (`MATERIAL`).
+    pub materials: Vec<u64>,
 }
 
 pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
     let reader = chunks::Reader::parse(bytes, FORMAT)?;
+    let desc = reader.require("DESC")?;
     let vertices = reader.require("VERTICES")?;
+    let indices = reader.require("INDICES")?;
     let meshlets = reader.require("MESHLETS")?;
     let meshlet_vertices = reader.require("MLVERTS")?;
     let triangles = reader.require("MLTRIS")?;
-    let vertex = |i: usize| -> Option<([f32; 3], [f32; 3])> {
+    let submeshes = reader.require("SUBMESH")?;
+    let bad = || "mesh data out of range".to_owned();
+    let wide = *desc.get(22).ok_or_else(bad)? == 4;
+    let index = |i: usize| -> Option<u32> {
+        if wide {
+            chunks::u32_at(indices, i, 4, 0)
+        } else {
+            let raw = indices.get(i * 2..i * 2 + 2)?;
+            Some(u32::from(u16::from_le_bytes(raw.try_into().ok()?)))
+        }
+    };
+    let corner = |level: &mut Level, i: usize| -> Option<()> {
         let base = i.checked_mul(28)?;
         let raw = vertices.get(base..base + 28)?;
         let f = |at: usize| f32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
         let s = |at: usize| i16::from_le_bytes(raw[at..at + 2].try_into().unwrap());
-        Some(([f(0), f(4), f(8)], octahedral_decode([s(12), s(14)])))
+        let [tx, ty, tz] = octahedral_decode([s(16) & !1, s(18)]);
+        let w = if s(16) & 1 == 1 { -1.0 } else { 1.0 };
+        level.positions.push([f(0), f(4), f(8)]);
+        level.normals.push(octahedral_decode([s(12), s(14)]));
+        level.uvs.push([f(20), f(24)]);
+        level.tangents.push([tx, ty, tz, w]);
+        Some(())
     };
-    let bad = || "meshlet data out of range".to_owned();
-    let mut out = Preview::default();
-    for m in 0..meshlets.len() / 16 {
-        let field = |at| chunks::u32_at(meshlets, m, 16, at).map(|v| v as usize);
-        let (vertex_offset, triangle_offset, triangle_count) = (
-            field(0).ok_or_else(bad)?,
-            field(8).ok_or_else(bad)?,
-            field(12).ok_or_else(bad)?,
-        );
-        for t in triangle_offset..triangle_offset + triangle_count {
-            let corners = triangles.get(t * 3..t * 3 + 3).ok_or_else(bad)?;
-            for &local in corners {
-                let global = chunks::u32_at(meshlet_vertices, vertex_offset + local as usize, 4, 0)
-                    .ok_or_else(bad)?;
-                let (position, normal) = vertex(global as usize).ok_or_else(bad)?;
-                out.positions.push(position);
-                out.normals.push(normal);
+
+    // Submesh ranges: (first index, index count, first meshlet, meshlet count, material).
+    let submesh_count = submeshes.len() / 64;
+    let mut ranges = Vec::with_capacity(submesh_count);
+    for s in 0..submesh_count {
+        let field = |at| chunks::u32_at(submeshes, s, 64, at).ok_or_else(bad);
+        let material = field(16)?;
+        ranges.push((
+            field(0)?,
+            field(4)?,
+            field(8)?,
+            field(12)?,
+            (material != NO_MATERIAL).then_some(material),
+        ));
+    }
+
+    // LOD 0, meshlet by meshlet.
+    let mut full = Level::default();
+    for (s, &(_, _, first_meshlet, meshlet_count, material)) in ranges.iter().enumerate() {
+        for m in first_meshlet as usize..(first_meshlet + meshlet_count) as usize {
+            let field = |at| {
+                chunks::u32_at(meshlets, m, 16, at)
+                    .map(|v| v as usize)
+                    .ok_or_else(bad)
+            };
+            let (vertex_offset, triangle_offset, triangle_count) =
+                (field(0)?, field(8)?, field(12)?);
+            for t in triangle_offset..triangle_offset + triangle_count {
+                for &local in triangles.get(t * 3..t * 3 + 3).ok_or_else(bad)? {
+                    let global =
+                        chunks::u32_at(meshlet_vertices, vertex_offset + local as usize, 4, 0)
+                            .ok_or_else(bad)?;
+                    corner(&mut full, global as usize).ok_or_else(bad)?;
+                }
+                full.meshlets.push(m as u32);
+                full.submeshes.push(s as u32);
+                full.material_slots.push(material);
             }
-            out.meshlets.push(m as u32);
         }
     }
-    Ok(out)
+    let mut levels = vec![full];
+
+    // Reduced levels; a submesh without progress reuses its previous level.
+    if let (Some(lod_indices), Some(table)) = (reader.chunk("LODIDX"), reader.chunk("LODTABLE")) {
+        let lod_count = chunks::u32_at(table, 0, 8, 0).ok_or_else(bad)? as usize;
+        let range = |s: usize, k: usize| {
+            let row = 1 + s * lod_count + k;
+            Some((
+                chunks::u32_at(table, row, 8, 0)?,
+                chunks::u32_at(table, row, 8, 4)?,
+            ))
+        };
+        for k in 0..lod_count {
+            let mut level = Level {
+                same_as_previous: true,
+                ..Default::default()
+            };
+            for (s, &(first_index, index_count, _, _, material)) in ranges.iter().enumerate() {
+                // The nearest level at or below this one that has indices.
+                let reduced = (0..=k)
+                    .rev()
+                    .find_map(|j| range(s, j).filter(|r| r.1 > 0).map(|r| (j, r)));
+                level.same_as_previous &= reduced.is_none_or(|(j, _)| j != k);
+                let corners: Vec<u32> = match reduced {
+                    Some((_, (first, count))) => (first..first + count)
+                        .map(|i| chunks::u32_at(lod_indices, i as usize, 4, 0))
+                        .collect::<Option<_>>()
+                        .ok_or_else(bad)?,
+                    None => (first_index..first_index + index_count)
+                        .map(|i| index(i as usize))
+                        .collect::<Option<_>>()
+                        .ok_or_else(bad)?,
+                };
+                for triangle in corners.as_chunks::<3>().0 {
+                    for &i in triangle {
+                        corner(&mut level, i as usize).ok_or_else(bad)?;
+                    }
+                    level.submeshes.push(s as u32);
+                    level.material_slots.push(material);
+                }
+            }
+            levels.push(level);
+        }
+    }
+    Ok(Preview {
+        levels,
+        materials: reader
+            .require("MATERIAL")?
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|id| u64::from_le_bytes(*id))
+            .collect(),
+    })
 }
 
 /// Inspector rows of an `.amesh` file; see docs/features/models.md#inspector.
@@ -550,16 +663,35 @@ mod tests {
 
     #[test]
     fn previews_meshlet_triangles() {
-        let (bytes, summary) = encode(&[grid(16)], &[], None, true, MeshletLimits::default());
+        let mut second = grid(2);
+        second.material = None;
+        let (bytes, summary) = encode(
+            &[grid(16), second],
+            &[7],
+            None,
+            true,
+            MeshletLimits::default(),
+        );
         let preview = preview(&bytes).unwrap();
-        assert_eq!(preview.meshlets.len(), summary.triangles);
-        assert_eq!(preview.positions.len(), summary.triangles * 3);
+        assert_eq!(preview.materials, [7]);
+        let full = &preview.levels[0];
+        assert_eq!(full.triangles(), summary.triangles);
+        assert_eq!(full.positions.len(), summary.triangles * 3);
         assert_eq!(
-            *preview.meshlets.last().unwrap() as usize,
+            *full.meshlets.last().unwrap() as usize,
             summary.meshlets - 1
         );
-        // Normals decode back to +Z.
-        assert!(preview.normals.iter().all(|n| (n[2] - 1.0).abs() < 1e-3));
+        assert_eq!(full.submeshes[0], 0);
+        assert_eq!(*full.submeshes.last().unwrap(), 1);
+        assert_eq!(full.material_slots[0], Some(0));
+        assert_eq!(*full.material_slots.last().unwrap(), None);
+        // Normals, tangents and their handedness decode back.
+        assert!(full.normals.iter().all(|n| (n[2] - 1.0).abs() < 1e-3));
+        assert!(
+            full.tangents
+                .iter()
+                .all(|t| (t[0] - 1.0).abs() < 1e-3 && t[3] == 1.0)
+        );
         for n in [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.6, -0.8]] {
             let back = octahedral_decode(octahedral(n));
             assert!(
@@ -567,6 +699,15 @@ mod tests {
                 "{n:?} {back:?}"
             );
         }
+
+        // Two reduced levels, smaller, without meshlets.
+        assert_eq!(preview.levels.len(), 3);
+        let lod1 = &preview.levels[1];
+        assert!(lod1.triangles() < full.triangles());
+        assert!(lod1.meshlets.is_empty());
+        assert!(!lod1.same_as_previous);
+        // The small grid's submesh is still there in every level.
+        assert!(preview.levels.iter().all(|l| l.submeshes.contains(&1)));
     }
 
     #[test]

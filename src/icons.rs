@@ -7,6 +7,7 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 pub enum Icon {
     Aperture,
     Box,
+    BringToFront,
     Check,
     ChevronDown,
     ChevronRight,
@@ -28,6 +29,7 @@ pub enum Icon {
     ImagePlay,
     Images,
     Info,
+    Layers,
     Loader,
     Palette,
     Plus,
@@ -38,14 +40,19 @@ pub enum Icon {
     SwatchBook,
     Torus,
     Trash2,
+    Triangle,
     Type,
     Wrench,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 35] = [
+const SVGS: [(&str, &str); 38] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
+    (
+        "bring-to-front",
+        include_str!("../assets/icons/bring-to-front.svg"),
+    ),
     ("check", include_str!("../assets/icons/check.svg")),
     (
         "chevron-down",
@@ -85,6 +92,7 @@ const SVGS: [(&str, &str); 35] = [
     ("image-play", include_str!("../assets/icons/image-play.svg")),
     ("images", include_str!("../assets/icons/images.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
+    ("layers", include_str!("../assets/icons/layers.svg")),
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
@@ -101,6 +109,7 @@ const SVGS: [(&str, &str); 35] = [
     ),
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
+    ("triangle", include_str!("../assets/icons/triangle.svg")),
     ("type", include_str!("../assets/icons/type.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
 ];

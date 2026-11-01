@@ -26,7 +26,9 @@ use crate::lut::Lut;
 use crate::manifest::Kind;
 use crate::model;
 use crate::noise::{GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Value};
-use crate::preview3d::{CubemapUpload, ModelStatus, Orbit, Preview3d, Shape, Upload};
+use crate::preview3d::{
+    CompiledUpload, CubemapUpload, MeshDisplay, ModelStatus, Orbit, Preview3d, Shape, Upload,
+};
 use crate::texture::Image;
 use crate::theme::{
     self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHANNEL_B, CHANNEL_G, CHANNEL_R,
@@ -77,8 +79,10 @@ struct UiState {
     animations: HashMap<PathBuf, Option<usize>>,
     /// Mip level shown for each compiled texture, by path.
     mip_levels: HashMap<PathBuf, usize>,
-    /// Compiled meshes are colored by meshlet (else gray).
-    meshlet_colors: bool,
+    /// How compiled meshes are drawn.
+    mesh_display: MeshDisplay,
+    /// Level of detail shown for each compiled mesh, by path.
+    lod_levels: HashMap<PathBuf, usize>,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -142,9 +146,10 @@ struct Inspected {
     uploaded_color_cube: bool,
     /// A glTF model's input-relative path and this inspection's generation, for the 3D view.
     model: Option<(PathBuf, u64)>,
-    /// A compiled mesh's triangles, and whether the 3D view has them.
+    /// A compiled mesh's levels and material slots, and the level the 3D view has.
     compiled_mesh: Option<crate::amesh::Preview>,
-    uploaded_compiled_mesh: bool,
+    compiled_materials: Vec<Option<inspect::MaterialPreview>>,
+    uploaded_lod: Option<usize>,
 }
 
 /// Before / after textures of the LUT compare view for one source image.
@@ -302,7 +307,8 @@ impl Default for UiState {
             canvas_options: HashMap::new(),
             animations: HashMap::new(),
             mip_levels: HashMap::new(),
-            meshlet_colors: true,
+            mesh_display: MeshDisplay::default(),
+            lod_levels: HashMap::new(),
         }
     }
 }
@@ -339,17 +345,19 @@ enum InspectorTab {
     Gradients,
     Animations,
     Mipmaps,
+    Lods,
     Assets,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 7] = [
+    const ALL: [Self; 8] = [
         Self::Info,
         Self::Parameters,
         Self::Modifiers,
         Self::Gradients,
         Self::Animations,
         Self::Mipmaps,
+        Self::Lods,
         Self::Assets,
     ];
 
@@ -361,6 +369,7 @@ impl InspectorTab {
             Self::Gradients => Icon::Palette,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
+            Self::Lods => Icon::BringToFront,
             Self::Assets => Icon::Files,
         }
     }
@@ -373,6 +382,7 @@ impl InspectorTab {
             Self::Gradients => "Gradients",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
+            Self::Lods => "Levels of detail",
             Self::Assets => "Assets",
         }
     }
@@ -381,6 +391,9 @@ impl InspectorTab {
         match self {
             Self::Info => true,
             Self::Mipmaps => inspected.is_some_and(|i| i.levels.len() > 1),
+            Self::Lods => inspected
+                .and_then(|i| i.compiled_mesh.as_ref())
+                .is_some_and(|m| m.levels.len() > 1),
             Self::Animations => {
                 inspected.is_some_and(|i| i.model.is_some() && !i.inspection.animations.is_empty())
             }
@@ -569,13 +582,21 @@ fn shell(
                 (Shown::Environment, _) => {
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
                 }
-                (Shown::CompiledMesh, _) => canvas_compiled_mesh(
-                    ui,
-                    rect,
-                    state.inspected.as_mut(),
-                    &mut preview3d,
-                    &mut state.meshlet_colors,
-                ),
+                (Shown::CompiledMesh, _) => {
+                    let lod = state
+                        .inspected
+                        .as_ref()
+                        .and_then(|i| state.lod_levels.get(&i.path).copied())
+                        .unwrap_or(0);
+                    canvas_compiled_mesh(
+                        ui,
+                        rect,
+                        state.inspected.as_mut(),
+                        &mut preview3d,
+                        &mut state.mesh_display,
+                        lod,
+                    )
+                }
                 (Shown::Model, _) => {
                     let inspected = state.inspected.as_ref();
                     let animation = inspected
@@ -652,6 +673,7 @@ struct Prepared {
     mesh: Option<Result<(Amod, MeshletLimits), String>>,
     model: Option<(PathBuf, u64)>,
     compiled_mesh: Option<crate::amesh::Preview>,
+    compiled_materials: Vec<Option<inspect::MaterialPreview>>,
 }
 
 fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
@@ -728,6 +750,7 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
         });
     Prepared {
         compiled_mesh: inspection.compiled_mesh.take(),
+        compiled_materials: std::mem::take(&mut inspection.compiled_materials),
         gradient,
         mesh,
         model,
@@ -861,7 +884,8 @@ fn inspected(
         gradient,
         mesh,
         compiled_mesh: prepared.compiled_mesh,
-        uploaded_compiled_mesh: false,
+        compiled_materials: prepared.compiled_materials,
+        uploaded_lod: None,
         lut_compare: None,
         uploaded_color_cube: false,
         model: prepared.model,
@@ -1750,6 +1774,12 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                     }
                 }
                 (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
+                (InspectorTab::Lods, Some(inspected), Some(_)) => {
+                    let choice = state.lod_levels.entry(inspected.path.clone()).or_default();
+                    if let Some(mesh) = &inspected.compiled_mesh {
+                        lods_tab(ui, mesh, choice);
+                    }
+                }
                 (InspectorTab::Mipmaps, Some(inspected), Some(_)) => {
                     let choice = state.mip_levels.entry(inspected.path.clone()).or_default();
                     mipmaps_tab(ui, &inspected.levels, choice);
@@ -2814,6 +2844,30 @@ fn mipmaps_tab(ui: &mut Ui, levels: &[Image], choice: &mut usize) {
     }
 }
 
+/// One row per level of detail, the chosen one drawn by the canvas; see
+/// docs/features/models.md#levels-of-detail-tab.
+fn lods_tab(ui: &mut Ui, mesh: &crate::amesh::Preview, choice: &mut usize) {
+    let rows: Vec<_> = mesh
+        .levels
+        .iter()
+        .enumerate()
+        .map(|(i, level)| {
+            let same = if i > 0 && level.same_as_previous {
+                format!(" (same as LOD {})", i - 1)
+            } else {
+                String::new()
+            };
+            (
+                format!("LOD {i}"),
+                format!("{} triangles{same}", level.triangles()),
+            )
+        })
+        .collect();
+    if let Some(row) = choice_list(ui, &rows, *choice) {
+        *choice = row;
+    }
+}
+
 /// Full-width rows of (label, weak right-aligned detail), one chosen; returns the clicked row.
 fn choice_list(ui: &mut Ui, rows: &[(String, String)], chosen: usize) -> Option<usize> {
     let mut clicked = None;
@@ -3514,14 +3568,15 @@ fn canvas_environment(
     }
 }
 
-/// A compiled mesh in the 3D view, by meshlet or gray; see
+/// A compiled mesh in the 3D view in one of its display modes; see
 /// docs/features/models.md#compiled-mesh-preview.
 fn canvas_compiled_mesh(
     ui: &mut Ui,
     rect: Rect,
     inspected: Option<&mut Inspected>,
     preview: &mut Preview3d,
-    meshlet_colors: &mut bool,
+    display: &mut MeshDisplay,
+    lod: usize,
 ) {
     let Some(inspected) = inspected else {
         return;
@@ -3529,29 +3584,44 @@ fn canvas_compiled_mesh(
     let Some(mesh) = &inspected.compiled_mesh else {
         return;
     };
-    if !inspected.uploaded_compiled_mesh {
-        preview.compiled = Some(mesh.clone());
-        inspected.uploaded_compiled_mesh = true;
+    let lod = lod.min(mesh.levels.len().saturating_sub(1));
+    if inspected.uploaded_lod != Some(lod)
+        && let Some(level) = mesh.levels.get(lod)
+    {
+        // Every level is fitted by the full mesh's bounds.
+        let (mut min, mut max) = (bevy::math::Vec3::INFINITY, bevy::math::Vec3::NEG_INFINITY);
+        for p in &mesh.levels[0].positions {
+            let p = bevy::math::Vec3::from(*p);
+            (min, max) = (min.min(p), max.max(p));
+        }
+        preview.compiled = Some(CompiledUpload {
+            level: level.clone(),
+            bounds: [min, max],
+            materials: inspected.compiled_materials.clone(),
+        });
+        inspected.uploaded_lod = Some(lod);
     }
     preview.compiled_shown = true;
-    preview.meshlet_colors = *meshlet_colors;
+    preview.display = *display;
     view_3d(ui, rect, preview);
-    let tools = [
-        Tool {
-            glyph: Glyph::Icon(Icon::Shapes),
-            name: "Meshlets".into(),
-            on: *meshlet_colors,
+    let tools: Vec<Tool> = MeshDisplay::ALL
+        .into_iter()
+        .map(|mode| Tool {
+            glyph: Glyph::Icon(match mode {
+                MeshDisplay::Material => Icon::Palette,
+                MeshDisplay::Wireframe => Icon::Triangle,
+                MeshDisplay::Shaded => Icon::Box,
+                MeshDisplay::Meshlets => Icon::Shapes,
+                MeshDisplay::MaterialId => Icon::SwatchBook,
+                MeshDisplay::Submeshes => Icon::Layers,
+            }),
+            name: mode.name().into(),
+            on: *display == mode,
             enabled: true,
-        },
-        Tool {
-            glyph: Glyph::Icon(Icon::Box),
-            name: "Shaded".into(),
-            on: !*meshlet_colors,
-            enabled: true,
-        },
-    ];
+        })
+        .collect();
     if let Some((_, button)) = toolbar(ui, rect, &[&tools]) {
-        *meshlet_colors = button == 0;
+        *display = MeshDisplay::ALL[button];
         ui.ctx().request_repaint();
     }
 }
