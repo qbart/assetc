@@ -43,7 +43,7 @@ The Inspector's **Gradients** tab (`palette`) lists the selected
 `.gradient` file's gradients, one card each, in order:
 
 - Cards **fold** like property sections: a chevron (or a click on the title)
-  folds and unfolds the card, open by default, remembered for the session.
+  folds and unfolds the card, **folded** by default, remembered for the session.
 - Header: the chevron, a **drag handle** (`grip-horizontal`) to reorder
   gradients exactly as modifiers are reordered (see
   [`noise.md`](noise.md#modifiers-tab)), and the title (the name, or

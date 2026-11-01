@@ -152,7 +152,8 @@ property sheet, inside 8 px margins:
 - **Sections**: cards with 6 px rounded corners and `BG_HEADER` fill, 8 px
   apart. The header row (28 px) has a `chevron-down` / `chevron-right` icon
   and the title (14 px, `TEXT`); clicking the chevron or title collapses /
-  expands the card (open by default, remembered for the session). Cards may
+  expands the card (open by default unless a feature says otherwise,
+  remembered for the session). Cards may
   be non-collapsible: no chevron, always open. Optional header buttons sit
   after the chevron (before the title) and on the right. The body is inset
   10 px.
