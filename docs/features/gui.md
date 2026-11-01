@@ -9,10 +9,10 @@ frame that later features plug into; it has no asset functionality of its own.
 +--------------------------------------------------------------+
 | ◆  File  Edit  View  Help                         (menu bar) |
 +-------------+------------------------------+-----------------+
-| Input|Output|                              | Assets       +  |
-|             |                              |                 |
-|             |     (empty, no canvas)       |-----------------|
-|             |                              | ℹ | Inspector   |
+| Input|Output|                              | Inspector       |
+|             |                              |-----------------|
+|             |     canvas (preview of the   | ℹ |             |
+|             |     selected file)           | ▤ |             |
 |             |                              | ⚙ |             |
 +-------------+------------------------------+-----------------+
 | Ready                                     assetc 0.1.0       |
@@ -20,29 +20,37 @@ frame that later features plug into; it has no asset functionality of its own.
 ```
 
 - **Menu bar** (top, fixed height): logo (see [Logo](#logo)) followed by the
-  `File`, `Edit`, `View`, `Help` menus.
-  - Each menu item's click/hover area spans the full bar height with 10 px
-    horizontal padding, and items sit edge to edge with no gaps, so the whole
-    item is clickable, not just its text.
-  - `File → Quit` exits the application.
-  - `Edit` contains no items yet (button shown disabled).
-  - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar.
-  - `Help` shows the application name and version.
+  `File`, `Edit`, `View`, `Help` menus. See [Menus](#menus).
 - **Left sidebar** (resizable, default width 260 px, min 200 px): file
   browser with two tabs in its header row, **Input** and **Output**, plus
   build (`hammer` icon, see [`build.md`](build.md#gui)) and rescan
   (`refresh-cw` icon) buttons on the right. See [File browser](#file-browser).
-- **Right sidebar** (resizable, default width 320 px, min 220 px), split
-  vertically into two sections:
-  - **Assets** (top, ~40% height): header row with title; body lists the built assets, see
-    [`assets.md`](assets.md).
-  - **Inspector** (bottom): a narrow vertical tab strip on the left with icon
-    tabs (`Info`, `Settings`, see [Tabs](#tabs)), and the active tab's content on the right.
-    Shows the file selected in the file browser, see
-    [`inspector.md`](inspector.md).
+- **Right sidebar** (resizable, default width 320 px, min 220 px): the
+  **Inspector** only, under an `Inspector` header row: a narrow vertical tab
+  strip on the left with icon tabs (`Info`, `Assets`, `Settings`, see
+  [Tabs](#tabs)) and the active tab's content on the right. Shows the selected
+  file, see [`inspector.md`](inspector.md).
 - **Status bar** (bottom, fixed height): status message on the left
   (see [`cli.md`](cli.md) and [`build.md`](build.md#gui)), `assetc <version>` on the right in weak text.
-- **Center**: no canvas. The window clear color fills the remaining space.
+- **Center**: the canvas, previewing the selected file with zoom and pan, see
+  [`canvas.md`](canvas.md).
+
+## Menus
+
+- **Bar items** (`File`, `Edit`, …): 14 px text, 12 px horizontal padding,
+  each item exactly as tall as the bar's content (the bar has no vertical
+  margin), items edge to edge with no gaps. The hover / open highlight fills
+  the item's whole rectangle with square corners, so it covers the full item,
+  not just its text.
+- **Dropdown items**: full-width rows, 28 px tall, 14 px text, at least
+  180 px wide. Hovering highlights the whole row (`BG_HEADER`, square
+  corners) and the whole row is clickable. A 24 px gutter on the left shows a
+  `check` icon for toggles that are on (empty when off).
+- `File → Quit` exits the application.
+- `Edit` contains no items yet (button shown disabled).
+- `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar (check
+  shown when visible); the menu stays open after toggling.
+- `Help` shows the application name and version as a non-interactive weak row.
 
 ## File browser
 
@@ -81,6 +89,8 @@ Tabs are attached to the pane they switch, not drawn as separate buttons:
   padding, indicator on the top edge.
 - Inspector tabs (vertical): 36 × 36 px, 18 px icon, indicator on the left
   edge.
+- Disabled tabs (not applicable right now): `TEXT_WEAK` at 50% opacity, no
+  hover, not clickable.
 
 ## Icons
 
@@ -88,7 +98,8 @@ All icons are [Lucide](https://lucide.dev) SVGs, copied unmodified from
 `lucide-static` into `assets/icons/` together with Lucide's ISC `LICENSE`, and
 embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
-(rescan), `hammer` (build), `folder`, `folder-open`, `file`,
+(rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
+toggles), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 

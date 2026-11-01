@@ -1,21 +1,31 @@
 # Inspector
 
 Shows what a file in the file browser is, and what the build does or did with
-it. Lives in the bottom half of the right sidebar (see [`gui.md`](gui.md)).
+it. It fills the right sidebar (see [`gui.md`](gui.md)). The selected file's
+image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Selection
 
 - Clicking a **file** row in the Input or Output tree selects it. Clicking a
-  folder row still only opens/closes it. Clicking an asset in the Assets panel
-  selects its compiled file (see [`assets.md`](assets.md#selection)).
+  folder row still only opens/closes it.
 - One file is selected at a time, across both tabs: selecting a file in one
   tab replaces a selection in the other. Switching tabs keeps the selection.
 - The selected row is filled with `ACCENT` at 25% opacity and has a 2 px
   `ACCENT` bar on its left edge (hover still uses `BG_HEADER`).
 - The selection is kept by path. After a rescan (button or finished build)
-  the selected file is inspected again, so the Inspector shows the new
-  output of a build. If the file is gone, the Inspector says
+  the selected file is inspected again, so the Inspector and canvas show the
+  new output of a build. If the file is gone, the Inspector says
   "<name> no longer exists".
+
+## Tabs
+
+Three icon tabs, top to bottom: **Info** (`info`), **Assets** (`files`),
+**Settings** (`settings`). Hovering a tab shows its name.
+
+A tab that does not apply to the selected file is disabled: its icon is drawn
+in `TEXT_WEAK` at 50% opacity, it does not react to hover or clicks. If the
+active tab becomes disabled by a new selection, the Inspector switches to
+Info.
 
 ## Info tab
 
@@ -23,9 +33,8 @@ With nothing selected: weak "Nothing selected".
 
 Otherwise, from top to bottom:
 
-1. **Preview** (textures only), see [Preview](#preview).
-2. **File name** (strong) and its path relative to the project root (weak).
-3. **Details**: a two-column grid, weak labels on the left, values on the
+1. **File name** (strong) and its path relative to the project root (weak).
+2. **Details**: a two-column grid, weak labels on the left, values on the
    right. Values are selectable text, so an asset ID can be copied.
 
 Content scrolls vertically when it does not fit.
@@ -78,23 +87,26 @@ instead.
 
 If the file cannot be read or decoded (corrupt PNG, not a KTX2 file, bad
 manifest), the details show the rows that are still known (Kind, Size) and an
-**Error** row with the message. There is no preview.
+**Error** row with the message. The canvas shows no image.
 
-## Preview
+## Assets tab
 
-- Source texture: the decoded PNG. Compiled texture: level 0. Only `.ktx2`
-  files in assetc's own subset (see [`ktx2.md`](../spec/ktx2.md):
-  `R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression) are previewed;
-  others show the weak text "No preview for this format".
-- Pixels are shown as stored, for both color spaces (linear data textures look
-  as they would in an image viewer).
-- Fitted to the Inspector width minus 8 px margins and at most 240 px tall,
-  keeping aspect ratio, centered. Never scaled up beyond 8× its pixel size.
-- Images larger than 512 px on either side are downscaled to fit 512 × 512
-  (aspect kept) before upload; the Dimensions row still shows the real size.
-- Magnified pixels stay sharp (nearest filtering); minified ones are smoothed.
-- Drawn over an 8 px checkerboard (`CHECKER_LIGHT` / `CHECKER_DARK`) so
-  transparency is visible.
+Lists the assets a file contains, as recorded in `<output>/assets.manifest`
+(see [`docs/spec/manifest.md`](../spec/manifest.md)).
+
+- Enabled only for **compiled textures** (`.ktx2` selected in the Output
+  tree) for now. A `.ktx2` holds exactly one asset; later container formats
+  (e.g. meshes with embedded materials) will list several.
+- The manifest is read when the app opens and on every rescan (rescan button,
+  or after a build finishes). A failed build does not write a manifest, so the
+  tab reflects the last successful build.
+- One row per manifest entry whose output path is the selected file: `image`
+  icon (textures), the asset path (strong), then weak `Texture` and the asset
+  ID (`0x` + 16 hex digits, selectable). Rows sorted by asset path.
+- Placeholders (weak text) instead of rows:
+  - no manifest: "Not built yet"
+  - manifest unreadable or invalid: the error message
+  - file not in the manifest: "Not in the manifest"
 
 ## Settings tab
 

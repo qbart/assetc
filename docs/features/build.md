@@ -55,9 +55,16 @@ converted). Color space and mipmaps follow the `[textures]` settings, see
 After a **successful** build (manifest written), outputs that no source
 produces any more, e.g. after a source was renamed or deleted, are removed:
 
-- Only files with an extension assetc writes are candidates: `.ktx2` (any
-  case). Anything else in `output` (your own files, `.gitkeep`, …) is never
-  touched. Entries starting with `.` and the contents of symlinked directories
+- Only files matching an **output pattern** are candidates. Each asset kind
+  declares the extension of the files it writes, and the patterns are exactly
+  those extensions, matched case-insensitively:
+
+  | Asset kind | Output pattern |
+  |------------|----------------|
+  | texture    | `*.ktx2`       |
+
+  Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
+  touched. `assets.manifest` is rewritten, never removed. Entries starting with `.` and the contents of symlinked directories
   are not looked at, as in the file browser.
 - A candidate is kept if its `output`-relative path matches an output of this
   build, compared **case-insensitively**, so that on case-insensitive file
