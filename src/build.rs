@@ -363,6 +363,7 @@ fn write(dest: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::fnv1a64;
 
     fn png(path: &Path, w: u32, h: u32) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -520,10 +521,6 @@ mod tests {
         (reader.header().format, data)
     }
 
-    fn texture_id(asset_path: &str) -> u64 {
-        crate::hash::fnv1a64(asset_path.as_bytes())
-    }
-
     #[test]
     fn convention_material_with_orm() {
         let dir = tempfile::tempdir().unwrap();
@@ -574,16 +571,16 @@ mod tests {
         );
 
         let m = material::decode(&fs::read(output.join("brick/brick.mat")).unwrap()).unwrap();
-        assert_eq!(m.textures.base_color, texture_id("brick/brick"));
-        assert_eq!(m.textures.normal, texture_id("brick/brick.n"));
-        assert_eq!(m.textures.orm, texture_id("brick/brick.orm"));
+        assert_eq!(m.textures.base_color, fnv1a64(b"brick/brick"));
+        assert_eq!(m.textures.normal, fnv1a64(b"brick/brick.n"));
+        assert_eq!(m.textures.orm, fnv1a64(b"brick/brick.orm"));
         assert_eq!((m.textures.emissive, m.textures.height), (0, 0));
         assert_eq!(m.metallic, 0.0);
 
         let entries =
             manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
         let material = entries.iter().find(|e| e.kind == Kind::Material).unwrap();
-        assert_eq!(material.id, texture_id("brick/brick.mat"));
+        assert_eq!(material.id, fnv1a64(b"brick/brick.mat"));
         assert_eq!(material.path, "brick/brick.mat");
         assert_eq!(entries.len(), 6);
     }
