@@ -56,6 +56,26 @@ pub fn rows(data: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     Ok(rows)
 }
 
+/// Each animation's name (`Animation <n>` without one) and duration in seconds, in file order;
+/// see docs/features/models.md#animations-tab.
+pub fn animations(data: &[u8]) -> Result<Vec<(String, f32)>, String> {
+    let gltf = parse(data)?;
+    Ok(gltf
+        .animations()
+        .map(|animation| {
+            let name = animation.name().map_or_else(
+                || format!("Animation {}", animation.index() + 1),
+                str::to_owned,
+            );
+            let duration = animation
+                .channels()
+                .filter_map(|c| c.sampler().input().max()?.as_array()?.first()?.as_f64())
+                .fold(0.0, f64::max);
+            (name, duration as f32)
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,6 +122,14 @@ mod tests {
         // Per mesh, not per instance.
         assert_eq!(row(&rows, "Vertices"), "3");
         assert_eq!(row(&rows, "Triangles"), "1");
+    }
+
+    #[test]
+    fn animations_have_names_and_durations() {
+        let animations = animations(FOX).unwrap();
+        let names: Vec<_> = animations.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Survey", "Walk", "Run"]);
+        assert!(animations.iter().all(|(_, d)| *d > 0.0));
     }
 
     #[test]

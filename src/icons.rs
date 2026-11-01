@@ -16,6 +16,7 @@ pub enum Icon {
     EyeOff,
     File,
     Files,
+    Film,
     Folder,
     FolderOpen,
     Globe,
@@ -39,7 +40,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 31] = [
+const SVGS: [(&str, &str); 32] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
@@ -60,6 +61,7 @@ const SVGS: [(&str, &str); 31] = [
     ("eye-off", include_str!("../assets/icons/eye-off.svg")),
     ("file", include_str!("../assets/icons/file.svg")),
     ("files", include_str!("../assets/icons/files.svg")),
+    ("film", include_str!("../assets/icons/film.svg")),
     ("folder", include_str!("../assets/icons/folder.svg")),
     (
         "folder-open",

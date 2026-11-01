@@ -39,6 +39,8 @@ pub struct Inspection {
     pub specimen: bool,
     /// A glTF model that parsed, previewed in 3D by the canvas.
     pub model: bool,
+    /// A model's animations: name and duration in seconds.
+    pub animations: Vec<(String, f32)>,
 }
 
 /// Face file stems of an environment map folder, in cube layer order.
@@ -297,6 +299,7 @@ fn font_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
 fn model_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let data = fs::read(file).map_err(|e| e.to_string())?;
     out.rows.extend(model::rows(&data)?);
+    out.animations = model::animations(&data)?;
     out.model = true;
     Ok(())
 }
@@ -880,6 +883,7 @@ mod tests {
         let i = inspect(&project, Location::Input, &fox);
         assert_eq!(row(&i, "Kind"), "Model");
         assert_eq!(row(&i, "Animations"), "3");
+        assert_eq!(i.animations.len(), 3);
         assert!(i.model);
 
         let broken = dir.path().join("assets/broken.gltf");

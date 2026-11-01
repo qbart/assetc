@@ -18,7 +18,7 @@ use bevy::render::render_resource::{
 };
 
 use bevy::transform::TransformSystems;
-use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
+use bevy::world_serialization::{WorldAsset, WorldAssetRoot, WorldInstanceReady};
 
 use crate::theme::BG_CENTER;
 
@@ -152,6 +152,8 @@ pub struct Preview3d {
     pub model: Option<(PathBuf, u64)>,
     /// How the requested model is doing, written by [`sync_model`].
     pub model_status: ModelStatus,
+    /// The model's animation to play, by index in the file; `None` is the rest pose.
+    pub animation: Option<usize>,
 }
 
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -549,10 +551,16 @@ struct Model {
     spin: Entity,
     /// Centers and scales the scene, spawned as its child once the file has loaded.
     fit: Entity,
-    spawned: bool,
+    /// The scene being shown, once spawned.
+    scene: Option<Handle<WorldAsset>>,
     /// The scene's entities exist.
     ready: bool,
-    fitted: bool,
+    /// The fit, once measured.
+    fitted: Option<Transform>,
+    /// The file's animations as one graph, and each one's node.
+    graph: Option<(Handle<AnimationGraph>, Vec<AnimationNodeIndex>)>,
+    /// The animation playing; `None` is the rest pose.
+    playing: Option<usize>,
 }
 
 fn spawn_model_entities(commands: &mut Commands) -> (Entity, Entity) {
@@ -565,6 +573,19 @@ fn spawn_model_entities(commands: &mut Commands) -> (Entity, Entity) {
     (spin, fit)
 }
 
+/// Spawns `scene` under `fit`, marking the model ready once its entities exist.
+fn spawn_scene(commands: &mut Commands, fit: Entity, scene: Handle<WorldAsset>) {
+    commands.entity(fit).insert(WorldAssetRoot(scene)).observe(
+        |ready: On<WorldInstanceReady>, mut loaded: ResMut<LoadedModel>| {
+            if let Some(model) = &mut loaded.0
+                && model.fit == ready.event().entity
+            {
+                model.ready = true;
+            }
+        },
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn sync_model(
     mut commands: Commands,
@@ -575,6 +596,11 @@ fn sync_model(
     mut events: MessageReader<AssetEvent<Gltf>>,
     time: Res<Time>,
     mut spins: Query<(&mut Transform, &mut Visibility)>,
+    (children, mut players, mut graphs): (
+        Query<&Children>,
+        Query<&mut AnimationPlayer>,
+        ResMut<Assets<AnimationGraph>>,
+    ),
 ) {
     let wanted = preview.model.clone().filter(|_| preview.viewport.is_some());
     if loaded.0.as_ref().map(|m| &m.key) != wanted.as_ref() {
@@ -595,9 +621,11 @@ fn sync_model(
                 reloading,
                 spin,
                 fit,
-                spawned: false,
+                scene: None,
                 ready: false,
-                fitted: false,
+                fitted: None,
+                graph: None,
+                playing: None,
             });
             preview.model_status = ModelStatus::Loading(Instant::now());
         }
@@ -616,10 +644,11 @@ fn sync_model(
             && *id == model.gltf.id()
             && (model.reloading || matches!(event, AssetEvent::Modified { .. }))
         {
-            if model.spawned {
+            if model.scene.is_some() {
                 commands.entity(model.spin).despawn();
                 (model.spin, model.fit) = spawn_model_entities(&mut commands);
-                (model.spawned, model.ready, model.fitted) = (false, false, false);
+                (model.scene, model.ready, model.fitted) = (None, false, None);
+                (model.graph, model.playing) = (None, None);
                 if !matches!(preview.model_status, ModelStatus::Loading(_)) {
                     preview.model_status = ModelStatus::Loading(Instant::now());
                 }
@@ -628,7 +657,7 @@ fn sync_model(
         }
     }
 
-    if !model.spawned {
+    if model.scene.is_none() {
         match server.load_state(&model.gltf) {
             LoadState::Failed(error) => {
                 preview.model_status = ModelStatus::Failed(error.to_string());
@@ -641,19 +670,8 @@ fn sync_model(
                         .or_else(|| gltf.scenes.first().cloned())
                     {
                         Some(scene) => {
-                            commands
-                                .entity(model.fit)
-                                .insert(WorldAssetRoot(scene))
-                                .observe(
-                                |ready: On<WorldInstanceReady>, mut loaded: ResMut<LoadedModel>| {
-                                    if let Some(model) = &mut loaded.0
-                                        && model.fit == ready.event().entity
-                                    {
-                                        model.ready = true;
-                                    }
-                                },
-                            );
-                            model.spawned = true;
+                            spawn_scene(&mut commands, model.fit, scene.clone());
+                            model.scene = Some(scene);
                         }
                         None => {
                             preview.model_status =
@@ -666,8 +684,42 @@ fn sync_model(
         }
     }
 
+    // Animations; see docs/features/models.md#animations-tab.
+    if model.ready
+        && model.playing != preview.animation
+        && let (Some(fitted), Some(scene)) = (model.fitted, model.scene.clone())
+    {
+        if model.playing.is_some() {
+            // Back to the rest pose: spawn the scene again, fitted as before.
+            commands.entity(model.fit).despawn();
+            model.fit = commands
+                .spawn((fitted, Visibility::default(), ChildOf(model.spin)))
+                .id();
+            spawn_scene(&mut commands, model.fit, scene);
+            (model.ready, model.playing) = (false, None);
+        } else if let Some(index) = preview.animation
+            && let Some(gltf) = gltfs.get(&model.gltf)
+        {
+            let (graph, nodes) = model.graph.get_or_insert_with(|| {
+                let (graph, nodes) = AnimationGraph::from_clips(gltf.animations.iter().cloned());
+                (graphs.add(graph), nodes)
+            });
+            if let Some(&node) = nodes.get(index) {
+                for entity in children.iter_descendants(model.fit) {
+                    if let Ok(mut player) = players.get_mut(entity) {
+                        commands
+                            .entity(entity)
+                            .insert(AnimationGraphHandle(graph.clone()));
+                        player.play(node).repeat();
+                    }
+                }
+            }
+            model.playing = Some(index);
+        }
+    }
+
     if let Ok((mut transform, mut visibility)) = spins.get_mut(model.spin) {
-        if model.fitted && *visibility == Visibility::Hidden {
+        if model.fitted.is_some() && *visibility == Visibility::Hidden {
             *visibility = Visibility::Inherited;
             preview.model_status = ModelStatus::Ready;
         }
@@ -690,7 +742,7 @@ fn fit_model(
     let Some(model) = &mut loaded.0 else {
         return;
     };
-    if !model.ready || model.fitted {
+    if !model.ready || model.fitted.is_some() {
         return;
     }
     let Ok(fit_global) = globals.get(model.fit) else {
@@ -721,18 +773,20 @@ fn fit_model(
             (min, max) = (min.min(p), max.max(p));
         }
     }
-    if min.cmple(max).all()
-        && let Ok(mut transform) = transforms.get_mut(model.fit)
-    {
+    let mut fitted = Transform::default();
+    if min.cmple(max).all() {
         let size = (max - min).max_element();
         let scale = if size > 0.0 { MODEL_SIZE / size } else { 1.0 };
-        *transform = Transform {
+        fitted = Transform {
             translation: -(min + max) / 2.0 * scale,
             scale: Vec3::splat(scale),
             ..default()
         };
     }
-    model.fitted = true;
+    if let Ok(mut transform) = transforms.get_mut(model.fit) {
+        *transform = fitted;
+    }
+    model.fitted = Some(fitted);
 }
 
 #[cfg(test)]

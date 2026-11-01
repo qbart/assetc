@@ -68,6 +68,8 @@ struct UiState {
     notice: Option<String>,
     /// Canvas toolbar state of each image, by path.
     canvas_options: HashMap<PathBuf, CanvasOptions>,
+    /// Animation chosen for each model, by path; `None` is the rest pose.
+    animations: HashMap<PathBuf, Option<usize>>,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -278,6 +280,7 @@ impl Default for UiState {
             confirm_delete: None,
             notice: None,
             canvas_options: HashMap::new(),
+            animations: HashMap::new(),
         }
     }
 }
@@ -311,17 +314,25 @@ enum InspectorTab {
     Info,
     Parameters,
     Modifiers,
+    Animations,
     Assets,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 4] = [Self::Info, Self::Parameters, Self::Modifiers, Self::Assets];
+    const ALL: [Self; 5] = [
+        Self::Info,
+        Self::Parameters,
+        Self::Modifiers,
+        Self::Animations,
+        Self::Assets,
+    ];
 
     fn icon(self) -> Icon {
         match self {
             Self::Info => Icon::Info,
             Self::Parameters => Icon::SlidersVertical,
             Self::Modifiers => Icon::Wrench,
+            Self::Animations => Icon::Film,
             Self::Assets => Icon::Files,
         }
     }
@@ -331,13 +342,17 @@ impl InspectorTab {
             Self::Info => "Info",
             Self::Parameters => "Parameters",
             Self::Modifiers => "Modifiers",
+            Self::Animations => "Animations",
             Self::Assets => "Assets",
         }
     }
 
-    fn enabled(self, selection: Option<&Selection>) -> bool {
+    fn enabled(self, selection: Option<&Selection>, inspected: Option<&Inspected>) -> bool {
         match self {
             Self::Info => true,
+            Self::Animations => {
+                inspected.is_some_and(|i| i.model.is_some() && !i.inspection.animations.is_empty())
+            }
             Self::Parameters | Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input && build::is_noise(&s.path) && s.path.is_file()
             }),
@@ -494,7 +509,12 @@ fn shell(
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
                 }
                 (Shown::Model, _) => {
-                    canvas_model(ui, rect, state.inspected.as_ref(), &mut preview3d)
+                    let inspected = state.inspected.as_ref();
+                    let animation = inspected
+                        .and_then(|i| state.animations.get(&i.path).copied())
+                        .flatten();
+                    preview3d.animation = animation;
+                    canvas_model(ui, rect, inspected, &mut preview3d)
                 }
                 (Shown::Lut, _) => canvas_lut(
                     ui,
@@ -1483,8 +1503,13 @@ fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
 
 fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
     section_header(ui, "Inspector");
-    // Only applicable tabs are shown; fall back to Info when the active one stops applying.
-    if !state.inspector_tab.enabled(state.selection.as_ref()) {
+    // Only applicable tabs are shown; fall back to Info when the active one does not apply to
+    // the inspected file (a selection still loading keeps it).
+    let selection = state.selection.as_ref();
+    let inspected = state.inspected.as_ref();
+    if (inspected.is_some() || selection.is_none())
+        && !state.inspector_tab.enabled(selection, inspected)
+    {
         state.inspector_tab = InspectorTab::Info;
     }
 
@@ -1499,7 +1524,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                 .vline(rect.right() - 0.5, rect.y_range(), Stroke::new(1.0, STROKE));
             ui.spacing_mut().item_spacing.y = 0.0;
             for tab in InspectorTab::ALL {
-                if !tab.enabled(state.selection.as_ref()) {
+                if !tab.enabled(state.selection.as_ref(), state.inspected.as_ref()) {
                     continue;
                 }
                 let response = icon_tab(ui, tab.icon(), state.inspector_tab == tab);
@@ -1531,6 +1556,10 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
                     }
+                }
+                (InspectorTab::Animations, Some(inspected), Some(_)) => {
+                    let choice = state.animations.entry(inspected.path.clone()).or_default();
+                    animations_tab(ui, &inspected.inspection.animations, choice);
                 }
                 (InspectorTab::Info, Some(inspected), _) => info(ui, &inspected.inspection),
                 (InspectorTab::Assets, _, Some(selection)) => {
@@ -1941,6 +1970,57 @@ fn info(ui: &mut Ui, inspection: &Inspection) {
                             ui.end_row();
                         }
                     });
+            });
+        });
+}
+
+/// Rest pose and the model's animations, one chosen; see docs/features/models.md#animations-tab.
+fn animations_tab(ui: &mut Ui, animations: &[(String, f32)], choice: &mut Option<usize>) {
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                let rows = std::iter::once((None, "Rest pose", None)).chain(
+                    animations
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (name, duration))| (Some(i), name.as_str(), Some(*duration))),
+                );
+                for (index, name, duration) in rows {
+                    let (rect, response) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
+                    let painter = ui.painter();
+                    if *choice == index {
+                        painter.rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.25));
+                        painter.rect_filled(
+                            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
+                            0.0,
+                            ACCENT,
+                        );
+                    } else if response.hovered() {
+                        painter.rect_filled(rect, 0.0, BG_HEADER);
+                    }
+                    painter.text(
+                        pos2(rect.left() + 10.0, rect.center().y),
+                        Align2::LEFT_CENTER,
+                        name,
+                        FontId::proportional(14.0),
+                        TEXT,
+                    );
+                    if let Some(duration) = duration {
+                        painter.text(
+                            pos2(rect.right() - 10.0, rect.center().y),
+                            Align2::RIGHT_CENTER,
+                            format!("{duration:.2} s"),
+                            FontId::proportional(13.0),
+                            TEXT_WEAK,
+                        );
+                    }
+                    if response.clicked() {
+                        *choice = index;
+                    }
+                }
             });
         });
 }
