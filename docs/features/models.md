@@ -123,8 +123,9 @@ view, to check what the build produced.
   asset IDs in the output's [`assets.manifest`](../spec/manifest.md)) as a
   physically based material: base color factor and texture, metallic and
   roughness factors with the ORM texture (G roughness, B metallic, R
-  occlusion), normal texture and scale, emissive factor × strength and
-  texture, alpha mode and cutoff, double-sided. Textures are read from their
+  occlusion), normal texture, emissive factor × strength and texture, alpha
+  mode and cutoff, double-sided. Normal scale and occlusion strength are not
+  applied (the 3D view's material has no such settings). Textures are read from their
   `.ktx2` (level 0). A material or texture that cannot be found or read is
   replaced by the defaults (white, roughness 1, no texture), and a submesh
   without a material is light gray.
@@ -132,7 +133,26 @@ view, to check what the build produced.
   has hue `i × 0.618034` (fractional part, the golden ratio, so neighbours
   differ), saturation 0.65, value 0.9. Triangles are lit as usual (the
   file's normals), so shapes stay readable.
+- **Level of detail**: the view shows the level chosen in the
+  [Levels of detail tab](#levels-of-detail-tab) (LOD 0, the full mesh, to
+  start with), in every mode. Meshlets exist only for LOD 0: with another
+  level chosen, the Meshlets mode shows it in light gray.
 - A file that does not read shows its error as the canvas message.
+
+## Levels of detail tab
+
+The Inspector's **Levels of detail** tab (`bring-to-front`) is shown for a
+compiled mesh (`*.amesh` in the Output tree) with reduced levels (a
+`LODTABLE`). It switches which level the
+[compiled mesh preview](#compiled-mesh-preview) draws.
+
+- Rows like the [Mipmaps tab](inspector.md#mipmaps-tab)'s: `LOD 0`, `LOD 1`,
+  … with the level's triangle count on the right (`576 triangles`).
+- A submesh whose level made no progress (`index_count` 0) uses its previous
+  level, as a runtime would; a level where every submesh did so says
+  `(same as LOD <n>)` after its count.
+- LOD 0 is chosen to start with; the choice is remembered per file (by path)
+  for the session.
 
 ## Animations tab
 

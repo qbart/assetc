@@ -19,7 +19,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Seven icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Eight icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient` and model files, **Modifiers**
 (`wrench`) for `.noise` files and **Gradients** (`palette`) for `.gradient`
 files, all three only in the Input tree (see
@@ -27,7 +27,9 @@ files, all three only in the Input tree (see
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
 compiled textures with more than one mip level (see
-[Mipmaps tab](#mipmaps-tab)), and **Assets** (`files`). Hovering
+[Mipmaps tab](#mipmaps-tab)), **Levels of detail** (`bring-to-front`), only
+for compiled meshes with reduced levels (see
+[`models.md`](models.md#levels-of-detail-tab)), and **Assets** (`files`). Hovering
 a tab shows its name.
 
 Only tabs that apply to the selected file are shown, stacked from the top in
