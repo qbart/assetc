@@ -265,6 +265,7 @@ fn set_title(project: Res<Project>, mut window: Single<&mut Window>) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn shell(
     mut contexts: EguiContexts,
     mut state: ResMut<UiState>,

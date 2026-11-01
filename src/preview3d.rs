@@ -126,6 +126,8 @@ struct Scene {
     material: Handle<StandardMaterial>,
 }
 
+type ShapeQuery = (&'static mut Mesh3d, &'static mut Transform);
+
 /// Auto-rotation, radians per second.
 const SPIN: f32 = 20.0 * std::f32::consts::PI / 180.0;
 
@@ -190,7 +192,7 @@ fn sync(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut camera: Single<(&mut Camera, &mut Transform), With<PreviewCamera>>,
     mut overlay: Query<&mut Camera, (With<Camera2d>, Without<PreviewCamera>)>,
-    mut shape: Single<(&mut Mesh3d, &mut Transform), (With<PreviewShape>, Without<PreviewCamera>)>,
+    mut shape: Single<ShapeQuery, (With<PreviewShape>, Without<PreviewCamera>)>,
 ) {
     let active = preview.viewport.is_some();
     let (camera, camera_transform) = &mut *camera;
