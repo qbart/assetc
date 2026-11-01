@@ -16,6 +16,7 @@ use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
 use crate::manifest::Kind;
+use crate::preview3d::{Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
 use crate::theme::{
     self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHANNEL_B, CHANNEL_G, CHANNEL_R,
@@ -49,6 +50,7 @@ struct UiState {
     reinspect: bool,
     inspected: Option<Inspected>,
     view: View,
+    mode: ViewMode,
     /// Canvas toolbar state of each image, by path.
     canvas_options: HashMap<PathBuf, CanvasOptions>,
 }
@@ -94,6 +96,27 @@ struct Inspected {
     preview: Option<egui::TextureHandle>,
     /// Single-channel view of `pixels`, built on demand.
     channel_preview: Option<(Channels, egui::TextureHandle)>,
+    /// Channels last sent to the 3D preview.
+    uploaded_3d: Option<Channels>,
+}
+
+/// Canvas view mode, see docs/features/canvas.md#view-bar.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+enum ViewMode {
+    #[default]
+    TwoD,
+    ThreeD,
+}
+
+impl ViewMode {
+    const ALL: [Self; 2] = [Self::TwoD, Self::ThreeD];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::TwoD => "2D",
+            Self::ThreeD => "3D",
+        }
+    }
 }
 
 /// Canvas toolbar state of one image, see docs/features/canvas.md#toolbar.
@@ -111,11 +134,11 @@ enum Channels {
     G,
     B,
     A,
+    /// Grayscale images: shown as stored, like `Rgb`.
+    Gray,
 }
 
 impl Channels {
-    const ALL: [Self; 5] = [Self::Rgb, Self::R, Self::G, Self::B, Self::A];
-
     fn name(self) -> &'static str {
         match self {
             Self::Rgb => "RGB",
@@ -123,13 +146,14 @@ impl Channels {
             Self::G => "Green",
             Self::B => "Blue",
             Self::A => "Alpha",
+            Self::Gray => "Gray",
         }
     }
 
     /// Index in an RGBA pixel; `None` for all channels.
     fn index(self) -> Option<usize> {
         match self {
-            Self::Rgb => None,
+            Self::Rgb | Self::Gray => None,
             Self::R => Some(0),
             Self::G => Some(1),
             Self::B => Some(2),
@@ -158,6 +182,7 @@ impl Default for UiState {
             reinspect: false,
             inspected: None,
             view: View::default(),
+            mode: ViewMode::default(),
             canvas_options: HashMap::new(),
         }
     }
@@ -248,6 +273,7 @@ fn shell(
     mut assets: ResMut<Assets>,
     mut exit: MessageWriter<AppExit>,
     mut logo: Local<Option<egui::TextureHandle>>,
+    mut preview3d: ResMut<Preview3d>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?.clone();
     let logo = logo.get_or_insert_with(|| {
@@ -292,16 +318,43 @@ fn shell(
             .show(&mut root, |ui| right_sidebar(ui, &mut state, &assets));
     }
 
+    // In 3D the canvas is left transparent so the 3D camera's image shows through.
+    preview3d.viewport = None;
+    preview3d.dragging = false;
+    let show_3d = state.mode == ViewMode::ThreeD
+        && state
+            .inspected
+            .as_ref()
+            .is_some_and(|i| i.preview.is_some());
+    let fill = if show_3d {
+        egui::Color32::TRANSPARENT
+    } else {
+        BG_CENTER
+    };
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(BG_CENTER))
+        .frame(Frame::new().fill(fill))
         .show(&mut root, |ui| {
             let state = &mut *state;
-            canvas(
-                ui,
-                state.inspected.as_mut(),
-                &mut state.view,
-                &mut state.canvas_options,
-            );
+            let full = ui.max_rect();
+            let bar = Rect::from_min_size(full.min, vec2(full.width(), 36.0));
+            view_bar(ui, bar, &mut state.mode);
+            let rect = Rect::from_min_max(pos2(full.left(), bar.bottom()), full.max);
+            match state.mode {
+                ViewMode::TwoD => canvas(
+                    ui,
+                    rect,
+                    state.inspected.as_mut(),
+                    &mut state.view,
+                    &mut state.canvas_options,
+                ),
+                ViewMode::ThreeD => canvas_3d(
+                    ui,
+                    rect,
+                    state.inspected.as_mut(),
+                    &mut state.canvas_options,
+                    &mut preview3d,
+                ),
+            }
         });
 
     if std::mem::take(&mut state.start_build) {
@@ -341,6 +394,7 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
         pixels,
         preview,
         channel_preview: None,
+        uploaded_3d: None,
     }
 }
 
@@ -835,60 +889,185 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
         });
 }
 
-/// Center pane: the selected file's image with zoom and pan, see docs/features/canvas.md.
-fn canvas(
-    ui: &mut Ui,
-    inspected: Option<&mut Inspected>,
-    view: &mut View,
-    all_options: &mut HashMap<PathBuf, CanvasOptions>,
-) {
-    let rect = ui.max_rect();
-    let message = |ui: &mut Ui, text: &str| {
-        ui.painter().text(
+/// `View [2D | 3D]` across the top of the canvas, see docs/features/canvas.md#view-bar.
+fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode) {
+    let painter = ui.painter_at(bar);
+    painter.rect_filled(bar, 0.0, BG_PANEL);
+    painter.hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, STROKE));
+    let font = FontId::proportional(13.0);
+    let label = painter.text(
+        pos2(bar.left() + 12.0, bar.center().y),
+        Align2::LEFT_CENTER,
+        "View",
+        font.clone(),
+        TEXT_WEAK,
+    );
+
+    const HEIGHT: f32 = 24.0;
+    const RADIUS: u8 = 4;
+    let widths = ViewMode::ALL.map(|m| {
+        painter
+            .layout_no_wrap(m.name().into(), font.clone(), TEXT)
+            .size()
+            .x
+            + 20.0
+    });
+    let group = Rect::from_min_size(
+        pos2(label.right() + 12.0, bar.center().y - HEIGHT / 2.0),
+        vec2(widths.iter().sum(), HEIGHT),
+    );
+    painter.rect_filled(group, RADIUS, BG_BAR);
+    let mut x = group.left();
+    let last = ViewMode::ALL.len() - 1;
+    for (i, (option, width)) in ViewMode::ALL.into_iter().zip(widths).enumerate() {
+        let rect = Rect::from_min_size(pos2(x, group.top()), vec2(width, HEIGHT));
+        x += width;
+        let response = ui.interact(rect, ui.id().with(("view_mode", i)), Sense::click());
+        let outer = |edge: bool| if edge { RADIUS } else { 0 };
+        let radius = egui::CornerRadius {
+            nw: outer(i == 0),
+            sw: outer(i == 0),
+            ne: outer(i == last),
+            se: outer(i == last),
+        };
+        let color = if *mode == option {
+            painter.rect_filled(rect, radius, ACCENT);
+            BG_BAR
+        } else if response.hovered() {
+            painter.rect_filled(rect, radius, BG_HEADER);
+            TEXT
+        } else {
+            TEXT_WEAK
+        };
+        painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            text,
-            FontId::proportional(14.0),
-            TEXT_WEAK,
+            option.name(),
+            font.clone(),
+            color,
         );
-    };
-    let Some(inspected) = inspected else {
-        return message(ui, "Select a file to preview");
-    };
-    let inspection = &inspected.inspection;
-    if inspection.missing {
-        return message(ui, &format!("{} no longer exists", inspection.name));
+        if response.clicked() {
+            *mode = option;
+        }
     }
-    let (Some(preview), Some(pixels)) = (&inspected.preview, &inspected.pixels) else {
-        return message(ui, inspection.note.unwrap_or("No preview"));
-    };
+}
 
+/// The selection's image if it has one; otherwise draws the canvas message and returns `None`.
+fn shown_image<'a>(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: Option<&'a mut Inspected>,
+) -> Option<&'a mut Inspected> {
+    let message = match inspected {
+        None => "Select a file to preview".to_owned(),
+        Some(i) if i.inspection.missing => format!("{} no longer exists", i.inspection.name),
+        Some(i) if i.preview.is_none() || i.pixels.is_none() => {
+            i.inspection.note.unwrap_or("No preview").to_owned()
+        }
+        Some(i) => return Some(i),
+    };
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        message,
+        FontId::proportional(14.0),
+        TEXT_WEAK,
+    );
+    None
+}
+
+/// The image's toolbar state, with its channel choice replaced if the image lacks it.
+fn image_options(
+    inspected: &Inspected,
+    all_options: &HashMap<PathBuf, CanvasOptions>,
+) -> CanvasOptions {
     let mut options = all_options
         .get(&inspected.path)
         .copied()
         .unwrap_or_default();
-    let available = |channels: Channels| channels.index().is_none_or(|i| inspection.channels[i]);
-    if !available(options.channels) {
-        options.channels = Channels::Rgb;
+    let choices = channel_choices(&inspected.inspection);
+    if !choices.contains(&(options.channels, true)) {
+        options.channels = choices[0].0;
     }
-    let texture = match options.channels.index() {
-        None => preview.clone(),
-        Some(channel) => {
-            let cached = &mut inspected.channel_preview;
-            if cached.as_ref().is_none_or(|(c, _)| *c != options.channels) {
-                // Grayscale and opaque: the channel's value in R, G and B.
-                let gray: Vec<u8> = pixels
-                    .pixels
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .flat_map(|p| [p[channel], p[channel], p[channel], 255])
-                    .collect();
-                let texture = load_preview(ui.ctx(), "canvas_channel", pixels, &gray);
-                *cached = Some((options.channels, texture));
-            }
-            cached.as_ref().unwrap().1.clone()
+    options
+}
+
+/// Channel buttons for an image and whether each is enabled; see docs/features/canvas.md#toolbar.
+fn channel_choices(inspection: &Inspection) -> Vec<(Channels, bool)> {
+    let [r, g, b, a] = inspection.channels;
+    if !(r || g || b) {
+        let mut choices = vec![(Channels::Gray, true)];
+        if a {
+            choices.push((Channels::A, true));
         }
+        return choices;
+    }
+    [
+        Channels::Rgb,
+        Channels::R,
+        Channels::G,
+        Channels::B,
+        Channels::A,
+    ]
+    .map(|c| (c, c.index().is_none_or(|i| inspection.channels[i])))
+    .to_vec()
+}
+
+fn channel_tools(choices: &[(Channels, bool)], current: Channels) -> Vec<Tool> {
+    choices
+        .iter()
+        .map(|&(channels, enabled)| Tool {
+            glyph: Glyph::Channels(channels),
+            name: if enabled {
+                channels.name().into()
+            } else {
+                format!("{} (not in this image)", channels.name())
+            },
+            on: current == channels,
+            enabled,
+        })
+        .collect()
+}
+
+/// RGBA8 pixels of `image` as shown for `channels`: as stored, or one channel as opaque gray.
+fn channel_pixels(image: &Image, channels: Channels) -> Vec<u8> {
+    match channels.index() {
+        None => image.pixels.clone(),
+        Some(c) => image
+            .pixels
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| [p[c], p[c], p[c], 255])
+            .collect(),
+    }
+}
+
+/// 2D canvas: the selected file's image with zoom, pan and tiling, see docs/features/canvas.md#2d.
+fn canvas(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: Option<&mut Inspected>,
+    view: &mut View,
+    all_options: &mut HashMap<PathBuf, CanvasOptions>,
+) {
+    let Some(inspected) = shown_image(ui, rect, inspected) else {
+        return;
+    };
+    let options = image_options(inspected, all_options);
+    let (Some(preview), Some(pixels)) = (&inspected.preview, &inspected.pixels) else {
+        return;
+    };
+    let texture = if options.channels.index().is_none() {
+        preview.clone()
+    } else {
+        let cached = &mut inspected.channel_preview;
+        if cached.as_ref().is_none_or(|(c, _)| *c != options.channels) {
+            let gray = channel_pixels(pixels, options.channels);
+            let texture = load_preview(ui.ctx(), "canvas_channel", pixels, &gray);
+            *cached = Some((options.channels, texture));
+        }
+        cached.as_ref().unwrap().1.clone()
     };
 
     let ppp = ui.ctx().pixels_per_point();
@@ -932,7 +1111,7 @@ fn canvas(
 
     let shown = Rect::from_center_size(rect.center() + view.pan, size);
     let painter = ui.painter_at(rect);
-    if options.channels == Channels::Rgb {
+    if options.channels.index().is_none() {
         checkerboard(&painter, shown);
     }
     // Tiles share edge coordinates so neighbours touch exactly.
@@ -960,28 +1139,96 @@ fn canvas(
         on: options.tiled,
         enabled: true,
     }];
-    let channels = Channels::ALL.map(|channels| {
-        let enabled = available(channels);
-        Tool {
-            glyph: Glyph::Channels(channels),
-            name: if enabled {
-                channels.name().into()
-            } else {
-                format!("{} (not in this image)", channels.name())
-            },
-            on: options.channels == channels,
-            enabled,
-        }
-    });
+    let choices = channel_choices(&inspected.inspection);
+    let channels = channel_tools(&choices, options.channels);
     if let Some((group, button)) = toolbar(ui, rect, &[&tile, &channels]) {
         let options = all_options.entry(inspected.path.clone()).or_default();
         match group {
             0 => options.tiled = !options.tiled,
-            _ => options.channels = Channels::ALL[button],
+            _ => options.channels = choices[button].0,
         }
         ui.ctx().request_repaint();
     }
     if zoom_bar(ui, rect, view, fit) {
+        ui.ctx().request_repaint();
+    }
+}
+
+/// 3D canvas: the image on a rotating shape rendered by [`preview3d`] under this
+/// (transparent) area, see docs/features/canvas.md#3d.
+fn canvas_3d(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: Option<&mut Inspected>,
+    all_options: &mut HashMap<PathBuf, CanvasOptions>,
+    preview: &mut Preview3d,
+) {
+    let Some(inspected) = shown_image(ui, rect, inspected) else {
+        return;
+    };
+    let options = image_options(inspected, all_options);
+    let Some(pixels) = &inspected.pixels else {
+        return;
+    };
+    if inspected.uploaded_3d != Some(options.channels) {
+        preview.upload = Some(Upload {
+            width: pixels.width,
+            height: pixels.height,
+            pixels: channel_pixels(pixels, options.channels),
+            blend: options.channels.index().is_none() && inspected.inspection.channels[3],
+        });
+        inspected.uploaded_3d = Some(options.channels);
+    }
+    let ppp = ui.ctx().pixels_per_point();
+    let min = (rect.min.to_vec2() * ppp).round();
+    let size = (rect.size() * ppp).round().max(Vec2::splat(1.0));
+    preview.viewport = Some((
+        UVec2::new(min.x as u32, min.y as u32),
+        UVec2::new(size.x as u32, size.y as u32),
+    ));
+
+    let response = ui.interact(rect, ui.id().with("canvas_3d"), Sense::click_and_drag());
+    if response.double_clicked() {
+        preview.orbit = Orbit::default();
+    } else if response.dragged_by(PointerButton::Primary)
+        || response.dragged_by(PointerButton::Secondary)
+    {
+        let delta = response.drag_delta();
+        preview.orbit.drag(bevy::math::Vec2::new(delta.x, delta.y));
+        preview.dragging = true;
+    }
+    if response.hovered() {
+        let (notches, pinch) = ui.input(|i| (wheel_notches(i), i.zoom_delta()));
+        let factor = pinch * WHEEL_ZOOM.powf(notches);
+        if factor != 1.0 {
+            preview.orbit.dolly(factor);
+        }
+    }
+
+    let shapes: Vec<Tool> = Shape::ALL
+        .iter()
+        .map(|&shape| Tool {
+            glyph: Glyph::Icon(match shape {
+                Shape::Box => Icon::Box,
+                Shape::Sphere => Icon::Globe,
+                Shape::Cylinder => Icon::Cylinder,
+                Shape::Torus => Icon::Torus,
+            }),
+            name: shape.name().into(),
+            on: preview.shape == shape,
+            enabled: true,
+        })
+        .collect();
+    let choices = channel_choices(&inspected.inspection);
+    let channels = channel_tools(&choices, options.channels);
+    if let Some((group, button)) = toolbar(ui, rect, &[&shapes, &channels]) {
+        match group {
+            0 => preview.shape = Shape::ALL[button],
+            _ => {
+                let options = all_options.entry(inspected.path.clone()).or_default();
+                options.channels = choices[button].0;
+            }
+        }
         ui.ctx().request_repaint();
     }
 }
@@ -1105,9 +1352,20 @@ fn paint_glyph(
                 (vec2(3.7, 2.8), Channels::B, CHANNEL_B),
             ];
             // circle-small is r = 6 of 24, so 4 px at 16 px.
-            for (offset, channel, color) in circles {
-                if shown == Channels::Rgb || shown == channel {
-                    painter.circle_filled(center + offset, 4.0, fill(color));
+            // Gray: black, gray, white instead of the channel colors.
+            let gray = [egui::Color32::BLACK, TEXT_WEAK, egui::Color32::WHITE];
+            for (i, (offset, channel, color)) in circles.into_iter().enumerate() {
+                match shown {
+                    Channels::Gray => {
+                        painter.circle_filled(center + offset, 4.0, fill(gray[i]));
+                    }
+                    Channels::Rgb => {
+                        painter.circle_filled(center + offset, 4.0, fill(color));
+                    }
+                    _ if shown == channel => {
+                        painter.circle_filled(center + offset, 4.0, fill(color));
+                    }
+                    _ => {}
                 }
             }
             for (offset, ..) in circles {

@@ -9,6 +9,7 @@ mod logo;
 mod manifest;
 mod material;
 mod plan;
+mod preview3d;
 mod texture;
 mod theme;
 mod tree;
@@ -18,7 +19,7 @@ use std::env;
 use std::process::ExitCode;
 
 use bevy::prelude::*;
-use bevy_egui::EguiPlugin;
+use bevy_egui::{EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -90,7 +91,12 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
-        .add_plugins(ui::UiPlugin)
+        // The overlay camera is chosen explicitly: the 3D preview camera must not get egui.
+        .insert_resource(EguiGlobalSettings {
+            auto_create_primary_context: false,
+            ..default()
+        })
+        .add_plugins((ui::UiPlugin, preview3d::Preview3dPlugin))
         .insert_resource(project)
         .add_systems(Startup, setup_camera)
         .run();
@@ -98,5 +104,5 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, PrimaryEguiContext));
 }

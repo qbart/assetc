@@ -5,24 +5,29 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 /// Lucide icons vendored in assets/icons, see docs/features/gui.md.
 #[derive(Clone, Copy)]
 pub enum Icon {
+    Box,
     Check,
     ChevronDown,
     ChevronRight,
     CircleSmall,
+    Cylinder,
     File,
     Files,
     Folder,
     FolderOpen,
+    Globe,
     Grid3x3,
     Hammer,
     Image,
     Info,
     RefreshCw,
     Settings,
+    Torus,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 14] = [
+const SVGS: [(&str, &str); 18] = [
+    ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
     (
         "chevron-down",
@@ -36,6 +41,7 @@ const SVGS: [(&str, &str); 14] = [
         "circle-small",
         include_str!("../assets/icons/circle-small.svg"),
     ),
+    ("cylinder", include_str!("../assets/icons/cylinder.svg")),
     ("file", include_str!("../assets/icons/file.svg")),
     ("files", include_str!("../assets/icons/files.svg")),
     ("folder", include_str!("../assets/icons/folder.svg")),
@@ -43,12 +49,14 @@ const SVGS: [(&str, &str); 14] = [
         "folder-open",
         include_str!("../assets/icons/folder-open.svg"),
     ),
+    ("globe", include_str!("../assets/icons/globe.svg")),
     ("grid-3x3", include_str!("../assets/icons/grid-3x3.svg")),
     ("hammer", include_str!("../assets/icons/hammer.svg")),
     ("image", include_str!("../assets/icons/image.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("settings", include_str!("../assets/icons/settings.svg")),
+    ("torus", include_str!("../assets/icons/torus.svg")),
 ];
 
 // Rendered white so `Image::tint` can color them.
