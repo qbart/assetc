@@ -7,8 +7,9 @@ produced.
 
 ## View bar
 
-A 36 px bar across the top of the canvas (`BG_PANEL`, 1 px `STROKE` line at
-its bottom), always shown:
+A 32 px bar across the top of the canvas (`BG_PANEL`, 1 px `STROKE` line at
+its bottom), always shown. It is as tall as the left sidebar's tab strip, so
+their bottom lines align:
 
 ```
 View  [ 2D | 3D ]

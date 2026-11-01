@@ -41,8 +41,7 @@ prints the error and exits with a non-zero code.
 
 ## GUI integration
 
-- Window title is `assetc — <project root directory name>`, or `assetc`
-  when no project was found.
+- Window title is `assetc`, with or without a project.
 - Left sidebar browses the configured `input` and `output` directories (see
   [`gui.md`](gui.md#file-browser)).
 - Status bar shows `Ready` when a project was loaded, or
