@@ -97,6 +97,7 @@ The icon follows the entry's type, by extension (any case):
 | font: `ttf`, `otf`, `woff`, `woff2`           | `type`                    |
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `noise`                      | `image-play`              |
+| gradient: `gradient`                          | `swatch-book`             |
 | mesh: `gltf`, `glb`, `obj`                    | `torus`                   |
 | anything else                                 | `file`                    |
 
@@ -132,7 +133,7 @@ toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `bo
 `grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab),
 `grip-vertical` (LUT compare divider), `loader`
 (status bar), `folder`, `folder-open`, `file`, `sun-medium`, `type`,
-`aperture`, `image-play`, `image`, `torus`, `chevron-right`, `chevron-down` (file tree,
+`aperture`, `image-play`, `swatch-book`, `image`, `torus`, `chevron-right`, `chevron-down` (file tree,
 see [Tree icons](#tree-icons)), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 

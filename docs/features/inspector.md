@@ -20,8 +20,9 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 ## Tabs
 
 Five icon tabs, top to bottom: **Info** (`info`), **Parameters**
-(`sliders-vertical`) and **Modifiers** (`wrench`), both only for `.noise`
-files in the Input tree (see [`noise.md`](noise.md#parameters-tab)),
+(`sliders-vertical`) for `.noise` and `.gradient` files and **Modifiers**
+(`wrench`) for `.noise` files, both only in the Input tree (see
+[`noise.md`](noise.md#parameters-tab), [`gradients.md`](gradients.md#parameters-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), and **Assets** (`files`). Hovering
 a tab shows its name.
@@ -56,6 +57,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.mat.toml`               | Material source    |
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
 | Input  | `*.noise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |
+| Input  | `*.gradient` (any case)    | Gradient, see [`gradients.md`](gradients.md#inspector-info) |
 | Input  | `*.ttf`, `*.otf` (any case) | Font, see [`fonts.md`](fonts.md#inspector) |
 | Input  | `*.gltf`, `*.glb` (any case) | Model, see [`models.md`](models.md#inspector) |
 | Input  | anything else              | Ignored            |

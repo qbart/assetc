@@ -1,7 +1,7 @@
 # File operations
 
-The **Input** tree can change the files it shows: create folders and noise
-textures, rename, and delete. These are real file-system operations on the
+The **Input** tree can change the files it shows: create folders, noise
+textures and gradients, rename, and delete. These are real file-system operations on the
 project's `input` directory. The **Output** tree is read-only (the build owns
 it).
 
@@ -15,6 +15,7 @@ Right-clicking an Input row, or the empty area below the last row (the
 | New Folder           | inside the folder, or the file's folder   | always             |
 | New Noise ▸ (the `noise/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
 | New Pattern ▸ (the `pattern/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
+| New Gradient         | as New Folder, see [`gradients.md`](gradients.md#creating) | always |
 | Rename               | the row                                   | rows               |
 | Delete               | the row                                   | rows               |
 
