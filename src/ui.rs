@@ -1722,7 +1722,7 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                             // In the middle of the 8 px gap above card `to` (or below the last).
                             let y = cards
                                 .get(to)
-                                .map_or(cards[to - 1].bottom() + 4.0, |r| r.top() - 4.0);
+                                .map_or_else(|| cards[to - 1].bottom() + 4.0, |r| r.top() - 4.0);
                             let rect = cards[from];
                             painter.hline(rect.x_range(), y, Stroke::new(2.0, ACCENT));
                         }
