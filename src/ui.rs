@@ -877,7 +877,7 @@ fn status_bar(
             let angle = (ui.input(|i| i.time) % 1.0) as f32 * std::f32::consts::TAU;
             let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
             Icon::Loader
-                .image(14.0, TEXT_WEAK)
+                .image(14.0, ACCENT)
                 .rotate(angle, Vec2::splat(0.5))
                 .paint_at(ui, rect);
             ui.ctx().request_repaint();
