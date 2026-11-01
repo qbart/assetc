@@ -20,6 +20,7 @@ mod manifest;
 mod material;
 mod model;
 mod noise;
+mod palette;
 mod plan;
 mod preview3d;
 mod texture;

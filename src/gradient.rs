@@ -89,6 +89,120 @@ impl Layout {
     }
 }
 
+/// An image split into equal cells, filled in `layout` order: `.gradient` and `.palette`
+/// files; see docs/spec/gradient.md#image.
+pub trait CellGrid {
+    /// Width, height, cell width, cell height, px.
+    fn grid(&self) -> [u32; 4];
+    fn grid_mut(&mut self) -> ([&mut u32; 4], &mut Layout);
+    fn layout(&self) -> Layout;
+    /// How many cells are filled.
+    fn used(&self) -> usize;
+    /// What fills the cells, e.g. `gradients`, for errors.
+    fn noun(&self) -> &'static str;
+
+    fn columns(&self) -> u32 {
+        let [width, _, cell_width, _] = self.grid();
+        width / cell_width.max(1)
+    }
+
+    fn rows(&self) -> u32 {
+        let [_, height, _, cell_height] = self.grid();
+        height / cell_height.max(1)
+    }
+
+    /// Column and row of item `i`'s cell.
+    fn cell(&self, i: usize) -> (u32, u32) {
+        let i = i as u32;
+        match self.layout() {
+            Layout::Rows => (i % self.columns(), i / self.columns()),
+            Layout::Columns => (i / self.rows(), i % self.rows()),
+        }
+    }
+
+    /// How many cells the grid has.
+    fn capacity(&self) -> usize {
+        (self.columns() * self.rows()) as usize
+    }
+
+    /// Checks what the editor can get wrong: sizes and whether the items fit.
+    fn validate(&self) -> Result<(), String> {
+        let [width, height, cell_width, cell_height] = self.grid();
+        for (key, value) in [("width", width), ("height", height)] {
+            in_range(key, i64::from(value), 1, MAX_SIZE)?;
+        }
+        in_range("cell_width", i64::from(cell_width), 1, i64::from(width))?;
+        in_range("cell_height", i64::from(cell_height), 1, i64::from(height))?;
+        let n = self.used();
+        if n > self.capacity() {
+            return Err(format!(
+                "{n} {} need {n} cells but the grid has {}",
+                self.noun(),
+                self.capacity()
+            ));
+        }
+        Ok(())
+    }
+
+    /// The image: cell `i` drawn by `fill(i, cell_width, cell_height)` (RGBA8 rows), the rest
+    /// transparent.
+    fn render_cells(&self, fill: impl Fn(usize, u32, u32) -> Vec<u8>) -> Result<Image, String> {
+        self.validate()?;
+        let [width, height, cell_width, cell_height] = self.grid();
+        let mut pixels = vec![0; (width * height * 4) as usize];
+        for i in 0..self.used() {
+            let (column, row) = self.cell(i);
+            let (left, top) = (column * cell_width, row * cell_height);
+            let cell = fill(i, cell_width, cell_height);
+            let row_bytes = (cell_width * 4) as usize;
+            for (y, row) in cell.chunks_exact(row_bytes).enumerate() {
+                let start = (((top + y as u32) * width + left) * 4) as usize;
+                pixels[start..start + row_bytes].copy_from_slice(row);
+            }
+        }
+        Ok(Image {
+            width,
+            height,
+            pixels,
+        })
+    }
+
+    /// The grid's keys in the written form.
+    fn grid_toml(&self) -> String {
+        let [width, height, cell_width, cell_height] = self.grid();
+        format!(
+            "width = {width}\nheight = {height}\ncell_width = {cell_width}\ncell_height = {cell_height}\nlayout = \"{}\"\n",
+            self.layout().key()
+        )
+    }
+}
+
+/// Reads and removes the grid keys from `table`; missing ones get `defaults`.
+pub fn take_grid(
+    table: &mut toml::Table,
+    defaults: [u32; 4],
+) -> Result<([u32; 4], Layout), String> {
+    let mut grid = defaults;
+    for (key, value) in ["width", "height", "cell_width", "cell_height"]
+        .into_iter()
+        .zip(&mut grid)
+    {
+        if let Some(v) = table.remove(key) {
+            let v = v.as_integer().ok_or(format!("{key} must be an integer"))?;
+            in_range(key, v, 1, MAX_SIZE)?;
+            *value = v as u32;
+        }
+    }
+    let layout = match table.remove("layout") {
+        None => Layout::Rows,
+        Some(v) => v
+            .as_str()
+            .and_then(|key| Layout::ALL.into_iter().find(|l| l.key() == key))
+            .ok_or_else(|| format!("unknown layout {v} (use rows or columns)"))?,
+    };
+    Ok((grid, layout))
+}
+
 /// A color at a position; `color` is straight (not premultiplied) RGBA.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Stop {
@@ -235,108 +349,22 @@ impl Gradients {
         }
     }
 
-    pub fn columns(&self) -> u32 {
-        self.width / self.cell_width.max(1)
-    }
-
-    pub fn rows(&self) -> u32 {
-        self.height / self.cell_height.max(1)
-    }
-
-    /// Column and row of gradient `i`'s cell.
-    pub fn cell(&self, i: usize) -> (u32, u32) {
-        let i = i as u32;
-        match self.layout {
-            Layout::Rows => (i % self.columns(), i / self.columns()),
-            Layout::Columns => (i / self.rows(), i % self.rows()),
-        }
-    }
-
-    /// How many cells the grid has.
-    pub fn capacity(&self) -> usize {
-        (self.columns() * self.rows()) as usize
-    }
-
-    /// Checks what the editor can get wrong: sizes and whether the gradients fit.
-    pub fn validate(&self) -> Result<(), String> {
-        for (key, value) in [("width", self.width), ("height", self.height)] {
-            in_range(key, i64::from(value), 1, MAX_SIZE)?;
-        }
-        in_range(
-            "cell_width",
-            i64::from(self.cell_width),
-            1,
-            i64::from(self.width),
-        )?;
-        in_range(
-            "cell_height",
-            i64::from(self.cell_height),
-            1,
-            i64::from(self.height),
-        )?;
-        let n = self.gradients.len();
-        if n > self.capacity() {
-            return Err(format!(
-                "{n} gradients need {n} cells but the grid has {}",
-                self.capacity()
-            ));
-        }
-        Ok(())
-    }
-
     /// Whether some stop is not opaque.
     pub fn has_alpha(&self) -> bool {
         !self.gradients.iter().all(Gradient::is_opaque)
     }
 
-    /// The image: one cell per gradient, left to right then top to bottom, the rest transparent.
+    /// The image: one cell per gradient, in layout order, the rest transparent.
     pub fn render(&self) -> Result<Image, String> {
-        self.validate()?;
-        let (width, height) = (self.width, self.height);
-        let (cell_width, cell_height) = (self.cell_width, self.cell_height);
-        let mut pixels = vec![0; (width * height * 4) as usize];
-        for (i, gradient) in self.gradients.iter().enumerate() {
-            let (column, row) = self.cell(i);
-            let (left, top) = (column * cell_width, row * cell_height);
-            let cell = gradient.render(cell_width, cell_height);
-            let row_bytes = (cell_width * 4) as usize;
-            for (y, row) in cell.chunks_exact(row_bytes).enumerate() {
-                let start = (((top + y as u32) * width + left) * 4) as usize;
-                pixels[start..start + row_bytes].copy_from_slice(row);
-            }
-        }
-        Ok(Image {
-            width,
-            height,
-            pixels,
-        })
+        self.render_cells(|i, width, height| self.gradients[i].render(width, height))
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut table: toml::Table = text
             .parse()
             .map_err(|e: toml::de::Error| e.message().to_owned())?;
-        let mut size = |key: &str, default: u32| -> Result<u32, String> {
-            match table.remove(key) {
-                None => Ok(default),
-                Some(v) => {
-                    let v = v.as_integer().ok_or(format!("{key} must be an integer"))?;
-                    in_range(key, v, 1, MAX_SIZE)?;
-                    Ok(v as u32)
-                }
-            }
-        };
-        let width = size("width", 256)?;
-        let height = size("height", 256)?;
-        let cell_width = size("cell_width", 16)?;
-        let cell_height = size("cell_height", 64)?;
-        let layout = match table.remove("layout") {
-            None => Layout::Rows,
-            Some(v) => v
-                .as_str()
-                .and_then(|key| Layout::ALL.into_iter().find(|l| l.key() == key))
-                .ok_or_else(|| format!("unknown layout {v} (use rows or columns)"))?,
-        };
+        let ([width, height, cell_width, cell_height], layout) =
+            take_grid(&mut table, [256, 256, 16, 64])?;
         let gradients = match table.remove("gradients") {
             None => Vec::new(),
             Some(toml::Value::Array(items)) => items
@@ -365,14 +393,7 @@ impl Gradients {
 
     /// The written form, see docs/spec/gradient.md#written-form.
     pub fn to_toml(&self) -> String {
-        let mut out = format!(
-            "width = {}\nheight = {}\ncell_width = {}\ncell_height = {}\nlayout = \"{}\"\n",
-            self.width,
-            self.height,
-            self.cell_width,
-            self.cell_height,
-            self.layout.key()
-        );
+        let mut out = self.grid_toml();
         for gradient in &self.gradients {
             out += "\n[[gradients]]\n";
             out += &format!("name = {}\n", toml::Value::String(gradient.name.clone()));
@@ -390,6 +411,36 @@ impl Gradients {
             out += "]\n";
         }
         out
+    }
+}
+
+impl CellGrid for Gradients {
+    fn grid(&self) -> [u32; 4] {
+        [self.width, self.height, self.cell_width, self.cell_height]
+    }
+
+    fn grid_mut(&mut self) -> ([&mut u32; 4], &mut Layout) {
+        (
+            [
+                &mut self.width,
+                &mut self.height,
+                &mut self.cell_width,
+                &mut self.cell_height,
+            ],
+            &mut self.layout,
+        )
+    }
+
+    fn layout(&self) -> Layout {
+        self.layout
+    }
+
+    fn used(&self) -> usize {
+        self.gradients.len()
+    }
+
+    fn noun(&self) -> &'static str {
+        "gradients"
     }
 }
 

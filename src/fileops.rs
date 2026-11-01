@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::gradient::Gradients;
 use crate::noise::{GeneratorKind, Noise};
+use crate::palette::Palette;
 
 /// Creates `New Folder` (or `New Folder 2`, …) in `dir`.
 pub fn create_folder(input: &Path, dir: &Path) -> Result<PathBuf, String> {
@@ -28,6 +29,15 @@ pub fn create_gradient(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     check_inside(input, dir, true)?;
     let path = unique(dir, "gradient", ".gradient");
     fs::write(&path, Gradients::new().to_toml()).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// Creates `palette.palette` (or `palette 2.palette`, …) in `dir`; see
+/// docs/features/palettes.md#creating.
+pub fn create_palette(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "palette", ".palette");
+    fs::write(&path, Palette::new().to_toml()).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -135,6 +145,10 @@ mod tests {
         assert_eq!(gradient, input.join("gradient.gradient"));
         let parsed = Gradients::parse(&fs::read_to_string(&gradient).unwrap()).unwrap();
         assert_eq!(parsed, Gradients::new());
+        let palette = create_palette(&input, &input).unwrap();
+        assert_eq!(palette, input.join("palette.palette"));
+        let parsed = Palette::parse(&fs::read_to_string(&palette).unwrap()).unwrap();
+        assert_eq!(parsed, Palette::new());
     }
 
     #[test]

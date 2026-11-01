@@ -379,8 +379,10 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             job: Job::Texture {
                 source: rel.clone(),
                 color,
-                // Smaller levels would blend neighbouring gradient cells.
-                mipmaps: settings.mipmaps(rel) && !is_gradient(Path::new(rel)),
+                // Smaller levels would blend neighbouring gradient or palette cells.
+                mipmaps: settings.mipmaps(rel)
+                    && !is_gradient(Path::new(rel))
+                    && !crate::palette::is_palette(Path::new(rel)),
                 flip_green,
             },
         });

@@ -5,11 +5,12 @@ use std::path::Path;
 
 use crate::build::{is_noise, is_texture_source, load_source as decode, relative, strip_extension};
 use crate::config::Project;
-use crate::gradient::{Gradients, is_gradient};
+use crate::gradient::{CellGrid, Gradients, is_gradient};
 use crate::hash::fnv1a64;
 use crate::lut::Lut;
 use crate::material::{self, AlphaMode, HeightMode};
 use crate::noise::Noise;
+use crate::palette::{Palette, is_palette};
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
 use crate::{aanim, amesh, font, ktx2, manifest, model};
@@ -91,6 +92,7 @@ enum Kind {
     SourceTexture,
     Noise,
     Gradient,
+    Palette,
     MaterialSource,
     ColorLut,
     Font,
@@ -111,6 +113,7 @@ impl Kind {
             Self::SourceTexture => "Source texture",
             Self::Noise => "Noise",
             Self::Gradient => "Gradient",
+            Self::Palette => "Palette",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
@@ -174,6 +177,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if has_ext("cube") => Kind::ColorLut,
         Location::Input if is_noise(file) => Kind::Noise,
         Location::Input if is_gradient(file) => Kind::Gradient,
+        Location::Input if is_palette(file) => Kind::Palette,
         Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if model::is_model(file) => Kind::Model,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
@@ -197,6 +201,8 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             noise_rows(file, &mut out).and_then(|()| source_texture(project, file, &rel, &mut out))
         }
         Kind::Gradient => gradient_rows(file, &mut out)
+            .and_then(|()| source_texture(project, file, &rel, &mut out)),
+        Kind::Palette => palette_rows(file, &mut out)
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
@@ -253,6 +259,7 @@ fn source_texture(
         .push(("Dimensions", format!("{width} × {height} px")));
     if !is_noise(file)
         && !is_gradient(file)
+        && !is_palette(file)
         && let Ok(Some(amod)) = crate::amod::read(file)
         && !amod.modifiers.is_empty()
     {
@@ -365,16 +372,26 @@ fn gradient_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let gradients = Gradients::parse(&text)?;
     out.rows
         .push(("Gradients", gradients.gradients.len().to_string()));
-    out.rows.push((
-        "Cell",
-        format!("{} × {} px", gradients.cell_width, gradients.cell_height),
-    ));
-    out.rows.push((
-        "Grid",
-        format!("{} × {}", gradients.columns(), gradients.rows()),
-    ));
-    out.rows.push(("Layout", gradients.layout.key().into()));
+    grid_rows(&gradients, out);
     Ok(())
+}
+
+fn palette_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let palette = Palette::parse(&text)?;
+    out.rows.push(("Colors", palette.colors.len().to_string()));
+    grid_rows(&palette, out);
+    Ok(())
+}
+
+/// Cell, Grid and Layout of a `.gradient` or `.palette` file.
+fn grid_rows(grid: &impl CellGrid, out: &mut Inspection) {
+    let [_, _, cell_width, cell_height] = grid.grid();
+    out.rows
+        .push(("Cell", format!("{cell_width} × {cell_height} px")));
+    out.rows
+        .push(("Grid", format!("{} × {}", grid.columns(), grid.rows())));
+    out.rows.push(("Layout", grid.layout().key().into()));
 }
 
 fn font_rows(
@@ -1124,6 +1141,37 @@ mod tests {
         fs::write(&file, "cell_width = 999\n").unwrap();
         let i = inspect(&project, Location::Input, &file);
         assert!(row(&i, "Error").contains("cell_width"));
+        assert!(i.preview.is_none());
+    }
+
+    #[test]
+    fn palette_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        let file = dir.path().join("assets/ui/theme.palette");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, Palette::new().to_toml()).unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Kind"), "Palette");
+        assert_eq!(row(&i, "Colors"), "2");
+        assert_eq!(row(&i, "Cell"), "16 × 16 px");
+        assert_eq!(row(&i, "Grid"), "8 × 8");
+        assert_eq!(row(&i, "Layout"), "rows");
+        assert_eq!(row(&i, "Dimensions"), "128 × 128 px");
+        assert_eq!(row(&i, "Asset path"), "ui/theme");
+        assert_eq!(row(&i, "Color"), "sRGB");
+        // Never mipmapped: levels would blend cells.
+        assert_eq!(row(&i, "Mip levels"), "1");
+        assert_eq!(i.channels, [true, true, true, false]);
+
+        fs::write(
+            &file,
+            "[[colors]]
+name = \"x\"\n",
+        )
+        .unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Error"), "color 1: missing color");
         assert!(i.preview.is_none());
     }
 

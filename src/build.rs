@@ -265,7 +265,7 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
 }
 
 /// Texture source extensions, matched case-insensitively: images, and generated noise.
-const TEXTURE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "tga", "noise", "gradient"];
+const TEXTURE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "tga", "noise", "gradient", "palette"];
 
 pub fn is_texture_source(file: &Path) -> bool {
     file.extension().is_some_and(|ext| {
@@ -310,6 +310,19 @@ pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType)
         let generated = noise.generate();
         let image = image::RgbaImage::from_raw(generated.width, generated.height, generated.pixels)
             .expect("noise image size");
+        return Ok((image, color));
+    }
+    if crate::palette::is_palette(source) {
+        let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
+        let palette = crate::palette::Palette::parse(&text)?;
+        let color = if palette.has_alpha() {
+            image::ColorType::Rgba8
+        } else {
+            image::ColorType::Rgb8
+        };
+        let rendered = palette.render()?;
+        let image = image::RgbaImage::from_raw(rendered.width, rendered.height, rendered.pixels)
+            .expect("palette image size");
         return Ok((image, color));
     }
     if is_gradient(source) {
@@ -425,7 +438,10 @@ fn compile_font(input: &Path, source: &str, output: &Path) -> Result<String, Str
 
 /// An image file (`png`, `jpg`, `jpeg`, `tga`), as opposed to generated texture sources.
 pub fn is_image(file: &Path) -> bool {
-    is_texture_source(file) && !is_noise(file) && !is_gradient(file)
+    is_texture_source(file)
+        && !is_noise(file)
+        && !is_gradient(file)
+        && !crate::palette::is_palette(file)
 }
 
 pub fn is_lut(file: &Path) -> bool {

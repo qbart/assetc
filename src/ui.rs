@@ -18,7 +18,9 @@ use crate::build::{self, Outcome};
 use crate::color_picker::{self, Picker};
 use crate::config::Project;
 use crate::fileops;
-use crate::gradient::{self, Dither, Gradient, Gradients, Layout as GradientLayout, Stop};
+use crate::gradient::{
+    self, CellGrid, Dither, Gradient, Gradients, Layout as GradientLayout, Stop,
+};
 use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
@@ -26,6 +28,7 @@ use crate::lut::Lut;
 use crate::manifest::Kind;
 use crate::model;
 use crate::noise::{GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Value};
+use crate::palette::{self, Palette, Swatch};
 use crate::preview3d::{
     CompiledUpload, CubemapUpload, MeshDisplay, MeshOverlay, ModelStatus, Orbit, Preview3d, Shape,
     Upload,
@@ -151,6 +154,8 @@ struct Inspected {
     noise: Option<Result<NoiseEdit, String>>,
     /// A `.gradient` file being edited, or why it can't be read.
     gradient: Option<Result<GradientEdit, String>>,
+    /// A `.palette` file being edited, or why it can't be read.
+    palette: Option<Result<PaletteEdit, String>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
     mesh: Option<Result<MeshEdit, String>>,
     /// An image's `.amod` (its modifiers) being edited, or why it can't be read.
@@ -362,6 +367,7 @@ enum InspectorTab {
     Parameters,
     Modifiers,
     Gradients,
+    Colors,
     Animations,
     Mipmaps,
     Lods,
@@ -369,11 +375,12 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 9] = [
         Self::Info,
         Self::Parameters,
         Self::Modifiers,
         Self::Gradients,
+        Self::Colors,
         Self::Animations,
         Self::Mipmaps,
         Self::Lods,
@@ -385,7 +392,7 @@ impl InspectorTab {
             Self::Info => Icon::Info,
             Self::Parameters => Icon::SlidersVertical,
             Self::Modifiers => Icon::Wrench,
-            Self::Gradients => Icon::Palette,
+            Self::Gradients | Self::Colors => Icon::Palette,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
             Self::Lods => Icon::BringToFront,
@@ -399,6 +406,7 @@ impl InspectorTab {
             Self::Parameters => "Parameters",
             Self::Modifiers => "Modifiers",
             Self::Gradients => "Gradients",
+            Self::Colors => "Colors",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
             Self::Lods => "Levels of detail",
@@ -420,6 +428,7 @@ impl InspectorTab {
                 s.location == Location::Input
                     && (build::is_noise(&s.path)
                         || gradient::is_gradient(&s.path)
+                        || palette::is_palette(&s.path)
                         || model::is_model(&s.path))
                     && s.path.is_file()
             }),
@@ -430,6 +439,9 @@ impl InspectorTab {
             }),
             Self::Gradients => selection.is_some_and(|s| {
                 s.location == Location::Input && gradient::is_gradient(&s.path) && s.path.is_file()
+            }),
+            Self::Colors => selection.is_some_and(|s| {
+                s.location == Location::Input && palette::is_palette(&s.path) && s.path.is_file()
             }),
             // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
@@ -725,6 +737,7 @@ struct Prepared {
     lut: Option<Lut>,
     noise: Option<Result<Noise, String>>,
     gradient: Option<Result<Gradients, String>>,
+    palette: Option<Result<Palette, String>>,
     /// A model's sidecar and the meshlet limits the project gives it.
     mesh: Option<Result<(Amod, MeshOptions), String>>,
     sidecar: Option<Result<Amod, String>>,
@@ -795,6 +808,12 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
             .map_err(|e| e.to_string())
             .and_then(|text| Gradients::parse(&text))
     });
+    let palette = (selection.location == Location::Input && palette::is_palette(&selection.path))
+        .then(|| {
+            std::fs::read_to_string(&selection.path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| Palette::parse(&text))
+        });
     let mesh =
         (selection.location == Location::Input && model::is_model(&selection.path)).then(|| {
             let settings = MeshSettings::new(&project.config.meshes)
@@ -815,6 +834,7 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
         compiled_materials: std::mem::take(&mut inspection.compiled_materials),
         compiled_bytes: inspection.compiled_bytes.take(),
         gradient,
+        palette,
         mesh,
         model,
         pixels: inspection
@@ -885,15 +905,33 @@ fn inspected(
     prepared: Prepared,
     previous: Option<Inspected>,
 ) -> Inspected {
-    let (kept, kept_gradient, kept_mesh, kept_sidecar) =
-        previous.map_or((None, None, None, None), |p| {
+    let (kept, kept_gradient, kept_palette, kept_mesh, kept_sidecar) =
+        previous.map_or((None, None, None, None, None), |p| {
             (
                 p.noise.and_then(Result::ok),
                 p.gradient.and_then(Result::ok),
+                p.palette.and_then(Result::ok),
                 p.mesh.and_then(Result::ok),
                 p.sidecar.and_then(Result::ok),
             )
         });
+    let palette = prepared.palette.map(|parsed| {
+        parsed.map(|p| match kept_palette {
+            Some(edit) if edit.saved == p => edit,
+            Some(edit) => PaletteEdit {
+                edit: p.clone(),
+                saved: p,
+                ..edit
+            },
+            None => PaletteEdit {
+                edit: p.clone(),
+                saved: p,
+                selected: 0,
+                drag: None,
+                picker: Picker::default(),
+            },
+        })
+    });
     let sidecar = prepared.sidecar.map(|parsed| {
         parsed.map(|amod| match kept_sidecar {
             Some(edit) if edit.saved == amod => edit,
@@ -956,6 +994,7 @@ fn inspected(
         lut: prepared.lut,
         noise,
         gradient,
+        palette,
         mesh,
         sidecar,
         compiled_mesh: prepared.compiled_mesh,
@@ -1396,6 +1435,7 @@ enum FileOp {
     NewFolder(PathBuf),
     NewNoise(PathBuf, GeneratorKind),
     NewGradient(PathBuf),
+    NewPalette(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -1451,6 +1491,10 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
         *action = Some(TreeAction::Op(FileOp::NewGradient(dir.to_path_buf())));
         ui.close();
     }
+    if menu_item(ui, "New Palette", None).clicked() {
+        *action = Some(TreeAction::Op(FileOp::NewPalette(dir.to_path_buf())));
+        ui.close();
+    }
 }
 
 /// The row icon by type, see docs/features/gui.md#tree-icons.
@@ -1474,6 +1518,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "cube" => Icon::Aperture,
         "noise" => Icon::ImagePlay,
         "gradient" => Icon::SwatchBook,
+        "palette" => Icon::Palette,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
@@ -1653,6 +1698,9 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             .map(|path| (dir, path)),
         FileOp::NewGradient(dir) => fileops::create_gradient(&input, &dir)
             .map_err(|e| ("New Gradient", e))
+            .map(|path| (dir, path)),
+        FileOp::NewPalette(dir) => fileops::create_palette(&input, &dir)
+            .map_err(|e| ("New Palette", e))
             .map(|path| (dir, path)),
         FileOp::Rename(path) => {
             let text = path
@@ -1865,6 +1913,23 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                     }
                 }
                 (
+                    tab @ (InspectorTab::Parameters | InspectorTab::Colors),
+                    Some(inspected),
+                    Some(_),
+                ) if inspected.palette.is_some() => {
+                    let save = if tab == InspectorTab::Parameters {
+                        palette_output_tab(ui, inspected)
+                    } else {
+                        colors_tab(ui, inspected)
+                    };
+                    if let Some(palette) = save {
+                        match std::fs::write(&inspected.path, palette.to_toml()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
+                (
                     tab @ (InspectorTab::Parameters | InspectorTab::Gradients),
                     Some(inspected),
                     Some(_),
@@ -1899,6 +1964,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                     }
                 }
                 (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
+                (InspectorTab::Colors, Some(_), Some(_)) => placeholder(ui, "No colors"),
                 (InspectorTab::Lods, Some(inspected), Some(_)) => {
                     let choice = state.lod_levels.entry(inspected.path.clone()).or_default();
                     if let Some(mesh) = &inspected.compiled_mesh {
@@ -2572,64 +2638,292 @@ fn gradient_output_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradien
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
-                let file = &mut edit.edit;
-                prop_section(
-                    ui,
-                    "gradient_output",
-                    Fold::Open,
-                    RichText::new("Output"),
-                    |_| {},
-                    |_, _| {},
-                    |ui| {
-                        // A change that leaves too few cells is undone, so the file stays valid.
-                        let before = (file.width, file.height, file.cell_width, file.cell_height);
-                        let (max_cell_width, max_cell_height) = (file.width, file.height);
-                        let fields = [
-                            ("Width", &mut file.width, 4096),
-                            ("Height", &mut file.height, 4096),
-                            ("Cell width", &mut file.cell_width, max_cell_width),
-                            ("Cell height", &mut file.cell_height, max_cell_height),
-                        ];
-                        for (label, value, max) in fields {
-                            prop_row(ui, label, |ui, width| {
-                                ui.add_sized(
-                                    vec2(width, 22.0),
-                                    egui::DragValue::new(value).range(1..=max),
-                                );
-                            });
-                        }
-                        file.cell_width = file.cell_width.min(file.width);
-                        file.cell_height = file.cell_height.min(file.height);
-                        if file.validate().is_err() {
-                            (file.width, file.height, file.cell_width, file.cell_height) = before;
-                        }
-                        prop_row(ui, "Layout", |ui, width| {
-                            egui::ComboBox::from_id_salt("gradient_layout")
-                                .width(width - 8.0)
-                                .selected_text(file.layout.name())
-                                .show_ui(ui, |ui| {
-                                    for layout in GradientLayout::ALL {
-                                        ui.selectable_value(
-                                            &mut file.layout,
-                                            layout,
-                                            layout.name(),
-                                        )
-                                        .on_hover_text(layout.description());
-                                    }
-                                });
-                        });
-                        ui.weak(format!(
-                            "{} of {} cells used ({} × {})",
-                            file.gradients.len(),
-                            file.capacity(),
-                            file.columns(),
-                            file.rows()
-                        ));
-                    },
-                );
+                grid_section(ui, &mut edit.edit);
             });
         });
     gradient_commit(ui, edit)
+}
+
+/// The Output section of a `.gradient` or `.palette` file: image size, cells and layout; see
+/// docs/features/gradients.md#parameters-tab.
+fn grid_section(ui: &mut Ui, file: &mut impl CellGrid) {
+    prop_section(
+        ui,
+        "grid_output",
+        Fold::Open,
+        RichText::new("Output"),
+        |_| {},
+        |_, _| {},
+        |ui| {
+            // A change that leaves too few cells is undone, so the file stays valid.
+            let before = file.grid();
+            let [width, height, ..] = before;
+            let ([w, h, cw, ch], layout) = file.grid_mut();
+            let fields = [
+                ("Width", w, 4096),
+                ("Height", h, 4096),
+                ("Cell width", cw, width),
+                ("Cell height", ch, height),
+            ];
+            for (label, value, max) in fields {
+                prop_row(ui, label, |ui, width| {
+                    ui.add_sized(
+                        vec2(width, 22.0),
+                        egui::DragValue::new(value).range(1..=max),
+                    );
+                });
+            }
+            prop_row(ui, "Layout", |ui, width| {
+                egui::ComboBox::from_id_salt("grid_layout")
+                    .width(width - 8.0)
+                    .selected_text(layout.name())
+                    .show_ui(ui, |ui| {
+                        for option in GradientLayout::ALL {
+                            ui.selectable_value(layout, option, option.name())
+                                .on_hover_text(option.description());
+                        }
+                    });
+            });
+            let ([w, h, cw, ch], _) = file.grid_mut();
+            *cw = (*cw).min(*w);
+            *ch = (*ch).min(*h);
+            if file.validate().is_err() {
+                let ([w, h, cw, ch], _) = file.grid_mut();
+                [*w, *h, *cw, *ch] = before;
+            }
+            ui.weak(format!(
+                "{} of {} cells used ({} × {})",
+                file.used(),
+                file.capacity(),
+                file.columns(),
+                file.rows()
+            ));
+        },
+    );
+}
+
+/// A `.palette` file being edited; see docs/features/palettes.md#colors-tab.
+struct PaletteEdit {
+    edit: Palette,
+    /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
+    saved: Palette,
+    selected: usize,
+    /// The swatch being dragged to a new place.
+    drag: Option<usize>,
+    picker: Picker,
+}
+
+/// The palette file being edited, or a placeholder with why there is none.
+fn palette_edit<'a>(ui: &mut Ui, inspected: &'a mut Inspected) -> Option<&'a mut PaletteEdit> {
+    match &mut inspected.palette {
+        Some(Ok(edit)) => Some(edit),
+        Some(Err(e)) => {
+            placeholder(ui, e);
+            None
+        }
+        None => {
+            placeholder(ui, "No parameters");
+            None
+        }
+    }
+}
+
+/// The palette to write once nothing is being dragged or typed into, as for gradients.
+fn palette_commit(ui: &Ui, edit: &mut PaletteEdit) -> Option<Palette> {
+    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+    (!busy && edit.edit != edit.saved).then(|| {
+        edit.saved = edit.edit.clone();
+        edit.edit.clone()
+    })
+}
+
+/// Image size, cells and layout; see docs/features/palettes.md#parameters-tab.
+fn palette_output_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Palette> {
+    let edit = palette_edit(ui, inspected)?;
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                grid_section(ui, &mut edit.edit);
+            });
+        });
+    palette_commit(ui, edit)
+}
+
+/// Swatches and the selected color's editor; see docs/features/palettes.md#colors-tab.
+fn colors_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Palette> {
+    const SWATCH: f32 = 24.0;
+    const GAP: f32 = 4.0;
+    let edit = palette_edit(ui, inspected)?;
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let file = &mut edit.edit;
+                let room = file.colors.len() < file.capacity();
+                edit.selected = edit.selected.min(file.colors.len().saturating_sub(1));
+
+                // Swatches, wrapping, then the add button.
+                let per_row = ((ui.available_width() + GAP) / (SWATCH + GAP))
+                    .floor()
+                    .max(1.0) as usize;
+                let count = file.colors.len() + 1;
+                let rows = count.div_ceil(per_row);
+                let (area, _) = ui.allocate_exact_size(
+                    vec2(ui.available_width(), rows as f32 * (SWATCH + GAP) - GAP),
+                    Sense::hover(),
+                );
+                let slot = |i: usize| {
+                    Rect::from_min_size(
+                        area.min
+                            + vec2(
+                                (i % per_row) as f32 * (SWATCH + GAP),
+                                (i / per_row) as f32 * (SWATCH + GAP),
+                            ),
+                        vec2(SWATCH, SWATCH),
+                    )
+                };
+                let pointer = ui.ctx().pointer_interact_pos();
+                let target = edit.drag.and_then(|_| {
+                    let p = pointer?;
+                    (0..file.colors.len()).find(|&i| slot(i).expand(GAP / 2.0).contains(p))
+                });
+                let mut moved = None;
+                for i in 0..file.colors.len() {
+                    let rect = slot(i);
+                    let response = ui
+                        .interact(rect, ui.id().with(("swatch", i)), Sense::click_and_drag())
+                        .on_hover_text({
+                            let swatch = &file.colors[i];
+                            let name = if swatch.name.is_empty() {
+                                format!("Color {}", i + 1)
+                            } else {
+                                swatch.name.clone()
+                            };
+                            format!("{name} {}", gradient::format_color(swatch.color))
+                        });
+                    if response.clicked() || response.drag_started() {
+                        edit.selected = i;
+                    }
+                    if response.drag_started() {
+                        edit.drag = Some(i);
+                    }
+                    if response.drag_stopped()
+                        && let Some(from) = edit.drag.take()
+                        && let Some(to) = target
+                    {
+                        moved = Some((from, to));
+                    }
+                    let color = file.colors[i].color;
+                    if color[3] < 255 {
+                        color_picker::checker(ui, rect, 3);
+                    }
+                    let painter = ui.painter();
+                    painter.rect_filled(rect, 3, color_picker::to_color32(color));
+                    let (width, stroke) = if i == edit.selected || target == Some(i) {
+                        (2.0, ACCENT)
+                    } else {
+                        (1.0, TEXT_WEAK)
+                    };
+                    painter.rect_stroke(
+                        rect,
+                        3,
+                        Stroke::new(width, stroke),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+                if edit.drag.is_some() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    if !ui.input(|i| i.pointer.any_down()) {
+                        edit.drag = None;
+                    }
+                }
+                if let Some((from, to)) = moved
+                    && from != to
+                {
+                    let swatch = file.colors.remove(from);
+                    file.colors.insert(to, swatch);
+                    edit.selected = to;
+                }
+                // Add: a copy of the selected color's value.
+                let add = slot(file.colors.len());
+                let response = ui
+                    .interact(add, ui.id().with("swatch_add"), sense_if(room))
+                    .on_hover_text(if room {
+                        "Add color"
+                    } else {
+                        "No room: enlarge the image or shrink the cells"
+                    });
+                let tint = if !room {
+                    TEXT_WEAK.gamma_multiply(0.5)
+                } else if response.hovered() {
+                    TEXT
+                } else {
+                    TEXT_WEAK
+                };
+                ui.painter()
+                    .rect_stroke(add, 3, Stroke::new(1.0, tint), egui::StrokeKind::Inside);
+                Icon::Plus
+                    .image(14.0, tint)
+                    .paint_at(ui, Rect::from_center_size(add.center(), vec2(14.0, 14.0)));
+                if room && response.clicked() {
+                    let color = file.colors.get(edit.selected).map_or([255; 4], |s| s.color);
+                    file.colors.push(Swatch {
+                        name: format!("Color {}", file.colors.len() + 1),
+                        color,
+                    });
+                    edit.selected = file.colors.len() - 1;
+                }
+                ui.add_space(12.0);
+
+                // The selected color.
+                let Some(swatch) = file.colors.get_mut(edit.selected) else {
+                    ui.weak("No colors");
+                    return;
+                };
+                prop_row(ui, "Name", |ui, width| {
+                    ui.add_sized(
+                        vec2(width, 22.0),
+                        egui::TextEdit::singleline(&mut swatch.name),
+                    );
+                });
+                ui.add_space(6.0);
+                edit.picker.show(ui, &mut swatch.color);
+                ui.add_space(6.0);
+                let (mut duplicate, mut remove) = (false, false);
+                ui.horizontal(|ui| {
+                    duplicate = ui
+                        .add_enabled(room, egui::Button::new("Duplicate"))
+                        .clicked();
+                    remove = ui
+                        .add(egui::Button::image_and_text(
+                            Icon::Trash2.image(14.0, TEXT),
+                            "Remove color",
+                        ))
+                        .clicked();
+                });
+                if duplicate {
+                    let copy = swatch.clone();
+                    file.colors.insert(edit.selected + 1, copy);
+                    edit.selected += 1;
+                } else if remove {
+                    file.colors.remove(edit.selected);
+                    edit.selected = edit.selected.min(file.colors.len().saturating_sub(1));
+                }
+            });
+        });
+    palette_commit(ui, edit)
+}
+
+/// Clicks only when enabled; a disabled control still takes hover (for its tooltip).
+fn sense_if(enabled: bool) -> Sense {
+    if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    }
 }
 
 /// One foldable card per gradient; see docs/features/gradients.md#gradients-tab.
