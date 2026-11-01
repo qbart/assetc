@@ -48,6 +48,8 @@ pub struct Inspection {
     pub compiled_bytes: Option<Vec<u8>>,
     /// Its material slots, as found in the output (`None` when missing or unreadable).
     pub compiled_materials: Vec<Option<MaterialPreview>>,
+    /// `compiled_bytes` is an `.afont`, and `preview` its atlas (if found).
+    pub compiled_font: bool,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
 }
@@ -74,6 +76,7 @@ enum Kind {
     CompiledMaterial,
     CompiledMesh,
     CompiledAnimation,
+    CompiledFont,
     Manifest,
     Ignored,
     File,
@@ -93,6 +96,7 @@ impl Kind {
             Self::CompiledMaterial => "Compiled material",
             Self::CompiledMesh => "Compiled mesh",
             Self::CompiledAnimation => "Compiled animation",
+            Self::CompiledFont => "Compiled font",
             Self::Manifest => "Manifest",
             Self::Ignored => "Ignored",
             Self::File => "File",
@@ -157,6 +161,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Output if has_ext(manifest::Kind::Animation.extension()) => {
             Kind::CompiledAnimation
         }
+        Location::Output if has_ext(manifest::Kind::Font.extension()) => Kind::CompiledFont,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output => Kind::File,
     };
@@ -172,7 +177,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
-        Kind::Font => font_rows(file, &mut out),
+        Kind::Font => font_rows(project, file, &rel, &mut out),
         Kind::Model => model_rows(project, file, &rel, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
         Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
@@ -193,6 +198,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
                 out.rows.extend(rows);
                 asset_rows(&rel, &mut out);
             }),
+        Kind::CompiledFont => compiled_font(project, file, &rel, &mut out),
         Kind::Manifest => manifest(file, &mut out),
         Kind::Ignored | Kind::File => Ok(()),
     };
@@ -344,12 +350,65 @@ fn gradient_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     Ok(())
 }
 
-fn font_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+fn font_rows(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+    out: &mut Inspection,
+) -> Result<(), String> {
     let data = fs::read(file).map_err(|e| e.to_string())?;
     out.rows.extend(font::rows(&data)?);
+    // Compiled to an `.afont` and its atlas, see docs/features/fonts.md#build.
+    let afont = format!("{}.afont", strip_extension(rel));
+    out.rows.push(("Asset path", afont.clone()));
+    output_row(project, &afont, "", out);
     out.preview = Some(font::specimen(&data)?);
     out.channels = [true; 4];
     out.specimen = true;
+    Ok(())
+}
+
+/// See docs/features/fonts.md#compiled-fonts.
+fn compiled_font(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+    out: &mut Inspection,
+) -> Result<(), String> {
+    let bytes = fs::read(file).map_err(|e| e.to_string())?;
+    let (mut rows, atlas) = font::afont_rows(&bytes)?;
+    let entry = project.output_dir().and_then(|output| {
+        let entries = manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).ok()?).ok()?;
+        let entry = entries.into_iter().find(|e| e.id == atlas)?;
+        let level = ktx2::read(&fs::read(output.join(&entry.path)).ok()?)
+            .ok()?
+            .level0?;
+        Some((entry.path, level))
+    });
+    let at = rows
+        .iter()
+        .position(|(k, _)| *k == "Distance range")
+        .map_or(rows.len(), |i| i + 1);
+    match entry {
+        Some((path, level)) => {
+            let row = format!("{} × {} px ({path})", level.width, level.height);
+            rows.insert(at, ("Atlas", row));
+            out.preview = Some(to_image(
+                image::RgbaImage::from_raw(level.width, level.height, level.pixels)
+                    .ok_or("atlas level 0 has the wrong size")?,
+            ));
+            out.channels = [true; 4];
+            out.specimen = true;
+        }
+        None => {
+            rows.insert(at, ("Atlas", "not found".into()));
+            out.note = Some("Atlas not found".into());
+        }
+    }
+    out.rows.extend(rows);
+    asset_rows(rel, out);
+    out.compiled_font = true;
+    out.compiled_bytes = Some(bytes);
     Ok(())
 }
 

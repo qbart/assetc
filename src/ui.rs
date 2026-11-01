@@ -85,7 +85,10 @@ struct UiState {
     lod_levels: HashMap<PathBuf, usize>,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
     mesh_in_3d: bool,
+    /// The chosen chunk of the Chunks view, of a compiled mesh or font.
     mesh_chunk: String,
+    /// A compiled font shows its atlas, else its chunks.
+    font_atlas: bool,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -316,6 +319,7 @@ impl Default for UiState {
             mesh_display: MeshDisplay::default(),
             lod_levels: HashMap::new(),
             mesh_in_3d: true,
+            font_atlas: true,
             mesh_chunk: "DESC".into(),
         }
     }
@@ -545,7 +549,7 @@ fn shell(
         Shown::Environment | Shown::Model => true,
         Shown::CompiledMesh => state.mesh_in_3d,
         Shown::Lut => state.lut.view == LutView::Cube,
-        Shown::Specimen | Shown::Other => false,
+        Shown::Specimen | Shown::CompiledFont | Shown::Other => false,
     };
     let fill = if show_3d {
         egui::Color32::TRANSPARENT
@@ -572,6 +576,11 @@ fn shell(
                     Some(usize::from(!state.mesh_in_3d)),
                     true,
                 ),
+                Shown::CompiledFont => (
+                    &["Atlas", "Chunks"],
+                    Some(usize::from(!state.font_atlas)),
+                    true,
+                ),
                 Shown::Environment | Shown::Specimen | Shown::Model => (&[], None, false),
                 Shown::Other => (&modes, None, false),
             };
@@ -579,6 +588,7 @@ fn shell(
                 match shown {
                     Shown::Lut => state.lut.view = LutView::ALL[i],
                     Shown::CompiledMesh => state.mesh_in_3d = i == 0,
+                    Shown::CompiledFont => state.font_atlas = i == 0,
                     _ => state.mode = ViewMode::ALL[i],
                 }
             }
@@ -597,7 +607,10 @@ fn shell(
                 (Shown::Environment, _) => {
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
                 }
-                (Shown::CompiledMesh, _) if !state.mesh_in_3d => {
+                (Shown::CompiledMesh, _) | (Shown::CompiledFont, _)
+                    if shown == Shown::CompiledMesh && !state.mesh_in_3d
+                        || shown == Shown::CompiledFont && !state.font_atlas =>
+                {
                     if let Some(bytes) = state
                         .inspected
                         .as_ref()
@@ -637,7 +650,7 @@ fn shell(
                     state.last_image.as_ref(),
                     &mut preview3d,
                 ),
-                (Shown::Specimen, _) | (_, ViewMode::TwoD) => canvas(
+                (Shown::Specimen | Shown::CompiledFont, _) | (_, ViewMode::TwoD) => canvas(
                     ui,
                     rect,
                     state.inspected.as_mut(),
@@ -1445,6 +1458,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
+        "afont" => Icon::Type,
         _ => Icon::File,
     }
 }
@@ -3266,6 +3280,7 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
                             Kind::Material => Icon::File,
                             Kind::Mesh => Icon::Torus,
                             Kind::Animation => Icon::Film,
+                            Kind::Font => Icon::Type,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {
@@ -3377,6 +3392,8 @@ enum Shown {
     Model,
     /// An `.amesh` from the Output tree, with its meshlets.
     CompiledMesh,
+    /// An `.afont` from the Output tree: its atlas (like a specimen) or its chunks.
+    CompiledFont,
     Lut,
     Other,
 }
@@ -3387,6 +3404,7 @@ impl Shown {
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.model.is_some() => Self::Model,
             Some(i) if i.compiled_mesh.is_some() => Self::CompiledMesh,
+            Some(i) if i.inspection.compiled_font => Self::CompiledFont,
             Some(i) if i.lut.is_some() => Self::Lut,
             Some(i) if i.inspection.specimen && i.preview.is_some() => Self::Specimen,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
@@ -3980,10 +3998,49 @@ fn canvas_compiled_mesh(
     );
 }
 
-/// A compiled mesh's chunks: a list, and the chosen one's table; see
+/// How the Chunks view reads one chunked format.
+struct ChunkSchema {
+    describe: fn(&str) -> &'static str,
+    table: fn(&[u8], &str) -> Option<crate::amesh::Table>,
+    cell: fn(&[u8], &str, usize, usize) -> String,
+}
+
+/// The format a chunked file names in its header, and how to read it.
+fn chunk_schema(bytes: &[u8]) -> Option<(&'static str, ChunkSchema)> {
+    let name = bytes.get(..8)?;
+    let is = |format: &str| {
+        name.starts_with(format.as_bytes()) && name[format.len()..].iter().all(|&b| b == 0)
+    };
+    if is(crate::amesh::FORMAT) {
+        Some((
+            crate::amesh::FORMAT,
+            ChunkSchema {
+                describe: crate::amesh::describe,
+                table: crate::amesh::table,
+                cell: crate::amesh::cell,
+            },
+        ))
+    } else if is(crate::font::FORMAT) {
+        Some((
+            crate::font::FORMAT,
+            ChunkSchema {
+                describe: crate::font::describe,
+                table: crate::font::table,
+                cell: crate::font::cell,
+            },
+        ))
+    } else {
+        None
+    }
+}
+
+/// A chunked file's chunks (a compiled mesh or font): a list, and the chosen one's table; see
 /// docs/features/models.md#chunks-view.
 fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
-    let Ok(reader) = crate::chunks::Reader::parse(bytes, crate::amesh::FORMAT) else {
+    let Some((format, schema)) = chunk_schema(bytes) else {
+        return;
+    };
+    let Ok(reader) = crate::chunks::Reader::parse(bytes, format) else {
         return;
     };
     let entries = reader.entries();
@@ -4021,7 +4078,7 @@ fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
                     painter.text(
                         pos2(row.left() + 10.0, row.top() + 29.0),
                         Align2::LEFT_CENTER,
-                        crate::amesh::describe(&entry.name),
+                        (schema.describe)(&entry.name),
                         FontId::proportional(12.0),
                         TEXT_WEAK,
                     );
@@ -4042,7 +4099,7 @@ fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
     let Some(entry) = entries.iter().find(|e| e.name == *chosen) else {
         return;
     };
-    let Some(table) = crate::amesh::table(bytes, &entry.name) else {
+    let Some(table) = (schema.table)(bytes, &entry.name) else {
         return;
     };
     let area = Rect::from_min_max(pos2(list.right(), rect.top()), rect.max).shrink(10.0);
@@ -4051,7 +4108,7 @@ fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
             RichText::new(format!(
                 "{} — {}   @{}   {} bytes",
                 entry.name,
-                crate::amesh::describe(&entry.name),
+                (schema.describe)(&entry.name),
                 entry.offset,
                 entry.size
             ))
@@ -4063,7 +4120,7 @@ fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
         egui::ScrollArea::horizontal()
             .id_salt("chunk_table_wide")
             .auto_shrink(false)
-            .show(ui, |ui| chunk_table(ui, bytes, entry, &table));
+            .show(ui, |ui| chunk_table(ui, bytes, entry, &table, schema.cell));
     });
 }
 
@@ -4073,6 +4130,7 @@ fn chunk_table(
     bytes: &[u8],
     entry: &crate::chunks::Entry,
     table: &crate::amesh::Table,
+    cell: fn(&[u8], &str, usize, usize) -> String,
 ) {
     use egui_extras::{Column, TableBuilder};
     let mut columns: Vec<&str> = Vec::new();
@@ -4104,7 +4162,7 @@ fn chunk_table(
                 let index = row.index();
                 for column in 0..columns.len() {
                     row.col(|ui| {
-                        let value = crate::amesh::cell(bytes, &entry.name, index, column);
+                        let value = cell(bytes, &entry.name, index, column);
                         ui.add(egui::Label::new(text(value).color(TEXT)).extend());
                     });
                 }

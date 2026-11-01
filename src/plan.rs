@@ -63,6 +63,11 @@ pub enum Job {
     },
     /// Another output of a model, written by its [`Job::Model`].
     ModelPart { source: String },
+    /// A font (relative to `input`): writes its `.afont` and SDF atlas; see
+    /// docs/features/fonts.md#build.
+    Font { source: String },
+    /// The atlas of a font, written by its [`Job::Font`].
+    FontPart { source: String },
     Material {
         /// `<name>.mat.toml`, or `<name>.*` without one.
         source: String,
@@ -91,7 +96,9 @@ impl Asset {
             Job::Material { source, .. }
             | Job::Lut { source, .. }
             | Job::Model { source, .. }
-            | Job::ModelPart { source } => source.clone(),
+            | Job::ModelPart { source }
+            | Job::Font { source }
+            | Job::FontPart { source } => source.clone(),
         }
     }
 }
@@ -215,6 +222,32 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                     source: rel,
                     message,
                 }),
+            }
+        } else if crate::font::is_font(file) {
+            let p = strip_extension(&rel).to_owned();
+            for (kind, asset_path, job) in [
+                (
+                    Kind::Font,
+                    format!("{p}.afont"),
+                    Job::Font {
+                        source: rel.clone(),
+                    },
+                ),
+                (
+                    Kind::Texture,
+                    p.clone(),
+                    Job::FontPart {
+                        source: rel.clone(),
+                    },
+                ),
+            ] {
+                plan.assets.push(Asset {
+                    id: fnv1a64(asset_path.as_bytes()),
+                    kind,
+                    output: kind.output_path(&asset_path),
+                    asset_path,
+                    job,
+                });
             }
         } else if is_lut(file) {
             let asset_path = strip_extension(&rel).to_owned();

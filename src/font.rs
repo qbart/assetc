@@ -236,6 +236,413 @@ impl Sheet {
     }
 }
 
+// ---- Compiling: SDF atlas and `.afont`, see docs/features/fonts.md#build -------------
+
+/// Atlas pixels per em, distance spread in pixels, and the value on the outline.
+const EM_SIZE: f32 = 48.0;
+const SPREAD: f32 = 6.0;
+const ON_EDGE: f32 = 128.0;
+const ATLAS_WIDTH: usize = 512;
+/// Straight segments per curve when measuring distances.
+const CURVE_SEGMENTS: usize = 16;
+
+pub const FORMAT: &str = "AFONT";
+pub const VERSION: u32 = 1;
+
+/// A compiled font: the `.afont` bytes and its atlas.
+pub struct Compiled {
+    pub afont: Vec<u8>,
+    pub atlas: Image,
+    pub glyphs: usize,
+    pub kerning: usize,
+}
+
+/// One glyph's distance field: size, offset from the pen (pixels, y down) and texels.
+struct Sdf {
+    width: usize,
+    height: usize,
+    x: i32,
+    y: i32,
+    texels: Vec<u8>,
+}
+
+/// The outline's straight segments in pixels, y up.
+fn segments(font: &FontRef, id: GlyphId, scale: f32) -> Option<(Vec<[[f32; 2]; 2]>, [f32; 4])> {
+    let outline = font.outline(id)?;
+    let p = |q: ab_glyph::Point| [q.x * scale, q.y * scale];
+    let mut lines = Vec::new();
+    let flatten = |lines: &mut Vec<[[f32; 2]; 2]>, at: &dyn Fn(f32) -> [f32; 2]| {
+        let mut previous = at(0.0);
+        for k in 1..=CURVE_SEGMENTS {
+            let next = at(k as f32 / CURVE_SEGMENTS as f32);
+            lines.push([previous, next]);
+            previous = next;
+        }
+    };
+    for curve in &outline.curves {
+        match *curve {
+            ab_glyph::OutlineCurve::Line(a, b) => lines.push([p(a), p(b)]),
+            ab_glyph::OutlineCurve::Quad(a, b, c) => {
+                let (a, b, c) = (p(a), p(b), p(c));
+                flatten(&mut lines, &|t| {
+                    let u = 1.0 - t;
+                    [0, 1].map(|i| u * u * a[i] + 2.0 * u * t * b[i] + t * t * c[i])
+                });
+            }
+            ab_glyph::OutlineCurve::Cubic(a, b, c, d) => {
+                let (a, b, c, d) = (p(a), p(b), p(c), p(d));
+                flatten(&mut lines, &|t| {
+                    let u = 1.0 - t;
+                    [0, 1].map(|i| {
+                        u * u * u * a[i]
+                            + 3.0 * u * u * t * b[i]
+                            + 3.0 * u * t * t * c[i]
+                            + t * t * t * d[i]
+                    })
+                });
+            }
+        }
+    }
+    // Bounds are stored top-left first: min holds the top (largest y).
+    let b = outline.bounds;
+    let bounds = [
+        b.min.x * scale,
+        b.max.y * scale,
+        b.max.x * scale,
+        b.min.y * scale,
+    ];
+    (!lines.is_empty()).then_some((lines, bounds))
+}
+
+/// The signed distance field of one glyph, `None` without an outline.
+fn glyph_sdf(font: &FontRef, id: GlyphId, scale: f32) -> Option<Sdf> {
+    let (lines, [x_min, y_min, x_max, y_max]) = segments(font, id, scale)?;
+    let pad = SPREAD as i32;
+    // Pixels, y down from the baseline.
+    let (x0, x1) = (x_min.floor() as i32 - pad, x_max.ceil() as i32 + pad);
+    let (y0, y1) = ((-y_max).floor() as i32 - pad, (-y_min).ceil() as i32 + pad);
+    let (width, height) = ((x1 - x0) as usize, (y1 - y0) as usize);
+    let mut texels = Vec::with_capacity(width * height);
+    for row in 0..height {
+        for column in 0..width {
+            // Texel center, back to y up.
+            let px = x0 as f32 + column as f32 + 0.5;
+            let py = -(y0 as f32 + row as f32 + 0.5);
+            let mut nearest = f32::MAX;
+            let mut winding = 0;
+            for [a, b] in &lines {
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let length = dx * dx + dy * dy;
+                let t = if length > 0.0 {
+                    (((px - a[0]) * dx + (py - a[1]) * dy) / length).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let (ex, ey) = (a[0] + t * dx - px, a[1] + t * dy - py);
+                nearest = nearest.min(ex * ex + ey * ey);
+                // Non-zero winding of a ray toward +x.
+                let cross = dx * (py - a[1]) - (px - a[0]) * dy;
+                if a[1] <= py && b[1] > py && cross > 0.0 {
+                    winding += 1;
+                } else if b[1] <= py && a[1] > py && cross < 0.0 {
+                    winding -= 1;
+                }
+            }
+            let distance = nearest.sqrt() * if winding != 0 { 1.0 } else { -1.0 };
+            texels.push(
+                (ON_EDGE + distance * ON_EDGE / SPREAD)
+                    .round()
+                    .clamp(0.0, 255.0) as u8,
+            );
+        }
+    }
+    Some(Sdf {
+        width,
+        height,
+        x: x0,
+        y: y0,
+        texels,
+    })
+}
+
+/// Compiles the font in `data`; `atlas_id` is its atlas texture's asset ID.
+pub fn compile(data: &[u8], atlas_id: u64) -> Result<Compiled, String> {
+    let font = font(data)?;
+    let units = font.units_per_em().unwrap_or(1000.0);
+    let (em_per_unit, scale) = (1.0 / units, EM_SIZE / units);
+
+    // Codepoint 0 is the `.notdef` fallback, then the characters the font has.
+    let mut glyphs: Vec<(u32, GlyphId)> = vec![(0, GlyphId(0))];
+    for c in (0x20..=0x7Eu32).chain(0xA0..=0xFF) {
+        let id = font.glyph_id(char::from_u32(c).expect("Latin-1"));
+        if id.0 != 0 {
+            glyphs.push((c, id));
+        }
+    }
+    let fields: Vec<Option<Sdf>> = glyphs
+        .iter()
+        .map(|&(_, id)| glyph_sdf(&font, id, scale))
+        .collect();
+    if fields.iter().all(Option::is_none) {
+        return Err("no glyphs".into());
+    }
+
+    // Shelf packing in codepoint order.
+    let width = fields
+        .iter()
+        .flatten()
+        .map(|f| f.width)
+        .max()
+        .unwrap_or(0)
+        .max(ATLAS_WIDTH)
+        .next_multiple_of(4);
+    let (mut x, mut y, mut row) = (0, 0, 0);
+    let mut places = Vec::with_capacity(fields.len());
+    for field in &fields {
+        let Some(f) = field else {
+            places.push((0, 0));
+            continue;
+        };
+        if x + f.width > width {
+            (x, y, row) = (0, y + row, 0);
+        }
+        places.push((x, y));
+        x += f.width;
+        row = row.max(f.height);
+    }
+    let height = (y + row).max(1).next_multiple_of(4);
+    let mut atlas = vec![0u8; width * height];
+    for (field, &(ax, ay)) in fields.iter().zip(&places) {
+        if let Some(f) = field {
+            for r in 0..f.height {
+                let start = (ay + r) * width + ax;
+                atlas[start..start + f.width]
+                    .copy_from_slice(&f.texels[r * f.width..(r + 1) * f.width]);
+            }
+        }
+    }
+
+    // GLYPHS, by codepoint (already ascending).
+    let mut glyph_bytes = Vec::with_capacity(glyphs.len() * 40);
+    let (w, h) = (width as f32, height as f32);
+    for ((&(codepoint, id), field), &(ax, ay)) in glyphs.iter().zip(&fields).zip(&places) {
+        let mut record = [0.0f32; 9];
+        record[0] = font.h_advance_unscaled(id) * em_per_unit;
+        if let Some(f) = field {
+            let em = 1.0 / EM_SIZE;
+            record[1..5].copy_from_slice(&[
+                f.x as f32 * em,
+                -(f.y + f.height as i32) as f32 * em,
+                (f.x + f.width as i32) as f32 * em,
+                -f.y as f32 * em,
+            ]);
+            record[5..9].copy_from_slice(&[
+                ax as f32 / w,
+                ay as f32 / h,
+                (ax + f.width) as f32 / w,
+                (ay + f.height) as f32 / h,
+            ]);
+        }
+        glyph_bytes.extend(codepoint.to_le_bytes());
+        for v in record {
+            glyph_bytes.extend(v.to_le_bytes());
+        }
+    }
+
+    // KERNING, by (left, right).
+    let mut kerning = Vec::new();
+    for &(left, a) in glyphs.iter().skip(1) {
+        for &(right, b) in glyphs.iter().skip(1) {
+            let k = font.kern_unscaled(a, b);
+            if k != 0.0 {
+                kerning.extend(left.to_le_bytes());
+                kerning.extend(right.to_le_bytes());
+                kerning.extend((k * em_per_unit).to_le_bytes());
+            }
+        }
+    }
+    let kerning_count = kerning.len() / 12;
+
+    let mut desc = Vec::with_capacity(56);
+    desc.extend((glyphs.len() as u32).to_le_bytes());
+    desc.extend((kerning_count as u32).to_le_bytes());
+    desc.extend(atlas_id.to_le_bytes());
+    for v in [
+        font.ascent_unscaled() * em_per_unit,
+        font.descent_unscaled() * em_per_unit,
+        font.line_gap_unscaled() * em_per_unit,
+        255.0 * SPREAD / ON_EDGE,
+        ON_EDGE / 255.0,
+        EM_SIZE,
+    ] {
+        desc.extend(v.to_le_bytes());
+    }
+    for v in [width as u32, height as u32, 0, 0] {
+        desc.extend(v.to_le_bytes());
+    }
+    let afont = crate::chunks::Writer::new(FORMAT, VERSION)
+        .chunk("DESC", desc)
+        .chunk("GLYPHS", glyph_bytes)
+        .chunk("KERNING", kerning)
+        .finish();
+    Ok(Compiled {
+        afont,
+        atlas: Image {
+            width: width as u32,
+            height: height as u32,
+            pixels: atlas.iter().flat_map(|&v| [v, v, v, 255]).collect(),
+        },
+        glyphs: glyphs.len(),
+        kerning: kerning_count,
+    })
+}
+
+/// Info rows of an `.afont` and its atlas's asset ID; see docs/features/fonts.md#compiled-fonts.
+pub fn afont_rows(bytes: &[u8]) -> Result<(Vec<(&'static str, String)>, u64), String> {
+    let reader = crate::chunks::Reader::parse(bytes, FORMAT)?;
+    if reader.version != VERSION {
+        return Err(format!("unsupported {FORMAT} version {}", reader.version));
+    }
+    let desc = reader.require("DESC")?;
+    if desc.len() < 56 {
+        return Err("DESC is too short".into());
+    }
+    let u = |at| crate::chunks::u32_at(desc, 0, 56, at).unwrap_or(0);
+    let f = |at| crate::chunks::f32_at(desc, 0, 56, at).unwrap_or(0.0);
+    let atlas = u64::from_le_bytes(desc[8..16].try_into().unwrap());
+    Ok((
+        vec![
+            (
+                "Format",
+                format!(
+                    "{FORMAT} v{}, {} chunks",
+                    reader.version,
+                    reader.entries().len()
+                ),
+            ),
+            ("Glyphs", u(0).to_string()),
+            ("Kerning pairs", u(4).to_string()),
+            ("Em size", format!("{} px", f(36))),
+            ("Distance range", format!("{:.2} texels", f(28))),
+            ("Ascent", format!("{:.3}", f(16))),
+            ("Descent", format!("{:.3}", f(20))),
+            ("Line gap", format!("{:.3}", f(24))),
+        ],
+        atlas,
+    ))
+}
+
+/// What a chunk holds, for the Chunks view.
+pub fn describe(name: &str) -> &'static str {
+    match name {
+        "DESC" => "Font descriptor",
+        "GLYPHS" => "Glyphs",
+        "KERNING" => "Kerning pairs",
+        _ => "Unknown chunk",
+    }
+}
+
+const DESC_FIELDS: [&str; 13] = [
+    "glyph_count",
+    "kerning_count",
+    "atlas",
+    "ascent",
+    "descent",
+    "line_gap",
+    "distance_range",
+    "edge_value",
+    "em_size",
+    "atlas_width",
+    "atlas_height",
+    "flags",
+    "reserved",
+];
+
+pub fn table(bytes: &[u8], name: &str) -> Option<crate::amesh::Table> {
+    let reader = crate::chunks::Reader::parse(bytes, FORMAT).ok()?;
+    let payload = reader.chunk(name)?;
+    let table = |columns: Vec<&'static str>, rows: usize, numbered: bool| crate::amesh::Table {
+        columns,
+        rows,
+        numbered,
+    };
+    Some(match name {
+        "DESC" => table(vec!["Field", "Value"], DESC_FIELDS.len(), false),
+        "GLYPHS" => table(
+            vec!["Codepoint", "Advance", "Plane", "UV"],
+            payload.len() / 40,
+            true,
+        ),
+        "KERNING" => table(vec!["Left", "Right", "Advance"], payload.len() / 12, true),
+        _ => table(vec!["Offset", "Bytes"], payload.len().div_ceil(16), false),
+    })
+}
+
+fn codepoint(c: u32) -> String {
+    match char::from_u32(c).filter(|c| !c.is_control()) {
+        Some(ch) if c != 0 => format!("U+{c:04X} {ch}"),
+        _ => format!("U+{c:04X}"),
+    }
+}
+
+pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
+    let Ok(reader) = crate::chunks::Reader::parse(bytes, FORMAT) else {
+        return String::new();
+    };
+    let Some(p) = reader.chunk(name) else {
+        return String::new();
+    };
+    let Some(table) = table(bytes, name) else {
+        return String::new();
+    };
+    if table.numbered && column == 0 {
+        return row.to_string();
+    }
+    let column = if table.numbered { column - 1 } else { column };
+    let u = |index, stride, at| crate::chunks::u32_at(p, index, stride, at).unwrap_or(0);
+    let f = |index, stride, at| crate::chunks::f32_at(p, index, stride, at).unwrap_or(0.0);
+    let four = |index, at: usize| {
+        (0..4usize)
+            .map(|k| format!("{:.3}", f(index, 40, at + k * 4)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match name {
+        "DESC" if column == 0 => DESC_FIELDS[row].to_owned(),
+        "DESC" => match row {
+            0 | 1 => u(0, 56, row * 4).to_string(),
+            2 => p
+                .get(8..16)
+                .map(|b| format!("{:#018x}", u64::from_le_bytes(b.try_into().unwrap())))
+                .unwrap_or_default(),
+            3..=8 => format!("{:.3}", f(0, 56, 16 + (row - 3) * 4)),
+            _ => u(0, 56, 40 + (row - 9) * 4).to_string(),
+        },
+        "GLYPHS" => match column {
+            0 => codepoint(u(row, 40, 0)),
+            1 => format!("{:.3}", f(row, 40, 4)),
+            2 => four(row, 8),
+            _ => four(row, 24),
+        },
+        "KERNING" => match column {
+            0 | 1 => codepoint(u(row, 12, column * 4)),
+            _ => format!("{:.3}", f(row, 12, 8)),
+        },
+        _ => {
+            let chunk = p.get(row * 16..(row * 16 + 16).min(p.len())).unwrap_or(&[]);
+            if column == 0 {
+                format!("{:#06x}", row * 16)
+            } else {
+                chunk
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -280,6 +687,70 @@ mod tests {
                 .iter()
                 .any(|p| p[3] == 255 && p[..3] == [TEXT.r(), TEXT.g(), TEXT.b()])
         );
+    }
+
+    #[test]
+    fn compiles_an_sdf_atlas_and_afont() {
+        let compiled = compile(MONOGRAM, 42).unwrap();
+        assert!(compiled.glyphs > 95);
+        let reader = crate::chunks::Reader::parse(&compiled.afont, FORMAT).unwrap();
+        let desc = reader.require("DESC").unwrap();
+        assert_eq!(desc.len(), 56);
+        assert_eq!(
+            crate::chunks::u32_at(desc, 0, 56, 0),
+            Some(compiled.glyphs as u32)
+        );
+        assert_eq!(desc[8..16], 42u64.to_le_bytes());
+        assert_eq!(crate::chunks::f32_at(desc, 0, 56, 36), Some(48.0));
+        let width = crate::chunks::u32_at(desc, 0, 56, 40).unwrap();
+        assert_eq!(width, compiled.atlas.width);
+        assert_eq!(width % 4, 0);
+        let glyphs = reader.require("GLYPHS").unwrap();
+        assert_eq!(glyphs.len(), compiled.glyphs * 40);
+        // Glyph 0 is the fallback; codepoints ascend.
+        let codepoints: Vec<u32> = (0..compiled.glyphs)
+            .map(|i| crate::chunks::u32_at(glyphs, i, 40, 0).unwrap())
+            .collect();
+        assert_eq!(codepoints[0], 0);
+        assert!(codepoints.windows(2).all(|w| w[0] < w[1]));
+        // The space has no outline but advances.
+        let space = codepoints.iter().position(|&c| c == 0x20).unwrap();
+        assert!(crate::chunks::f32_at(glyphs, space, 40, 4).unwrap() > 0.0);
+        assert_eq!(crate::chunks::f32_at(glyphs, space, 40, 24), Some(0.0));
+        assert_eq!(crate::chunks::f32_at(glyphs, space, 40, 32), Some(0.0));
+
+        // The 'I' field: inside its stem the value is above the edge, far outside 0.
+        let i = codepoints
+            .iter()
+            .position(|&c| c == u32::from('I'))
+            .unwrap();
+        let uv = |at| crate::chunks::f32_at(glyphs, i, 40, at).unwrap();
+        let (left, top, right, bottom) = (uv(24), uv(28), uv(32), uv(36));
+        assert!(right > left && bottom > top);
+        let texel = |u: f32, v: f32| {
+            let x = (u * compiled.atlas.width as f32) as usize;
+            let y = (v * compiled.atlas.height as f32) as usize;
+            compiled.atlas.pixels[(y * compiled.atlas.width as usize + x) * 4]
+        };
+        assert!(texel((left + right) / 2.0, (top + bottom) / 2.0) > 128);
+        assert_eq!(texel(left, top), 0);
+    }
+
+    #[test]
+    fn afont_rows_and_tables() {
+        let compiled = compile(MONOGRAM, 7).unwrap();
+        let (rows, atlas) = afont_rows(&compiled.afont).unwrap();
+        assert_eq!(atlas, 7);
+        assert_eq!(rows[0], ("Format", "AFONT v1, 3 chunks".into()));
+        assert_eq!(row(&rows, "Em size"), "48 px");
+        assert_eq!(row(&rows, "Distance range"), "11.95 texels");
+        let glyphs = table(&compiled.afont, "GLYPHS").unwrap();
+        assert_eq!(glyphs.rows, compiled.glyphs);
+        assert_eq!(cell(&compiled.afont, "GLYPHS", 0, 1), "U+0000");
+        assert_eq!(cell(&compiled.afont, "GLYPHS", 1, 1), "U+0020  ");
+        assert_eq!(cell(&compiled.afont, "DESC", 8, 1), "48.000");
+        assert_eq!(cell(&compiled.afont, "DESC", 9, 0), "atlas_width");
+        assert_eq!(describe("KERNING"), "Kerning pairs");
     }
 
     #[test]

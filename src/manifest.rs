@@ -15,10 +15,17 @@ pub enum Kind {
     Material = 1,
     Mesh = 2,
     Animation = 3,
+    Font = 4,
 }
 
 impl Kind {
-    pub const ALL: [Self; 4] = [Self::Texture, Self::Material, Self::Mesh, Self::Animation];
+    pub const ALL: [Self; 5] = [
+        Self::Texture,
+        Self::Material,
+        Self::Mesh,
+        Self::Animation,
+        Self::Font,
+    ];
 
     /// Extension of the files assets of this kind are written to.
     pub fn extension(self) -> &'static str {
@@ -27,6 +34,7 @@ impl Kind {
             Self::Material => "amat",
             Self::Mesh => "amesh",
             Self::Animation => "aanim",
+            Self::Font => "afont",
         }
     }
 
@@ -36,15 +44,16 @@ impl Kind {
             Self::Material => "Material",
             Self::Mesh => "Mesh",
             Self::Animation => "Animation",
+            Self::Font => "Font",
         }
     }
 
     /// Output path (relative to `output`) of an asset; asset paths of every kind but textures
-    /// already end in their extension (`.amat`, `.amesh`, `.aanim`).
+    /// already end in their extension (`.amat`, `.amesh`, `.aanim`, `.afont`).
     pub fn output_path(self, asset_path: &str) -> String {
         match self {
             Self::Texture => format!("{asset_path}.{}", self.extension()),
-            Self::Material | Self::Mesh | Self::Animation => asset_path.to_owned(),
+            Self::Material | Self::Mesh | Self::Animation | Self::Font => asset_path.to_owned(),
         }
     }
 
@@ -52,7 +61,7 @@ impl Kind {
     pub fn asset_path(self, output: &str) -> &str {
         match self {
             Self::Texture => output.strip_suffix(".ktx2").unwrap_or(output),
-            Self::Material | Self::Mesh | Self::Animation => output,
+            Self::Material | Self::Mesh | Self::Animation | Self::Font => output,
         }
     }
 }
@@ -136,6 +145,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, DecodeError> {
             1 => Kind::Material,
             2 => Kind::Mesh,
             3 => Kind::Animation,
+            4 => Kind::Font,
             _ => continue,
         };
         entries.push(Entry {

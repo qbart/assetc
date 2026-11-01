@@ -147,8 +147,9 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
             Job::Model { source, options } => compile_model(input, source, output, options),
-            // Written with its model.
-            Job::ModelPart { .. } => continue,
+            // Written with its model or font.
+            Job::ModelPart { .. } | Job::FontPart { .. } => continue,
+            Job::Font { source } => compile_font(input, source, output),
             Job::Lut { source, volume } => {
                 compile_lut(&input.join(source), &dest, *volume).map(|size| {
                     let layout = if *volume { "volume" } else { "strip" };
@@ -396,6 +397,27 @@ fn compile_model(
     Ok(model.detail)
 }
 
+/// Writes a font's `.afont` and SDF atlas; see docs/features/fonts.md#build.
+fn compile_font(input: &Path, source: &str, output: &Path) -> Result<String, String> {
+    let p = strip_extension(source);
+    let data = fs::read(input.join(source)).map_err(|e| e.to_string())?;
+    let font = crate::font::compile(&data, crate::hash::fnv1a64(p.as_bytes()))?;
+    write(&output.join(format!("{p}.afont")), &font.afont)?;
+    let (width, height) = (font.atlas.width, font.atlas.height);
+    let atlas = image::RgbaImage::from_raw(width, height, font.atlas.pixels)
+        .ok_or("atlas size mismatch")?;
+    write_texture(
+        atlas,
+        &output.join(format!("{p}.ktx2")),
+        ColorSpace::Linear,
+        false,
+    )?;
+    Ok(format!(
+        "{} glyphs, {} kerning pairs, {width} × {height} atlas",
+        font.glyphs, font.kerning
+    ))
+}
+
 /// An image file (`png`, `jpg`, `jpeg`), as opposed to generated texture sources.
 pub fn is_image(file: &Path) -> bool {
     is_texture_source(file) && !is_noise(file) && !is_gradient(file)
@@ -561,6 +583,41 @@ mod tests {
         assert_eq!(entries[0].id, fnv1a64(b"logo"));
         assert_eq!(entries[1].path, "textures/Grass.ktx2");
         assert_eq!(entries[1].id, fnv1a64(b"textures/Grass"));
+    }
+
+    #[test]
+    fn builds_fonts_to_afont_and_atlas() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(input.join("ui")).unwrap();
+        fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/samples/monogram.ttf"),
+            input.join("ui/monogram.ttf"),
+        )
+        .unwrap();
+
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(outcome.built.len(), 1);
+        assert_eq!(outcome.built[0].output, "ui/monogram.afont");
+        assert!(outcome.built[0].detail.contains(" glyphs, "));
+
+        let afont = fs::read(output.join("ui/monogram.afont")).unwrap();
+        let (_, atlas) = crate::font::afont_rows(&afont).unwrap();
+        assert_eq!(atlas, fnv1a64(b"ui/monogram"));
+        let ktx = fs::read(output.join("ui/monogram.ktx2")).unwrap();
+        let reader = ::ktx2::Reader::new(&ktx[..]).unwrap();
+        assert_eq!(reader.header().format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+        assert_eq!(reader.header().level_count, 1);
+
+        let mut entries =
+            manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].kind, manifest::Kind::Font);
+        assert_eq!(entries[0].id, fnv1a64(b"ui/monogram.afont"));
+        assert_eq!(entries[1].path, "ui/monogram.ktx2");
+        assert_eq!(entries[1].id, atlas);
     }
 
     #[test]
@@ -854,7 +911,11 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         png(&input.join("a.png"), 2, 2);
         gray(&input.join("g.png"), 2, 2, 64);
-        fs::write(input.join("a.png.amod"), "[[modifiers]]\ntype = \"invert\"\n").unwrap();
+        fs::write(
+            input.join("a.png.amod"),
+            "[[modifiers]]\ntype = \"invert\"\n",
+        )
+        .unwrap();
         fs::write(
             input.join("g.png.amod"),
             "[[modifiers]]\ntype = \"colorize\"\ncolor_a = [1.0, 0.0, 0.0]\ncolor_b = [1.0, 0.0, 0.0]\n",
@@ -874,10 +935,18 @@ mod tests {
         assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
 
         // A broken sidecar fails its image.
-        fs::write(input.join("a.png.amod"), "[[modifiers]]\ntype = \"sharpen\"\n").unwrap();
+        fs::write(
+            input.join("a.png.amod"),
+            "[[modifiers]]\ntype = \"sharpen\"\n",
+        )
+        .unwrap();
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
-        assert!(outcome.failures[0].message.contains("a.png.amod: modifier 1"));
+        assert!(
+            outcome.failures[0]
+                .message
+                .contains("a.png.amod: modifier 1")
+        );
     }
 
     fn gray(path: &Path, w: u32, h: u32, value: u8) {
