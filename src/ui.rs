@@ -1285,11 +1285,6 @@ fn tree_row(
     if selected {
         ui.painter()
             .rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.25));
-        ui.painter().rect_filled(
-            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
-            0.0,
-            ACCENT,
-        );
     } else if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, BG_HEADER);
     }
@@ -1993,11 +1988,6 @@ fn animations_tab(ui: &mut Ui, animations: &[(String, f32)], choice: &mut Option
                     let painter = ui.painter();
                     if *choice == index {
                         painter.rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.25));
-                        painter.rect_filled(
-                            Rect::from_min_size(rect.min, vec2(2.0, rect.height())),
-                            0.0,
-                            ACCENT,
-                        );
                     } else if response.hovered() {
                         painter.rect_filled(rect, 0.0, BG_HEADER);
                     }
