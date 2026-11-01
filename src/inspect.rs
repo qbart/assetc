@@ -647,7 +647,8 @@ mod tests {
         assert_eq!(row(&i, "Kind"), "Noise");
         assert_eq!(row(&i, "Type"), "Value");
         assert_eq!(row(&i, "Seed"), "3");
-        assert_eq!(row(&i, "Frequency"), "8");
+        assert_eq!(row(&i, "Frequency X"), "8");
+        assert_eq!(row(&i, "Interpolation"), "quintic");
         assert_eq!(row(&i, "Modifiers"), "Blur (off)");
         assert_eq!(row(&i, "Dimensions"), "16 × 16 px");
         assert_eq!(row(&i, "Asset path"), "clouds");

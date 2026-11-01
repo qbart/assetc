@@ -94,17 +94,34 @@ const fn choice(
 }
 
 const SEED: ParamSpec = int("seed", "Seed", 0, u32::MAX as i64, 0);
-const fn frequency(default: i64) -> ParamSpec {
-    int("frequency", "Frequency", 1, 256, default)
+const BASIS: ParamSpec = choice("basis", "Basis", &["value", "perlin", "simplex"], 1);
+const INTERPOLATION: ParamSpec = choice(
+    "interpolation",
+    "Interpolation",
+    &["linear", "cubic", "quintic"],
+    2,
+);
+const fn frequency_x(default: i64) -> ParamSpec {
+    int("frequency_x", "Frequency X", 1, 256, default)
 }
+const fn frequency_y(default: i64) -> ParamSpec {
+    int("frequency_y", "Frequency Y", 1, 256, default)
+}
+const TRANSLATE_X: ParamSpec = float("translate_x", "Translate X", 0.0, 1.0, 0.0);
+const TRANSLATE_Y: ParamSpec = float("translate_y", "Translate Y", 0.0, 1.0, 0.0);
 const fn octaves(default: i64) -> ParamSpec {
     int("octaves", "Octaves", 1, 8, default)
 }
 const LACUNARITY: ParamSpec = int("lacunarity", "Lacunarity", 2, 4, 2);
+const GAIN: ParamSpec = float("gain", "Gain", 0.0, 1.0, 0.5);
 const DIMENSION: ParamSpec = float("dimension", "Dimension", 0.0, 2.0, 1.0);
+const WARP: ParamSpec = float("warp", "Warp", 0.0, 4.0, 0.0);
 
 const GENERATOR_CHECKERBOARD: &[ParamSpec] = &[
-    int("cells", "Cells", 1, 256, 8),
+    int("cells_x", "Cells X", 1, 256, 8),
+    int("cells_y", "Cells Y", 1, 256, 8),
+    TRANSLATE_X,
+    TRANSLATE_Y,
     ParamSpec {
         key: "color_a",
         label: "Color A",
@@ -117,18 +134,47 @@ const GENERATOR_CHECKERBOARD: &[ParamSpec] = &[
     },
 ];
 const GENERATOR_UNIFORM: &[ParamSpec] = &[SEED];
-const GENERATOR_LATTICE: &[ParamSpec] = &[SEED, frequency(8)];
+const GENERATOR_VALUE: &[ParamSpec] = &[
+    SEED,
+    INTERPOLATION,
+    frequency_x(8),
+    frequency_y(8),
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    octaves(1),
+    LACUNARITY,
+    GAIN,
+    WARP,
+];
+const GENERATOR_LATTICE: &[ParamSpec] = &[
+    SEED,
+    frequency_x(8),
+    frequency_y(8),
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    octaves(1),
+    LACUNARITY,
+    GAIN,
+    WARP,
+];
 const GENERATOR_FBM: &[ParamSpec] = &[
     SEED,
-    choice("basis", "Basis", &["value", "perlin", "simplex"], 1),
-    frequency(4),
+    BASIS,
+    frequency_x(4),
+    frequency_y(4),
+    TRANSLATE_X,
+    TRANSLATE_Y,
     octaves(5),
     LACUNARITY,
-    float("gain", "Gain", 0.0, 1.0, 0.5),
+    GAIN,
+    WARP,
 ];
 const GENERATOR_VORONOI: &[ParamSpec] = &[
     SEED,
-    frequency(8),
+    frequency_x(8),
+    frequency_y(8),
+    TRANSLATE_X,
+    TRANSLATE_Y,
     float("jitter", "Jitter", 0.0, 1.0, 1.0),
     choice(
         "metric",
@@ -136,20 +182,58 @@ const GENERATOR_VORONOI: &[ParamSpec] = &[
         &["euclidean", "manhattan", "chebyshev"],
         0,
     ),
-    choice("output", "Output", &["f1", "edge", "cell"], 0),
+    choice("output", "Output", &["f1", "f2", "edge", "cell"], 0),
+    WARP,
 ];
-const GENERATOR_PERLIN_WORLEY: &[ParamSpec] = &[SEED, frequency(4), octaves(4)];
-const GENERATOR_MUSGRAVE: &[ParamSpec] = &[SEED, frequency(4), octaves(6), LACUNARITY, DIMENSION];
+const GENERATOR_PERLIN_WORLEY: &[ParamSpec] = &[
+    SEED,
+    frequency_x(4),
+    frequency_y(4),
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    octaves(4),
+    GAIN,
+    int("worley_octaves", "Worley octaves", 1, 4, 3),
+    WARP,
+];
+const GENERATOR_MUSGRAVE: &[ParamSpec] = &[
+    SEED,
+    BASIS,
+    frequency_x(4),
+    frequency_y(4),
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    octaves(6),
+    LACUNARITY,
+    DIMENSION,
+    WARP,
+];
 const GENERATOR_RIDGED: &[ParamSpec] = &[
     SEED,
-    frequency(4),
+    BASIS,
+    frequency_x(4),
+    frequency_y(4),
+    TRANSLATE_X,
+    TRANSLATE_Y,
     octaves(6),
     LACUNARITY,
     DIMENSION,
     float("offset", "Offset", 0.0, 2.0, 1.0),
     float("gain", "Gain", 0.0, 4.0, 2.0),
+    WARP,
 ];
-const GENERATOR_CURL: &[ParamSpec] = &[SEED, frequency(4), octaves(2)];
+const GENERATOR_CURL: &[ParamSpec] = &[
+    SEED,
+    BASIS,
+    frequency_x(4),
+    frequency_y(4),
+    TRANSLATE_X,
+    TRANSLATE_Y,
+    octaves(2),
+    LACUNARITY,
+    GAIN,
+    WARP,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum GeneratorKind {
@@ -224,7 +308,8 @@ impl GeneratorKind {
         match self {
             Self::Checkerboard => GENERATOR_CHECKERBOARD,
             Self::Uniform => GENERATOR_UNIFORM,
-            Self::Value | Self::Perlin | Self::Simplex => GENERATOR_LATTICE,
+            Self::Value => GENERATOR_VALUE,
+            Self::Perlin | Self::Simplex => GENERATOR_LATTICE,
             Self::Fbm => GENERATOR_FBM,
             Self::Voronoi => GENERATOR_VORONOI,
             Self::PerlinWorley => GENERATOR_PERLIN_WORLEY,
@@ -457,8 +542,12 @@ impl Params {
     }
 
     fn get<'a>(&'a self, specs: &[ParamSpec], key: &str) -> &'a Value {
-        let i = specs.iter().position(|s| s.key == key);
-        &self.0[i.unwrap_or_else(|| panic!("no parameter {key}"))]
+        self.find(specs, key)
+            .unwrap_or_else(|| panic!("no parameter {key}"))
+    }
+
+    fn find<'a>(&'a self, specs: &[ParamSpec], key: &str) -> Option<&'a Value> {
+        specs.iter().position(|s| s.key == key).map(|i| &self.0[i])
     }
 }
 
@@ -629,15 +718,33 @@ fn unit(h: u64) -> f64 {
 
 // ---- Basic noises ---------------------------------------------------------------------
 
+/// Lattice periods: cells across and down the image.
+type Periods = (u64, u64);
+
 #[derive(Clone, Copy)]
-enum Basis {
-    Value,
-    Perlin,
-    Simplex,
+enum Curve {
+    Linear,
+    Cubic,
+    Quintic,
 }
 
-fn fade(t: f64) -> f64 {
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
+impl Curve {
+    const ALL: [Self; 3] = [Self::Linear, Self::Cubic, Self::Quintic];
+
+    fn apply(self, t: f64) -> f64 {
+        match self {
+            Self::Linear => t,
+            Self::Cubic => t * t * (3.0 - 2.0 * t),
+            Self::Quintic => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Basis {
+    Value(Curve),
+    Perlin,
+    Simplex,
 }
 
 fn lerp(a: f64, b: f64, t: f64) -> f64 {
@@ -648,11 +755,11 @@ fn wrap(i: i64, period: u64) -> u32 {
     i.rem_euclid(period as i64) as u32
 }
 
-fn interpolate(x: f64, y: f64, corner: impl Fn(i64, i64, f64, f64) -> f64) -> f64 {
+fn interpolate(x: f64, y: f64, curve: Curve, corner: impl Fn(i64, i64, f64, f64) -> f64) -> f64 {
     let (i, j) = (x.floor() as i64, y.floor() as i64);
     let (fx, fy) = (x - i as f64, y - j as f64);
     let at = |di: i64, dj: i64| corner(i + di, j + dj, fx - di as f64, fy - dj as f64);
-    let (tx, ty) = (fade(fx), fade(fy));
+    let (tx, ty) = (curve.apply(fx), curve.apply(fy));
     lerp(
         lerp(at(0, 0), at(1, 0), tx),
         lerp(at(0, 1), at(1, 1), tx),
@@ -660,35 +767,37 @@ fn interpolate(x: f64, y: f64, corner: impl Fn(i64, i64, f64, f64) -> f64) -> f6
     )
 }
 
-/// Basic noise of `basis` with period `p` at image position `(u, v)`, in 0..1.
-fn basic(basis: Basis, u: f64, v: f64, p: u64, s: u32) -> f64 {
-    let (x, y) = (u * p as f64, v * p as f64);
+/// Basic noise of `basis` with periods `(p, q)` at image position `(u, v)`, in 0..1.
+fn basic(basis: Basis, u: f64, v: f64, (p, q): Periods, s: u32) -> f64 {
+    let (x, y) = (u * p as f64, v * q as f64);
     match basis {
-        Basis::Value => interpolate(x, y, |i, j, _, _| unit(hash(wrap(i, p), wrap(j, p), s))),
+        Basis::Value(curve) => interpolate(x, y, curve, |i, j, _, _| {
+            unit(hash(wrap(i, p), wrap(j, q), s))
+        }),
         Basis::Perlin => {
-            let n = interpolate(x, y, |i, j, dx, dy| {
-                let angle = TAU * unit(hash(wrap(i, p), wrap(j, p), s));
+            let n = interpolate(x, y, Curve::Quintic, |i, j, dx, dy| {
+                let angle = TAU * unit(hash(wrap(i, p), wrap(j, q), s));
                 angle.cos() * dx + angle.sin() * dy
             });
             (0.5 + n * FRAC_1_SQRT_2).clamp(0.0, 1.0)
         }
         Basis::Simplex => {
-            let r = p as f64 / TAU;
+            let (r, t) = (p as f64 / TAU, q as f64 / TAU);
             let (a, b) = (TAU * u, TAU * v);
-            let n = simplex4([r * a.cos(), r * a.sin(), r * b.cos(), r * b.sin()], s);
+            let n = simplex4([r * a.cos(), r * a.sin(), t * b.cos(), t * b.sin()], s);
             (0.5 + 0.5 * n).clamp(0.0, 1.0)
         }
     }
 }
 
-fn worley(u: f64, v: f64, p: u64, s: u32) -> f64 {
-    let (x, y) = (u * p as f64, v * p as f64);
+fn worley(u: f64, v: f64, (p, q): Periods, s: u32) -> f64 {
+    let (x, y) = (u * p as f64, v * q as f64);
     let (i, j) = (x.floor() as i64, y.floor() as i64);
     let mut nearest = f64::MAX;
     for dj in -1..=1 {
         for di in -1..=1 {
             let (ci, cj) = (i + di, j + dj);
-            let (wi, wj) = (wrap(ci, p), wrap(cj, p));
+            let (wi, wj) = (wrap(ci, p), wrap(cj, q));
             let fx = ci as f64 + unit(hash(wi, wj, s));
             let fy = cj as f64 + unit(hash(wi, wj, s ^ SECOND));
             nearest = nearest.min((fx - x).hypot(fy - y));
@@ -750,10 +859,11 @@ fn simplex4(c: [f64; 4], s: u32) -> f64 {
     27.0 * n
 }
 
-/// Weighted octave average, octave `o` at period `frequency × lacunarity^o`, seed `seed + o`.
+/// Weighted octave average, octave `o` at periods `periods × lacunarity^o`, seed `seed + o`;
+/// see docs/spec/noise.md#fractal-sum.
 fn fbm(
-    noise: impl Fn(u64, u32) -> f64,
-    frequency: u64,
+    noise: impl Fn(Periods, u32) -> f64,
+    (p, q): Periods,
     octaves: u32,
     lacunarity: u64,
     gain: f64,
@@ -761,7 +871,8 @@ fn fbm(
 ) -> f64 {
     let (mut sum, mut total, mut weight) = (0.0, 0.0, 1.0);
     for o in 0..octaves {
-        sum += weight * noise(frequency * lacunarity.pow(o), seed.wrapping_add(o));
+        let m = lacunarity.pow(o);
+        sum += weight * noise((p * m, q * m), seed.wrapping_add(o));
         total += weight;
         weight *= gain;
     }
@@ -769,6 +880,10 @@ fn fbm(
 }
 
 // ---- Generators -----------------------------------------------------------------------
+
+/// Seeds of the two warp noises, see docs/spec/noise.md#domain.
+const WARP_U: u32 = 0x68E31DA4;
+const WARP_V: u32 = 0xB5297A4D;
 
 fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64; 3]> {
     let specs = kind.specs();
@@ -784,65 +899,99 @@ fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64
         Value::Choice(c) => *c,
         _ => unreachable!(),
     };
+    // Shared parameters a generator may not have.
+    let optional = |key| match params.find(specs, key) {
+        Some(Value::Float(v)) => *v,
+        _ => 0.0,
+    };
     let seed = || int("seed") as u32;
-    let frequency = || int("frequency") as u64;
+    let periods = || (int("frequency_x") as u64, int("frequency_y") as u64);
     let octaves = || int("octaves") as u32;
     let lacunarity = || int("lacunarity") as u64;
+    let basis = match kind {
+        GeneratorKind::Value => Basis::Value(Curve::ALL[choice("interpolation")]),
+        GeneratorKind::Simplex => Basis::Simplex,
+        _ => match params.find(specs, "basis") {
+            Some(Value::Choice(c)) => {
+                [Basis::Value(Curve::Quintic), Basis::Perlin, Basis::Simplex][*c]
+            }
+            _ => Basis::Perlin,
+        },
+    };
 
+    let (translate_x, translate_y, warp) = (
+        optional("translate_x"),
+        optional("translate_y"),
+        optional("warp"),
+    );
+    let domain = |u: f64, v: f64| {
+        let (u, v) = (u + translate_x, v + translate_y);
+        if warp == 0.0 {
+            return (u, v);
+        }
+        let (p, q) = periods();
+        let a = basic(basis, u, v, (p, q), seed() ^ WARP_U);
+        let b = basic(basis, u, v, (p, q), seed() ^ WARP_V);
+        (
+            u + warp * (2.0 * a - 1.0) / p as f64,
+            v + warp * (2.0 * b - 1.0) / q as f64,
+        )
+    };
     let gray = |f: &dyn Fn(f64, f64, usize, usize) -> f64| -> Vec<[f64; 3]> {
         (0..size * size)
             .map(|i| {
                 let (px, py) = (i % size, i / size);
                 let u = (px as f64 + 0.5) / size as f64;
                 let v = (py as f64 + 0.5) / size as f64;
+                let (u, v) = domain(u, v);
                 [f(u, v, px, py); 3]
             })
             .collect()
     };
-    let perlin = |u, v| move |p, s| basic(Basis::Perlin, u, v, p, s);
+    let fractal = |u, v, gain| {
+        fbm(
+            |pq, s| basic(basis, u, v, pq, s),
+            periods(),
+            octaves(),
+            lacunarity(),
+            gain,
+            seed(),
+        )
+    };
+    // Signed basis noise of octave `o`, for the multifractals.
+    let octave = |u, v, o: u32| {
+        let ((p, q), m) = (periods(), lacunarity().pow(o));
+        2.0 * basic(basis, u, v, (p * m, q * m), seed().wrapping_add(o)) - 1.0
+    };
     let multifractal_weight = |o: u32| (lacunarity() as f64).powf(-float("dimension") * o as f64);
 
     match kind {
         GeneratorKind::Checkerboard => {
-            let cells = int("cells") as f64;
+            let (cells_x, cells_y) = (int("cells_x") as f64, int("cells_y") as f64);
             let (a, b) = (float("color_a"), float("color_b"));
             gray(&|u, v, _, _| {
-                let parity = ((u * cells).floor() + (v * cells).floor()) as i64 % 2;
+                let parity =
+                    ((u * cells_x).floor() as i64 + (v * cells_y).floor() as i64).rem_euclid(2);
                 if parity == 0 { a } else { b }
             })
         }
         GeneratorKind::Uniform => gray(&|_, _, px, py| unit(hash(px as u32, py as u32, seed()))),
-        GeneratorKind::Value => gray(&|u, v, _, _| basic(Basis::Value, u, v, frequency(), seed())),
-        GeneratorKind::Perlin => {
-            gray(&|u, v, _, _| basic(Basis::Perlin, u, v, frequency(), seed()))
-        }
-        GeneratorKind::Simplex => {
-            gray(&|u, v, _, _| basic(Basis::Simplex, u, v, frequency(), seed()))
-        }
-        GeneratorKind::Fbm => {
-            let basis = [Basis::Value, Basis::Perlin, Basis::Simplex][choice("basis")];
-            gray(&|u, v, _, _| {
-                fbm(
-                    |p, s| basic(basis, u, v, p, s),
-                    frequency(),
-                    octaves(),
-                    lacunarity(),
-                    float("gain"),
-                    seed(),
-                )
-            })
-        }
+        GeneratorKind::Value
+        | GeneratorKind::Perlin
+        | GeneratorKind::Simplex
+        | GeneratorKind::Fbm => gray(&|u, v, _, _| fractal(u, v, float("gain"))),
         GeneratorKind::Voronoi => {
             let (jitter, metric, output) = (float("jitter"), choice("metric"), choice("output"));
-            gray(&|u, v, _, _| voronoi(u, v, frequency(), seed(), jitter, metric, output))
+            gray(&|u, v, _, _| voronoi(u, v, periods(), seed(), jitter, metric, output))
         }
         GeneratorKind::PerlinWorley => gray(&|u, v, _, _| {
-            let p = fbm(perlin(u, v), frequency(), octaves(), 2, 0.5, seed());
+            let perlin = |pq, s| basic(Basis::Perlin, u, v, pq, s);
+            let p = fbm(perlin, periods(), octaves(), 2, float("gain"), seed());
             let w = 1.0
                 - fbm(
-                    |p, s| worley(u, v, p, s),
-                    frequency(),
-                    3,
+                    |pq, s| worley(u, v, pq, s),
+                    periods(),
+                    int("worley_octaves") as u32,
                     2,
                     0.5,
                     seed().wrapping_add(100),
@@ -852,11 +1001,8 @@ fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64
         GeneratorKind::Musgrave => gray(&|u, v, _, _| {
             let (mut value, mut max) = (1.0, 1.0);
             for o in 0..octaves() {
-                let n = 2.0
-                    * perlin(u, v)(frequency() * lacunarity().pow(o), seed().wrapping_add(o))
-                    - 1.0;
                 let w = multifractal_weight(o);
-                value *= 1.0 + n * w;
+                value *= 1.0 + octave(u, v, o) * w;
                 max *= 1.0 + w;
             }
             value / max
@@ -864,12 +1010,7 @@ fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64
         GeneratorKind::Ridged => {
             let (offset, gain) = (float("offset"), float("gain"));
             gray(&|u, v, _, _| {
-                let signal = |o: u32| {
-                    let n = 2.0
-                        * perlin(u, v)(frequency() * lacunarity().pow(o), seed().wrapping_add(o))
-                        - 1.0;
-                    (offset - n.abs()).powi(2)
-                };
+                let signal = |o: u32| (offset - octave(u, v, o).abs()).powi(2);
                 let mut previous = signal(0);
                 let (mut sum, mut max) = (previous, offset * offset);
                 for o in 1..octaves() {
@@ -887,12 +1028,10 @@ fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64
             })
         }
         GeneratorKind::Curl => {
-            let psi: Vec<f64> = gray(&|u, v, _, _| {
-                2.0 * fbm(perlin(u, v), frequency(), octaves(), 2, 0.5, seed()) - 1.0
-            })
-            .iter()
-            .map(|c| c[0])
-            .collect();
+            let psi: Vec<f64> = gray(&|u, v, _, _| 2.0 * fractal(u, v, float("gain")) - 1.0)
+                .iter()
+                .map(|c| c[0])
+                .collect();
             let at = |x: usize, y: usize| psi[(y % size) * size + x % size];
             let vectors: Vec<[f64; 2]> = (0..size * size)
                 .map(|i| {
@@ -912,14 +1051,22 @@ fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64
     }
 }
 
-fn voronoi(u: f64, v: f64, p: u64, s: u32, jitter: f64, metric: usize, output: usize) -> f64 {
-    let (x, y) = (u * p as f64, v * p as f64);
+fn voronoi(
+    u: f64,
+    v: f64,
+    (p, q): Periods,
+    s: u32,
+    jitter: f64,
+    metric: usize,
+    output: usize,
+) -> f64 {
+    let (x, y) = (u * p as f64, v * q as f64);
     let (i, j) = (x.floor() as i64, y.floor() as i64);
     let (mut f1, mut f2, mut nearest) = (f64::MAX, f64::MAX, (0, 0));
     for dj in -2..=2 {
         for di in -2..=2 {
             let (ci, cj) = (i + di, j + dj);
-            let (wi, wj) = (wrap(ci, p), wrap(cj, p));
+            let (wi, wj) = (wrap(ci, p), wrap(cj, q));
             let fx = ci as f64 + 0.5 + jitter * (unit(hash(wi, wj, s)) - 0.5);
             let fy = cj as f64 + 0.5 + jitter * (unit(hash(wi, wj, s ^ SECOND)) - 0.5);
             let (dx, dy) = ((fx - x).abs(), (fy - y).abs());
@@ -937,7 +1084,8 @@ fn voronoi(u: f64, v: f64, p: u64, s: u32, jitter: f64, metric: usize, output: u
     }
     let value = match output {
         0 => f1,
-        1 => f2 - f1,
+        1 => f2,
+        2 => f2 - f1,
         _ => unit(hash(nearest.0, nearest.1, s ^ 0x2545F491)),
     };
     value.clamp(0.0, 1.0)
@@ -1096,7 +1244,7 @@ mod tests {
         noise.modifiers.push(off);
         let text = noise.to_toml();
         assert!(text.starts_with(
-            "type = \"noise/fbm\"\nsize = 512\nseed = 0\nbasis = \"perlin\"\nfrequency = 4\noctaves = 5\nlacunarity = 2\ngain = 0.5\n\n[[modifiers]]\ntype = \"levels\"\nenabled = true\nblack = 0.0\n"
+            "type = \"noise/fbm\"\nsize = 512\nseed = 0\nbasis = \"perlin\"\nfrequency_x = 4\nfrequency_y = 4\ntranslate_x = 0.0\ntranslate_y = 0.0\noctaves = 5\nlacunarity = 2\ngain = 0.5\nwarp = 0.0\n\n[[modifiers]]\ntype = \"levels\"\nenabled = true\nblack = 0.0\n"
         ), "{text}");
         assert!(text.contains("color_a = [0.0, 0.0, 0.0]"), "{text}");
         assert_eq!(Noise::parse(&text).unwrap(), noise);
@@ -1106,14 +1254,19 @@ mod tests {
     #[test]
     fn parameters_belong_to_their_type() {
         assert!(Noise::parse("type = \"checkerboard\"\nseed = 1").is_err());
-        assert!(Noise::parse("type = \"noise/perlin\"\noctaves = 3").is_err());
+        assert!(Noise::parse("type = \"noise/perlin\"\nbasis = \"value\"").is_err());
+        assert!(Noise::parse("type = \"noise/uniform\"\nwarp = 1").is_err());
+        assert!(Noise::parse("type = \"noise/perlin\"\nfrequency = 3").is_err());
         let ok = Noise::parse("type = \"noise/fbm\"\noctaves = 3\ngain = 1").unwrap();
-        assert_eq!(ok.params.display(GeneratorKind::Fbm.specs(), 3), "3");
+        assert_eq!(ok.params.display(GeneratorKind::Fbm.specs(), 6), "3");
         for bad in [
             "size = 0",
             "size = 5000",
             "type = \"noise/blue\"",
-            "frequency = 0",
+            "frequency_x = 0",
+            "translate_y = 1.5",
+            "warp = 5",
+            "type = \"noise/value\"\ninterpolation = \"cosine\"",
             "type = \"noise/fbm\"\nbasis = \"cubic\"",
             "type = \"noise/fbm\"\nlacunarity = 2.5",
             "[[modifiers]]\ntype = \"levels\"\ngamma = 0",
@@ -1222,6 +1375,117 @@ mod tests {
         let mut pixels = vec![[0.2; 3], [0.6; 3]];
         apply_modifier(&Modifier::new(ModifierKind::Normalize), &mut pixels, 1);
         assert_eq!(pixels, [[0.0; 3], [1.0; 3]]);
+    }
+
+    fn with(kind: GeneratorKind, size: u32, set: &[(&str, Value)]) -> Image {
+        let mut noise = Noise {
+            size,
+            ..Noise::new(kind)
+        };
+        for (key, value) in set {
+            let i = kind.specs().iter().position(|s| s.key == *key).unwrap();
+            noise.params.0[i] = value.clone();
+        }
+        noise.generate()
+    }
+
+    #[test]
+    fn every_setting_keeps_tiling() {
+        let settings: &[(GeneratorKind, &[(&str, Value)])] = &[
+            (
+                GeneratorKind::Perlin,
+                &[
+                    ("frequency_x", Value::Int(3)),
+                    ("frequency_y", Value::Int(7)),
+                ],
+            ),
+            (
+                GeneratorKind::Simplex,
+                &[
+                    ("frequency_x", Value::Int(2)),
+                    ("frequency_y", Value::Int(9)),
+                ],
+            ),
+            (
+                GeneratorKind::Value,
+                &[
+                    ("octaves", Value::Int(4)),
+                    ("translate_x", Value::Float(0.37)),
+                ],
+            ),
+            (GeneratorKind::Fbm, &[("warp", Value::Float(2.0))]),
+            (
+                GeneratorKind::Voronoi,
+                &[("frequency_y", Value::Int(3)), ("warp", Value::Float(1.0))],
+            ),
+            (
+                GeneratorKind::Ridged,
+                &[
+                    ("basis", Value::Choice(2)),
+                    ("octaves", Value::Int(3)),
+                    ("translate_y", Value::Float(0.5)),
+                ],
+            ),
+        ];
+        for (kind, set) in settings {
+            let image = with(*kind, 128, set);
+            for i in (0..128).step_by(9) {
+                let (left, right) = (gray(&image, 0, i), gray(&image, 127, i));
+                assert!(left.abs_diff(right) < 40, "{kind:?} {set:?} y={i}");
+                let (top, bottom) = (gray(&image, i, 0), gray(&image, i, 127));
+                assert!(top.abs_diff(bottom) < 40, "{kind:?} {set:?} x={i}");
+            }
+        }
+    }
+
+    #[test]
+    fn settings_change_the_image() {
+        let plain = with(GeneratorKind::Perlin, 32, &[]);
+        for set in [
+            ("frequency_x", Value::Int(3)),
+            ("translate_x", Value::Float(0.25)),
+            ("octaves", Value::Int(3)),
+            ("warp", Value::Float(1.0)),
+        ] {
+            assert_ne!(
+                with(GeneratorKind::Perlin, 32, std::slice::from_ref(&set)),
+                plain,
+                "{set:?}"
+            );
+        }
+        // Gain only matters with more than one octave.
+        let detail = [("octaves", Value::Int(3))];
+        assert_ne!(
+            with(
+                GeneratorKind::Perlin,
+                32,
+                &[detail[0].clone(), ("gain", Value::Float(0.9))]
+            ),
+            with(GeneratorKind::Perlin, 32, &detail),
+        );
+        let value = with(GeneratorKind::Value, 32, &[]);
+        assert_ne!(
+            with(
+                GeneratorKind::Value,
+                32,
+                &[("interpolation", Value::Choice(0))]
+            ),
+            value
+        );
+        // Translating by a whole image is no translation.
+        let shifted = with(
+            GeneratorKind::Value,
+            32,
+            &[("translate_x", Value::Float(1.0))],
+        );
+        for (a, b) in shifted.pixels.iter().zip(&value.pixels) {
+            assert!(a.abs_diff(*b) <= 1);
+        }
+        // Voronoi F2 is never below F1.
+        let f1 = with(GeneratorKind::Voronoi, 32, &[]);
+        let f2 = with(GeneratorKind::Voronoi, 32, &[("output", Value::Choice(1))]);
+        assert!(f1.pixels.iter().zip(&f2.pixels).all(|(a, b)| a <= b));
+        assert_ne!(f1, f2);
     }
 
     #[test]
