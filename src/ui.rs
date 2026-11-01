@@ -3631,12 +3631,12 @@ fn canvas_compiled_mesh(
         .into_iter()
         .map(|mode| Tool {
             glyph: Glyph::Icon(match mode {
-                MeshDisplay::Material => Icon::Palette,
-                MeshDisplay::Wireframe => Icon::Triangle,
-                MeshDisplay::Shaded => Icon::Box,
-                MeshDisplay::Meshlets => Icon::Shapes,
-                MeshDisplay::MaterialId => Icon::SwatchBook,
-                MeshDisplay::Submeshes => Icon::Layers,
+                MeshDisplay::Material => Icon::BoxChecker,
+                MeshDisplay::Wireframe => Icon::Box,
+                MeshDisplay::Shaded => Icon::BoxShaded,
+                MeshDisplay::Meshlets => Icon::SquaresUnite,
+                MeshDisplay::MaterialId => Icon::Image,
+                MeshDisplay::Submeshes => Icon::Boxes,
             }),
             name: mode.name().into(),
             on: *display == mode,

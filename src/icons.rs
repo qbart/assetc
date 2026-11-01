@@ -7,6 +7,9 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 pub enum Icon {
     Aperture,
     Box,
+    BoxChecker,
+    BoxShaded,
+    Boxes,
     BringToFront,
     Check,
     ChevronDown,
@@ -29,26 +32,30 @@ pub enum Icon {
     ImagePlay,
     Images,
     Info,
-    Layers,
     Loader,
     Palette,
     Plus,
     RefreshCw,
-    Shapes,
     SlidersVertical,
+    SquaresUnite,
     SunMedium,
     SwatchBook,
     Torus,
     Trash2,
-    Triangle,
     Type,
     Wrench,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 38] = [
+const SVGS: [(&str, &str); 39] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
+    (
+        "box-checker",
+        include_str!("../assets/icons/box-checker.svg"),
+    ),
+    ("box-shaded", include_str!("../assets/icons/box-shaded.svg")),
+    ("boxes", include_str!("../assets/icons/boxes.svg")),
     (
         "bring-to-front",
         include_str!("../assets/icons/bring-to-front.svg"),
@@ -92,15 +99,17 @@ const SVGS: [(&str, &str); 38] = [
     ("image-play", include_str!("../assets/icons/image-play.svg")),
     ("images", include_str!("../assets/icons/images.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
-    ("layers", include_str!("../assets/icons/layers.svg")),
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
-    ("shapes", include_str!("../assets/icons/shapes.svg")),
     (
         "sliders-vertical",
         include_str!("../assets/icons/sliders-vertical.svg"),
+    ),
+    (
+        "squares-unite",
+        include_str!("../assets/icons/squares-unite.svg"),
     ),
     ("sun-medium", include_str!("../assets/icons/sun-medium.svg")),
     (
@@ -109,7 +118,6 @@ const SVGS: [(&str, &str); 38] = [
     ),
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
-    ("triangle", include_str!("../assets/icons/triangle.svg")),
     ("type", include_str!("../assets/icons/type.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
 ];
