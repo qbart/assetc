@@ -264,7 +264,7 @@ Bevy into the canvas area (below the view bar) behind the egui overlay.
 
 Every 3D view (images, [environment maps](#environment-maps),
 [models](models.md#preview), the [LUT cube](lut.md#cube)) shows the world
-axes as seen from the camera, in the canvas' bottom-left corner, 8 px from
+axes as seen from the camera, in the canvas' top-left corner, 8 px from
 both edges:
 
 - A 64 × 64 px area with a `BG_BAR` circle at 70% opacity filling it.
