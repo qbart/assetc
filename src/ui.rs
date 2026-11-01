@@ -76,8 +76,8 @@ impl Default for View {
 const MIN_ZOOM: f32 = 1.0 / 32.0;
 const MAX_ZOOM: f32 = 64.0;
 const FIT_MARGIN: f32 = 24.0;
-/// Wheel zoom: factor = exp(scroll points × this), about ×1.2 per notch.
-const WHEEL_ZOOM: f32 = 0.0045;
+/// Zoom factor per wheel notch, and per 50 points of smooth (touchpad) scrolling.
+const WHEEL_ZOOM: f32 = 1.2;
 
 #[derive(Clone, PartialEq, Eq)]
 struct Selection {
@@ -829,14 +829,9 @@ fn canvas(
         view.fit = false;
     }
     if response.hovered() {
-        let (scroll, pinch, pointer) = ui.input(|i| {
-            (
-                i.smooth_scroll_delta.y,
-                i.zoom_delta(),
-                i.pointer.hover_pos(),
-            )
-        });
-        let zoom = pinch * (scroll * WHEEL_ZOOM).exp();
+        let (notches, pinch, pointer) =
+            ui.input(|i| (wheel_notches(i), i.zoom_delta(), i.pointer.hover_pos()));
+        let zoom = pinch * WHEEL_ZOOM.powf(notches);
         if zoom != 1.0
             && let Some(pointer) = pointer
         {
@@ -883,6 +878,28 @@ fn canvas(
     if zoom_bar(ui, rect, view, fit) {
         ui.ctx().request_repaint();
     }
+}
+
+/// Vertical wheel movement this frame in notches (lines); smooth scrolling counts 50 points
+/// as one. Counted from raw events because points per notch differ between platforms.
+/// `Ctrl` + wheel is left out: egui already reports it as `zoom_delta`.
+fn wheel_notches(input: &egui::InputState) -> f32 {
+    input
+        .events
+        .iter()
+        .map(|event| match event {
+            egui::Event::MouseWheel {
+                unit,
+                delta,
+                modifiers,
+                ..
+            } if !modifiers.command => match unit {
+                egui::MouseWheelUnit::Point => delta.y / 50.0,
+                egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => delta.y,
+            },
+            _ => 0.0,
+        })
+        .sum()
 }
 
 /// Toggle buttons `(icon, name, on)` in the canvas' top-right corner; returns the clicked index.
