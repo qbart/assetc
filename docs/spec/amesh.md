@@ -43,8 +43,8 @@ together, as do `SKIN` and `SKELETON` (only for skinned meshes).
 |     20 |    2 | `vertex_stride`         | u16, `28`                                    |
 |     22 |    1 | `index_width`           | u8, `2` when `vertex_count ≤ 65535`, else `4` |
 |     23 |    1 | `flags`                 | u8: bit 0 tangents valid, bit 1 skinned (`SKIN`/`SKELETON` present), bit 2 levels of detail present |
-|     24 |    4 | `meshlet_max_vertices`  | u32, build limit, `64`                       |
-|     28 |    4 | `meshlet_max_triangles` | u32, build limit, `124`                      |
+|     24 |    4 | `meshlet_max_vertices`  | u32, build limit (`assetc.toml` `[meshes]`, default `64`) |
+|     28 |    4 | `meshlet_max_triangles` | u32, build limit (default `124`)             |
 
 ## Bounds (40 bytes)
 

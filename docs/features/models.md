@@ -34,8 +34,10 @@ images are not read for these rows.
 | Animations | number of animations                                               |
 
 Counts are per mesh, not per instance: a mesh used by two nodes counts once.
-After them, **Asset path** and **Output** (the `.amesh`; `(not built)`
-appended when it does not exist), as for source textures.
+After them, **Meshlet limits** (`64 vertices, 124 triangles`: the values
+`[meshes]` gives this model, or the config error), then **Asset path** and
+**Output** (the `.amesh`; `(not built)` appended when it does not exist), as
+for source textures.
 
 Compiled files in the Output tree:
 
@@ -143,8 +145,12 @@ line per model, e.g.
   `DESC.flags` bit 0 cleared); `JOINTS_0` / `WEIGHTS_0` for skinning.
   Weights are renormalized to sum 1.
 - Per submesh: the vertex order is optimized for the GPU's vertex cache, then
-  the submesh is split into **meshlets** of at most 64 vertices and 124
-  triangles (cone weight 0.25) with their bounds, and simplified into two
+  the submesh is split into **meshlets** with their bounds (cone weight
+  0.25), of at most `meshlet_max_vertices` vertices and
+  `meshlet_max_triangles` triangles: 64 and 124 unless
+  [`[meshes]`](../spec/assetc.toml.md#meshes) in `assetc.toml` sets other
+  defaults or overrides them for the model. The limits used are stored in
+  the `.amesh` `DESC`, and simplified into two
   **levels of detail** at about 50% and 25% of its triangles, all with
   [meshoptimizer](https://github.com/zeux/meshoptimizer). Simplification
   starts with a 5% error limit, raises it by 5% up to three times while it
