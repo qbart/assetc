@@ -244,7 +244,9 @@ Bevy into the canvas area (below the view bar) behind the egui overlay.
   | Torus    | ring radius 0.6, tube radius 0.25                  | U around the ring, V around the tube  |
 
 - The shape **rotates** about the vertical axis at 20°/s, except while it is
-  being orbited (dragged). The rotation continues from where it was.
+  being orbited (dragged). The rotation continues from where it was. This is
+  for previews only (textures, environment maps); [models](models.md#preview)
+  do not rotate.
 - **Lighting**: one white directional light from the upper left behind the
   camera, plus ambient light, so the shape reads as 3D; base color texture
   only (no normal, ORM or height maps), roughness 0.8, not metallic.

@@ -53,8 +53,10 @@ a shape.
   the shapes). The box is that of every mesh in the scene in its rest pose;
   a skinned mesh is measured through its first joint. The model is hidden
   until it has been fitted.
-- Auto-rotation, the orbit camera, its controls and the lighting work as for
-  textured shapes ([Scene](canvas.md#scene), [Camera](canvas.md#camera)).
+- The model does **not** auto-rotate: it stays as authored, facing the way
+  the file has it, and only the orbit camera moves. The camera, its controls
+  and the lighting work as for textured shapes ([Scene](canvas.md#scene),
+  [Camera](canvas.md#camera)).
 - **Loading** runs in the background: the canvas stays empty and the status
   bar shows the [loader](gui.md#layout) until the model is shown. If loading
   fails the canvas shows `Could not load the model: <error>`.
@@ -80,7 +82,7 @@ plays.
   chooses it.
 - **Rest pose** (the default) shows the model as loaded, without animation.
   Choosing an animation plays it from its start, looping, at normal speed;
-  auto-rotation and the orbit camera keep working. Switching to another
+  the orbit camera keeps working. Switching to another
   animation or back to Rest pose first returns the model to its rest pose.
 - The choice is remembered per model (by path) for the session, and kept
   when the model is reloaded.
