@@ -194,6 +194,62 @@ does not react to hover or clicks, and its tooltip adds "(not in this
 image)". If an image's remembered channel is not available (the file changed),
 RGB (or Gray) is shown.
 
+## Color vision
+
+Every canvas view that shows colors ends its toolbar with a **Color vision**
+group, the last group of the column, to check how the content looks to
+people with color vision deficiencies:
+
+| Button       | Ban color | Tooltip |
+|--------------|-----------|---------|
+| Protanopia   | red (`CHANNEL_R`)   | `Protanopia` and, below it, `Red-Green Color Blindness: The most common form (including deuteranomaly and protanomaly), affecting about 8% of males and 0.5% of females of Northern European descent.` |
+| Deuteranopia | green (`CHANNEL_G`) | `Deuteranopia` and the same Red-Green text |
+| Tritanopia   | blue (`CHANNEL_B`)  | `Tritanopia` and `Blue-Yellow Color Blindness (Tritan-type): Much rarer (affecting roughly 0.01% to 0.03% of the population) and affects men and women equally.` |
+| Monochromacy | gray (`#8c8c8c`)    | `Monochromacy` and `Complete Color Blindness (Achromatopsia): Extremely rare, affecting a tiny fraction of the global population.` |
+
+- **Icon**: the outline of Lucide's `eye` without its pupil (tinted like any
+  toolbar icon), with a small "ban" sign in place of the pupil: a circle of
+  3.5 px radius and its diagonal from top-left to bottom-right, 1.5 px
+  strokes, in the button's ban color (dimmed like channel colors when
+  disabled; it keeps its color on an `ACCENT` fill).
+- **At most one** is on: clicking a button turns it on (and any other off),
+  clicking the button that is on turns it off, showing normal vision. None
+  is on to start with; the choice is one for the whole canvas (every file,
+  2D and 3D) and lasts for the session.
+- **Shown in**: the 2D image views (images, `.noise`, `.gradient`,
+  `.palette`, compiled textures and their mip levels, font specimens and
+  compiled font atlases, the LUT Compare view, both its sides) and every 3D
+  view (images on shapes, environment maps, models, compiled meshes, the LUT
+  Cube). Not in views of data: LUT Curves, Chunks and data tables. Views
+  that had no toolbar (font specimens and atlases) get one with only this
+  group; the zoom bar stays.
+- **Simulation**: what is shown is transformed per pixel, after the other
+  toolbar choices (channels, tiling): the displayed color (taken as sRGB
+  encoded) is linearized, multiplied by the deficiency's 3 × 3 matrix,
+  clamped to 0–1 and encoded back; alpha is kept. Protanopia, deuteranopia
+  and tritanopia use the full-severity matrices of Machado, Oliveira and
+  Fernandes (2009):
+
+  ```
+  Protanopia     0.152286  1.052583 -0.204868
+                 0.114503  0.786281  0.099216
+                -0.003882 -0.048116  1.051998
+  Deuteranopia   0.367322  0.860646 -0.227968
+                 0.280085  0.672501  0.047413
+                -0.011820  0.042940  0.968881
+  Tritanopia     1.255528 -0.076749 -0.178779
+                -0.078411  0.930809  0.147602
+                 0.004733  0.691367  0.303900
+  ```
+
+  Monochromacy replaces each channel with the Rec. 709 luminance
+  `0.2126 R + 0.7152 G + 0.0722 B`. Rows sum to 1, so grays (and the
+  single-channel views) stay unchanged.
+- 2D views transform the image on the CPU (cached per file, channel and
+  deficiency); 3D views apply the same matrix as a full-screen pass over the
+  rendered scene (before the UI is drawn on top). Only the canvas content
+  is transformed, never the UI around it (toolbars, Inspector swatches).
+
 ### Channel icons
 
 Three Lucide `circle-small` icons, each 16 px, arranged as a trefoil inside

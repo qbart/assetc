@@ -149,7 +149,9 @@ see [Tree icons](#tree-icons)), `image` (texture assets). Two icons are assetc's
 on Lucide's `box` (same outline, stroke and license): `box-checker` (each
 visible face split 2 × 2 with two opposite cells filled solid in the
 outline's color, a checkerboard) and `box-shaded` (the top face filled at 90%, the left at 55%,
-the right at 30%, so it reads as lit). The logo is not a Lucide icon, see
+the right at 30%, so it reads as lit). `eye-outline` is Lucide's `eye`
+without its pupil, for the canvas [Color vision](canvas.md#color-vision)
+buttons, which draw their colored ban sign in its place. The logo is not a Lucide icon, see
 below.
 
 ## Logo
