@@ -1,0 +1,9 @@
+# assetc project configuration.
+# See docs/spec/assetc.toml.md for available options.
+
+input = "samples"
+output = "tmp/build"
+
+# [textures]
+# linear = ["**/*_n.png"]
+# no_mipmaps = ["ui/**"]
