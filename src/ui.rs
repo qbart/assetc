@@ -2086,7 +2086,10 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                             mesh.meshlet_max_vertices.unwrap_or(project.max_vertices);
                         prop_row(ui, "Max vertices", |ui, width| {
                             let field = egui::DragValue::new(&mut vertices).range(3..=256);
-                            if ui.add_sized(vec2(width, 22.0), field).changed() {
+                            // Only a new value is an override; a click alone writes nothing.
+                            let before = vertices;
+                            ui.add_sized(vec2(width, 22.0), field);
+                            if vertices != before {
                                 mesh.meshlet_max_vertices = Some(vertices);
                             }
                         });
@@ -2096,7 +2099,9 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                             let field = egui::DragValue::new(&mut triangles)
                                 .range(4..=512)
                                 .speed(4.0);
-                            if ui.add_sized(vec2(width, 22.0), field).changed() {
+                            let before = triangles;
+                            ui.add_sized(vec2(width, 22.0), field);
+                            if triangles != before {
                                 mesh.meshlet_max_triangles = Some(triangles);
                             }
                         });
