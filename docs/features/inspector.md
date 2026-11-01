@@ -35,7 +35,8 @@ Otherwise, from top to bottom:
 
 1. **File name** (strong) and its path relative to the project root (weak).
 2. **Details**: a two-column grid, weak labels on the left, values on the
-   right. Values are selectable text, so an asset ID can be copied.
+   right. Values are selectable text, so an asset ID can be copied. Long
+   values wrap within the sidebar instead of widening it.
 
 Content scrolls vertically when it does not fit.
 

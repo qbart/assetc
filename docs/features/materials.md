@@ -163,13 +163,15 @@ otherwise `<dir>/<name>.*`.
 
 ## Inspector
 
-- **Material source** (Input `*.mat.toml`): Material (asset path), Asset ID,
-  Output (with `(not built)` when missing).
+- **Material source** (Input `*.mat.toml`): Asset path, Asset ID, Output
+  (with `(not built)` when missing); an Error row if the file is invalid.
 - **Source texture** that belongs to a material gets a **Material** row,
   e.g. `brick/brick.mat (roughness)`. Its **Color** row is the slot's color space;
   for ORM inputs, **Output** shows the ORM texture, e.g.
   `brick/brick.orm.ktx2 (channel G)`.
 - **Compiled material** (Output `*.mat`): every value from the `.mat` file,
+  one row each (Base color, Metallic, Roughness, Occlusion, Normal scale,
+  Emissive, Height mode, Height scale, Height midlevel, Alpha, Double-sided),
   and each texture slot's asset ID (or `—`).
 - The Assets tab is enabled for `.mat` files too and lists the material.
 
