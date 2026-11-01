@@ -19,8 +19,10 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Three icon tabs, top to bottom: **Info** (`info`), **Assets** (`files`),
-**Settings** (`settings`). Hovering a tab shows its name.
+Four icon tabs, top to bottom: **Info** (`info`), **Parameters**
+(`sliders-vertical`, only for `.noise` files in the Input tree, see
+[`noise.md`](noise.md#editing)), **Assets** (`files`), **Settings**
+(`settings`). Hovering a tab shows its name.
 
 A tab that does not apply to the selected file is disabled: its icon is drawn
 in `TEXT_WEAK` at 50% opacity, it does not react to hover or clicks. If the
@@ -50,6 +52,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.png`, `*.jpg`, `*.jpeg` (any case) | Source texture |
 | Input  | `*.mat.toml`               | Material source    |
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
+| Input  | `*.noise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |
 | Input  | anything else              | Ignored            |
 | Output | `*.ktx2` (any case)        | Compiled texture   |
 | Output | `*.mat`                    | Compiled material  |

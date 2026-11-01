@@ -30,7 +30,9 @@ frame that later features plug into; it has no asset functionality of its own.
   strip on the left with icon tabs (`Info`, `Assets`, `Settings`, see
   [Tabs](#tabs)) and the active tab's content on the right. Shows the selected
   file, see [`inspector.md`](inspector.md).
-- **Status bar** (bottom, fixed height): status message on the left
+- **Status bar** (bottom, fixed height): status message on the left (a
+  failed [file operation](file-operations.md#errors) shows there until the
+  next operation or build)
   (see [`cli.md`](cli.md) and [`build.md`](build.md#gui)), `assetc <version>` on the right in weak text.
 - **Center**: the canvas, previewing the selected file in 2D (zoom, pan,
   tiling) or 3D (on a rotating shape), with a view bar on top; see
@@ -63,6 +65,8 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   14 px per level, and highlight with `BG_HEADER` on hover. Clicking a folder
   row opens / closes it **and** selects it; clicking a file row selects it
   (see [`inspector.md`](inspector.md#selection)).
+  Right-clicking an Input row opens the [file operations](file-operations.md)
+  menu.
 - Folders are collapsible (collapsed by default) and listed before files;
   each group is sorted by name, case-insensitively.
 - Entries whose name starts with `.` are hidden.
@@ -101,7 +105,8 @@ embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
-(canvas 3D shapes), `palette` (LUT reference chart), `folder`, `folder-open`, `file`,
+(canvas 3D shapes), `palette` (LUT reference chart), `eye`, `eye-off` (LUT cube before / after),
+`sliders-vertical` (Inspector Parameters tab), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 

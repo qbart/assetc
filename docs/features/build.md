@@ -33,6 +33,7 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | Source             | Asset kind | Output                                        |
 |--------------------|------------|-----------------------------------------------|
 | `*.png`, `*.jpg`, `*.jpeg` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
+| `*.noise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
 | `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.mat`, see [`materials.md`](materials.md) |
 | anything else      | —          | ignored, counted as skipped                   |
 

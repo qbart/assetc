@@ -81,7 +81,14 @@ and no tonemapping as the 3D image view) of the RGB cube transformed by the
 LUT: a 1.2-unit cube with red along +X, green along +Y and blue along +Z, its
 six faces subdivided into N × N quads, each vertex colored with the LUT output
 for its input color (unlit). An identity LUT shows the plain RGB cube; a grade
-shows where it moves colors. No toolbar.
+shows where it moves colors.
+
+- **Before / After** — a toolbar group (top-right): **Before** (`eye-off`)
+  shows the plain, untransformed RGB cube; **After** (`eye`, the default)
+  shows the LUT's cube. The choice keeps the camera and rotation, so flipping
+  between them shows where colors move. It is global for the session.
+- Holding **Space** shows Before while held (when no text field has focus),
+  whatever the toolbar says.
 
 ### Curves
 

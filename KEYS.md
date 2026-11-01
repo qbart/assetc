@@ -1,6 +1,19 @@
 # Keys
 
-Keyboard and mouse bindings in the assetc GUI.
+Keyboard and mouse bindings in the assetc GUI. Keys only act when no text
+field has focus.
+
+## File browser (Input tree)
+
+See [`docs/features/file-operations.md`](docs/features/file-operations.md).
+
+| Input           | Action                                     |
+|-----------------|--------------------------------------------|
+| Right click     | File operations menu                       |
+| `F2`            | Rename the selected entry                  |
+| `Delete`        | Delete the selected entry (asks first)     |
+| `Enter`         | While renaming: commit                     |
+| `Escape`        | While renaming: cancel                     |
 
 ## Canvas (2D)
 
@@ -33,3 +46,4 @@ See [`docs/features/lut.md`](docs/features/lut.md#views).
 |---------|--------------------|-------------------------------------|
 | Compare | Left click / drag  | Move the before / after divider     |
 | Cube    | as Canvas (3D)     | Orbit, move closer / farther, reset |
+| Cube    | Hold `Space`       | Show Before (untransformed cube)    |
