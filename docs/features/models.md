@@ -117,12 +117,12 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
 
   | Button      | Icon          | Shows                                                    |
   |-------------|---------------|----------------------------------------------------------|
-  | Material    | `palette`     | the mesh with its compiled materials (default), see below |
-  | Wireframe   | `triangle`    | every triangle edge as a 1 px `TEXT` line, unlit, no faces |
-  | Shaded      | `box`         | the whole mesh in light gray                             |
-  | Meshlets    | `shapes`      | each meshlet in its own color                            |
-  | Material ID | `swatch-book` | each material slot in its own color; no material in gray |
-  | Submeshes   | `layers`      | each submesh in its own color                            |
+  | Material    | `box-checker` | the mesh with its compiled materials (default), see below |
+  | Wireframe   | `box`         | every triangle edge as a 1 px `TEXT` line, unlit, no faces |
+  | Shaded      | `box-shaded`  | the whole mesh in light gray                             |
+  | Meshlets    | `squares-unite` | each meshlet in its own color                          |
+  | Material ID | `image`       | each material slot in its own color; no material in gray |
+  | Submeshes   | `boxes`       | each submesh in its own color                            |
 
 - **Material**: each submesh uses its `.amat` (looked up by the `MATERIAL`
   asset IDs in the output's [`assets.manifest`](../spec/manifest.md)) as a
