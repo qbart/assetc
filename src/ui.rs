@@ -863,10 +863,14 @@ fn canvas(
         return message(ui, inspection.note.unwrap_or("No preview"));
     };
 
-    let options = all_options
+    let mut options = all_options
         .get(&inspected.path)
         .copied()
         .unwrap_or_default();
+    let available = |channels: Channels| channels.index().is_none_or(|i| inspection.channels[i]);
+    if !available(options.channels) {
+        options.channels = Channels::Rgb;
+    }
     let texture = match options.channels.index() {
         None => preview.clone(),
         Some(channel) => {
@@ -952,13 +956,22 @@ fn canvas(
     // Drawn last so they sit on top; their clicks apply next frame.
     let tile = [Tool {
         glyph: Glyph::Icon(Icon::Grid3x3),
-        name: "Tile",
+        name: "Tile".into(),
         on: options.tiled,
+        enabled: true,
     }];
-    let channels = Channels::ALL.map(|channels| Tool {
-        glyph: Glyph::Channels(channels),
-        name: channels.name(),
-        on: options.channels == channels,
+    let channels = Channels::ALL.map(|channels| {
+        let enabled = available(channels);
+        Tool {
+            glyph: Glyph::Channels(channels),
+            name: if enabled {
+                channels.name().into()
+            } else {
+                format!("{} (not in this image)", channels.name())
+            },
+            on: options.channels == channels,
+            enabled,
+        }
     });
     if let Some((group, button)) = toolbar(ui, rect, &[&tile, &channels]) {
         let options = all_options.entry(inspected.path.clone()).or_default();
@@ -1004,8 +1017,9 @@ enum Glyph {
 
 struct Tool {
     glyph: Glyph,
-    name: &'static str,
+    name: String,
     on: bool,
+    enabled: bool,
 }
 
 /// A column of button groups in the canvas' top-right corner; returns the clicked `(group, button)`.
@@ -1024,13 +1038,15 @@ fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usiz
         let last = tools.len() - 1;
         for (i, tool) in tools.iter().enumerate() {
             let rect = Rect::from_min_size(bar.min + vec2(0.0, BUTTON.y * i as f32), BUTTON);
+            // Disabled buttons still take the pointer so it never reaches the canvas.
+            let sense = if tool.enabled {
+                Sense::click_and_drag()
+            } else {
+                Sense::drag()
+            };
             let response = ui
-                .interact(
-                    rect,
-                    ui.id().with(("toolbar", g, i)),
-                    Sense::click_and_drag(),
-                )
-                .on_hover_text(tool.name);
+                .interact(rect, ui.id().with(("toolbar", g, i)), sense)
+                .on_hover_text(&tool.name);
             // Round only the corners on the group's outer edge.
             let outer = |edge: bool| if edge { RADIUS } else { 0 };
             let radius = egui::CornerRadius {
@@ -1042,6 +1058,8 @@ fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usiz
             let tint = if tool.on {
                 painter.rect_filled(rect, radius, ACCENT);
                 BG_BAR
+            } else if !tool.enabled {
+                TEXT_WEAK.gamma_multiply(0.5)
             } else if response.hovered() {
                 painter.rect_filled(rect, radius, BG_HEADER);
                 TEXT
@@ -1051,7 +1069,7 @@ fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usiz
             if i > 0 {
                 painter.hline(rect.x_range(), rect.top(), Stroke::new(1.0, STROKE));
             }
-            paint_glyph(ui, &painter, tool.glyph, rect.center(), tint);
+            paint_glyph(ui, &painter, tool, rect.center(), tint);
             if response.clicked() {
                 clicked = Some((g, i));
             }
@@ -1063,11 +1081,19 @@ fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usiz
 fn paint_glyph(
     ui: &Ui,
     painter: &egui::Painter,
-    glyph: Glyph,
+    tool: &Tool,
     center: egui::Pos2,
     tint: egui::Color32,
 ) {
-    match glyph {
+    // Disabled buttons show their fill colors dimmed too.
+    let fill = |color: egui::Color32| {
+        if tool.enabled {
+            color
+        } else {
+            color.gamma_multiply(0.35)
+        }
+    };
+    match tool.glyph {
         Glyph::Icon(icon) => icon
             .image(18.0, tint)
             .paint_at(ui, Rect::from_center_size(center, vec2(18.0, 18.0))),
@@ -1081,7 +1107,7 @@ fn paint_glyph(
             // circle-small is r = 6 of 24, so 4 px at 16 px.
             for (offset, channel, color) in circles {
                 if shown == Channels::Rgb || shown == channel {
-                    painter.circle_filled(center + offset, 4.0, color);
+                    painter.circle_filled(center + offset, 4.0, fill(color));
                 }
             }
             for (offset, ..) in circles {

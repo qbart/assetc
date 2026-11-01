@@ -25,6 +25,8 @@ pub struct Inspection {
     pub missing: bool,
     pub rows: Vec<(&'static str, String)>,
     pub preview: Option<Image>,
+    /// Which of R, G, B, A the previewed file actually has.
+    pub channels: [bool; 4],
     /// Shown instead of a preview, e.g. for unsupported formats.
     pub note: Option<&'static str>,
 }
@@ -126,13 +128,16 @@ fn source_texture(
     rel: &str,
     out: &mut Inspection,
 ) -> Result<(), String> {
-    let image = image::ImageReader::open(file)
+    let decoded = image::ImageReader::open(file)
         .map_err(|e| e.to_string())?
         .with_guessed_format()
         .map_err(|e| e.to_string())?
         .decode()
-        .map_err(|e| e.to_string())?
-        .to_rgba8();
+        .map_err(|e| e.to_string())?;
+    let color = decoded.color();
+    let rgb = color.has_color();
+    out.channels = [rgb, rgb, rgb, color.has_alpha()];
+    let image = decoded.to_rgba8();
     let (width, height) = image.dimensions();
     let asset_path = strip_extension(rel);
     out.rows
@@ -211,6 +216,7 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
             let image = image::RgbaImage::from_raw(level.width, level.height, level.pixels)
                 .ok_or("level 0 has the wrong size")?;
             out.preview = Some(to_image(image));
+            out.channels = [true; 4];
         }
         None => out.note = Some("No preview for this format"),
     }
@@ -432,6 +438,7 @@ mod tests {
             i.preview.as_ref().map(|p| (p.width, p.height)),
             Some((8, 4))
         );
+        assert_eq!(i.channels, [true; 4]);
 
         let input = project.input_dir().unwrap();
         let output = project.output_dir().unwrap();
@@ -457,6 +464,23 @@ mod tests {
         );
         assert_eq!(row(&m, "Kind"), "Manifest");
         assert_eq!(row(&m, "Entries"), "1");
+    }
+
+    #[test]
+    fn channels_follow_the_source_color_type() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        fs::create_dir_all(dir.path().join("assets")).unwrap();
+        let file = |name: &str| dir.path().join("assets").join(name);
+        image::RgbImage::new(2, 2).save(file("rgb.jpg")).unwrap();
+        image::GrayImage::new(2, 2).save(file("gray.png")).unwrap();
+        image::GrayAlphaImage::new(2, 2)
+            .save(file("gray_alpha.png"))
+            .unwrap();
+        let channels = |name| inspect(&project, Location::Input, &file(name)).channels;
+        assert_eq!(channels("rgb.jpg"), [true, true, true, false]);
+        assert_eq!(channels("gray.png"), [false; 4]);
+        assert_eq!(channels("gray_alpha.png"), [false, false, false, true]);
     }
 
     #[test]
