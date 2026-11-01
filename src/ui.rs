@@ -695,7 +695,8 @@ fn menu_row(ui: &mut Ui, label: &str, check: Option<bool>, interactive: bool) ->
     } else {
         Sense::hover()
     };
-    let width = ui.available_width().max(180.0);
+    // Fixed width: popups offer far more room than their items need.
+    let width = 180.0;
     let (rect, response) = ui.allocate_exact_size(vec2(width, 28.0), sense);
     if interactive && response.hovered() {
         ui.painter().rect_filled(rect, 0.0, BG_HEADER);
@@ -961,6 +962,11 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
         *action = Some(TreeAction::Op(FileOp::NewFolder(dir.to_path_buf())));
         ui.close();
     }
+    // Same size and text inset as `menu_row`.
+    ui.spacing_mut().button_padding = vec2(24.0, 7.0);
+    ui.style_mut()
+        .text_styles
+        .insert(egui::TextStyle::Button, FontId::proportional(14.0));
     ui.menu_button("New Noise", |ui| {
         for kind in NoiseType::ALL {
             if menu_item(ui, kind.name(), None).clicked() {
