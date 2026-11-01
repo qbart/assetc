@@ -49,6 +49,11 @@ pub fn rename(input: &Path, path: &Path, name: &str) -> Result<PathBuf, String> 
         return Err(format!("{name} already exists"));
     }
     fs::rename(path, &target).map_err(|e| e.to_string())?;
+    // The sidecar follows its file.
+    let sidecar = crate::amod::path_for(path);
+    if sidecar.is_file() {
+        fs::rename(&sidecar, crate::amod::path_for(&target)).map_err(|e| e.to_string())?;
+    }
     Ok(target)
 }
 
@@ -57,11 +62,16 @@ pub fn delete(input: &Path, path: &Path) -> Result<(), String> {
     check_inside(input, path, false)?;
     let meta = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
     if meta.is_dir() {
-        fs::remove_dir_all(path)
+        fs::remove_dir_all(path).map_err(|e| e.to_string())
     } else {
-        fs::remove_file(path)
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+        // The sidecar goes with its file.
+        let sidecar = crate::amod::path_for(path);
+        if sidecar.is_file() {
+            fs::remove_file(sidecar).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
-    .map_err(|e| e.to_string())
 }
 
 /// `path` must resolve inside `input`; the `input` directory itself only if `allow_root`.
@@ -142,6 +152,16 @@ mod tests {
         assert!(renamed.is_file() && !file.exists());
         let folder = rename(&input, &input.join("sub"), "textures").unwrap();
         assert!(folder.is_dir());
+
+        // Sidecars follow their file, and go with it.
+        let model = input.join("Fox.glb");
+        fs::write(&model, "x").unwrap();
+        fs::write(input.join("Fox.glb.amod"), "").unwrap();
+        let hero = rename(&input, &model, "Hero.glb").unwrap();
+        assert!(input.join("Hero.glb.amod").is_file());
+        assert!(!input.join("Fox.glb.amod").exists());
+        delete(&input, &hero).unwrap();
+        assert!(!input.join("Hero.glb.amod").exists());
     }
 
     #[test]

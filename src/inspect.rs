@@ -363,14 +363,11 @@ fn model_rows(
     // Compiled to an `.amesh` and more, see docs/features/models.md#build.
     out.rows.push((
         "Meshlet limits",
-        match crate::amesh::MeshSettings::new(&project.config.meshes) {
-            Ok(settings) => {
-                let limits = settings.limits(rel);
-                format!(
-                    "{} vertices, {} triangles",
-                    limits.max_vertices, limits.max_triangles
-                )
-            }
+        match meshlet_limits(project, file, rel) {
+            Ok(limits) => format!(
+                "{} vertices, {} triangles",
+                limits.max_vertices, limits.max_triangles
+            ),
             Err(e) => e,
         },
     ));
@@ -378,6 +375,21 @@ fn model_rows(
     out.rows.push(("Asset path", mesh.clone()));
     output_row(project, &mesh, "", out);
     Ok(())
+}
+
+/// The meshlet limits a model builds with: `assetc.toml` `[meshes]` and its `.amod`.
+pub fn meshlet_limits(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+) -> Result<crate::amesh::MeshletLimits, String> {
+    let settings = crate::amesh::MeshSettings::new(&project.config.meshes)
+        .map_err(|e| format!("assetc.toml [meshes]: {e}"))?;
+    let amod = crate::amod::read(file)?;
+    settings.limits_with(rel, amod.as_ref()).map_err(|e| {
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        format!("{name}.amod: {e}")
+    })
 }
 
 fn color_lut(

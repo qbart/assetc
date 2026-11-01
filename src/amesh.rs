@@ -87,8 +87,23 @@ impl MeshSettings {
         })
     }
 
-    /// Limits for the model at `source` (input-relative, with extension); the last matching
-    /// override that sets a value wins.
+    /// Limits for the model at `source` (input-relative, with extension) with its sidecar's
+    /// `[mesh]`, which wins over the project; see docs/spec/amod.md#mesh.
+    pub fn limits_with(
+        &self,
+        source: &str,
+        amod: Option<&crate::amod::Amod>,
+    ) -> Result<MeshletLimits, String> {
+        let mut limits = self.limits(source);
+        if let Some(mesh) = amod.map(|a| &a.mesh) {
+            limits.max_vertices = mesh.meshlet_max_vertices.unwrap_or(limits.max_vertices);
+            limits.max_triangles = mesh.meshlet_max_triangles.unwrap_or(limits.max_triangles);
+        }
+        limits.check()
+    }
+
+    /// Limits for the model at `source` (input-relative, with extension) from `assetc.toml`;
+    /// the last matching override that sets a value wins.
     pub fn limits(&self, source: &str) -> MeshletLimits {
         let mut limits = self.defaults;
         for (set, vertices, triangles) in &self.overrides {

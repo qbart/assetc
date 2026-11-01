@@ -201,11 +201,16 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             }
             sources.push(rel);
         } else if model::is_model(file) {
-            match fs::read(file)
-                .map_err(|e| e.to_string())
-                .and_then(|data| model::outputs(&data))
-            {
-                Ok(outputs) => model_assets(&mut plan, &rel, &outputs, meshes.limits(&rel)),
+            let limits = crate::amod::read(file).and_then(|amod| {
+                meshes
+                    .limits_with(&rel, amod.as_ref())
+                    .map_err(|e| format!("{}.amod: {e}", split_dir(&rel).1))
+            });
+            match limits.and_then(|limits| {
+                let data = fs::read(file).map_err(|e| e.to_string())?;
+                Ok((model::outputs(&data)?, limits))
+            }) {
+                Ok((outputs, limits)) => model_assets(&mut plan, &rel, &outputs, limits),
                 Err(message) => plan.failures.push(Failure {
                     source: rel,
                     message,

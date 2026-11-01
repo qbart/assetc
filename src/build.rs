@@ -698,6 +698,31 @@ mod tests {
         let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
         let desc = reader.require("DESC").unwrap();
         assert_eq!(desc[24..32], [32, 0, 0, 0, 32, 0, 0, 0]);
+        // The model's .amod wins over the project.
+        fs::write(
+            input.join("models/Fox.glb.amod"),
+            "[mesh]\nmeshlet_max_vertices = 16\n",
+        )
+        .unwrap();
+        let outcome = run(&input, &output, &config).unwrap();
+        assert!(outcome.failures.is_empty());
+        let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
+        let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
+        assert_eq!(
+            reader.require("DESC").unwrap()[24..32],
+            [16, 0, 0, 0, 32, 0, 0, 0]
+        );
+        fs::write(
+            input.join("models/Fox.glb.amod"),
+            "[mesh]\nmeshlet_max_vertices = 1\n",
+        )
+        .unwrap();
+        let outcome = run(&input, &output, &config).unwrap();
+        assert_eq!(
+            outcome.failures[0].message,
+            "Fox.glb.amod: meshlet_max_vertices 1 is outside 3–256"
+        );
+        fs::remove_file(input.join("models/Fox.glb.amod")).unwrap();
         config.meshes.meshlet_max_triangles = 7;
         let error = run(&input, &output, &config).unwrap_err().to_string();
         assert_eq!(
