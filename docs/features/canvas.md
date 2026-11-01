@@ -43,7 +43,9 @@ image center's offset from the canvas center).
   keeps the view.
 - While the view is still the automatic fit (no zoom or pan since), resizing
   the canvas (window, sidebars) refits.
-- Panning is clamped so the image center always stays inside the canvas.
+- Panning is clamped so that, on each axis, at least 32 px of the image (or
+  all of it, if it is smaller) stays inside the canvas. A zoomed-in image can
+  be panned to any of its edges, but never lost off-screen.
 
 ## Controls
 
