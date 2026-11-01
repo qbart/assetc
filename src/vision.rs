@@ -74,7 +74,7 @@ fraction of the global population."
             LazyLock::new(|| std::array::from_fn(|v| srgb_to_linear(v as f32 / 255.0)));
         let m = self.matrix();
         let mut out = Vec::with_capacity(pixels.len());
-        for px in pixels.chunks_exact(4) {
+        for px in pixels.as_chunks::<4>().0 {
             let rgb = [
                 LINEAR[px[0] as usize],
                 LINEAR[px[1] as usize],

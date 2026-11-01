@@ -84,10 +84,8 @@ struct UiState {
     animations: HashMap<PathBuf, Option<usize>>,
     /// Mip level shown for each compiled texture, by path.
     mip_levels: HashMap<PathBuf, usize>,
-    /// How compiled meshes are drawn.
-    mesh_display: MeshDisplay,
-    /// Bounds drawn over compiled meshes, by index in [`MeshOverlay::ALL`].
-    mesh_overlays: [bool; 6],
+    /// How compiled meshes are drawn: display mode and bounds overlays.
+    mesh_view: MeshView,
     /// Level of detail shown for each compiled mesh, by path.
     lod_levels: HashMap<PathBuf, usize>,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
@@ -332,8 +330,7 @@ impl Default for UiState {
             canvas_options: HashMap::new(),
             animations: HashMap::new(),
             mip_levels: HashMap::new(),
-            mesh_display: MeshDisplay::default(),
-            mesh_overlays: [false; 6],
+            mesh_view: MeshView::default(),
             lod_levels: HashMap::new(),
             mesh_in_3d: true,
             font_atlas: true,
@@ -663,8 +660,7 @@ fn shell(
                         rect,
                         state.inspected.as_mut(),
                         &mut preview3d,
-                        &mut state.mesh_display,
-                        &mut state.mesh_overlays,
+                        &mut state.mesh_view,
                         lod,
                         &mut state.vision,
                     )
@@ -4311,8 +4307,7 @@ fn canvas_compiled_mesh(
     rect: Rect,
     inspected: Option<&mut Inspected>,
     preview: &mut Preview3d,
-    display: &mut MeshDisplay,
-    overlays: &mut [bool; 6],
+    mesh_view: &mut MeshView,
     lod: usize,
     vision: &mut Option<Vision>,
 ) {
@@ -4344,6 +4339,7 @@ fn canvas_compiled_mesh(
         inspected.uploaded_lod = Some(lod);
     }
     preview.compiled_shown = true;
+    let MeshView { display, overlays } = mesh_view;
     preview.display = *display;
     // Meshlets exist only for LOD 0.
     let available = |overlay: MeshOverlay| lod == 0 || !overlay.of_meshlets();
@@ -4827,6 +4823,15 @@ struct Tool {
     name: String,
     on: bool,
     enabled: bool,
+}
+
+/// How compiled meshes are drawn, for the session; see
+/// docs/features/models.md#compiled-mesh-preview.
+#[derive(Default)]
+struct MeshView {
+    display: MeshDisplay,
+    /// Bounds drawn over the mesh, by index in [`MeshOverlay::ALL`].
+    overlays: [bool; 6],
 }
 
 /// The Color vision group: at most one on; see docs/features/canvas.md#color-vision.
