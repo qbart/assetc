@@ -250,8 +250,14 @@ fn source_texture(
 fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), String> {
     let bytes = fs::read(file).map_err(|e| e.to_string())?;
     let info = ktx2::read(&bytes)?;
-    out.rows
-        .push(("Dimensions", format!("{} × {} px", info.width, info.height)));
+    out.rows.push((
+        "Dimensions",
+        if info.depth > 0 {
+            format!("{} × {} × {} px", info.width, info.height, info.depth)
+        } else {
+            format!("{} × {} px", info.width, info.height)
+        },
+    ));
     out.rows.push(("Format", info.format_name()));
     out.rows.push(("Mip levels", info.levels.to_string()));
     asset_rows(strip_extension(rel), out);
@@ -636,6 +642,7 @@ mod tests {
         let textures = config::Textures {
             linear: vec!["**/*_n.png".into()],
             no_mipmaps: vec![],
+            ..Default::default()
         };
         let project = project(dir.path(), textures);
         let file = dir.path().join("assets/textures/rock_n.png");

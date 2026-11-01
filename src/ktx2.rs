@@ -13,14 +13,28 @@ const DFD_SIZE: u32 = 92;
 
 /// Encodes RGBA8 mip levels (largest first, each half the previous) as a KTX2 file.
 pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
-    let base = &levels[0];
     for level in levels {
         assert_eq!(
             level.pixels.len(),
             level.width as usize * level.height as usize * 4
         );
     }
+    let data: Vec<&[u8]> = levels.iter().map(|l| l.pixels.as_slice()).collect();
+    encode(color, [levels[0].width, levels[0].height, 0], &data)
+}
 
+/// Encodes one RGBA8 3D texture level, `size` = width, height, depth; `pixels` are depth
+/// slices of rows, top to bottom. See docs/spec/ktx2.md#volume.
+pub fn encode_rgba8_volume(color: ColorSpace, size: [u32; 3], pixels: &[u8]) -> Vec<u8> {
+    assert_eq!(
+        pixels.len(),
+        size.iter().map(|&s| s as usize).product::<usize>() * 4
+    );
+    encode(color, size, &[pixels])
+}
+
+/// `size` is level 0's width, height and depth (0 for 2D).
+fn encode(color: ColorSpace, size: [u32; 3], levels: &[&[u8]]) -> Vec<u8> {
     let format = match color {
         ColorSpace::Srgb => VK_FORMAT_R8G8B8A8_SRGB,
         ColorSpace::Linear => VK_FORMAT_R8G8B8A8_UNORM,
@@ -35,13 +49,14 @@ pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
     let mut offset = data_offset;
     for (i, level) in levels.iter().enumerate().rev() {
         offsets[i] = offset;
-        offset += level.pixels.len();
+        offset += level.len();
     }
 
     let mut out = Vec::with_capacity(offset);
     out.extend_from_slice(&IDENTIFIER);
     let level_count = levels.len() as u32;
-    for v in [format, 1, base.width, base.height, 0, 0, 1, level_count, 0] {
+    let [width, height, depth] = size;
+    for v in [format, 1, width, height, depth, 0, 1, level_count, 0] {
         put_u32(&mut out, v);
     }
     put_u32(&mut out, dfd_offset as u32);
@@ -54,8 +69,8 @@ pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
 
     for (level, offset) in levels.iter().zip(&offsets) {
         put_u64(&mut out, *offset as u64);
-        put_u64(&mut out, level.pixels.len() as u64);
-        put_u64(&mut out, level.pixels.len() as u64);
+        put_u64(&mut out, level.len() as u64);
+        put_u64(&mut out, level.len() as u64);
     }
     debug_assert_eq!(out.len(), dfd_offset);
 
@@ -63,7 +78,7 @@ pub fn encode_rgba8(color: ColorSpace, levels: &[Image]) -> Vec<u8> {
     out.extend_from_slice(&kvd);
     out.resize(data_offset, 0);
     for level in levels.iter().rev() {
-        out.extend_from_slice(&level.pixels);
+        out.extend_from_slice(level);
     }
     out
 }
@@ -97,8 +112,10 @@ pub struct Info {
     pub vk_format: u32,
     pub width: u32,
     pub height: u32,
+    /// 0 for 2D textures.
+    pub depth: u32,
     pub levels: u32,
-    /// Level 0, only for the subset assetc writes.
+    /// Level 0, only for the subset assetc writes; a 3D texture's slices side by side.
     pub level0: Option<Image>,
     /// Levels 1 and up, decoded like level 0 (empty when level 0 is not).
     pub mips: Vec<Image>,
@@ -132,32 +149,46 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
         supercompression,
     ] = std::array::from_fn(|i| u32_at(12 + i * 4));
 
-    let plain_2d = depth == 0 && layers == 0 && faces == 1 && supercompression == 0;
+    let plain = layers == 0 && faces == 1 && supercompression == 0;
     let rgba8 = matches!(
         vk_format,
         VK_FORMAT_R8G8B8A8_SRGB | VK_FORMAT_R8G8B8A8_UNORM
     );
     // Level `i` is `max(1, size >> i)` on each axis; its entry is in the level index.
+    // A 3D level is laid out as its depth slices side by side.
     let level = |i: u32| {
         let entry = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * i as usize;
         if entry + LEVEL_INDEX_ENTRY > bytes.len() {
             return None;
         }
         let (offset, length) = (u64_at(entry), u64_at(entry + 8));
-        let (w, h) = ((width >> i).max(1), (height >> i).max(1));
+        let (w, h, d) = (
+            (width >> i).max(1),
+            (height >> i).max(1),
+            (depth >> i).max(1),
+        );
         let end = offset.checked_add(length)?;
-        if length != w as u64 * h as u64 * 4 || end > bytes.len() as u64 {
+        if length != w as u64 * h as u64 * d as u64 * 4 || end > bytes.len() as u64 {
             return None;
         }
+        let data = &bytes[offset as usize..end as usize];
+        let row = w as usize * 4;
+        let mut pixels = Vec::with_capacity(data.len());
+        for y in 0..h as usize {
+            for z in 0..d as usize {
+                let start = (z * h as usize + y) * row;
+                pixels.extend_from_slice(&data[start..start + row]);
+            }
+        }
         Some(Image {
-            width: w,
+            width: w * d,
             height: h,
-            pixels: bytes[offset as usize..end as usize].to_vec(),
+            pixels,
         })
     };
-    let readable = plain_2d && rgba8;
-    let level0 = readable.then(|| level(0)).flatten();
-    let mips = if level0.is_some() {
+    let level0 = (plain && rgba8).then(|| level(0)).flatten();
+    // Volumes show level 0 only.
+    let mips = if level0.is_some() && depth == 0 {
         (1..levels.max(1)).map_while(level).collect()
     } else {
         Vec::new()
@@ -166,6 +197,7 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
         vk_format,
         width,
         height,
+        depth,
         levels: levels.max(1),
         level0,
         mips,
@@ -285,6 +317,27 @@ mod tests {
 
         let info = read(&encode_rgba8(ColorSpace::Linear, &[sample()])).unwrap();
         assert_eq!(info.format_name(), "R8G8B8A8_UNORM");
+    }
+
+    #[test]
+    fn volumes_are_3d_and_preview_as_slices() {
+        // 2 × 1 × 2: texel (x, 0, z) has red x, blue z.
+        let pixels = [
+            0, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 255, 0, 255, 255,
+        ];
+        let file = encode_rgba8_volume(ColorSpace::Linear, [2, 1, 2], &pixels);
+        let reader = ::ktx2::Reader::new(&file[..]).unwrap();
+        let header = reader.header();
+        assert_eq!(
+            (header.pixel_width, header.pixel_height, header.pixel_depth),
+            (2, 1, 2)
+        );
+        assert_eq!(reader.levels().next().unwrap().data, &pixels[..]);
+        let info = read(&file).unwrap();
+        assert_eq!(info.depth, 2);
+        let level0 = info.level0.unwrap();
+        assert_eq!((level0.width, level0.height), (4, 1));
+        assert_eq!(level0.pixels, pixels);
     }
 
     #[test]

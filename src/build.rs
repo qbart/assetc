@@ -142,8 +142,12 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
                 .map(|levels| levels_detail(*color, levels)),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
-            Job::Lut { source } => compile_lut(&input.join(source), &dest)
-                .map(|size| format!("{size}³ LUT, linear, 1 level")),
+            Job::Lut { source, volume } => {
+                compile_lut(&input.join(source), &dest, *volume).map(|size| {
+                    let layout = if *volume { "volume" } else { "strip" };
+                    format!("{size}³ LUT {layout}, linear, 1 level")
+                })
+            }
             Job::Material { material, .. } => {
                 write(&dest, &material::encode(material)).map(|()| material_detail(material))
             }
@@ -323,15 +327,18 @@ pub fn is_lut(file: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("cube"))
 }
 
-/// Writes a LUT's strip; returns its size. See docs/features/lut.md#build.
-fn compile_lut(source: &Path, dest: &Path) -> Result<usize, String> {
+/// Writes a LUT as a strip, or a 3D texture when `volume`; returns its size. See
+/// docs/features/lut.md#build.
+fn compile_lut(source: &Path, dest: &Path, volume: bool) -> Result<usize, String> {
     let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
     let lut = crate::lut::Lut::parse(&text)?;
-    let strip = lut.strip()?;
-    write(
-        dest,
-        &crate::ktx2::encode_rgba8(ColorSpace::Linear, &[strip]),
-    )?;
+    let bytes = if volume {
+        let n = lut.size as u32;
+        crate::ktx2::encode_rgba8_volume(ColorSpace::Linear, [n, n, n], &lut.volume())
+    } else {
+        crate::ktx2::encode_rgba8(ColorSpace::Linear, &[lut.strip()?])
+    };
+    write(dest, &bytes)?;
     Ok(lut.size)
 }
 
@@ -554,6 +561,41 @@ mod tests {
     }
 
     #[test]
+    fn builds_volume_luts_when_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        let mut cube = String::from("LUT_3D_SIZE 2\n");
+        for i in 0..8 {
+            cube += &format!("{} {} {}\n", i & 1, (i >> 1) & 1, (i >> 2) & 1);
+        }
+        fs::write(input.join("warm.cube"), &cube).unwrap();
+        fs::write(input.join("cold.cube"), &cube).unwrap();
+        let textures = config::Textures {
+            volume_luts: vec!["warm.cube".into()],
+            ..Default::default()
+        };
+
+        let outcome = run(&input, &output, &textures).unwrap();
+        assert!(outcome.failures.is_empty());
+        let size = |name: &str| {
+            let bytes = fs::read(output.join(name)).unwrap();
+            let header = ::ktx2::Reader::new(&bytes[..]).unwrap().header();
+            (header.pixel_width, header.pixel_height, header.pixel_depth)
+        };
+        assert_eq!(size("warm.ktx2"), (2, 2, 2));
+        assert_eq!(size("cold.ktx2"), (4, 2, 0));
+        let detail = |name: &str| {
+            let built = outcome.built.iter().find(|b| b.source == name).unwrap();
+            built.detail.clone()
+        };
+        assert_eq!(detail("warm.cube"), "2³ LUT volume, linear, 1 level");
+        assert_eq!(detail("cold.cube"), "2³ LUT strip, linear, 1 level");
+        // Table order: texel 1 is red.
+        assert_eq!(level0(&output.join("warm.ktx2")).1[4..8], [255, 0, 0, 255]);
+    }
+
+    #[test]
     fn builds_noise_as_linear_texture() {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
@@ -602,6 +644,7 @@ mod tests {
         let textures = config::Textures {
             linear: vec!["**/*_n.png".into()],
             no_mipmaps: vec!["ui/**".into()],
+            ..Default::default()
         };
 
         let mut outcome = run(&input, &output, &textures).unwrap();
@@ -651,6 +694,7 @@ mod tests {
             // Slot color space wins over the globs.
             linear: vec!["**/brick.png".into()],
             no_mipmaps: vec![],
+            ..Default::default()
         };
 
         let outcome = run(&input, &output, &textures).unwrap();
@@ -842,6 +886,7 @@ mod tests {
         let textures = config::Textures {
             linear: vec!["[".into()],
             no_mipmaps: vec![],
+            ..Default::default()
         };
         assert!(matches!(
             run(&input, &output, &textures),

@@ -51,8 +51,9 @@ pub enum Job {
     },
     /// Sources (relative to `input`) of the R (occlusion), G (roughness), B (metallic) channels.
     Orm { sources: [Option<String>; 3] },
-    /// A color LUT (relative to `input`) as a strip texture, see docs/features/lut.md#build.
-    Lut { source: String },
+    /// A color LUT (relative to `input`) as a strip texture, or a 3D one when `volume`; see
+    /// docs/features/lut.md#build.
+    Lut { source: String, volume: bool },
     Material {
         /// `<name>.mat.toml`, or `<name>.*` without one.
         source: String,
@@ -78,7 +79,7 @@ impl Asset {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", "),
-            Job::Material { source, .. } | Job::Lut { source } => source.clone(),
+            Job::Material { source, .. } | Job::Lut { source, .. } => source.clone(),
         }
     }
 }
@@ -156,7 +157,10 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
                 kind: Kind::Texture,
                 output: Kind::Texture.output_path(&asset_path),
                 asset_path,
-                job: Job::Lut { source: rel },
+                job: Job::Lut {
+                    volume: settings.volume_lut(&rel),
+                    source: rel,
+                },
             });
         } else {
             plan.skipped += 1;

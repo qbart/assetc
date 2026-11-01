@@ -39,6 +39,8 @@ pub struct Textures {
     pub linear: Vec<String>,
     /// Globs of textures written without mipmaps.
     pub no_mipmaps: Vec<String>,
+    /// Globs of color LUTs compiled as 3D textures instead of 2D strips.
+    pub volume_luts: Vec<String>,
 }
 
 impl Default for Config {

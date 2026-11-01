@@ -26,6 +26,7 @@ impl fmt::Display for ColorSpace {
 pub struct Settings {
     linear: GlobSet,
     no_mipmaps: GlobSet,
+    volume_luts: GlobSet,
 }
 
 impl Settings {
@@ -33,6 +34,7 @@ impl Settings {
         Ok(Self {
             linear: glob_set(&textures.linear)?,
             no_mipmaps: glob_set(&textures.no_mipmaps)?,
+            volume_luts: glob_set(&textures.volume_luts)?,
         })
     }
 
@@ -47,6 +49,11 @@ impl Settings {
 
     pub fn mipmaps(&self, source: &str) -> bool {
         !self.no_mipmaps.is_match(source)
+    }
+
+    /// Whether a color LUT compiles as a 3D texture rather than a strip.
+    pub fn volume_lut(&self, source: &str) -> bool {
+        self.volume_luts.is_match(source)
     }
 }
 
@@ -149,6 +156,7 @@ mod tests {
         Settings::new(&config::Textures {
             linear: linear.iter().map(|s| s.to_string()).collect(),
             no_mipmaps: no_mipmaps.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
         })
         .unwrap()
     }
@@ -202,6 +210,7 @@ mod tests {
         let textures = config::Textures {
             linear: vec!["[".into()],
             no_mipmaps: vec![],
+            ..Default::default()
         };
         assert!(Settings::new(&textures).is_err());
     }

@@ -136,7 +136,8 @@ impl Lut {
         let n = self.size;
         if n > MAX_STRIP_SIZE {
             return Err(format!(
-                "LUT_3D_SIZE {n} is too large to compile (at most {MAX_STRIP_SIZE})"
+                "LUT_3D_SIZE {n} is too large to compile as a strip (at most {MAX_STRIP_SIZE}; \
+                 volume_luts allows up to 256)"
             ));
         }
         let mut pixels = Vec::with_capacity(n * n * n * 4);
@@ -154,6 +155,18 @@ impl Lut {
             height: n as u32,
             pixels,
         })
+    }
+
+    /// RGBA8 texels of the `size³` 3D texture, in table order (red fastest, then green, then
+    /// blue), as KTX2 stores a 3D level; see docs/spec/ktx2.md#volume.
+    pub fn volume(&self) -> Vec<u8> {
+        self.table
+            .iter()
+            .flat_map(|entry| {
+                let [r, g, b] = entry.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+                [r, g, b, 255]
+            })
+            .collect()
     }
 }
 
@@ -196,6 +209,11 @@ mod tests {
         assert_eq!(pixel(0, 2), [0, 255, 0, 255]);
         assert_eq!(pixel(6, 0), [0, 0, 255, 255]);
         assert_eq!(pixel(4, 1), [128, 128, 128, 255]);
+
+        // The volume holds the same texels in table order.
+        let volume = lut.volume();
+        assert_eq!(volume.len(), 27 * 4);
+        assert_eq!(volume[4..8], [128, 0, 0, 255]);
 
         let mut big = lut.clone();
         big.size = 129;
