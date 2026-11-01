@@ -5,6 +5,7 @@ use egui::{
     Stroke, StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
@@ -47,6 +48,8 @@ struct UiState {
     reinspect: bool,
     inspected: Option<Inspected>,
     view: View,
+    /// Images shown tiled 3 × 3 in the canvas, by path.
+    tiled: HashSet<PathBuf>,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -73,6 +76,8 @@ impl Default for View {
 const MIN_ZOOM: f32 = 1.0 / 32.0;
 const MAX_ZOOM: f32 = 64.0;
 const FIT_MARGIN: f32 = 24.0;
+/// Wheel zoom: factor = exp(scroll points × this), about ×1.2 per notch.
+const WHEEL_ZOOM: f32 = 0.0045;
 
 #[derive(Clone, PartialEq, Eq)]
 struct Selection {
@@ -81,6 +86,7 @@ struct Selection {
 }
 
 struct Inspected {
+    path: PathBuf,
     inspection: Inspection,
     preview: Option<egui::TextureHandle>,
 }
@@ -105,6 +111,7 @@ impl Default for UiState {
             reinspect: false,
             inspected: None,
             view: View::default(),
+            tiled: HashSet::new(),
         }
     }
 }
@@ -242,7 +249,12 @@ fn shell(
         .frame(Frame::new().fill(BG_CENTER))
         .show(&mut root, |ui| {
             let state = &mut *state;
-            canvas(ui, state.inspected.as_ref(), &mut state.view);
+            canvas(
+                ui,
+                state.inspected.as_ref(),
+                &mut state.view,
+                &mut state.tiled,
+            );
         });
 
     if std::mem::take(&mut state.start_build) {
@@ -281,6 +293,7 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
         ctx.load_texture("canvas_preview", image, options)
     });
     Inspected {
+        path: selection.path.clone(),
         inspection,
         preview,
     }
@@ -761,7 +774,12 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
 }
 
 /// Center pane: the selected file's image with zoom and pan, see docs/features/canvas.md.
-fn canvas(ui: &mut Ui, inspected: Option<&Inspected>, view: &mut View) {
+fn canvas(
+    ui: &mut Ui,
+    inspected: Option<&Inspected>,
+    view: &mut View,
+    tiled: &mut HashSet<PathBuf>,
+) {
     let rect = ui.max_rect();
     let message = |ui: &mut Ui, text: &str| {
         ui.painter().text(
@@ -784,7 +802,13 @@ fn canvas(ui: &mut Ui, inspected: Option<&Inspected>, view: &mut View) {
     };
 
     let ppp = ui.ctx().pixels_per_point();
-    let texels = texture.size_vec2();
+    let tiles = if tiled.contains(&inspected.path) {
+        3.0
+    } else {
+        1.0
+    };
+    // Texels of everything shown: the image, or the 3 × 3 block.
+    let texels = texture.size_vec2() * tiles;
     let fit = |view: &mut View| {
         let room = (rect.size() - Vec2::splat(2.0 * FIT_MARGIN)).max(Vec2::splat(1.0));
         *view = View {
@@ -800,19 +824,19 @@ fn canvas(ui: &mut Ui, inspected: Option<&Inspected>, view: &mut View) {
     let response = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
     if response.double_clicked() {
         fit(view);
-    } else if response.dragged_by(PointerButton::Primary)
-        || response.dragged_by(PointerButton::Middle)
-    {
+    } else if response.dragged_by(PointerButton::Secondary) {
         view.pan += response.drag_delta();
         view.fit = false;
     }
     if response.hovered() {
-        let (scroll, zoom, pointer) =
-            ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
-        if scroll != Vec2::ZERO {
-            view.pan += scroll;
-            view.fit = false;
-        }
+        let (scroll, pinch, pointer) = ui.input(|i| {
+            (
+                i.smooth_scroll_delta.y,
+                i.zoom_delta(),
+                i.pointer.hover_pos(),
+            )
+        });
+        let zoom = pinch * (scroll * WHEEL_ZOOM).exp();
         if zoom != 1.0
             && let Some(pointer) = pointer
         {
@@ -825,20 +849,88 @@ fn canvas(ui: &mut Ui, inspected: Option<&Inspected>, view: &mut View) {
     let limit = (rect.size() + size) / 2.0 - size.min(Vec2::splat(32.0));
     view.pan = view.pan.clamp(-limit, limit);
 
-    let image = Rect::from_center_size(rect.center() + view.pan, size);
+    let shown = Rect::from_center_size(rect.center() + view.pan, size);
     let painter = ui.painter_at(rect);
-    checkerboard(&painter, image);
-    painter.image(
-        texture.id(),
-        image,
-        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-        egui::Color32::WHITE,
-    );
+    checkerboard(&painter, shown);
+    // Tiles share edge coordinates so neighbours touch exactly.
+    let n = tiles as usize;
+    let edge = |axis: usize, i: usize| shown.min[axis] + shown.size()[axis] * i as f32 / tiles;
+    for y in 0..n {
+        for x in 0..n {
+            let tile = Rect::from_min_max(
+                pos2(edge(0, x), edge(1, y)),
+                pos2(edge(0, x + 1), edge(1, y + 1)),
+            );
+            painter.image(
+                texture.id(),
+                tile,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+    }
 
-    // Drawn last so it sits on top; its clicks apply next frame.
+    // Drawn last so they sit on top; their clicks apply next frame.
+    let is_tiled = tiles > 1.0;
+    if toolbar(ui, rect, &[(Icon::Grid3x3, "Tile", is_tiled)]) == Some(0) {
+        if is_tiled {
+            tiled.remove(&inspected.path);
+        } else {
+            tiled.insert(inspected.path.clone());
+        }
+        ui.ctx().request_repaint();
+    }
     if zoom_bar(ui, rect, view, fit) {
         ui.ctx().request_repaint();
     }
+}
+
+/// Toggle buttons `(icon, name, on)` in the canvas' top-right corner; returns the clicked index.
+fn toolbar(ui: &mut Ui, canvas: Rect, buttons: &[(Icon, &str, bool)]) -> Option<usize> {
+    const BUTTON: Vec2 = vec2(36.0, 32.0);
+    const RADIUS: u8 = 6;
+    let width = BUTTON.x * buttons.len() as f32;
+    let bar = Rect::from_min_size(
+        pos2(canvas.right() - width - 8.0, canvas.top() + 8.0),
+        vec2(width, BUTTON.y),
+    );
+    let painter = ui.painter_at(canvas);
+    painter.rect_filled(bar, RADIUS, BG_BAR);
+
+    let mut clicked = None;
+    let last = buttons.len() - 1;
+    for (i, &(icon, name, on)) in buttons.iter().enumerate() {
+        let rect = Rect::from_min_size(bar.min + vec2(BUTTON.x * i as f32, 0.0), BUTTON);
+        let response = ui
+            .interact(rect, ui.id().with(("toolbar", i)), Sense::click_and_drag())
+            .on_hover_text(name);
+        // Round only the corners on the group's outer edge.
+        let outer = |edge: bool| if edge { RADIUS } else { 0 };
+        let radius = egui::CornerRadius {
+            nw: outer(i == 0),
+            sw: outer(i == 0),
+            ne: outer(i == last),
+            se: outer(i == last),
+        };
+        let tint = if on {
+            painter.rect_filled(rect, radius, ACCENT);
+            BG_BAR
+        } else if response.hovered() {
+            painter.rect_filled(rect, radius, BG_HEADER);
+            TEXT
+        } else {
+            TEXT_WEAK
+        };
+        if i > 0 {
+            painter.vline(rect.left(), rect.y_range(), Stroke::new(1.0, STROKE));
+        }
+        icon.image(18.0, tint)
+            .paint_at(ui, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
+        if response.clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 /// Multiplies the zoom by `factor`, keeping the image point at `anchor`
