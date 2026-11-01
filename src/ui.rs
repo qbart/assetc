@@ -1030,13 +1030,8 @@ fn text_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {
 }
 
 /// Vertical icon tab attached to the pane on its right.
-fn icon_tab(ui: &mut Ui, icon: Icon, selected: bool, enabled: bool) -> Response {
-    let sense = if enabled {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(vec2(36.0, 36.0), sense);
+fn icon_tab(ui: &mut Ui, icon: Icon, selected: bool) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
     if selected {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, BG_PANEL);
@@ -1046,12 +1041,7 @@ fn icon_tab(ui: &mut Ui, icon: Icon, selected: bool, enabled: bool) -> Response 
             ACCENT,
         );
     }
-    let color = if enabled {
-        tab_color(selected, response.hovered())
-    } else {
-        TEXT_WEAK.gamma_multiply(0.5)
-    };
-    icon.image(18.0, color)
+    icon.image(18.0, tab_color(selected, response.hovered()))
         .paint_at(ui, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
     response
 }
@@ -1098,9 +1088,6 @@ fn select(state: &mut UiState, location: Location, path: PathBuf) {
         state.selection = selection;
         state.reinspect = true;
         state.view = View::default();
-        if !state.inspector_tab.enabled(state.selection.as_ref()) {
-            state.inspector_tab = InspectorTab::Info;
-        }
     }
 }
 
@@ -1473,6 +1460,10 @@ fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
 
 fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
     section_header(ui, "Inspector");
+    // Only applicable tabs are shown; fall back to Info when the active one stops applying.
+    if !state.inspector_tab.enabled(state.selection.as_ref()) {
+        state.inspector_tab = InspectorTab::Info;
+    }
 
     egui::Panel::left("inspector_tabs")
         .exact_size(36.0)
@@ -1485,8 +1476,10 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                 .vline(rect.right() - 0.5, rect.y_range(), Stroke::new(1.0, STROKE));
             ui.spacing_mut().item_spacing.y = 0.0;
             for tab in InspectorTab::ALL {
-                let enabled = tab.enabled(state.selection.as_ref());
-                let response = icon_tab(ui, tab.icon(), state.inspector_tab == tab, enabled);
+                if !tab.enabled(state.selection.as_ref()) {
+                    continue;
+                }
+                let response = icon_tab(ui, tab.icon(), state.inspector_tab == tab);
                 if response.on_hover_text(tab.name()).clicked() {
                     state.inspector_tab = tab;
                 }
