@@ -33,6 +33,8 @@ View  [ 2D | 3D ]
     too;
   - a compiled mesh offers **3D** and **Chunks** instead, see
     [`models.md`](models.md#compiled-mesh-preview);
+  - a compiled font offers **Atlas** and **Chunks**, see
+    [`fonts.md`](fonts.md#compiled-fonts);
   - with anything else (or nothing) selected, both buttons are disabled
     (`TEXT_WEAK` at 50%, no hover or clicks) and neither is active.
 

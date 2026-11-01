@@ -57,6 +57,7 @@ back.
 |     1 | material | [`amat.md`](amat.md)         |
 |     2 | mesh     | [`amesh.md`](amesh.md)       |
 |     3 | animation | [`aanim.md`](aanim.md)      |
+|     4 | font     | [`afont.md`](afont.md)       |
 
 Other values are reserved. Readers should skip entries with unknown kinds.
 

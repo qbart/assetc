@@ -70,6 +70,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `*.amat`                   | Compiled material  |
 | Output | `*.amesh`                  | Compiled mesh, see [`models.md`](models.md#inspector) |
 | Output | `*.aanim`                  | Compiled animation, see [`models.md`](models.md#inspector) |
+| Output | `*.afont`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
 | Output | `assets.manifest` at the output root | Manifest |
 | Output | anything else              | File               |
 | either | folder named `*.env` (any case) | Environment map |
@@ -154,7 +155,7 @@ switches which level the [canvas](canvas.md) shows.
 Lists the assets a file contains, as recorded in `<output>/assets.manifest`
 (see [`docs/spec/manifest.md`](../spec/manifest.md)).
 
-- Enabled only for compiled files (`.ktx2`, `.amat`, `.amesh` or `.aanim` selected in the Output
+- Enabled only for compiled files (`.ktx2`, `.amat`, `.amesh`, `.aanim` or `.afont` selected in the Output
   tree) for now. Each holds exactly one asset; later container formats
   (e.g. meshes with embedded materials) will list several.
 - The manifest is read when the app opens and on every rescan (rescan button,

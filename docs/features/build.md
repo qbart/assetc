@@ -38,6 +38,7 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
 | `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat`, see [`materials.md`](materials.md) |
 | `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh` and more, see [`models.md`](models.md#build) |
+| `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
 | anything else      | —          | ignored, counted as skipped                   |
 
 Texture sources that belong to a material are compiled as that material
@@ -57,6 +58,7 @@ JPEGs are supported). Color space and mipmaps follow the `[textures]` settings, 
   <dir>/<name>.amat          one per material
   <model>.amesh              one per glTF model, with <model>/… for its materials and textures
   <model>.aanim              one per skinned, animated glTF model
+  <font>.afont               one per font, beside its atlas <font>.ktx2
 ```
 
 - Output directories are created as needed; existing files are overwritten.
@@ -79,6 +81,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | material   | `*.amat`       |
   | mesh       | `*.amesh`      |
   | animation  | `*.aanim`      |
+  | font       | `*.afont`      |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assets.manifest` is rewritten, never removed. Entries starting with `.` and the contents of symlinked directories

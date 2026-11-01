@@ -101,7 +101,7 @@ The icon follows the entry's type, by extension (any case):
 | environment map folder (`*.env`)              | `sun-medium`              |
 | other folder                                  | `folder` / `folder-open`  |
 | image: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `tga`, `webp`, `tif`, `tiff`, `exr`, `hdr`, `dds`, `ktx2` | `image` |
-| font: `ttf`, `otf`, `woff`, `woff2`           | `type`                    |
+| font: `ttf`, `otf`, `woff`, `woff2`, `afont`  | `type`                    |
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `noise`                      | `image-play`              |
 | gradient: `gradient`                          | `swatch-book`             |
