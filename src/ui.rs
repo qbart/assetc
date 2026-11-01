@@ -1449,11 +1449,10 @@ fn tree(ui: &mut Ui, nodes: &[Node], depth: usize, cx: &mut TreeCx) {
         let is_dir = node.children.is_some();
         let open = cx.open.contains(&node.path);
         let sidecar = if is_dir { None } else { sidecar_of(node) };
-        let chevron = match (is_dir, open, sidecar.is_some()) {
-            (true, true, _) => Some(Icon::ChevronDown),
-            (true, false, _) => Some(Icon::ChevronRight),
-            (false, _, true) => Some(Icon::Link),
-            (false, _, false) => None,
+        let chevron = match (is_dir, open) {
+            (true, true) => Some(Icon::ChevronDown),
+            (true, false) => Some(Icon::ChevronRight),
+            (false, _) => None,
         };
         tree_entry(ui, node, depth, chevron, cx);
         if let Some(sidecar) = sidecar {
