@@ -32,10 +32,12 @@ pub enum Icon {
     ImagePlay,
     Images,
     Info,
+    Link,
     Loader,
     Palette,
     Plus,
     RefreshCw,
+    Settings2,
     SlidersVertical,
     SquaresUnite,
     SunMedium,
@@ -47,7 +49,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 39] = [
+const SVGS: [(&str, &str); 41] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -99,10 +101,12 @@ const SVGS: [(&str, &str); 39] = [
     ("image-play", include_str!("../assets/icons/image-play.svg")),
     ("images", include_str!("../assets/icons/images.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
+    ("link", include_str!("../assets/icons/link.svg")),
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
+    ("settings-2", include_str!("../assets/icons/settings-2.svg")),
     (
         "sliders-vertical",
         include_str!("../assets/icons/sliders-vertical.svg"),

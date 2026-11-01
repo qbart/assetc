@@ -1421,6 +1421,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "cube" => Icon::Aperture,
         "noise" => Icon::ImagePlay,
         "gradient" => Icon::SwatchBook,
+        "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
         _ => Icon::File,
@@ -1428,56 +1429,88 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
 }
 
 fn tree(ui: &mut Ui, nodes: &[Node], depth: usize, cx: &mut TreeCx) {
+    // A file's `.amod` sidecar sits right below it; see docs/features/gui.md#file-browser.
+    let sidecar_of = |file: &Node| {
+        nodes.iter().find(|n| {
+            n.children.is_none() && n.name.strip_suffix(".amod") == Some(file.name.as_str())
+        })
+    };
+    let nested = |node: &Node| {
+        node.children.is_none()
+            && node
+                .name
+                .strip_suffix(".amod")
+                .is_some_and(|main| nodes.iter().any(|n| n.children.is_none() && n.name == main))
+    };
     for node in nodes {
+        if nested(node) {
+            continue;
+        }
         let is_dir = node.children.is_some();
         let open = cx.open.contains(&node.path);
-        let chevron = match (is_dir, open) {
-            (true, true) => Some(Icon::ChevronDown),
-            (true, false) => Some(Icon::ChevronRight),
-            (false, _) => None,
+        let sidecar = if is_dir { None } else { sidecar_of(node) };
+        let chevron = match (is_dir, open, sidecar.is_some()) {
+            (true, true, _) => Some(Icon::ChevronDown),
+            (true, false, _) => Some(Icon::ChevronRight),
+            (false, _, true) => Some(Icon::Link),
+            (false, _, false) => None,
         };
-        let icon = tree_icon(&node.path, is_dir, open);
-        let selected = cx
-            .selection
-            .is_some_and(|s| s.location == cx.location && s.path == node.path);
-        let renaming = cx.rename.as_mut().filter(|r| r.path == node.path);
-        let (response, done) = tree_row(ui, depth, chevron, icon, &node.name, selected, renaming);
-        if done.is_some() {
-            cx.rename_done = done;
-        }
-        if response.clicked() {
-            if is_dir && !cx.open.remove(&node.path) {
-                cx.open.insert(node.path.clone());
-            }
-            cx.action = Some(TreeAction::Select(node.path.clone()));
-        }
-        if cx.editable {
-            if response.secondary_clicked() {
-                cx.action = Some(TreeAction::Select(node.path.clone()));
-            }
-            response.context_menu(|ui| {
-                let dir = if is_dir {
-                    node.path.clone()
-                } else {
-                    node.path.parent().unwrap_or(&node.path).to_path_buf()
-                };
-                create_items(ui, &dir, &mut cx.action);
-                ui.separator();
-                if menu_item(ui, "Rename", None).clicked() {
-                    cx.action = Some(TreeAction::Op(FileOp::Rename(node.path.clone())));
-                    ui.close();
-                }
-                if menu_item(ui, "Delete", None).clicked() {
-                    cx.action = Some(TreeAction::Op(FileOp::Delete(node.path.clone())));
-                    ui.close();
-                }
-            });
+        tree_entry(ui, node, depth, chevron, cx);
+        if let Some(sidecar) = sidecar {
+            tree_entry(ui, sidecar, depth + 1, None, cx);
         }
         if let Some(children) = &node.children
             && open
         {
             tree(ui, children, depth + 1, cx);
         }
+    }
+}
+
+/// One row of the tree with its clicks and context menu.
+fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx: &mut TreeCx) {
+    let is_dir = node.children.is_some();
+    let open = cx.open.contains(&node.path);
+    let icon = tree_icon(&node.path, is_dir, open);
+    // Sidecars are dimmed.
+    let dim = !is_dir && amod::is_sidecar(&node.path);
+    let selected = cx
+        .selection
+        .is_some_and(|s| s.location == cx.location && s.path == node.path);
+    let renaming = cx.rename.as_mut().filter(|r| r.path == node.path);
+    let (response, done) = tree_row(
+        ui, depth, chevron, icon, &node.name, selected, dim, renaming,
+    );
+    if done.is_some() {
+        cx.rename_done = done;
+    }
+    if response.clicked() {
+        if is_dir && !cx.open.remove(&node.path) {
+            cx.open.insert(node.path.clone());
+        }
+        cx.action = Some(TreeAction::Select(node.path.clone()));
+    }
+    if cx.editable {
+        if response.secondary_clicked() {
+            cx.action = Some(TreeAction::Select(node.path.clone()));
+        }
+        response.context_menu(|ui| {
+            let dir = if is_dir {
+                node.path.clone()
+            } else {
+                node.path.parent().unwrap_or(&node.path).to_path_buf()
+            };
+            create_items(ui, &dir, &mut cx.action);
+            ui.separator();
+            if menu_item(ui, "Rename", None).clicked() {
+                cx.action = Some(TreeAction::Op(FileOp::Rename(node.path.clone())));
+                ui.close();
+            }
+            if menu_item(ui, "Delete", None).clicked() {
+                cx.action = Some(TreeAction::Op(FileOp::Delete(node.path.clone())));
+                ui.close();
+            }
+        });
     }
 }
 
@@ -1490,8 +1523,10 @@ fn tree_row(
     icon: Icon,
     name: &str,
     selected: bool,
+    dim: bool,
     renaming: Option<&mut Rename>,
 ) -> (Response, Option<bool>) {
+    let text = if dim { TEXT_WEAK } else { TEXT };
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
     if selected {
         ui.painter()
@@ -1516,7 +1551,7 @@ fn tree_row(
             Align2::LEFT_CENTER,
             name,
             FontId::proportional(13.0),
-            TEXT,
+            text,
         );
         return (response, None);
     };

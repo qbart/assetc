@@ -42,6 +42,11 @@ pub fn path_for(file: &Path) -> PathBuf {
     file.with_file_name(name)
 }
 
+/// Whether `path` is a sidecar (`*.amod`).
+pub fn is_sidecar(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "amod")
+}
+
 /// The sidecar of `file`, if it has one; errors name the sidecar.
 pub fn read(file: &Path) -> Result<Option<Amod>, String> {
     let path = path_for(file);
