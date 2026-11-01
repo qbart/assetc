@@ -1,4 +1,4 @@
-//! The Assets panel's list, read from the manifest, see docs/features/assets.md.
+//! Built assets, read from the manifest, see docs/features/inspector.md#assets-tab.
 
 use std::fs;
 use std::io;
@@ -6,10 +6,8 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::Resource;
 
-use crate::build::{relative, strip_extension};
+use crate::build::strip_extension;
 use crate::config::Project;
-use crate::hash::fnv1a64;
-use crate::inspect::Location;
 use crate::manifest::{self, Kind};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -59,23 +57,11 @@ impl Assets {
         Self::Loaded(assets)
     }
 
-    /// Index of the asset linked to a selected file, if any.
-    pub fn linked(&self, project: &Project, location: Location, file: &Path) -> Option<usize> {
-        let Self::Loaded(assets) = self else {
-            return None;
-        };
-        match location {
-            Location::Output => assets.iter().position(|a| a.file == file),
-            Location::Input => {
-                let is_png = file
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
-                let rel = relative(&project.input_dir()?, file).ok()?;
-                let id = fnv1a64(strip_extension(&rel).as_bytes());
-                is_png
-                    .then(|| assets.iter().position(|a| a.id == id))
-                    .flatten()
-            }
+    /// Assets stored in `file` (an absolute path in the output directory), by asset path.
+    pub fn in_file(&self, file: &Path) -> Vec<&Asset> {
+        match self {
+            Self::Loaded(assets) => assets.iter().filter(|a| a.file == file).collect(),
+            _ => Vec::new(),
         }
     }
 }
@@ -83,6 +69,7 @@ impl Assets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hash::fnv1a64;
     use crate::{build, config};
 
     fn project(dir: &Path) -> Project {
@@ -140,18 +127,20 @@ mod tests {
     }
 
     #[test]
-    fn links_compiled_files_and_sources() {
+    fn assets_in_file() {
         let dir = tempfile::tempdir().unwrap();
         let project = built(dir.path());
         let assets = Assets::load(&project);
-        let root = dir.path();
-        let link = |location, path: &str| assets.linked(&project, location, &root.join(path));
-
-        assert_eq!(link(Location::Output, "build/textures/b.ktx2"), Some(2));
-        assert_eq!(link(Location::Input, "assets/textures/b.png"), Some(2));
-        assert_eq!(link(Location::Input, "assets/A.png"), Some(0));
-        assert_eq!(link(Location::Output, "build/assets.manifest"), None);
-        assert_eq!(link(Location::Input, "assets/textures/b.txt"), None);
-        assert_eq!(link(Location::Input, "assets/missing.png"), None);
+        let in_file = |path: &str| -> Vec<String> {
+            assets
+                .in_file(&dir.path().join(path))
+                .iter()
+                .map(|a| a.asset_path.clone())
+                .collect()
+        };
+        assert_eq!(in_file("build/textures/b.ktx2"), ["textures/b"]);
+        assert!(in_file("build/assets.manifest").is_empty());
+        assert!(in_file("assets/textures/b.png").is_empty());
+        assert!(Assets::NotBuilt.in_file(Path::new("x.ktx2")).is_empty());
     }
 }

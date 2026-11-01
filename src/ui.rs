@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use egui::{
-    Align, Align2, FontId, Frame, Layout, Margin, Rect, Response, RichText, Sense, Stroke, Ui,
-    UiBuilder, vec2,
+    Align, Align2, FontId, Frame, Layout, Margin, PointerButton, Rect, Response, RichText, Sense,
+    Stroke, StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 
 use std::path::PathBuf;
@@ -46,7 +46,33 @@ struct UiState {
     /// Set when the selection changed or the trees were rescanned.
     reinspect: bool,
     inspected: Option<Inspected>,
+    view: View,
 }
+
+/// Canvas zoom and pan, see docs/features/canvas.md#view.
+#[derive(Clone, Copy)]
+struct View {
+    /// Screen pixels per image pixel.
+    zoom: f32,
+    /// Image center relative to the canvas center, in points.
+    pan: Vec2,
+    /// Still the automatic fit: refit when the canvas or image changes.
+    fit: bool,
+}
+
+impl Default for View {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+            fit: true,
+        }
+    }
+}
+
+const MIN_ZOOM: f32 = 1.0 / 32.0;
+const MAX_ZOOM: f32 = 64.0;
+const FIT_MARGIN: f32 = 24.0;
 
 #[derive(Clone, PartialEq, Eq)]
 struct Selection {
@@ -78,6 +104,7 @@ impl Default for UiState {
             selection: None,
             reinspect: false,
             inspected: None,
+            view: View::default(),
         }
     }
 }
@@ -109,15 +136,17 @@ impl BrowserTab {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InspectorTab {
     Info,
+    Assets,
     Settings,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 2] = [Self::Info, Self::Settings];
+    const ALL: [Self; 3] = [Self::Info, Self::Assets, Self::Settings];
 
     fn icon(self) -> Icon {
         match self {
             Self::Info => Icon::Info,
+            Self::Assets => Icon::Files,
             Self::Settings => Icon::Settings,
         }
     }
@@ -125,7 +154,21 @@ impl InspectorTab {
     fn name(self) -> &'static str {
         match self {
             Self::Info => "Info",
+            Self::Assets => "Assets",
             Self::Settings => "Settings",
+        }
+    }
+
+    fn enabled(self, selection: Option<&Selection>) -> bool {
+        match self {
+            Self::Info | Self::Settings => true,
+            // Only compiled textures are asset containers for now.
+            Self::Assets => selection.is_some_and(|s| {
+                s.location == Location::Output
+                    && s.path
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case(Kind::Texture.extension()))
+            }),
         }
     }
 }
@@ -190,10 +233,15 @@ fn shell(
             .default_size(320.0)
             .min_size(220.0)
             .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, |ui| {
-                right_sidebar(ui, &mut state, &project, &assets)
-            });
+            .show(&mut root, |ui| right_sidebar(ui, &mut state, &assets));
     }
+
+    egui::CentralPanel::default()
+        .frame(Frame::new().fill(BG_CENTER))
+        .show(&mut root, |ui| {
+            let state = &mut *state;
+            canvas(ui, state.inspected.as_ref(), &mut state.view);
+        });
 
     if std::mem::take(&mut state.start_build) {
         start_build(&mut state, &project);
@@ -218,7 +266,9 @@ fn shell(
 
 fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selection) -> Inspected {
     let mut inspection = inspect::inspect(project, selection.location, &selection.path);
+    let max_side = ctx.input(|i| i.max_texture_side) as u32;
     let preview = inspection.preview.take().map(|image| {
+        let image = inspect::fit_within(image, max_side);
         let size = [image.width as usize, image.height as usize];
         let image = egui::ColorImage::from_rgba_unmultiplied(size, &image.pixels);
         let options = egui::TextureOptions {
@@ -226,7 +276,7 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
             minification: egui::TextureFilter::Linear,
             ..Default::default()
         };
-        ctx.load_texture("inspector_preview", image, options)
+        ctx.load_texture("canvas_preview", image, options)
     });
     Inspected {
         inspection,
@@ -280,11 +330,23 @@ fn menu_bar(
     state: &mut UiState,
     exit: &mut MessageWriter<AppExit>,
 ) {
-    // Padded buttons with no gaps so the whole item, not just its text, is clickable.
+    // Square, gap-free items as tall as the bar, so the highlight covers the whole item.
     let style = |style: &mut egui::Style| {
         egui::containers::menu::menu_style(style);
-        style.spacing.button_padding = vec2(10.0, 6.0);
+        style.spacing.button_padding = vec2(12.0, 7.0);
         style.spacing.item_spacing.x = 0.0;
+        style
+            .text_styles
+            .insert(egui::TextStyle::Button, FontId::proportional(14.0));
+        for widget in [
+            &mut style.visuals.widgets.inactive,
+            &mut style.visuals.widgets.hovered,
+            &mut style.visuals.widgets.active,
+            &mut style.visuals.widgets.open,
+        ] {
+            widget.corner_radius = 0.into();
+            widget.expansion = 0.0;
+        }
     };
     egui::MenuBar::new().style(style).ui(ui, |ui| {
         // Same height as the menu buttons so the logo is centered with their text.
@@ -296,7 +358,7 @@ fn menu_bar(
             .paint_at(ui, Rect::from_center_size(rect.center(), size));
         ui.add_space(4.0);
         ui.menu_button("File", |ui| {
-            if ui.button("Quit").clicked() {
+            if menu_item(ui, "Quit", None).clicked() {
                 exit.write(AppExit::Success);
             }
         });
@@ -304,13 +366,56 @@ fn menu_bar(
             ui.menu_button("Edit", |_| {});
         });
         ui.menu_button("View", |ui| {
-            ui.checkbox(&mut state.show_left_sidebar, "Left Sidebar");
-            ui.checkbox(&mut state.show_right_sidebar, "Right Sidebar");
+            let left = &mut state.show_left_sidebar;
+            if menu_item(ui, "Left Sidebar", Some(*left)).clicked() {
+                *left = !*left;
+            }
+            let right = &mut state.show_right_sidebar;
+            if menu_item(ui, "Right Sidebar", Some(*right)).clicked() {
+                *right = !*right;
+            }
         });
         ui.menu_button("Help", |ui| {
-            ui.label(format!("assetc {}", env!("CARGO_PKG_VERSION")));
+            menu_row(
+                ui,
+                &format!("assetc {}", env!("CARGO_PKG_VERSION")),
+                None,
+                false,
+            );
         });
     });
+}
+
+/// Full-width dropdown row; `check` is `Some` for toggles.
+fn menu_item(ui: &mut Ui, label: &str, check: Option<bool>) -> Response {
+    menu_row(ui, label, check, true)
+}
+
+fn menu_row(ui: &mut Ui, label: &str, check: Option<bool>, interactive: bool) -> Response {
+    let sense = if interactive {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let width = ui.available_width().max(180.0);
+    let (rect, response) = ui.allocate_exact_size(vec2(width, 28.0), sense);
+    if interactive && response.hovered() {
+        ui.painter().rect_filled(rect, 0.0, BG_HEADER);
+    }
+    if check == Some(true) {
+        let at = pos2(rect.left() + 12.0, rect.center().y);
+        Icon::Check
+            .image(14.0, TEXT)
+            .paint_at(ui, Rect::from_center_size(at, vec2(14.0, 14.0)));
+    }
+    ui.painter().text(
+        pos2(rect.left() + 24.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(14.0),
+        if interactive { TEXT } else { TEXT_WEAK },
+    );
+    response
 }
 
 fn status_bar(ui: &mut Ui, project: &Project, build: &BuildStatus) {
@@ -422,8 +527,13 @@ fn text_tab(ui: &mut Ui, label: &str, selected: bool) -> Response {
 }
 
 /// Vertical icon tab attached to the pane on its right.
-fn icon_tab(ui: &mut Ui, icon: Icon, selected: bool) -> Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+fn icon_tab(ui: &mut Ui, icon: Icon, selected: bool, enabled: bool) -> Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(36.0, 36.0), sense);
     if selected {
         let painter = ui.painter();
         painter.rect_filled(rect, 0.0, BG_PANEL);
@@ -433,7 +543,12 @@ fn icon_tab(ui: &mut Ui, icon: Icon, selected: bool) -> Response {
             ACCENT,
         );
     }
-    icon.image(18.0, tab_color(selected, response.hovered()))
+    let color = if enabled {
+        tab_color(selected, response.hovered())
+    } else {
+        TEXT_WEAK.gamma_multiply(0.5)
+    };
+    icon.image(18.0, color)
         .paint_at(ui, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
     response
 }
@@ -460,6 +575,10 @@ fn select(state: &mut UiState, location: Location, path: PathBuf) {
     if state.selection != selection {
         state.selection = selection;
         state.reinspect = true;
+        state.view = View::default();
+        if !state.inspector_tab.enabled(state.selection.as_ref()) {
+            state.inspector_tab = InspectorTab::Info;
+        }
     }
 }
 
@@ -509,26 +628,6 @@ fn tree_row(
     name: &str,
     selected: bool,
 ) -> Response {
-    // Every level reserves room for a chevron left of the icon.
-    list_row(
-        ui,
-        22.0 + depth as f32 * 14.0,
-        chevron,
-        icon,
-        name,
-        selected,
-    )
-}
-
-/// 22 px row with the icon `indent` px from the left edge and an optional chevron before it.
-fn list_row(
-    ui: &mut Ui,
-    indent: f32,
-    chevron: Option<Icon>,
-    icon: Icon,
-    name: &str,
-    selected: bool,
-) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
     if selected {
         ui.painter()
@@ -542,16 +641,17 @@ fn list_row(
         ui.painter().rect_filled(rect, 0.0, BG_HEADER);
     }
     let icon_rect =
-        |x: f32| Rect::from_center_size(egui::pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0));
-    let x = rect.left() + indent;
+        |x: f32| Rect::from_center_size(pos2(x + 8.0, rect.center().y), vec2(16.0, 16.0));
+    let x = rect.left() + 6.0 + depth as f32 * 14.0;
     if let Some(chevron) = chevron {
         chevron
             .image(14.0, TEXT_WEAK)
-            .paint_at(ui, icon_rect(x - 16.0).shrink(1.0));
+            .paint_at(ui, icon_rect(x).shrink(1.0));
     }
-    icon.image(16.0, TEXT_WEAK).paint_at(ui, icon_rect(x));
+    icon.image(16.0, TEXT_WEAK)
+        .paint_at(ui, icon_rect(x + 16.0));
     ui.painter().text(
-        egui::pos2(x + 22.0, rect.center().y),
+        pos2(x + 38.0, rect.center().y),
         Align2::LEFT_CENTER,
         name,
         FontId::proportional(13.0),
@@ -560,18 +660,7 @@ fn list_row(
     response
 }
 
-fn right_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &Assets) {
-    let assets_height = (ui.available_height() * 0.4).round();
-
-    egui::Panel::top("assets")
-        .resizable(false)
-        .exact_size(assets_height)
-        .frame(Frame::new().fill(BG_PANEL))
-        .show(ui, |ui| {
-            section_header(ui, "Assets");
-            asset_list(ui, state, project, assets);
-        });
-
+fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
     section_header(ui, "Inspector");
 
     egui::Panel::left("inspector_tabs")
@@ -585,7 +674,8 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &A
                 .vline(rect.right() - 0.5, rect.y_range(), Stroke::new(1.0, STROKE));
             ui.spacing_mut().item_spacing.y = 0.0;
             for tab in InspectorTab::ALL {
-                let response = icon_tab(ui, tab.icon(), state.inspector_tab == tab);
+                let enabled = tab.enabled(state.selection.as_ref());
+                let response = icon_tab(ui, tab.icon(), state.inspector_tab == tab, enabled);
                 if response.on_hover_text(tab.name()).clicked() {
                     state.inspector_tab = tab;
                 }
@@ -594,15 +684,19 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &A
 
     egui::CentralPanel::default()
         .frame(Frame::new().fill(BG_PANEL))
-        .show(ui, |ui| match (state.inspector_tab, &state.inspected) {
-            (_, None) => placeholder(ui, "Nothing selected"),
-            (InspectorTab::Info, Some(inspected)) => info(ui, inspected),
-            (InspectorTab::Settings, Some(_)) => placeholder(ui, "No settings for this file"),
+        .show(ui, |ui| {
+            match (state.inspector_tab, &state.inspected, &state.selection) {
+                (_, None, _) | (_, _, None) => placeholder(ui, "Nothing selected"),
+                (InspectorTab::Info, Some(inspected), _) => info(ui, &inspected.inspection),
+                (InspectorTab::Assets, _, Some(selection)) => {
+                    assets_tab(ui, assets, &selection.path)
+                }
+                (InspectorTab::Settings, ..) => placeholder(ui, "No settings for this file"),
+            }
         });
 }
 
-fn info(ui: &mut Ui, inspected: &Inspected) {
-    let inspection = &inspected.inspection;
+fn info(ui: &mut Ui, inspection: &Inspection) {
     if inspection.missing {
         placeholder(ui, &format!("{} no longer exists", inspection.name));
         return;
@@ -611,13 +705,6 @@ fn info(ui: &mut Ui, inspected: &Inspected) {
         .auto_shrink(false)
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
-                if let Some(texture) = &inspected.preview {
-                    preview(ui, texture);
-                    ui.add_space(8.0);
-                } else if let Some(note) = inspection.note {
-                    ui.weak(note);
-                    ui.add_space(8.0);
-                }
                 ui.label(RichText::new(&inspection.name).strong());
                 ui.weak(&inspection.path);
                 ui.add_space(6.0);
@@ -635,58 +722,210 @@ fn info(ui: &mut Ui, inspected: &Inspected) {
         });
 }
 
-/// Texture fitted to the available width (max 240 px tall, max 8×) over a checkerboard.
-fn preview(ui: &mut Ui, texture: &egui::TextureHandle) {
-    let size = texture.size_vec2();
-    let scale = (ui.available_width() / size.x).min(240.0 / size.y).min(8.0);
-    let size = size * scale;
-    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), size.y), Sense::hover());
-    let rect = Rect::from_center_size(row.center(), size);
-
-    const CELL: f32 = 8.0;
-    let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_filled(rect, 0.0, CHECKER_DARK);
-    for y in 0..(rect.height() / CELL).ceil() as usize {
-        for x in (y % 2..(rect.width() / CELL).ceil() as usize).step_by(2) {
-            let min = rect.min + vec2(x as f32, y as f32) * CELL;
-            painter.rect_filled(
-                Rect::from_min_size(min, vec2(CELL, CELL)),
-                0.0,
-                CHECKER_LIGHT,
-            );
-        }
-    }
-    egui::Image::new((texture.id(), size)).paint_at(ui, rect);
-}
-
-fn asset_list(ui: &mut Ui, state: &mut UiState, project: &Project, assets: &Assets) {
-    let list = match assets {
-        Assets::NoProject => return placeholder(ui, "No project open"),
-        Assets::NotBuilt => return placeholder(ui, "Not built yet"),
+fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
+    match assets {
+        Assets::NoProject | Assets::NotBuilt => return placeholder(ui, "Not built yet"),
         Assets::Failed(e) => return placeholder(ui, e),
-        Assets::Loaded(list) if list.is_empty() => return placeholder(ui, "No assets"),
-        Assets::Loaded(list) => list,
-    };
-    let linked = state
-        .selection
-        .as_ref()
-        .and_then(|s| assets.linked(project, s.location, &s.path));
+        Assets::Loaded(_) => {}
+    }
+    let list = assets.in_file(file);
+    if list.is_empty() {
+        return placeholder(ui, "Not in the manifest");
+    }
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
-            ui.add_space(4.0);
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for (i, asset) in list.iter().enumerate() {
-                let icon = match asset.kind {
-                    Kind::Texture => Icon::Image,
-                };
-                let response = list_row(ui, 6.0, None, icon, &asset.asset_path, linked == Some(i))
-                    .on_hover_text(format!("{:#018x}", asset.id));
-                if response.clicked() {
-                    select(state, Location::Output, asset.file.clone());
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                for asset in list {
+                    ui.horizontal(|ui| {
+                        let icon = match asset.kind {
+                            Kind::Texture => Icon::Image,
+                        };
+                        ui.add(icon.image(16.0, TEXT_WEAK));
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new(&asset.asset_path).strong());
+                            ui.horizontal(|ui| {
+                                ui.weak(asset.kind.name());
+                                ui.weak(format!("{:#018x}", asset.id));
+                            });
+                        });
+                    });
+                    ui.add_space(6.0);
                 }
-            }
+            });
         });
+}
+
+/// Center pane: the selected file's image with zoom and pan, see docs/features/canvas.md.
+fn canvas(ui: &mut Ui, inspected: Option<&Inspected>, view: &mut View) {
+    let rect = ui.max_rect();
+    let message = |ui: &mut Ui, text: &str| {
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            FontId::proportional(14.0),
+            TEXT_WEAK,
+        );
+    };
+    let Some(inspected) = inspected else {
+        return message(ui, "Select a file to preview");
+    };
+    let inspection = &inspected.inspection;
+    if inspection.missing {
+        return message(ui, &format!("{} no longer exists", inspection.name));
+    }
+    let Some(texture) = &inspected.preview else {
+        return message(ui, inspection.note.unwrap_or("No preview"));
+    };
+
+    let ppp = ui.ctx().pixels_per_point();
+    let texels = texture.size_vec2();
+    let fit = |view: &mut View| {
+        let room = (rect.size() - Vec2::splat(2.0 * FIT_MARGIN)).max(Vec2::splat(1.0));
+        *view = View {
+            zoom: ((room / texels).min_elem() * ppp).clamp(MIN_ZOOM, MAX_ZOOM),
+            pan: Vec2::ZERO,
+            fit: true,
+        };
+    };
+    if view.fit {
+        fit(view);
+    }
+
+    let response = ui.interact(rect, ui.id().with("canvas"), Sense::click_and_drag());
+    if response.double_clicked() {
+        fit(view);
+    } else if response.dragged_by(PointerButton::Primary)
+        || response.dragged_by(PointerButton::Middle)
+    {
+        view.pan += response.drag_delta();
+        view.fit = false;
+    }
+    if response.hovered() {
+        let (scroll, zoom, pointer) =
+            ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
+        if scroll != Vec2::ZERO {
+            view.pan += scroll;
+            view.fit = false;
+        }
+        if zoom != 1.0
+            && let Some(pointer) = pointer
+        {
+            zoom_at(view, pointer - rect.center(), zoom);
+        }
+    }
+
+    let half = rect.size() / 2.0;
+    view.pan = view.pan.clamp(-half, half);
+
+    let image = Rect::from_center_size(rect.center() + view.pan, texels * view.zoom / ppp);
+    let painter = ui.painter_at(rect);
+    checkerboard(&painter, image);
+    painter.image(
+        texture.id(),
+        image,
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+        egui::Color32::WHITE,
+    );
+
+    // Drawn last so it sits on top; its clicks apply next frame.
+    if zoom_bar(ui, rect, view, fit) {
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Multiplies the zoom by `factor`, keeping the image point at `anchor`
+/// (relative to the canvas center) in place.
+fn zoom_at(view: &mut View, anchor: Vec2, factor: f32) {
+    let zoom = (view.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+    let ratio = zoom / view.zoom;
+    view.pan = anchor - (anchor - view.pan) * ratio;
+    view.zoom = zoom;
+    view.fit = false;
+}
+
+/// Checkerboard under the visible part of `image`, cells anchored to the image corner.
+fn checkerboard(painter: &egui::Painter, image: Rect) {
+    const CELL: f32 = 8.0;
+    let visible = image.intersect(painter.clip_rect());
+    if !visible.is_positive() {
+        return;
+    }
+    painter.rect_filled(visible, 0.0, CHECKER_DARK);
+    let first = ((visible.min - image.min) / CELL).floor();
+    let last = ((visible.max - image.min) / CELL).ceil();
+    for y in first.y as i64..last.y as i64 {
+        for x in first.x as i64..last.x as i64 {
+            if (x + y) % 2 == 0 {
+                continue;
+            }
+            let min = image.min + vec2(x as f32, y as f32) * CELL;
+            let cell = Rect::from_min_size(min, Vec2::splat(CELL)).intersect(visible);
+            painter.rect_filled(cell, 0.0, CHECKER_LIGHT);
+        }
+    }
+}
+
+/// `[ − ][ 100% ][ + ][ Fit ]` in the canvas' bottom-right corner.
+/// Returns whether a button changed the view.
+fn zoom_bar(ui: &mut Ui, canvas: Rect, view: &mut View, fit: impl Fn(&mut View)) -> bool {
+    const HEIGHT: f32 = 28.0;
+    let font = FontId::proportional(13.0);
+    let labels = [
+        "−".to_string(),
+        format!("{:.0}%", view.zoom * 100.0),
+        "+".to_string(),
+        "Fit".to_string(),
+    ];
+    let widths = labels.each_ref().map(|label| {
+        ui.painter()
+            .layout_no_wrap(label.clone(), font.clone(), TEXT)
+            .size()
+            .x
+            + 16.0
+    });
+    let total: f32 = widths.iter().sum();
+    let bar = Rect::from_min_size(
+        canvas.right_bottom() - vec2(total + 8.0, HEIGHT + 8.0),
+        vec2(total, HEIGHT),
+    );
+    let painter = ui.painter_at(canvas);
+    painter.rect(
+        bar,
+        0.0,
+        BG_BAR,
+        Stroke::new(1.0, STROKE),
+        StrokeKind::Inside,
+    );
+    let mut changed = false;
+    let mut x = bar.left();
+    for (i, (label, width)) in labels.iter().zip(widths).enumerate() {
+        let rect = Rect::from_min_size(pos2(x, bar.top()), vec2(width, HEIGHT));
+        x += width;
+        // Covers the whole bar so scrolling or dragging on it never reaches the canvas.
+        let response = ui.interact(rect, ui.id().with(("zoom_bar", i)), Sense::click_and_drag());
+        if response.hovered() {
+            painter.rect_filled(rect.shrink(1.0), 0.0, BG_HEADER);
+        }
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            font.clone(),
+            TEXT,
+        );
+        if response.clicked() {
+            match i {
+                0 => zoom_at(view, Vec2::ZERO, std::f32::consts::FRAC_1_SQRT_2),
+                1 => zoom_at(view, Vec2::ZERO, 1.0 / view.zoom),
+                2 => zoom_at(view, Vec2::ZERO, std::f32::consts::SQRT_2),
+                _ => fit(view),
+            }
+            changed = true;
+        }
+    }
+    changed
 }
 
 fn section_header(ui: &mut Ui, title: &str) {

@@ -14,6 +14,23 @@ pub enum Kind {
     Texture = 0,
 }
 
+impl Kind {
+    pub const ALL: [Self; 1] = [Self::Texture];
+
+    /// Extension of the files assets of this kind are written to.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Texture => "ktx2",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Texture => "Texture",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub id: u64,

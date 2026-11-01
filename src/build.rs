@@ -142,7 +142,7 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
         textures.push(Texture {
             id: fnv1a64(asset_path.as_bytes()),
             source: file.to_path_buf(),
-            output_rel: format!("{asset_path}.ktx2"),
+            output_rel: format!("{asset_path}.{}", Kind::Texture.extension()),
             source_rel,
         });
     }
@@ -199,11 +199,11 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
     Ok(outcome)
 }
 
-/// Extensions of files assetc writes; only these are ever deleted.
-const OUTPUT_EXTENSIONS: [&str; 1] = ["ktx2"];
-
 /// Deletes outputs not in `produced` (lowercased `output`-relative paths) and
 /// the directories this leaves empty. Returns the deleted paths.
+///
+/// Only files matching an output pattern (`*.<ext>` of an asset kind, any
+/// case) are candidates, so other files in `output` are never touched.
 fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>, Error> {
     let nodes = tree::scan(output).map_err(|e| Error::Io(output.to_path_buf(), e))?;
     let mut files = Vec::new();
@@ -212,9 +212,9 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
     let mut removed = Vec::new();
     for file in files {
         let is_output = file.extension().is_some_and(|ext| {
-            OUTPUT_EXTENSIONS
+            Kind::ALL
                 .iter()
-                .any(|known| ext.eq_ignore_ascii_case(known))
+                .any(|kind| ext.eq_ignore_ascii_case(kind.extension()))
         });
         let Ok(rel) = relative(output, file) else {
             continue;

@@ -9,9 +9,6 @@ use crate::hash::fnv1a64;
 use crate::texture::{self, ColorSpace, Image, Settings};
 use crate::{ktx2, manifest};
 
-/// Previews are downscaled to fit this square before upload.
-pub const PREVIEW_MAX: u32 = 512;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
     Input,
@@ -162,7 +159,7 @@ fn source_texture(
         },
     ));
 
-    out.preview = Some(fit_preview(image));
+    out.preview = Some(to_image(image));
     Ok(())
 }
 
@@ -179,7 +176,7 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
         Some(level) => {
             let image = image::RgbaImage::from_raw(level.width, level.height, level.pixels)
                 .ok_or("level 0 has the wrong size")?;
-            out.preview = Some(fit_preview(image));
+            out.preview = Some(to_image(image));
         }
         None => out.note = Some("No preview for this format"),
     }
@@ -202,23 +199,32 @@ fn asset_rows(asset_path: &str, out: &mut Inspection) {
     ));
 }
 
-fn fit_preview(image: image::RgbaImage) -> Image {
-    let (w, h) = image.dimensions();
-    let image = if w.max(h) > PREVIEW_MAX {
-        let scale = PREVIEW_MAX as f64 / w.max(h) as f64;
-        let (nw, nh) = (
-            ((w as f64 * scale).round() as u32).max(1),
-            ((h as f64 * scale).round() as u32).max(1),
-        );
-        image::imageops::resize(&image, nw, nh, image::imageops::FilterType::Triangle)
-    } else {
-        image
-    };
+fn to_image(image: image::RgbaImage) -> Image {
     Image {
         width: image.width(),
         height: image.height(),
         pixels: image.into_raw(),
     }
+}
+
+/// Downscales `image` (aspect kept) so neither side exceeds `max_side`, e.g. the GPU limit.
+pub fn fit_within(image: Image, max_side: u32) -> Image {
+    let (w, h) = (image.width, image.height);
+    if w.max(h) <= max_side {
+        return image;
+    }
+    let scale = max_side as f64 / w.max(h) as f64;
+    let (nw, nh) = (
+        ((w as f64 * scale).round() as u32).clamp(1, max_side),
+        ((h as f64 * scale).round() as u32).clamp(1, max_side),
+    );
+    let source = image::RgbaImage::from_raw(w, h, image.pixels).expect("RGBA8 image");
+    to_image(image::imageops::resize(
+        &source,
+        nw,
+        nh,
+        image::imageops::FilterType::Triangle,
+    ))
 }
 
 pub fn format_size(bytes: u64) -> String {
@@ -331,15 +337,24 @@ mod tests {
     }
 
     #[test]
-    fn large_previews_are_downscaled() {
+    fn previews_are_full_resolution() {
         let dir = tempfile::tempdir().unwrap();
         let project = project(dir.path(), Default::default());
         let file = dir.path().join("assets/big.png");
         png(&file, 1024, 256);
         let i = inspect(&project, Location::Input, &file);
-        assert_eq!(row(&i, "Dimensions"), "1024 × 256 px");
         let preview = i.preview.unwrap();
-        assert_eq!((preview.width, preview.height), (512, 128));
+        assert_eq!((preview.width, preview.height), (1024, 256));
+
+        let fitted = fit_within(preview, 512);
+        assert_eq!((fitted.width, fitted.height), (512, 128));
+        assert_eq!(fitted.pixels.len(), 512 * 128 * 4);
+        let small = Image {
+            width: 3,
+            height: 1,
+            pixels: vec![0; 12],
+        };
+        assert_eq!(fit_within(small.clone(), 512), small);
     }
 
     #[test]
