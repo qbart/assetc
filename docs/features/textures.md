@@ -66,6 +66,29 @@ Unless the texture matches `no_mipmaps`, a full mip chain is written, down to
 - Normal maps are averaged like any other linear data; the vectors are not
   renormalized.
 
+## Modifiers
+
+A `.png` / `.jpg` / `.jpeg` in `input` can carry the same modifier stack as
+a [`.noise`](noise.md#modifiers-tab) file, kept in its
+[`.amod`](../spec/amod.md#modifiers) sidecar (`brick.jpg.amod`) and edited
+in the Inspector's Modifiers tab.
+
+- The enabled modifiers run, in order, every time assetc loads the image:
+  the build (as a plain texture, in a material slot, packed into an ORM
+  texture, as an environment-map face), the canvas and the Inspector. What
+  the canvas shows is what is exported.
+- They work on the stored 8-bit values divided by 255; sRGB images are not
+  linearized first. Alpha is kept as it is.
+- A grayscale image becomes RGB when an enabled `colorize` is present (the
+  Inspector's channels follow).
+- The source file itself is never changed.
+- A sidecar that does not parse fails the image like an undecodable file
+  (`brick.jpg.amod: <problem>`).
+- **Modifiers tab**: for images in the Input tree it works exactly as for
+  `.noise` files (see [`noise.md`](noise.md#modifiers-tab)), but saves to the
+  sidecar: adding the first modifier creates `<file>.amod`, and removing the
+  last deletes it (unless it holds other settings).
+
 ## Output
 
 CLI lines show the settings used, for example:

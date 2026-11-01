@@ -248,7 +248,7 @@ each.
 | `brightness-contrast` | `brightness`: float −1–1, 0 · `contrast`: float −1–1, 0          | `(c − 0.5) × (1 + contrast) + 0.5 + brightness` |
 | `threshold`           | `level`: float 0–1, 0.5 · `softness`: float 0–0.5, 0             | `softness = 0`: `c ≥ level ? 1 : 0`; else smoothstep from `level − softness` to `level + softness` |
 | `posterize`           | `steps`: int 2–32, 4                                             | `round(c × (steps − 1)) / (steps − 1)` |
-| `blur`                | `radius`: int 1–64, 2                                            | three passes of a `(2 radius + 1)`-wide box blur, horizontal then vertical each pass, wrapping at the edges |
+| `blur`                | `radius`: int 1–64, 2 · `edges`: choice `wrap` / `clamp`, `wrap` | three passes of a `(2 radius + 1)`-wide box blur, horizontal then vertical each pass; past the image's edges it reads the opposite side (`wrap`, for tiling textures) or repeats the edge pixel (`clamp`) |
 | `normalize`           | —                                                              | over all channels of all pixels: `(c − min) / (max − min)` (unchanged if `max = min`) |
 | `colorize`            | `color_a`: color, `[0, 0, 0]` · `color_b`: color, `[1, 1, 1]`    | `l = (R + G + B) / 3`; result `color_a + (color_b − color_a) × l` |
 

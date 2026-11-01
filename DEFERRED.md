@@ -28,35 +28,6 @@ What assetc would have to do itself:
   crate leaves this to the caller.
 - **Preview**: the 3D environment view currently uploads 8-bit sRGB faces.
 
-## Modifiers on input images
-
-Let ordinary texture sources (`.png`, `.jpg`) carry the same modifier stack
-as `.noise` files, so the build exports the modified image.
-
-Plan so far:
-
-- **Storage**: an optional sidecar next to the image,
-  `<file.ext>.amod` (e.g. `brick.jpg.amod`), the general per-file
-  sidecar (`docs/spec/amod.md`, which already holds mesh settings), with
-  `[[modifiers]]` tables in the `.noise` format. The build does not treat it as a source of its
-  own.
-- **Editing**: the Inspector's Modifiers tab is enabled for `.png` / `.jpg`
-  files in the Input tree; adding the first modifier creates the sidecar,
-  removing the last deletes it.
-- **File operations**: renaming or deleting an image renames / deletes its
-  sidecar too.
-- **Build and preview**: every place that loads a texture source
-  (`build::load_source`: plain textures, material slots, ORM packing, the
-  canvas) applies the enabled modifiers in order, so the preview is what is
-  exported. A grayscale image becomes RGB when an enabled `colorize` is
-  present. Modifiers work on stored 8-bit values / 255 (sRGB images are not
-  linearized); alpha is unchanged.
-- **Needed in code**: modifiers become their own module, shared by noise and
-  images, and `blur` must handle non-square images (it assumes `size × size`
-  today). Environment-map faces (`*.env`) are left out.
-- **Open**: whether blur should wrap at the edges (fine for tiling textures)
-  or clamp for non-tiling images, perhaps as a modifier parameter.
-
 ## `.obj` models
 
 Preview (and later compile) Wavefront OBJ files like glTF models (see

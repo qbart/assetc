@@ -21,7 +21,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 Eight icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient` and model files, **Modifiers**
-(`wrench`) for `.noise` files and **Gradients** (`palette`) for `.gradient`
+(`wrench`) for `.noise` files and images (`.png`, `.jpg`, `.jpeg`) and **Gradients** (`palette`) for `.gradient`
 files, all three only in the Input tree (see
 [`noise.md`](noise.md#parameters-tab), [`gradients.md`](gradients.md#parameters-tab)),
 **Animations** (`film`), only for models with animations (see
@@ -83,6 +83,7 @@ decimal, e.g. `12.3 KiB`; plain bytes below 1 KiB, e.g. `512 B`).
 | Row        | Value                                                               |
 |------------|---------------------------------------------------------------------|
 | Dimensions | `W × H` px                                                          |
+| Modifiers  | images only, when the [sidecar](textures.md#modifiers) has any: e.g. `Levels, Blur (off)` |
 | Asset path | input-relative path without extension, e.g. `textures/Grass`        |
 | Asset ID   | `0x` + 16 lowercase hex digits                                      |
 | Color      | `sRGB` or `linear`, from [`[textures]`](textures.md#settings)       |

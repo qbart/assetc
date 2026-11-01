@@ -29,20 +29,33 @@ A key set here wins over [`assetc.toml`](assetc.toml.md#meshes) (its
 defaults and `[[meshes.overrides]]`); a key left out keeps the project's
 value.
 
+## `[[modifiers]]`
+
+For images (`*.png`, `*.jpg`, `*.jpeg`); see
+[`docs/features/textures.md`](../features/textures.md#modifiers). A list of
+modifiers, exactly as in a `.noise` file: each table has `type`, `enabled`
+and the modifier's parameters, see
+[`docs/spec/noise.md`](noise.md#modifiers). They run in order on the image
+whenever assetc loads it.
+
 ## Written form
 
-assetc writes only the keys that are set, in the order listed, each table
-preceded by a blank line except the first:
+assetc writes the `[mesh]` keys that are set, in the order listed, then each
+modifier as a `[[modifiers]]` table (`type`, `enabled`, then every parameter,
+as `.noise` files write them), each table preceded by a blank line except
+the first:
 
 ```toml
 [mesh]
 meshlet_max_vertices = 128
 meshlet_max_triangles = 256
+
+[[modifiers]]
+type = "levels"
+enabled = true
+black = 0.1
+white = 0.9
+gamma = 1.0
 ```
 
 When nothing is left to write, assetc deletes the file instead.
-
-## Reserved
-
-`[[modifiers]]` is reserved for modifier stacks on input images (see
-`DEFERRED.md`).

@@ -70,7 +70,8 @@ the current type's section affects the image.
 ## Modifiers tab
 
 The **Modifiers** tab (`wrench`) edits the selected `.noise` file's modifiers
-(disabled for anything else). Each modifier is a section card, in order:
+(and an image's, saved to its sidecar, see
+[`textures.md`](textures.md#modifiers)). Each modifier is a section card, in order:
 
 - Modifier cards do not collapse (no chevron); their parameters are always
   shown.
