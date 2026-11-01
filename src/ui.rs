@@ -816,10 +816,12 @@ fn canvas(ui: &mut Ui, inspected: Option<&Inspected>, view: &mut View) {
         }
     }
 
-    let half = rect.size() / 2.0;
-    view.pan = view.pan.clamp(-half, half);
+    // Keep at least 32 px (or all) of the image inside the canvas on each axis.
+    let size = texels * view.zoom / ppp;
+    let limit = (rect.size() + size) / 2.0 - size.min(Vec2::splat(32.0));
+    view.pan = view.pan.clamp(-limit, limit);
 
-    let image = Rect::from_center_size(rect.center() + view.pan, texels * view.zoom / ppp);
+    let image = Rect::from_center_size(rect.center() + view.pan, size);
     let painter = ui.painter_at(rect);
     checkerboard(&painter, image);
     painter.image(
