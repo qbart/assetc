@@ -5,7 +5,7 @@ use egui::{
     Stroke, StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::thread::JoinHandle;
 
@@ -16,9 +16,10 @@ use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
 use crate::manifest::Kind;
+use crate::texture::Image;
 use crate::theme::{
-    self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHECKER_DARK, CHECKER_LIGHT, STROKE,
-    TEXT, TEXT_WEAK,
+    self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHANNEL_B, CHANNEL_G, CHANNEL_R,
+    CHECKER_DARK, CHECKER_LIGHT, STROKE, TEXT, TEXT_WEAK,
 };
 use crate::tree::{FileTrees, Listing, Node};
 
@@ -48,8 +49,8 @@ struct UiState {
     reinspect: bool,
     inspected: Option<Inspected>,
     view: View,
-    /// Images shown tiled 3 × 3 in the canvas, by path.
-    tiled: HashSet<PathBuf>,
+    /// Canvas toolbar state of each image, by path.
+    canvas_options: HashMap<PathBuf, CanvasOptions>,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -88,7 +89,50 @@ struct Selection {
 struct Inspected {
     path: PathBuf,
     inspection: Inspection,
+    /// The uploaded image, kept to build single-channel views.
+    pixels: Option<Image>,
     preview: Option<egui::TextureHandle>,
+    /// Single-channel view of `pixels`, built on demand.
+    channel_preview: Option<(Channels, egui::TextureHandle)>,
+}
+
+/// Canvas toolbar state of one image, see docs/features/canvas.md#toolbar.
+#[derive(Clone, Copy, Default)]
+struct CanvasOptions {
+    tiled: bool,
+    channels: Channels,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Channels {
+    #[default]
+    Rgb,
+    R,
+    G,
+    B,
+}
+
+impl Channels {
+    const ALL: [Self; 4] = [Self::Rgb, Self::R, Self::G, Self::B];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Rgb => "RGB",
+            Self::R => "Red",
+            Self::G => "Green",
+            Self::B => "Blue",
+        }
+    }
+
+    /// Index in an RGBA pixel; `None` for all channels.
+    fn index(self) -> Option<usize> {
+        match self {
+            Self::Rgb => None,
+            Self::R => Some(0),
+            Self::G => Some(1),
+            Self::B => Some(2),
+        }
+    }
 }
 
 enum BuildStatus {
@@ -111,7 +155,7 @@ impl Default for UiState {
             reinspect: false,
             inspected: None,
             view: View::default(),
-            tiled: HashSet::new(),
+            canvas_options: HashMap::new(),
         }
     }
 }
@@ -251,9 +295,9 @@ fn shell(
             let state = &mut *state;
             canvas(
                 ui,
-                state.inspected.as_ref(),
+                state.inspected.as_mut(),
                 &mut state.view,
-                &mut state.tiled,
+                &mut state.canvas_options,
             );
         });
 
@@ -281,22 +325,37 @@ fn shell(
 fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selection) -> Inspected {
     let mut inspection = inspect::inspect(project, selection.location, &selection.path);
     let max_side = ctx.input(|i| i.max_texture_side) as u32;
-    let preview = inspection.preview.take().map(|image| {
-        let image = inspect::fit_within(image, max_side);
-        let size = [image.width as usize, image.height as usize];
-        let image = egui::ColorImage::from_rgba_unmultiplied(size, &image.pixels);
-        let options = egui::TextureOptions {
-            magnification: egui::TextureFilter::Nearest,
-            minification: egui::TextureFilter::Linear,
-            ..Default::default()
-        };
-        ctx.load_texture("canvas_preview", image, options)
-    });
+    let pixels = inspection
+        .preview
+        .take()
+        .map(|image| inspect::fit_within(image, max_side));
+    let preview = pixels
+        .as_ref()
+        .map(|image| load_preview(ctx, "canvas_preview", image, &image.pixels));
     Inspected {
         path: selection.path.clone(),
         inspection,
+        pixels,
         preview,
+        channel_preview: None,
     }
+}
+
+/// Uploads RGBA8 `pixels` of `image`'s size with the canvas filtering (sharp when magnified).
+fn load_preview(
+    ctx: &egui::Context,
+    name: &str,
+    image: &Image,
+    pixels: &[u8],
+) -> egui::TextureHandle {
+    let size = [image.width as usize, image.height as usize];
+    let options = egui::TextureOptions {
+        magnification: egui::TextureFilter::Nearest,
+        minification: egui::TextureFilter::Linear,
+        ..Default::default()
+    };
+    let image = egui::ColorImage::from_rgba_unmultiplied(size, pixels);
+    ctx.load_texture(name, image, options)
 }
 
 fn start_build(state: &mut UiState, project: &Project) {
@@ -776,9 +835,9 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
 /// Center pane: the selected file's image with zoom and pan, see docs/features/canvas.md.
 fn canvas(
     ui: &mut Ui,
-    inspected: Option<&Inspected>,
+    inspected: Option<&mut Inspected>,
     view: &mut View,
-    tiled: &mut HashSet<PathBuf>,
+    all_options: &mut HashMap<PathBuf, CanvasOptions>,
 ) {
     let rect = ui.max_rect();
     let message = |ui: &mut Ui, text: &str| {
@@ -797,16 +856,34 @@ fn canvas(
     if inspection.missing {
         return message(ui, &format!("{} no longer exists", inspection.name));
     }
-    let Some(texture) = &inspected.preview else {
+    let (Some(preview), Some(pixels)) = (&inspected.preview, &inspected.pixels) else {
         return message(ui, inspection.note.unwrap_or("No preview"));
     };
 
-    let ppp = ui.ctx().pixels_per_point();
-    let tiles = if tiled.contains(&inspected.path) {
-        3.0
-    } else {
-        1.0
+    let options = all_options
+        .get(&inspected.path)
+        .copied()
+        .unwrap_or_default();
+    let texture = match options.channels.index() {
+        None => preview.clone(),
+        Some(channel) => {
+            let cached = &mut inspected.channel_preview;
+            if cached.as_ref().is_none_or(|(c, _)| *c != options.channels) {
+                // Grayscale and opaque: the channel's value in R, G and B.
+                let gray: Vec<u8> = pixels
+                    .pixels
+                    .chunks_exact(4)
+                    .flat_map(|p| [p[channel], p[channel], p[channel], 255])
+                    .collect();
+                let texture = load_preview(ui.ctx(), "canvas_channel", pixels, &gray);
+                *cached = Some((options.channels, texture));
+            }
+            cached.as_ref().unwrap().1.clone()
+        }
     };
+
+    let ppp = ui.ctx().pixels_per_point();
+    let tiles = if options.tiled { 3.0 } else { 1.0 };
     // Texels of everything shown: the image, or the 3 × 3 block.
     let texels = texture.size_vec2() * tiles;
     let fit = |view: &mut View| {
@@ -846,7 +923,9 @@ fn canvas(
 
     let shown = Rect::from_center_size(rect.center() + view.pan, size);
     let painter = ui.painter_at(rect);
-    checkerboard(&painter, shown);
+    if options.channels == Channels::Rgb {
+        checkerboard(&painter, shown);
+    }
     // Tiles share edge coordinates so neighbours touch exactly.
     let n = tiles as usize;
     let edge = |axis: usize, i: usize| shown.min[axis] + shown.size()[axis] * i as f32 / tiles;
@@ -866,12 +945,21 @@ fn canvas(
     }
 
     // Drawn last so they sit on top; their clicks apply next frame.
-    let is_tiled = tiles > 1.0;
-    if toolbar(ui, rect, &[(Icon::Grid3x3, "Tile", is_tiled)]) == Some(0) {
-        if is_tiled {
-            tiled.remove(&inspected.path);
-        } else {
-            tiled.insert(inspected.path.clone());
+    let tile = [Tool {
+        glyph: Glyph::Icon(Icon::Grid3x3),
+        name: "Tile",
+        on: options.tiled,
+    }];
+    let channels = Channels::ALL.map(|channels| Tool {
+        glyph: Glyph::Channels(channels),
+        name: channels.name(),
+        on: options.channels == channels,
+    });
+    if let Some((group, button)) = toolbar(ui, rect, &[&tile, &channels]) {
+        let options = all_options.entry(inspected.path.clone()).or_default();
+        match group {
+            0 => options.tiled = !options.tiled,
+            _ => options.channels = Channels::ALL[button],
         }
         ui.ctx().request_repaint();
     }
@@ -902,52 +990,110 @@ fn wheel_notches(input: &egui::InputState) -> f32 {
         .sum()
 }
 
-/// Toggle buttons `(icon, name, on)` in the canvas' top-right corner; returns the clicked index.
-fn toolbar(ui: &mut Ui, canvas: Rect, buttons: &[(Icon, &str, bool)]) -> Option<usize> {
+#[derive(Clone, Copy)]
+enum Glyph {
+    Icon(Icon),
+    /// Three circles, filled for the shown channels.
+    Channels(Channels),
+}
+
+struct Tool {
+    glyph: Glyph,
+    name: &'static str,
+    on: bool,
+}
+
+/// Button groups in the canvas' top-right corner; returns the clicked `(group, button)`.
+fn toolbar(ui: &mut Ui, canvas: Rect, groups: &[&[Tool]]) -> Option<(usize, usize)> {
     const BUTTON: Vec2 = vec2(36.0, 32.0);
     const RADIUS: u8 = 6;
-    let width = BUTTON.x * buttons.len() as f32;
-    let bar = Rect::from_min_size(
-        pos2(canvas.right() - width - 8.0, canvas.top() + 8.0),
-        vec2(width, BUTTON.y),
-    );
+    const GAP: f32 = 8.0;
+    let total: f32 = groups
+        .iter()
+        .map(|g| BUTTON.x * g.len() as f32)
+        .sum::<f32>()
+        + GAP * (groups.len() - 1) as f32;
     let painter = ui.painter_at(canvas);
-    painter.rect_filled(bar, RADIUS, BG_BAR);
-
+    let mut x = canvas.right() - 8.0 - total;
     let mut clicked = None;
-    let last = buttons.len() - 1;
-    for (i, &(icon, name, on)) in buttons.iter().enumerate() {
-        let rect = Rect::from_min_size(bar.min + vec2(BUTTON.x * i as f32, 0.0), BUTTON);
-        let response = ui
-            .interact(rect, ui.id().with(("toolbar", i)), Sense::click_and_drag())
-            .on_hover_text(name);
-        // Round only the corners on the group's outer edge.
-        let outer = |edge: bool| if edge { RADIUS } else { 0 };
-        let radius = egui::CornerRadius {
-            nw: outer(i == 0),
-            sw: outer(i == 0),
-            ne: outer(i == last),
-            se: outer(i == last),
-        };
-        let tint = if on {
-            painter.rect_filled(rect, radius, ACCENT);
-            BG_BAR
-        } else if response.hovered() {
-            painter.rect_filled(rect, radius, BG_HEADER);
-            TEXT
-        } else {
-            TEXT_WEAK
-        };
-        if i > 0 {
-            painter.vline(rect.left(), rect.y_range(), Stroke::new(1.0, STROKE));
-        }
-        icon.image(18.0, tint)
-            .paint_at(ui, Rect::from_center_size(rect.center(), vec2(18.0, 18.0)));
-        if response.clicked() {
-            clicked = Some(i);
+    for (g, tools) in groups.iter().enumerate() {
+        let bar = Rect::from_min_size(
+            pos2(x, canvas.top() + 8.0),
+            vec2(BUTTON.x * tools.len() as f32, BUTTON.y),
+        );
+        x = bar.right() + GAP;
+        painter.rect_filled(bar, RADIUS, BG_BAR);
+        let last = tools.len() - 1;
+        for (i, tool) in tools.iter().enumerate() {
+            let rect = Rect::from_min_size(bar.min + vec2(BUTTON.x * i as f32, 0.0), BUTTON);
+            let response = ui
+                .interact(
+                    rect,
+                    ui.id().with(("toolbar", g, i)),
+                    Sense::click_and_drag(),
+                )
+                .on_hover_text(tool.name);
+            // Round only the corners on the group's outer edge.
+            let outer = |edge: bool| if edge { RADIUS } else { 0 };
+            let radius = egui::CornerRadius {
+                nw: outer(i == 0),
+                sw: outer(i == 0),
+                ne: outer(i == last),
+                se: outer(i == last),
+            };
+            let tint = if tool.on {
+                painter.rect_filled(rect, radius, ACCENT);
+                BG_BAR
+            } else if response.hovered() {
+                painter.rect_filled(rect, radius, BG_HEADER);
+                TEXT
+            } else {
+                TEXT_WEAK
+            };
+            if i > 0 {
+                painter.vline(rect.left(), rect.y_range(), Stroke::new(1.0, STROKE));
+            }
+            paint_glyph(ui, &painter, tool.glyph, rect.center(), tint);
+            if response.clicked() {
+                clicked = Some((g, i));
+            }
         }
     }
     clicked
+}
+
+fn paint_glyph(
+    ui: &Ui,
+    painter: &egui::Painter,
+    glyph: Glyph,
+    center: egui::Pos2,
+    tint: egui::Color32,
+) {
+    match glyph {
+        Glyph::Icon(icon) => icon
+            .image(18.0, tint)
+            .paint_at(ui, Rect::from_center_size(center, vec2(18.0, 18.0))),
+        Glyph::Channels(shown) => {
+            // Red top, green bottom-left, blue bottom-right; see docs/features/canvas.md#channel-icons.
+            let circles = [
+                (vec2(0.0, -3.2), Channels::R, CHANNEL_R),
+                (vec2(-3.7, 2.8), Channels::G, CHANNEL_G),
+                (vec2(3.7, 2.8), Channels::B, CHANNEL_B),
+            ];
+            // circle-small is r = 6 of 24, so 4 px at 16 px.
+            for (offset, channel, color) in circles {
+                if shown == Channels::Rgb || shown == channel {
+                    painter.circle_filled(center + offset, 4.0, color);
+                }
+            }
+            for (offset, ..) in circles {
+                Icon::CircleSmall.image(16.0, tint).paint_at(
+                    ui,
+                    Rect::from_center_size(center + offset, vec2(16.0, 16.0)),
+                );
+            }
+        }
+    }
 }
 
 /// Multiplies the zoom by `factor`, keeping the image point at `anchor`

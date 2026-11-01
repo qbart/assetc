@@ -8,6 +8,7 @@ pub enum Icon {
     Check,
     ChevronDown,
     ChevronRight,
+    CircleSmall,
     File,
     Files,
     Folder,
@@ -21,7 +22,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 13] = [
+const SVGS: [(&str, &str); 14] = [
     ("check", include_str!("../assets/icons/check.svg")),
     (
         "chevron-down",
@@ -30,6 +31,10 @@ const SVGS: [(&str, &str); 13] = [
     (
         "chevron-right",
         include_str!("../assets/icons/chevron-right.svg"),
+    ),
+    (
+        "circle-small",
+        include_str!("../assets/icons/circle-small.svg"),
     ),
     ("file", include_str!("../assets/icons/file.svg")),
     ("files", include_str!("../assets/icons/files.svg")),

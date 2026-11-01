@@ -11,6 +11,9 @@ pub const TEXT_WEAK: Color32 = Color32::from_rgb(0x7A, 0x7A, 0x82);
 pub const ACCENT: Color32 = Color32::from_rgb(0xF0, 0x88, 0x3E);
 pub const CHECKER_LIGHT: Color32 = Color32::from_rgb(0x3A, 0x3A, 0x3E);
 pub const CHECKER_DARK: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x32);
+pub const CHANNEL_R: Color32 = Color32::from_rgb(0xE5, 0x48, 0x4D);
+pub const CHANNEL_G: Color32 = Color32::from_rgb(0x46, 0xA7, 0x58);
+pub const CHANNEL_B: Color32 = Color32::from_rgb(0x3E, 0x8E, 0xED);
 
 pub fn apply(ctx: &egui::Context) {
     let mut v = egui::Visuals::dark();
