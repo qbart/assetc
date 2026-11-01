@@ -14,6 +14,7 @@ use crate::gradient::is_gradient;
 use crate::hash::fnv1a64;
 use crate::manifest::Kind;
 use crate::material::{self, Material, NormalY, Slot, TextureIds};
+use crate::model;
 use crate::texture::{ColorSpace, Settings};
 use crate::tree::{self, Node};
 
@@ -54,6 +55,10 @@ pub enum Job {
     /// A color LUT (relative to `input`) as a strip texture, or a 3D one when `volume`; see
     /// docs/features/lut.md#build.
     Lut { source: String, volume: bool },
+    /// A glTF model (relative to `input`): writes its `.amesh` and every other output of it.
+    Model { source: String },
+    /// Another output of a model, written by its [`Job::Model`].
+    ModelPart { source: String },
     Material {
         /// `<name>.mat.toml`, or `<name>.*` without one.
         source: String,
@@ -79,7 +84,10 @@ impl Asset {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", "),
-            Job::Material { source, .. } | Job::Lut { source, .. } => source.clone(),
+            Job::Material { source, .. }
+            | Job::Lut { source, .. }
+            | Job::Model { source }
+            | Job::ModelPart { source } => source.clone(),
         }
     }
 }
@@ -102,6 +110,42 @@ struct Group {
     base: Option<String>,
     slots: BTreeMap<Slot, String>,
     source: Option<String>,
+}
+
+/// The assets of one glTF model; see docs/features/models.md#build.
+fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs) {
+    let p = strip_extension(source);
+    let mut push = |kind: Kind, asset_path: String, job: Job| {
+        plan.assets.push(Asset {
+            id: fnv1a64(asset_path.as_bytes()),
+            kind,
+            output: kind.output_path(&asset_path),
+            asset_path,
+            job,
+        });
+    };
+    let part = || Job::ModelPart {
+        source: source.to_owned(),
+    };
+    push(
+        Kind::Mesh,
+        format!("{p}.amesh"),
+        Job::Model {
+            source: source.to_owned(),
+        },
+    );
+    if outputs.animation {
+        push(Kind::Animation, format!("{p}.aanim"), part());
+    }
+    for (_, name) in &outputs.materials {
+        push(Kind::Material, format!("{p}/{name}.amat"), part());
+    }
+    for (_, name, _) in &outputs.images {
+        push(Kind::Texture, format!("{p}/{name}"), part());
+    }
+    for name in &outputs.orm {
+        push(Kind::Texture, format!("{p}/{name}.orm"), part());
+    }
 }
 
 /// How a texture source is compiled when a material slot uses it.
@@ -150,6 +194,17 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
                 _ => groups.entry((dir.into(), stem.into())).or_default().base = Some(rel.clone()),
             }
             sources.push(rel);
+        } else if model::is_model(file) {
+            match fs::read(file)
+                .map_err(|e| e.to_string())
+                .and_then(|data| model::outputs(&data))
+            {
+                Ok(outputs) => model_assets(&mut plan, &rel, &outputs),
+                Err(message) => plan.failures.push(Failure {
+                    source: rel,
+                    message,
+                }),
+            }
         } else if is_lut(file) {
             let asset_path = strip_extension(&rel).to_owned();
             plan.assets.push(Asset {

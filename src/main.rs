@@ -1,6 +1,9 @@
+mod aanim;
+mod amesh;
 mod assets;
 mod build;
 mod chart;
+mod chunks;
 mod color_picker;
 mod config;
 mod fileops;

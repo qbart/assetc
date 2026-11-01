@@ -12,7 +12,7 @@ use crate::material::{self, AlphaMode, HeightMode};
 use crate::noise::Noise;
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
-use crate::{font, ktx2, manifest, model};
+use crate::{aanim, amesh, font, ktx2, manifest, model};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
@@ -66,6 +66,8 @@ enum Kind {
     Model,
     CompiledTexture,
     CompiledMaterial,
+    CompiledMesh,
+    CompiledAnimation,
     Manifest,
     Ignored,
     File,
@@ -83,6 +85,8 @@ impl Kind {
             Self::Model => "Model",
             Self::CompiledTexture => "Compiled texture",
             Self::CompiledMaterial => "Compiled material",
+            Self::CompiledMesh => "Compiled mesh",
+            Self::CompiledAnimation => "Compiled animation",
             Self::Manifest => "Manifest",
             Self::Ignored => "Ignored",
             Self::File => "File",
@@ -143,6 +147,10 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input => Kind::Ignored,
         Location::Output if has_ext(manifest::Kind::Texture.extension()) => Kind::CompiledTexture,
         Location::Output if has_ext(manifest::Kind::Material.extension()) => Kind::CompiledMaterial,
+        Location::Output if has_ext(manifest::Kind::Mesh.extension()) => Kind::CompiledMesh,
+        Location::Output if has_ext(manifest::Kind::Animation.extension()) => {
+            Kind::CompiledAnimation
+        }
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output => Kind::File,
     };
@@ -159,9 +167,23 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
         Kind::Font => font_rows(file, &mut out),
-        Kind::Model => model_rows(file, &mut out),
+        Kind::Model => model_rows(project, file, &rel, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
         Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
+        Kind::CompiledMesh => fs::read(file)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| amesh::rows(&bytes))
+            .map(|rows| {
+                out.rows.extend(rows);
+                asset_rows(&rel, &mut out);
+            }),
+        Kind::CompiledAnimation => fs::read(file)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| aanim::rows(&bytes))
+            .map(|rows| {
+                out.rows.extend(rows);
+                asset_rows(&rel, &mut out);
+            }),
         Kind::Manifest => manifest(file, &mut out),
         Kind::Ignored | Kind::File => Ok(()),
     };
@@ -328,11 +350,20 @@ fn font_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     Ok(())
 }
 
-fn model_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+fn model_rows(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+    out: &mut Inspection,
+) -> Result<(), String> {
     let data = fs::read(file).map_err(|e| e.to_string())?;
     out.rows.extend(model::rows(&data)?);
     out.animations = model::animations(&data)?;
     out.model = true;
+    // Compiled to an `.amesh` and more, see docs/features/models.md#build.
+    let mesh = format!("{}.amesh", strip_extension(rel));
+    out.rows.push(("Asset path", mesh.clone()));
+    output_row(project, &mesh, "", out);
     Ok(())
 }
 

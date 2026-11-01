@@ -142,6 +142,9 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
                 .map(|levels| levels_detail(*color, levels)),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
+            Job::Model { source } => compile_model(input, source, output),
+            // Written with its model.
+            Job::ModelPart { .. } => continue,
             Job::Lut { source, volume } => {
                 compile_lut(&input.join(source), &dest, *volume).map(|size| {
                     let layout = if *volume { "volume" } else { "strip" };
@@ -320,6 +323,30 @@ pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType)
         .map_err(|e| e.to_string())?;
     let color = decoded.color();
     Ok((decoded.to_rgba8(), color))
+}
+
+/// Writes every output of a glTF model; see docs/features/models.md#build.
+fn compile_model(input: &Path, source: &str, output: &Path) -> Result<String, String> {
+    let p = strip_extension(source);
+    let model = crate::model::compile(&input.join(source), p)?;
+    write(&output.join(format!("{p}.amesh")), &model.mesh)?;
+    if let Some(animation) = &model.animation {
+        write(&output.join(format!("{p}.aanim")), animation)?;
+    }
+    for (name, m) in &model.materials {
+        write(
+            &output.join(format!("{p}/{name}.amat")),
+            &material::encode(m),
+        )?;
+    }
+    for (name, image, color) in model.images {
+        write_texture(image, &output.join(format!("{p}/{name}.ktx2")), color, true)?;
+    }
+    for (name, image) in model.orm {
+        let dest = output.join(format!("{p}/{name}.orm.ktx2"));
+        write_texture(image, &dest, ColorSpace::Linear, true)?;
+    }
+    Ok(model.detail)
 }
 
 pub fn is_lut(file: &Path) -> bool {
@@ -593,6 +620,54 @@ mod tests {
         assert_eq!(detail("cold.cube"), "2³ LUT strip, linear, 1 level");
         // Table order: texel 1 is red.
         assert_eq!(level0(&output.join("warm.ktx2")).1[4..8], [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn builds_gltf_models() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(input.join("models")).unwrap();
+        fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/samples/Fox.glb"),
+            input.join("models/Fox.glb"),
+        )
+        .unwrap();
+        fs::write(input.join("models/broken.gltf"), "{").unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source, "models/broken.gltf");
+        fs::remove_file(input.join("models/broken.gltf")).unwrap();
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        let built: Vec<_> = outcome.built.iter().map(|b| b.output.as_str()).collect();
+        assert_eq!(built, ["models/Fox.amesh"]);
+        assert!(outcome.built[0].detail.contains("24 joints, 3 clips"));
+
+        let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
+        let rows = crate::amesh::rows(&mesh).unwrap();
+        assert!(rows.contains(&("Skin", "24 joints".into())));
+        assert!(rows.contains(&("Materials", "1".into())));
+        let anim = fs::read(output.join("models/Fox.aanim")).unwrap();
+        let rows = crate::aanim::rows(&anim).unwrap();
+        assert!(rows[0].1.starts_with("Survey ("), "{rows:?}");
+        let m = material::decode(&fs::read(output.join("models/Fox/fox_material.amat")).unwrap())
+            .unwrap();
+        assert_eq!(m.textures.base_color, fnv1a64(b"models/Fox/image_0"));
+        assert!(output.join("models/Fox/image_0.ktx2").is_file());
+
+        // Every output is in the manifest with its kind; the mesh lists the material's ID.
+        let entries = manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
+        let kind = |path: &str| entries.iter().find(|e| e.path == path).map(|e| e.kind);
+        assert_eq!(kind("models/Fox.amesh"), Some(Kind::Mesh));
+        assert_eq!(kind("models/Fox.aanim"), Some(Kind::Animation));
+        assert_eq!(kind("models/Fox/fox_material.amat"), Some(Kind::Material));
+        assert_eq!(kind("models/Fox/image_0.ktx2"), Some(Kind::Texture));
+        let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
+        assert_eq!(
+            reader.require("MATERIAL").unwrap(),
+            fnv1a64(b"models/Fox/fox_material.amat").to_le_bytes()
+        );
     }
 
     #[test]

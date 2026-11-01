@@ -1,8 +1,20 @@
-//! glTF model inspection, see docs/features/models.md.
+//! glTF models: inspection and compilation to `.amesh`, `.amat`, `.aanim` and textures; see
+//! docs/features/models.md.
 
+use std::collections::HashMap;
 use std::path::Path;
 
-use bevy::gltf::gltf::{self, Gltf, mesh::Mode};
+use base64::Engine;
+use bevy::asset::RenderAssetUsages;
+use bevy::gltf::gltf::{self, Document, Gltf, Node, Primitive, mesh::Mode};
+use bevy::math::{Mat3, Mat4, Vec3};
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+
+use crate::aanim;
+use crate::amesh::{self, Joint, Vertex};
+use crate::hash::fnv1a64;
+use crate::material::{AlphaMode, HeightMode, Material, TextureIds};
+use crate::texture::ColorSpace;
 
 /// Whether `file` is a model assetc reads (`*.gltf`, `*.glb`, any case).
 pub fn is_model(file: &Path) -> bool {
@@ -76,6 +88,651 @@ pub fn animations(data: &[u8]) -> Result<Vec<(String, f32)>, String> {
         .collect())
 }
 
+/// A name usable as a file name: the glTF name when non-empty, unique among `names` and free
+/// of path separators; otherwise `<prefix>_<index>`. See docs/features/models.md#names.
+fn leaves(names: &[Option<&str>], prefix: &str) -> Vec<String> {
+    names
+        .iter()
+        .enumerate()
+        .map(|(i, name)| match name {
+            Some(n)
+                if !n.is_empty()
+                    && !n.contains(['/', '\\'])
+                    && *n != "."
+                    && *n != ".."
+                    && names.iter().filter(|m| **m == Some(*n)).count() == 1 =>
+            {
+                (*n).to_owned()
+            }
+            _ => format!("{prefix}_{i}"),
+        })
+        .collect()
+}
+
+/// A mesh node of the scene with its world transform.
+struct Instance<'a> {
+    node: Node<'a>,
+    world: Mat4,
+    /// Bound to the file's first skin: left in mesh space.
+    skinned: bool,
+}
+
+/// Mesh nodes of the default (or first) scene, depth-first, children in file order.
+fn instances(document: &Document) -> Vec<Instance<'_>> {
+    fn visit<'a>(node: Node<'a>, parent: Mat4, out: &mut Vec<Instance<'a>>) {
+        let world = parent * Mat4::from_cols_array_2d(&node.transform().matrix());
+        if node.mesh().is_some() {
+            out.push(Instance {
+                skinned: node.skin().is_some_and(|s| s.index() == 0),
+                node: node.clone(),
+                world,
+            });
+        }
+        for child in node.children() {
+            visit(child, world, out);
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(scene) = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+    {
+        for node in scene.nodes() {
+            visit(node, Mat4::IDENTITY, &mut out);
+        }
+    }
+    out
+}
+
+fn is_triangles(primitive: &Primitive<'_>) -> bool {
+    matches!(
+        primitive.mode(),
+        Mode::Triangles | Mode::TriangleStrip | Mode::TriangleFan
+    )
+}
+
+/// The assets a model compiles to, from its JSON alone; see docs/features/models.md#build.
+#[derive(Debug, PartialEq)]
+pub struct Outputs {
+    /// Used materials in first-use order: glTF index and name.
+    pub materials: Vec<(usize, String)>,
+    /// Images used as base color, normal or emissive textures: index, name, color space.
+    pub images: Vec<(usize, String, ColorSpace)>,
+    /// Names of the used materials that get an ORM texture.
+    pub orm: Vec<String>,
+    /// Skinned, with animations: an `.aanim` too.
+    pub animation: bool,
+}
+
+pub fn outputs(data: &[u8]) -> Result<Outputs, String> {
+    analyze(&parse(data)?.document)
+}
+
+fn analyze(document: &Document) -> Result<Outputs, String> {
+    let names: Vec<_> = document.materials().map(|m| m.name()).collect();
+    let material_names = leaves(&names, "material");
+    let names: Vec<_> = document.images().map(|i| i.name()).collect();
+    let image_names = leaves(&names, "image");
+    let instances = instances(document);
+    let mut used = Vec::new();
+    let mut triangles = false;
+    for instance in &instances {
+        for primitive in instance
+            .node
+            .mesh()
+            .into_iter()
+            .flat_map(|m| m.primitives())
+        {
+            if !is_triangles(&primitive) {
+                continue;
+            }
+            triangles = true;
+            if let Some(i) = primitive.material().index()
+                && !used.contains(&i)
+            {
+                used.push(i);
+            }
+        }
+    }
+    if !triangles {
+        return Err("no triangles in the default scene".into());
+    }
+    let mut images: Vec<(usize, String, ColorSpace)> = Vec::new();
+    let mut orm = Vec::new();
+    for &i in &used {
+        let m = document.materials().nth(i).expect("material index");
+        let pbr = m.pbr_metallic_roughness();
+        let textures = [
+            pbr.base_color_texture()
+                .map(|t| (t.texture(), ColorSpace::Srgb)),
+            m.normal_texture()
+                .map(|t| (t.texture(), ColorSpace::Linear)),
+            m.emissive_texture()
+                .map(|t| (t.texture(), ColorSpace::Srgb)),
+        ];
+        // The first use of an image decides its color space.
+        for (texture, color) in textures.into_iter().flatten() {
+            let image = texture.source().index();
+            if !images.iter().any(|(j, _, _)| *j == image) {
+                images.push((image, image_names[image].clone(), color));
+            }
+        }
+        if pbr.metallic_roughness_texture().is_some() || m.occlusion_texture().is_some() {
+            orm.push(material_names[i].clone());
+        }
+    }
+    Ok(Outputs {
+        materials: used
+            .iter()
+            .map(|&i| (i, material_names[i].clone()))
+            .collect(),
+        images,
+        orm,
+        animation: instances.iter().any(|i| i.skinned) && document.animations().len() > 0,
+    })
+}
+
+/// A compiled model, ready to write; see docs/features/models.md#build.
+pub struct Compiled {
+    pub mesh: Vec<u8>,
+    pub animation: Option<Vec<u8>>,
+    /// By name: `<P>/<name>.amat`.
+    pub materials: Vec<(String, Material)>,
+    /// By name: `<P>/<name>.ktx2`.
+    pub images: Vec<(String, image::RgbaImage, ColorSpace)>,
+    /// By material name: `<P>/<name>.orm.ktx2`, linear.
+    pub orm: Vec<(String, image::RgbaImage)>,
+    /// For build output.
+    pub detail: String,
+}
+
+/// Bytes of a buffer or image URI: a data URI or a file next to the model.
+fn load_uri(uri: &str, dir: &Path) -> Result<Vec<u8>, String> {
+    if let Some(rest) = uri.strip_prefix("data:") {
+        let (_, data) = rest
+            .split_once(";base64,")
+            .ok_or_else(|| "unsupported data URI (not base64)".to_owned())?;
+        return base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .map_err(|e| format!("bad data URI: {e}"));
+    }
+    let path = dir.join(uri.replace("%20", " "));
+    std::fs::read(&path).map_err(|e| format!("{uri}: {e}"))
+}
+
+/// Compiles the model in `file`, whose asset path is `asset_path` (`P`).
+pub fn compile(file: &Path, asset_path: &str) -> Result<Compiled, String> {
+    let data = std::fs::read(file).map_err(|e| e.to_string())?;
+    let gltf = parse(&data)?;
+    let document = &gltf.document;
+    let outputs = analyze(document)?;
+    let dir = file.parent().unwrap_or(Path::new("."));
+    let buffers: Vec<Vec<u8>> = document
+        .buffers()
+        .map(|buffer| match buffer.source() {
+            gltf::buffer::Source::Bin => gltf
+                .blob
+                .clone()
+                .ok_or_else(|| "missing the GLB binary chunk".to_owned()),
+            gltf::buffer::Source::Uri(uri) => load_uri(uri, dir),
+        })
+        .collect::<Result<_, _>>()?;
+    let read = |buffer: gltf::Buffer<'_>| buffers.get(buffer.index()).map(Vec::as_slice);
+
+    // Geometry.
+    let slots: HashMap<usize, u32> = outputs
+        .materials
+        .iter()
+        .enumerate()
+        .map(|(slot, (i, _))| (*i, slot as u32))
+        .collect();
+    let instances = instances(document);
+    let skinned = instances.iter().any(|i| i.skinned);
+    let mut primitives = Vec::new();
+    let mut tangents = true;
+    for instance in &instances {
+        for primitive in instance
+            .node
+            .mesh()
+            .into_iter()
+            .flat_map(|m| m.primitives())
+        {
+            if !is_triangles(&primitive) {
+                continue;
+            }
+            let (vertices, indices, has_tangents) = read_primitive(&primitive, &read, instance)?;
+            tangents &= has_tangents;
+            primitives.push(amesh::Primitive {
+                vertices,
+                indices,
+                material: primitive
+                    .material()
+                    .index()
+                    .and_then(|i| slots.get(&i).copied()),
+            });
+        }
+    }
+    if skinned {
+        for p in &mut primitives {
+            for v in &mut p.vertices {
+                let sum: f32 = v.weights.iter().sum();
+                if sum > 0.0 {
+                    v.weights = v.weights.map(|w| w / sum);
+                } else {
+                    (v.joints, v.weights) = ([0; 4], [1.0, 0.0, 0.0, 0.0]);
+                }
+            }
+        }
+    }
+    let skeleton = skinned
+        .then(|| document.skins().next())
+        .flatten()
+        .map(|skin| skeleton(document, &skin, &read));
+    let material_ids: Vec<u64> = outputs
+        .materials
+        .iter()
+        .map(|(_, name)| fnv1a64(format!("{asset_path}/{name}.amat").as_bytes()))
+        .collect();
+    let (mesh, summary) = amesh::encode(&primitives, &material_ids, skeleton.as_deref(), tangents);
+
+    // Animations, for the skeleton.
+    let mut clip_count = 0;
+    let animation = match (&skeleton, outputs.animation) {
+        (Some(joints), true) => {
+            let clips = clips(document, &read)?;
+            clip_count = clips.len();
+            let mesh_id = fnv1a64(format!("{asset_path}.amesh").as_bytes());
+            Some(aanim::encode(&clips, joints.len() as u32, mesh_id))
+        }
+        _ => None,
+    };
+
+    // Images, decoded once.
+    let mut decoded: HashMap<usize, image::RgbaImage> = HashMap::new();
+    let mut decode = |index: usize| -> Result<image::RgbaImage, String> {
+        if let Some(image) = decoded.get(&index) {
+            return Ok(image.clone());
+        }
+        let image = document.images().nth(index).expect("image index");
+        let bytes = match image.source() {
+            gltf::image::Source::View { view, .. } => {
+                let buffer = read(view.buffer()).ok_or("missing buffer")?;
+                buffer
+                    .get(view.offset()..view.offset() + view.length())
+                    .ok_or("image view out of range")?
+                    .to_vec()
+            }
+            gltf::image::Source::Uri { uri, .. } => load_uri(uri, dir)?,
+        };
+        let rgba = image::load_from_memory(&bytes)
+            .map_err(|e| format!("image {index}: {e}"))?
+            .to_rgba8();
+        decoded.insert(index, rgba.clone());
+        Ok(rgba)
+    };
+    let mut images = Vec::new();
+    for (index, name, color) in &outputs.images {
+        images.push((name.clone(), decode(*index)?, *color));
+    }
+
+    // Materials and their ORM textures.
+    let texture_id = |name: &str| fnv1a64(format!("{asset_path}/{name}").as_bytes());
+    let image_name = |texture: gltf::Texture<'_>| {
+        let index = texture.source().index();
+        outputs
+            .images
+            .iter()
+            .find(|(i, _, _)| *i == index)
+            .map(|(_, name, _)| name.clone())
+    };
+    let mut materials = Vec::new();
+    let mut orm = Vec::new();
+    for (index, name) in &outputs.materials {
+        let m = document.materials().nth(*index).expect("material index");
+        let pbr = m.pbr_metallic_roughness();
+        let id_of = |texture: Option<gltf::Texture<'_>>| {
+            texture
+                .and_then(image_name)
+                .map_or(0, |name| texture_id(&name))
+        };
+        let occlusion = m.occlusion_texture();
+        let metal_rough = pbr.metallic_roughness_texture();
+        let mut orm_id = 0;
+        if occlusion.is_some() || metal_rough.is_some() {
+            let occlusion_image = occlusion
+                .as_ref()
+                .map(|t| decode(t.texture().source().index()))
+                .transpose()?;
+            let mr_image = metal_rough
+                .as_ref()
+                .map(|t| decode(t.texture().source().index()))
+                .transpose()?;
+            orm.push((name.clone(), pack_orm(occlusion_image, mr_image, name)?));
+            orm_id = texture_id(&format!("{name}.orm"));
+        }
+        let alpha_mode = match m.alpha_mode() {
+            gltf::material::AlphaMode::Opaque => AlphaMode::Opaque,
+            gltf::material::AlphaMode::Mask => AlphaMode::Mask,
+            gltf::material::AlphaMode::Blend => AlphaMode::Blend,
+        };
+        materials.push((
+            name.clone(),
+            Material {
+                base_color: pbr.base_color_factor(),
+                emissive: m.emissive_factor(),
+                emissive_strength: m.emissive_strength().unwrap_or(1.0),
+                metallic: pbr.metallic_factor(),
+                roughness: pbr.roughness_factor(),
+                occlusion_strength: occlusion.as_ref().map_or(1.0, |t| t.strength()),
+                normal_scale: m.normal_texture().map_or(1.0, |t| t.scale()),
+                height_scale: 0.0,
+                height_midlevel: 0.5,
+                alpha_cutoff: m.alpha_cutoff().unwrap_or(0.5),
+                alpha_mode,
+                double_sided: m.double_sided(),
+                height_mode: HeightMode::Parallax,
+                textures: TextureIds {
+                    base_color: id_of(pbr.base_color_texture().map(|t| t.texture())),
+                    normal: id_of(m.normal_texture().map(|t| t.texture())),
+                    orm: orm_id,
+                    emissive: id_of(m.emissive_texture().map(|t| t.texture())),
+                    height: 0,
+                },
+            },
+        ));
+    }
+
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let mut detail = vec![
+        plural(summary.vertices, "vertex", "vertices"),
+        plural(summary.triangles, "triangle", "triangles"),
+        plural(summary.submeshes, "submesh", "submeshes"),
+        plural(summary.meshlets, "meshlet", "meshlets"),
+    ];
+    if let Some(joints) = &skeleton {
+        detail.push(plural(joints.len(), "joint", "joints"));
+    }
+    if animation.is_some() {
+        detail.push(plural(clip_count, "clip", "clips"));
+    }
+    detail.push(plural(materials.len(), "material", "materials"));
+    detail.push(plural(images.len() + orm.len(), "texture", "textures"));
+    Ok(Compiled {
+        mesh,
+        animation,
+        materials,
+        images,
+        orm,
+        detail: detail.join(", "),
+    })
+}
+
+/// R from the occlusion image, G and B from the metallic-roughness image (255 without one).
+fn pack_orm(
+    occlusion: Option<image::RgbaImage>,
+    metal_rough: Option<image::RgbaImage>,
+    material: &str,
+) -> Result<image::RgbaImage, String> {
+    let size = match (&occlusion, &metal_rough) {
+        (Some(o), Some(m)) if o.dimensions() != m.dimensions() => {
+            return Err(format!(
+                "material {material}: occlusion is {:?} but metallic-roughness is {:?}",
+                o.dimensions(),
+                m.dimensions()
+            ));
+        }
+        (Some(o), _) => o.dimensions(),
+        (_, Some(m)) => m.dimensions(),
+        (None, None) => (1, 1),
+    };
+    Ok(image::RgbaImage::from_fn(size.0, size.1, |x, y| {
+        let r = occlusion.as_ref().map_or(255, |o| o.get_pixel(x, y)[0]);
+        let [g, b] = metal_rough.as_ref().map_or([255, 255], |m| {
+            let p = m.get_pixel(x, y);
+            [p[1], p[2]]
+        });
+        image::Rgba([r, g, b, 255])
+    }))
+}
+
+type Read<'s> = dyn Fn(gltf::Buffer<'_>) -> Option<&'s [u8]> + 's;
+
+/// One primitive's vertices and triangle-list indices; static ones baked into world space.
+/// Also says whether it has (or got generated) tangents.
+fn read_primitive<'s>(
+    primitive: &Primitive<'_>,
+    read: &Read<'s>,
+    instance: &Instance<'_>,
+) -> Result<(Vec<Vertex>, Vec<u32>, bool), String> {
+    let reader = primitive.reader(|b| read(b));
+    let positions: Vec<[f32; 3]> = reader
+        .read_positions()
+        .ok_or("primitive without POSITION")?
+        .collect();
+    let n = positions.len() as u32;
+    let raw: Vec<u32> = reader
+        .read_indices()
+        .map_or_else(|| (0..n).collect(), |i| i.into_u32().collect());
+    if raw.iter().any(|&i| i >= n) {
+        return Err("index out of range".into());
+    }
+    let mut indices = match primitive.mode() {
+        Mode::TriangleStrip => (2..raw.len())
+            .flat_map(|i| {
+                if i % 2 == 0 {
+                    [raw[i - 2], raw[i - 1], raw[i]]
+                } else {
+                    [raw[i - 1], raw[i - 2], raw[i]]
+                }
+            })
+            .collect(),
+        Mode::TriangleFan => (2..raw.len())
+            .flat_map(|i| [raw[i - 1], raw[i], raw[0]])
+            .collect(),
+        _ => raw[..raw.len() / 3 * 3].to_vec(),
+    };
+    let normals: Option<Vec<[f32; 3]>> = reader.read_normals().map(Iterator::collect);
+    let uvs: Option<Vec<[f32; 2]>> = reader.read_tex_coords(0).map(|t| t.into_f32().collect());
+    let tangents: Option<Vec<[f32; 4]>> = reader.read_tangents().map(Iterator::collect);
+    let joints: Option<Vec<[u16; 4]>> = reader.read_joints(0).map(|j| j.into_u16().collect());
+    let weights: Option<Vec<[f32; 4]>> = reader.read_weights(0).map(|w| w.into_f32().collect());
+    let mut vertices: Vec<Vertex> = (0..positions.len())
+        .map(|i| Vertex {
+            position: positions[i],
+            normal: normals.as_ref().map_or([0.0; 3], |v| v[i]),
+            tangent: tangents.as_ref().map_or([0.0; 4], |v| v[i]),
+            uv: uvs.as_ref().map_or([0.0; 2], |v| v[i]),
+            joints: joints.as_ref().map_or([0; 4], |v| v[i]),
+            weights: weights.as_ref().map_or([0.0; 4], |v| v[i]),
+        })
+        .collect();
+
+    // Flat normals: every triangle gets its own vertices.
+    if normals.is_none() {
+        let mut flat = Vec::with_capacity(indices.len());
+        for triangle in indices.chunks_exact(3) {
+            let [a, b, c] = [0, 1, 2].map(|k| Vec3::from(vertices[triangle[k] as usize].position));
+            let normal = (b - a).cross(c - a).normalize_or_zero().to_array();
+            for &i in triangle {
+                flat.push(Vertex {
+                    normal,
+                    ..vertices[i as usize]
+                });
+            }
+        }
+        vertices = flat;
+        indices = (0..vertices.len() as u32).collect();
+    }
+
+    let mut has_tangents = tangents.is_some();
+    if !has_tangents && uvs.is_some() && !indices.is_empty() {
+        if let Some(generated) = generate_tangents(&vertices, &indices) {
+            for (v, t) in vertices.iter_mut().zip(generated) {
+                v.tangent = t;
+            }
+            has_tangents = true;
+        }
+    }
+
+    if !instance.skinned {
+        let world = instance.world;
+        let linear = Mat3::from_mat4(world);
+        let normal_matrix = linear.inverse().transpose();
+        let mirror = if linear.determinant() < 0.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        for v in &mut vertices {
+            v.position = world.transform_point3(Vec3::from(v.position)).to_array();
+            v.normal = (normal_matrix * Vec3::from(v.normal))
+                .normalize_or_zero()
+                .to_array();
+            let t = (linear * Vec3::from_slice(&v.tangent[..3])).normalize_or_zero();
+            v.tangent = [t.x, t.y, t.z, v.tangent[3] * mirror];
+        }
+        if mirror < 0.0 {
+            // Keep triangles front-facing after a mirroring transform.
+            for triangle in indices.chunks_exact_mut(3) {
+                triangle.swap(1, 2);
+            }
+        }
+    }
+    Ok((vertices, indices, has_tangents))
+}
+
+/// MikkTSpace tangents, through Bevy's mesh.
+fn generate_tangents(vertices: &[Vertex], indices: &[u32]) -> Option<Vec<[f32; 4]>> {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vertices.iter().map(|v| v.position).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_NORMAL,
+        vertices.iter().map(|v| v.normal).collect::<Vec<_>>(),
+    )
+    .with_inserted_attribute(
+        Mesh::ATTRIBUTE_UV_0,
+        vertices.iter().map(|v| v.uv).collect::<Vec<_>>(),
+    )
+    .with_inserted_indices(Indices::U32(indices.to_vec()));
+    mesh.generate_tangents().ok()?;
+    match mesh.attribute(Mesh::ATTRIBUTE_TANGENT)? {
+        VertexAttributeValues::Float32x4(tangents) => Some(tangents.clone()),
+        _ => None,
+    }
+}
+
+/// The first skin's joints: bind pose, inverse bind matrices and parents.
+fn skeleton(document: &Document, skin: &gltf::Skin<'_>, read: &Read<'_>) -> Vec<Joint> {
+    let mut parents = HashMap::new();
+    for node in document.nodes() {
+        for child in node.children() {
+            parents.insert(child.index(), node.index());
+        }
+    }
+    let joints: Vec<Node<'_>> = skin.joints().collect();
+    let index_of = |node: usize| joints.iter().position(|j| j.index() == node);
+    let inverse_binds: Vec<[[f32; 4]; 4]> = skin
+        .reader(|b| read(b))
+        .read_inverse_bind_matrices()
+        .map(Iterator::collect)
+        .unwrap_or_default();
+    joints
+        .iter()
+        .enumerate()
+        .map(|(i, node)| {
+            let (translation, rotation, scale) = node.transform().decomposed();
+            let inverse_bind = inverse_binds
+                .get(i)
+                .map_or(Mat4::IDENTITY, Mat4::from_cols_array_2d);
+            Joint {
+                inverse_bind: inverse_bind.to_cols_array(),
+                translation,
+                rotation,
+                scale,
+                parent: parents
+                    .get(&node.index())
+                    .and_then(|&p| index_of(p))
+                    .map_or(-1, |p| p as i32),
+            }
+        })
+        .collect()
+}
+
+/// Every animation, keeping channels on the first skin's joints.
+fn clips(document: &Document, read: &Read<'_>) -> Result<Vec<aanim::Clip>, String> {
+    use gltf::animation::{Interpolation, Property, util::ReadOutputs};
+    let Some(skin) = document.skins().next() else {
+        return Ok(Vec::new());
+    };
+    let joints: Vec<usize> = skin.joints().map(|j| j.index()).collect();
+    let mut clips = Vec::new();
+    for (i, animation) in document.animations().enumerate() {
+        let mut channels = Vec::new();
+        for channel in animation.channels() {
+            let Some(joint) = joints
+                .iter()
+                .position(|&j| j == channel.target().node().index())
+            else {
+                continue;
+            };
+            let (path, components) = match channel.target().property() {
+                Property::Translation => (0, 3),
+                Property::Rotation => (1, 4),
+                Property::Scale => (2, 3),
+                Property::MorphTargetWeights => continue,
+            };
+            let reader = channel.reader(|b| read(b));
+            let times: Vec<f32> = reader
+                .read_inputs()
+                .ok_or("animation channel without input")?
+                .collect();
+            let mut values: Vec<f32> = match reader
+                .read_outputs()
+                .ok_or("animation channel without output")?
+            {
+                ReadOutputs::Translations(t) => t.flatten().collect(),
+                ReadOutputs::Rotations(r) => r.into_f32().flatten().collect(),
+                ReadOutputs::Scales(s) => s.flatten().collect(),
+                ReadOutputs::MorphTargetWeights(_) => continue,
+            };
+            let cubic = channel.sampler().interpolation() == Interpolation::CubicSpline;
+            if cubic {
+                // Keep the value of each in-tangent / value / out-tangent triple.
+                values = values
+                    .chunks(components)
+                    .skip(1)
+                    .step_by(3)
+                    .flatten()
+                    .copied()
+                    .collect();
+            }
+            channels.push(aanim::Channel {
+                joint: joint as u32,
+                path,
+                interpolation: u8::from(channel.sampler().interpolation() != Interpolation::Step),
+                components: components as u8,
+                times,
+                values,
+            });
+        }
+        clips.push(aanim::Clip {
+            name: animation
+                .name()
+                .filter(|n| !n.is_empty())
+                .map_or_else(|| format!("Animation {}", i + 1), str::to_owned),
+            channels,
+        });
+    }
+    Ok(clips)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +787,65 @@ mod tests {
         let names: Vec<_> = animations.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, ["Survey", "Walk", "Run"]);
         assert!(animations.iter().all(|(_, d)| *d > 0.0));
+    }
+
+    /// One triangle without normals, under a node moved by +10 on X, with a named material.
+    fn static_triangle() -> String {
+        let floats: Vec<u8> = [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+            .iter()
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+        let data = base64::engine::general_purpose::STANDARD.encode(floats);
+        format!(
+            r#"{{
+            "asset": {{"version": "2.0"}},
+            "buffers": [{{"byteLength": 36, "uri": "data:application/octet-stream;base64,{data}"}}],
+            "bufferViews": [{{"buffer": 0, "byteLength": 36}}],
+            "accessors": [{{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+                           "min": [0, 0, 0], "max": [1, 1, 0]}}],
+            "materials": [{{"name": "Paint", "pbrMetallicRoughness": {{"baseColorFactor": [1, 0, 0, 1]}}}},
+                          {{"name": "unused"}}],
+            "meshes": [{{"primitives": [{{"attributes": {{"POSITION": 0}}, "material": 0}}]}}],
+            "nodes": [{{"mesh": 0, "translation": [10, 0, 0]}}],
+            "scenes": [{{"nodes": [0]}}]
+        }}"#
+        )
+    }
+
+    #[test]
+    fn names_are_unique_and_safe() {
+        let names = leaves(&[Some("Wood"), None, Some("a/b"), Some("Dup"), Some("Dup")], "m");
+        assert_eq!(names, ["Wood", "m_1", "m_2", "m_3", "m_4"]);
+    }
+
+    #[test]
+    fn static_models_bake_transforms_and_flat_normals() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("tri.gltf");
+        std::fs::write(&file, static_triangle()).unwrap();
+        let outputs = outputs(&std::fs::read(&file).unwrap()).unwrap();
+        // Only used materials.
+        assert_eq!(outputs.materials, [(0, "Paint".to_owned())]);
+        assert!(!outputs.animation);
+
+        let compiled = compile(&file, "props/tri").unwrap();
+        assert!(compiled.animation.is_none());
+        assert_eq!(compiled.materials[0].0, "Paint");
+        assert_eq!(compiled.materials[0].1.base_color, [1.0, 0.0, 0.0, 1.0]);
+        let reader = crate::chunks::Reader::parse(&compiled.mesh, "AMESH").unwrap();
+        let vertices = reader.require("VERTICES").unwrap();
+        assert_eq!(vertices.len(), 3 * 28);
+        let xs: Vec<f32> = (0..3)
+            .map(|i| crate::chunks::f32_at(vertices, i, 28, 0).unwrap())
+            .collect();
+        assert!(xs.iter().all(|&x| x >= 10.0), "{xs:?}");
+        // Flat normal +Z encodes as (0, 0).
+        assert_eq!(&vertices[12..16], &[0, 0, 0, 0]);
+        assert_eq!(
+            reader.require("MATERIAL").unwrap(),
+            fnv1a64(b"props/tri/Paint.amat").to_le_bytes()
+        );
+        assert!(compiled.detail.starts_with("3 vertices, 1 triangle, 1 submesh, 1 meshlet"));
     }
 
     #[test]

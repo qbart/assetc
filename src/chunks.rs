@@ -109,17 +109,23 @@ impl<'a> Reader<'a> {
 
     pub fn chunk(&self, name: &str) -> Option<&'a [u8]> {
         let name = name8(name);
-        self.chunks.iter().find(|(n, _)| *n == name).map(|(_, p)| *p)
+        self.chunks
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, p)| *p)
     }
 
     /// A chunk the format requires.
     pub fn require(&self, name: &str) -> Result<&'a [u8], String> {
-        self.chunk(name).ok_or_else(|| format!("missing {name} chunk"))
+        self.chunk(name)
+            .ok_or_else(|| format!("missing {name} chunk"))
     }
 }
 
 fn show(name: &[u8; 8]) -> String {
-    String::from_utf8_lossy(name).trim_end_matches('\0').to_owned()
+    String::from_utf8_lossy(name)
+        .trim_end_matches('\0')
+        .to_owned()
 }
 
 /// Little-endian byte building for chunk payloads.
@@ -172,7 +178,9 @@ impl Bytes {
 /// Little-endian field `at` of record `index` (of `stride` bytes) in a payload.
 pub fn u32_at(payload: &[u8], index: usize, stride: usize, at: usize) -> Option<u32> {
     let start = index.checked_mul(stride)?.checked_add(at)?;
-    Some(u32::from_le_bytes(payload.get(start..start + 4)?.try_into().ok()?))
+    Some(u32::from_le_bytes(
+        payload.get(start..start + 4)?.try_into().ok()?,
+    ))
 }
 
 pub fn f32_at(payload: &[u8], index: usize, stride: usize, at: usize) -> Option<f32> {
@@ -186,7 +194,9 @@ mod tests {
     #[test]
     fn layout_matches_the_spec() {
         let mut writer = Writer::new("AMESH", 1);
-        writer.chunk("DESC", vec![1, 2, 3]).chunk("VERTICES", vec![9; 20]);
+        writer
+            .chunk("DESC", vec![1, 2, 3])
+            .chunk("VERTICES", vec![9; 20]);
         let file = writer.finish();
         assert_eq!(&file[..8], b"AMESH\0\0\0");
         assert_eq!(u32::from_le_bytes(file[8..12].try_into().unwrap()), 1);
