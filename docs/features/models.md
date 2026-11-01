@@ -100,23 +100,38 @@ section (collapsible, open):
 ## Compiled mesh preview
 
 Selecting a compiled mesh (`*.amesh` in the Output tree) shows it in the 3D
-view, so its meshlets can be checked after a build.
+view, to check what the build produced.
 
 - The view bar is empty: a mesh only exists in 3D. The mesh is read from the
-  file (positions, normals, meshlets) on the [inspector thread](inspector.md#loading),
-  centered and scaled like a [model](#preview), and does not auto-rotate. A
-  skinned mesh is shown in its bind pose.
-- A toolbar group (top right, like the canvas toolbar) picks the display;
-  the choice lasts for the session:
+  file (vertices, submeshes, meshlets) on the
+  [inspector thread](inspector.md#loading), centered and scaled like a
+  [model](#preview), and does not auto-rotate. A skinned mesh is shown in its
+  bind pose.
+- A toolbar group (top right, like the canvas toolbar) picks the display
+  mode; the choice lasts for the session:
 
-  | Button   | Icon     | Shows                                                       |
-  |----------|----------|-------------------------------------------------------------|
-  | Meshlets | `shapes` | each meshlet in its own color (default)                     |
-  | Shaded   | `box`    | the whole mesh in light gray                                |
+  | Button      | Icon          | Shows                                                    |
+  |-------------|---------------|----------------------------------------------------------|
+  | Material    | `palette`     | the mesh with its compiled materials (default), see below |
+  | Wireframe   | `triangle`    | every triangle edge as a 1 px `TEXT` line, unlit, no faces |
+  | Shaded      | `box`         | the whole mesh in light gray                             |
+  | Meshlets    | `shapes`      | each meshlet in its own color                            |
+  | Material ID | `swatch-book` | each material slot in its own color; no material in gray |
+  | Submeshes   | `layers`      | each submesh in its own color                            |
 
-- Meshlet colors: meshlet `i` has hue `i × 0.618034` (fractional part, the
-  golden ratio, so neighbours differ), saturation 0.65, value 0.9.
-  Triangles are lit as usual (the file's normals), so shapes stay readable.
+- **Material**: each submesh uses its `.amat` (looked up by the `MATERIAL`
+  asset IDs in the output's [`assets.manifest`](../spec/manifest.md)) as a
+  physically based material: base color factor and texture, metallic and
+  roughness factors with the ORM texture (G roughness, B metallic, R
+  occlusion), normal texture and scale, emissive factor × strength and
+  texture, alpha mode and cutoff, double-sided. Textures are read from their
+  `.ktx2` (level 0). A material or texture that cannot be found or read is
+  replaced by the defaults (white, roughness 1, no texture), and a submesh
+  without a material is light gray.
+- **Colors** of the ID modes: index `i` (meshlet, material slot or submesh)
+  has hue `i × 0.618034` (fractional part, the golden ratio, so neighbours
+  differ), saturation 0.65, value 0.9. Triangles are lit as usual (the
+  file's normals), so shapes stay readable.
 - A file that does not read shows its error as the canvas message.
 
 ## Animations tab

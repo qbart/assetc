@@ -132,7 +132,7 @@ toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `bo
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients tab), `eye`, `eye-off` (LUT cube before / after),
 `sliders-vertical` (Inspector Parameters tab), `wrench`,
 `grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab),
-`grip-vertical` (LUT compare divider), `shapes` (compiled mesh meshlets), `loader`
+`grip-vertical` (LUT compare divider), `palette`, `triangle`, `box`, `shapes`, `swatch-book`, `layers` (compiled mesh display modes), `loader`
 (status bar), `folder`, `folder-open`, `file`, `sun-medium`, `type`,
 `aperture`, `image-play`, `swatch-book`, `image`, `torus`, `chevron-right`, `chevron-down` (file tree,
 see [Tree icons](#tree-icons)), `image` (texture assets). The logo is not a
