@@ -279,10 +279,19 @@ line per model, e.g.
   [Parameters tab](#parameters-tab)) sets its own. The limits used are
   stored in the `.amesh` `DESC`, and simplified into two
   **levels of detail** at about 50% and 25% of its triangles, all with
-  [meshoptimizer](https://github.com/zeux/meshoptimizer). Simplification
-  starts with a 5% error limit, raises it by 5% up to three times while it
-  makes no progress, and then falls back to sloppy (topology-ignoring)
-  simplification.
+  [meshoptimizer](https://github.com/zeux/meshoptimizer).
+- **Simplification keeps UVs and normals in mind.** A level of detail only
+  drops vertices and reuses the remaining ones (with their own UV, normal and
+  tangent), so its quality depends on which vertices survive.
+  Simplification therefore weighs the vertices' UVs (weight 1) and normals
+  (weight 0.5) next to their positions, and may collapse across attribute
+  seams (vertices sharing a position but not their UV or normal, as on every
+  edge of a flat-shaded mesh) when the attribute error stays within the
+  limit. Without that, flat-shaded meshes could not be simplified at all.
+  It starts with a 5% error limit and raises it by 5% up to three times
+  while it makes no progress. Only then does it fall back to sloppy
+  (topology-ignoring) simplification, which merges nearby vertices from
+  different faces and so can stretch textures.
 - A file without any triangle primitive fails (`no triangles in the default
   scene`).
 
