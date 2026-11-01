@@ -156,8 +156,10 @@ below.
 
 ## Logo
 
-Source: `assets/icons/logo.png` (anvil, transparent background), embedded in
-the binary. At startup it is cropped to the bounding box of its visible pixels
+Source: `assets/icons/pipe_logo.png` (an orange pipe splitting into three,
+64 × 64 px, transparent background), embedded in the binary. The previous
+logo, `assets/icons/logo.png` (anvil), stays in the repository but is not
+used. At startup it is cropped to the bounding box of its visible pixels
 (alpha > 8 of 255, so near-invisible noise in the margins is ignored), then resized (Lanczos3) to 16 pt tall at the window's scale factor,
 keeping its aspect ratio, and shown untinted at the left of the menu bar.
 
