@@ -20,7 +20,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 ## Tabs
 
 Seven icon tabs, top to bottom: **Info** (`info`), **Parameters**
-(`sliders-vertical`) for `.noise` and `.gradient` files, **Modifiers**
+(`sliders-vertical`) for `.noise`, `.gradient` and model files, **Modifiers**
 (`wrench`) for `.noise` files and **Gradients** (`palette`) for `.gradient`
 files, all three only in the Input tree (see
 [`noise.md`](noise.md#parameters-tab), [`gradients.md`](gradients.md#parameters-tab)),

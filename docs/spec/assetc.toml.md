@@ -55,7 +55,8 @@ Each `[[meshes.overrides]]` entry:
 | `meshlet_max_triangles` | integer          | Optional, replaces the default for matching models   |
 
 For each setting, the **last** entry that matches the model and sets it wins;
-otherwise the default applies.
+otherwise the default applies. A model's own [`.amod`](amod.md#mesh) sidecar
+wins over both.
 
 ```toml
 [meshes]

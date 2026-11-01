@@ -35,7 +35,7 @@ images are not read for these rows.
 
 Counts are per mesh, not per instance: a mesh used by two nodes counts once.
 After them, **Meshlet limits** (`64 vertices, 124 triangles`: the values
-`[meshes]` gives this model, or the config error), then **Asset path** and
+this model builds with, from `[meshes]` and its `.amod`, or the error), then **Asset path** and
 **Output** (the `.amesh`; `(not built)` appended when it does not exist), as
 for source textures.
 
@@ -75,6 +75,49 @@ a shape.
   fails the canvas shows `Could not load the model: <error>`.
 - Each new inspection of the file (selecting it, a rescan) reloads it from
   disk, so changes made in another program show up.
+
+## Parameters tab
+
+The Inspector's **Parameters** tab (`sliders-vertical`) is shown for a model
+in the Input tree. It edits the model's [`.amod`](../spec/amod.md) sidecar,
+in the [property editor](gui.md#property-editor) look, with one **Meshlets**
+section (collapsible, open):
+
+- **Max vertices** (integer field, 3–256) and **Max triangles** (integer
+  field, 4–512, rounded to a multiple of 4), drag or type. They show the
+  values the model builds with.
+- A weak line saying where they come from: `Project settings (assetc.toml)`,
+  or `Set for this file (<file>.amod)` when the sidecar sets either value.
+- A **Use project settings** button, enabled when the sidecar sets a value:
+  it removes the values (and the file when nothing else is left in it).
+- Changing a value writes it to the sidecar (creating it), saved like noise
+  parameters (see [`noise.md`](noise.md#saving)); the file is then inspected
+  again. If `assetc.toml` `[meshes]` or the sidecar is invalid, the tab shows
+  the error instead.
+- The new limits apply at the next build; check the result in the
+  [compiled mesh preview](#compiled-mesh-preview).
+
+## Compiled mesh preview
+
+Selecting a compiled mesh (`*.amesh` in the Output tree) shows it in the 3D
+view, so its meshlets can be checked after a build.
+
+- The view bar is empty: a mesh only exists in 3D. The mesh is read from the
+  file (positions, normals, meshlets) on the [inspector thread](inspector.md#loading),
+  centered and scaled like a [model](#preview), and does not auto-rotate. A
+  skinned mesh is shown in its bind pose.
+- A toolbar group (top right, like the canvas toolbar) picks the display;
+  the choice lasts for the session:
+
+  | Button   | Icon     | Shows                                                       |
+  |----------|----------|-------------------------------------------------------------|
+  | Meshlets | `shapes` | each meshlet in its own color (default)                     |
+  | Shaded   | `box`    | the whole mesh in light gray                                |
+
+- Meshlet colors: meshlet `i` has hue `i × 0.618034` (fractional part, the
+  golden ratio, so neighbours differ), saturation 0.65, value 0.9.
+  Triangles are lit as usual (the file's normals), so shapes stay readable.
+- A file that does not read shows its error as the canvas message.
 
 ## Animations tab
 
@@ -149,8 +192,10 @@ line per model, e.g.
   0.25), of at most `meshlet_max_vertices` vertices and
   `meshlet_max_triangles` triangles: 64 and 124 unless
   [`[meshes]`](../spec/assetc.toml.md#meshes) in `assetc.toml` sets other
-  defaults or overrides them for the model. The limits used are stored in
-  the `.amesh` `DESC`, and simplified into two
+  defaults or overrides them for the model, or the model's
+  [`.amod`](../spec/amod.md#mesh) sidecar (edited in the
+  [Parameters tab](#parameters-tab)) sets its own. The limits used are
+  stored in the `.amesh` `DESC`, and simplified into two
   **levels of detail** at about 50% and 25% of its triangles, all with
   [meshoptimizer](https://github.com/zeux/meshoptimizer). Simplification
   starts with a 5% error limit, raises it by 5% up to three times while it

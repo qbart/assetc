@@ -37,6 +37,8 @@ renaming it.
   changes and the status bar shows why (see [Errors](#errors)). An unchanged
   name does nothing.
 - On success the tree is rescanned and the renamed entry stays selected.
+- A file's [`.amod`](../spec/amod.md) sidecar is renamed with it
+  (`Fox.glb.amod` → `Hero.glb.amod`).
 
 ## Delete
 
@@ -46,7 +48,8 @@ renaming it.
   deletes the file.` for files, and buttons **Cancel** and **Delete** (the
   confirming button), in the [dialog look](gui.md#dialogs). Escape or
   clicking outside cancels.
-- Deleting is permanent (not moved to a trash).
+- Deleting is permanent (not moved to a trash). A file's
+  [`.amod`](../spec/amod.md) sidecar is deleted with it.
 - On success the tree is rescanned and the selection is cleared.
 
 ## Safety

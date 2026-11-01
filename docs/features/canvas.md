@@ -57,6 +57,7 @@ Both modes show the same messages when there is no image to show.
 | an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
 | a font (Input `*.ttf`, `*.otf`)   | its specimen sheet, without the toolbar, see [`fonts.md`](fonts.md#specimen) |
 | a model (Input `*.gltf`, `*.glb`) | the model, in 3D, see [`models.md`](models.md#preview) |
+| a compiled mesh (Output `*.amesh`) | the mesh and its meshlets, in 3D, see [`models.md`](models.md#compiled-mesh-preview) |
 | any other file or folder          | "No preview"                              |
 | a selected file that disappeared  | "<name> no longer exists"                 |
 
