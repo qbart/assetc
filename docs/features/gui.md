@@ -138,8 +138,8 @@ toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `bo
 `aperture`, `image-play`, `swatch-book`, `image`, `torus`, `chevron-right`, `chevron-down` (file tree,
 see [Tree icons](#tree-icons)), `image` (texture assets). Two icons are assetc's own, drawn
 on Lucide's `box` (same outline, stroke and license): `box-checker` (each
-visible face split 2 × 2 with two opposite cells filled at 70% opacity, a
-checkerboard) and `box-shaded` (the top face filled at 90%, the left at 55%,
+visible face split 2 × 2 with two opposite cells filled solid in the
+outline's color, a checkerboard) and `box-shaded` (the top face filled at 90%, the left at 55%,
 the right at 30%, so it reads as lit). The logo is not a Lucide icon, see
 below.
 
