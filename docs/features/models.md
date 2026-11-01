@@ -100,6 +100,26 @@ and `TEXT_WEAK` when it comes from the project.
   **Attempts** (integer field, 0–10), **UV weight** and **Normal weight**
   (sliders 0–10), and checkboxes **Sloppy fallback**, **Permissive**,
   **Lock border**, **Regularize**, **Prune**.
+- Hovering a setting's label shows what it does, in plain words:
+
+  | Label           | Hint |
+  |-----------------|------|
+  | Max vertices    | Most vertices one meshlet may use. Match what your mesh shader outputs per workgroup (64 is common). |
+  | Max triangles   | Most triangles one meshlet may hold, a multiple of 4. Match what your mesh shader outputs per workgroup (124 is common). |
+  | Cone weight     | 0 packs triangles into as few meshlets as possible. Higher groups triangles that face the same way, so whole meshlets facing away from the camera can be skipped. |
+  | Levels          | How many simplified copies of the mesh to build, for drawing it far away. 0 builds none. |
+  | LOD *n*         | Size of this level as a share of the full mesh's triangles (0.25 = a quarter). Each level must be smaller than the one before. |
+  | Error           | How far simplification may move the surface, as a share of the mesh's size (0.05 = 5%). Lower keeps the shape better but may stop before reaching the target size. |
+  | Error step      | How much the allowed error grows on each retry, when a level cannot get smaller. |
+  | Attempts        | How many times to retry with more allowed error before giving up (or falling back to sloppy). |
+  | UV weight       | How much keeping texture coordinates matters. Higher keeps textures from stretching; lower simplifies more freely. |
+  | Normal weight   | How much keeping normals (the shading) matters. Higher keeps the lighting; lower simplifies more freely. |
+  | Sloppy fallback | When careful simplification cannot reach the target, merge nearby vertices regardless of how the mesh is built. Always gets smaller, but can stretch textures and leave holes. Off: the level reuses the previous one. |
+  | Permissive      | Allow simplifying across seams where UVs or normals split, such as every edge of a flat-shaded model. Flat-shaded models need it; the UV and normal weights keep it in check. |
+  | Lock border     | Keep vertices on the mesh's open edges in place, so pieces that meet along their edges (such as terrain tiles) stay sealed. |
+  | Regularize      | Prefer evenly sized triangles, at some cost to accuracy. |
+  | Prune           | Remove small, disconnected pieces while simplifying, when they are too small to matter. |
+
 - A weak line saying where the values come from: `Project settings
   (assetc.toml)`, or `Set for this file (<file>.amod)` when the sidecar sets
   any.
