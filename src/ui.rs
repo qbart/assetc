@@ -979,12 +979,9 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
         *action = Some(TreeAction::Op(FileOp::NewFolder(dir.to_path_buf())));
         ui.close();
     }
-    // Same size and text inset as `menu_row`.
+    // Same size, color and text inset as `menu_row`.
     ui.spacing_mut().button_padding = vec2(24.0, 7.0);
-    ui.style_mut()
-        .text_styles
-        .insert(egui::TextStyle::Button, FontId::proportional(14.0));
-    ui.menu_button("New Noise", |ui| {
+    ui.menu_button(RichText::new("New Noise").size(14.0).color(TEXT), |ui| {
         for kind in GeneratorKind::ALL {
             if menu_item(ui, kind.name(), None).clicked() {
                 *action = Some(TreeAction::Op(FileOp::NewNoise(dir.to_path_buf(), kind)));
@@ -1184,6 +1181,54 @@ fn commit_rename(state: &mut UiState, project: &Project) {
     }
 }
 
+/// A modal confirmation dialog, see docs/features/gui.md#dialogs. Returns `Some(true)` when
+/// `confirm` is clicked, `Some(false)` when cancelled, `None` while open.
+fn dialog(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    message: &str,
+    confirm: &str,
+) -> Option<bool> {
+    let frame = Frame::window(&ctx.global_style())
+        .fill(BG_PANEL)
+        .stroke(Stroke::new(1.0, STROKE))
+        .corner_radius(8)
+        .inner_margin(24);
+    let mut answer = None;
+    let modal = egui::Modal::new(egui::Id::new(id))
+        .frame(frame)
+        .show(ctx, |ui| {
+            ui.set_width(360.0);
+            ui.label(RichText::new(title).size(16.0).color(TEXT));
+            ui.add_space(8.0);
+            ui.label(RichText::new(message).size(14.0).color(TEXT_WEAK));
+            ui.add_space(24.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let button = |text: &str, color, fill, stroke| {
+                    egui::Button::new(RichText::new(text).size(14.0).color(color))
+                        .fill(fill)
+                        .stroke(stroke)
+                        .corner_radius(6)
+                        .min_size(vec2(96.0, 34.0))
+                };
+                let confirm = button(confirm, BG_BAR, ACCENT, Stroke::NONE);
+                if ui.add(confirm).clicked() {
+                    answer = Some(true);
+                }
+                let cancel = button("Cancel", TEXT, BG_HEADER, Stroke::new(1.0, STROKE));
+                if ui.add(cancel).clicked() {
+                    answer = Some(false);
+                }
+            });
+        });
+    if answer.is_none() && modal.should_close() {
+        answer = Some(false);
+    }
+    answer
+}
+
 /// The delete confirmation dialog, see docs/features/file-operations.md#delete.
 fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
     let Some(path) = state.confirm_delete.clone() else {
@@ -1193,29 +1238,19 @@ fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let mut confirmed = false;
-    let mut cancelled = false;
-    let modal = egui::Modal::new(egui::Id::new("confirm_delete")).show(ctx, |ui| {
-        ui.set_width(320.0);
-        ui.label(RichText::new(format!("Delete {name}?")).strong());
-        ui.add_space(4.0);
-        ui.weak(if path.is_dir() {
-            "This permanently deletes it and everything inside it."
-        } else {
-            "This permanently deletes the file."
-        });
-        ui.add_space(12.0);
-        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            let delete = egui::Button::new(RichText::new("Delete").color(BG_BAR)).fill(ACCENT);
-            if ui.add(delete).clicked() {
-                confirmed = true;
-            }
-            if ui.button("Cancel").clicked() {
-                cancelled = true;
-            }
-        });
-    });
-    if confirmed {
+    let message = if path.is_dir() {
+        "This permanently deletes it and everything inside it."
+    } else {
+        "This permanently deletes the file."
+    };
+    let answer = dialog(
+        ctx,
+        "confirm_delete",
+        &format!("Delete {name}?"),
+        message,
+        "Delete",
+    );
+    if answer == Some(true) {
         state.confirm_delete = None;
         state.notice = None;
         let Some(input) = project.input_dir() else {
@@ -1235,7 +1270,7 @@ fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
             }
             Err(e) => state.notice = Some(format!("Delete failed: {e}")),
         }
-    } else if cancelled || modal.should_close() {
+    } else if answer == Some(false) {
         state.confirm_delete = None;
     }
 }
