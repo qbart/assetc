@@ -1938,7 +1938,6 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                 let file = &mut edit.edit;
                 let cards = &mut edit.cards;
                 cards.resize_with(file.gradients.len(), GradientCard::default);
-                let count = file.gradients.len().max(1) as u32;
                 prop_section(
                     ui,
                     "gradient_output",
@@ -1947,31 +1946,34 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                     |_| {},
                     |_| {},
                     |ui| {
-                        prop_row(ui, "Width", |ui, width| {
-                            ui.add_sized(
-                                vec2(width, 22.0),
-                                egui::DragValue::new(&mut file.width).range(1..=4096),
-                            );
-                        });
-                        // Limits keep the gradients fitting, so the file stays valid.
-                        let needed = (file.gradients.len() as u32 * file.stripe).max(1);
-                        prop_row(ui, "Height", |ui, width| {
-                            ui.add_sized(
-                                vec2(width, 22.0),
-                                egui::DragValue::new(&mut file.height).range(needed..=4096),
-                            );
-                        });
-                        let most = (file.height / count).max(1);
-                        prop_row(ui, "Stripe", |ui, width| {
-                            ui.add_sized(
-                                vec2(width, 22.0),
-                                egui::DragValue::new(&mut file.stripe).range(1..=most),
-                            );
-                        });
+                        // A change that leaves too few cells is undone, so the file stays valid.
+                        let before = (file.width, file.height, file.cell_width, file.cell_height);
+                        let (max_cell_width, max_cell_height) = (file.width, file.height);
+                        let fields = [
+                            ("Width", &mut file.width, 4096),
+                            ("Height", &mut file.height, 4096),
+                            ("Cell width", &mut file.cell_width, max_cell_width),
+                            ("Cell height", &mut file.cell_height, max_cell_height),
+                        ];
+                        for (label, value, max) in fields {
+                            prop_row(ui, label, |ui, width| {
+                                ui.add_sized(
+                                    vec2(width, 22.0),
+                                    egui::DragValue::new(value).range(1..=max),
+                                );
+                            });
+                        }
+                        file.cell_width = file.cell_width.min(file.width);
+                        file.cell_height = file.cell_height.min(file.height);
+                        if file.validate().is_err() {
+                            (file.width, file.height, file.cell_width, file.cell_height) = before;
+                        }
                         ui.weak(format!(
-                            "{} of {} stripes used",
+                            "{} of {} cells used ({} × {})",
                             file.gradients.len(),
-                            file.capacity()
+                            file.capacity(),
+                            file.columns(),
+                            file.rows()
                         ));
                     },
                 );
@@ -2050,7 +2052,7 @@ fn gradient_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                     egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add gradient");
                 let added = ui
                     .add_enabled(room, button)
-                    .on_disabled_hover_text("No room: raise Height or lower Stripe")
+                    .on_disabled_hover_text("No room: enlarge the image or shrink the cells")
                     .clicked();
                 if added {
                     let name = format!("Gradient {}", file.gradients.len() + 1);
@@ -2182,7 +2184,7 @@ fn gradient_editor(ui: &mut Ui, gradient: &mut Gradient, card: &mut GradientCard
         .as_ref()
         .is_none_or(|(shown, shown_size, _)| shown != &*gradient || *shown_size != size)
     {
-        let pixels = gradient.render(size[0] as u32, size[1] as u32);
+        let pixels = gradient.render_sideways(size[0] as u32, size[1] as u32);
         let image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
         let texture = ui
             .ctx()

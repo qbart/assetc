@@ -298,8 +298,14 @@ fn gradient_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let gradients = Gradients::parse(&text)?;
     out.rows
         .push(("Gradients", gradients.gradients.len().to_string()));
-    out.rows
-        .push(("Stripe", format!("{} px", gradients.stripe)));
+    out.rows.push((
+        "Cell",
+        format!("{} × {} px", gradients.cell_width, gradients.cell_height),
+    ));
+    out.rows.push((
+        "Grid",
+        format!("{} × {}", gradients.columns(), gradients.rows()),
+    ));
     Ok(())
 }
 
@@ -719,17 +725,18 @@ mod tests {
         let i = inspect(&project, Location::Input, &file);
         assert_eq!(row(&i, "Kind"), "Gradient");
         assert_eq!(row(&i, "Gradients"), "1");
-        assert_eq!(row(&i, "Stripe"), "8 px");
-        assert_eq!(row(&i, "Dimensions"), "256 × 64 px");
+        assert_eq!(row(&i, "Cell"), "16 × 64 px");
+        assert_eq!(row(&i, "Grid"), "16 × 4");
+        assert_eq!(row(&i, "Dimensions"), "256 × 256 px");
         assert_eq!(row(&i, "Asset path"), "sky");
         assert_eq!(row(&i, "Color"), "sRGB");
-        // Never mipmapped: levels would blend stripes.
+        // Never mipmapped: levels would blend cells.
         assert_eq!(row(&i, "Mip levels"), "1");
         assert_eq!(i.channels, [true, true, true, false]);
 
-        fs::write(&file, "stripe = 99\n").unwrap();
+        fs::write(&file, "cell_width = 999\n").unwrap();
         let i = inspect(&project, Location::Input, &file);
-        assert!(row(&i, "Error").contains("stripe"));
+        assert!(row(&i, "Error").contains("cell_width"));
         assert!(i.preview.is_none());
     }
 

@@ -263,7 +263,7 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
             job: Job::Texture {
                 source: rel.clone(),
                 color,
-                // Smaller levels would blend neighbouring gradient stripes.
+                // Smaller levels would blend neighbouring gradient cells.
                 mipmaps: settings.mipmaps(rel) && !is_gradient(Path::new(rel)),
                 flip_green,
             },

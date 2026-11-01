@@ -1,4 +1,4 @@
-//! `.gradient` files: gradients as stops, one stripe each of one image; see
+//! `.gradient` files: gradients as stops, one vertical cell each in a grid of one image; see
 //! docs/spec/gradient.md. Rendering follows `img/gradient.go` of SoftKiwiGames/cli.
 
 use std::path::Path;
@@ -98,8 +98,21 @@ impl Gradient {
         shade(&self.stops, Dither::None, t, 0, 0)
     }
 
-    /// `width × height` RGBA8 of this gradient alone, as one stripe of the image.
+    /// `width × height` RGBA8 of this gradient as a cell of the image: first stop at the bottom.
     pub fn render(&self, width: u32, height: u32) -> Vec<u8> {
+        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
+        for y in 0..height {
+            let t = position(height - 1 - y, height);
+            for x in 0..width {
+                pixels.extend(shade(&self.stops, self.dither, t, x, y));
+            }
+        }
+        pixels
+    }
+
+    /// `width × height` RGBA8 of this gradient on its side, first stop on the left, as the
+    /// editor's bar shows it.
+    pub fn render_sideways(&self, width: u32, height: u32) -> Vec<u8> {
         let mut pixels = Vec::with_capacity((width * height * 4) as usize);
         for y in 0..height {
             for x in 0..width {
@@ -114,16 +127,16 @@ impl Gradient {
     }
 }
 
-/// Position of column `x` along a gradient `width` columns wide: the ends are exact.
-fn position(x: u32, width: u32) -> f64 {
-    if width > 1 {
-        x as f64 / (width - 1) as f64
+/// Position of pixel `i` along a gradient `length` pixels long: the ends are exact.
+fn position(i: u32, length: u32) -> f64 {
+    if length > 1 {
+        i as f64 / (length - 1) as f64
     } else {
         0.0
     }
 }
 
-/// The color of pixel `(x, y)` (stripe-local) at position `t`; see docs/spec/gradient.md#image.
+/// The color of pixel `(x, y)` (cell-local) at position `t`; see docs/spec/gradient.md#image.
 fn shade(stops: &[Stop], dither: Dither, t: f64, x: u32, y: u32) -> [u8; 4] {
     let mut k = 0;
     while k + 2 < stops.len() && t > stops[k + 1].at {
@@ -168,7 +181,8 @@ fn quantize(v: f64, d: f64) -> u8 {
 pub struct Gradients {
     pub width: u32,
     pub height: u32,
-    pub stripe: u32,
+    pub cell_width: u32,
+    pub cell_height: u32,
     pub gradients: Vec<Gradient>,
 }
 
@@ -177,15 +191,24 @@ impl Gradients {
     pub fn new() -> Self {
         Self {
             width: 256,
-            height: 64,
-            stripe: 8,
+            height: 256,
+            cell_width: 16,
+            cell_height: 64,
             gradients: vec![Gradient::new("Gradient 1".into())],
         }
     }
 
-    /// How many stripes fit.
+    pub fn columns(&self) -> u32 {
+        self.width / self.cell_width.max(1)
+    }
+
+    pub fn rows(&self) -> u32 {
+        self.height / self.cell_height.max(1)
+    }
+
+    /// How many cells the grid has.
     pub fn capacity(&self) -> usize {
-        (self.height / self.stripe.max(1)) as usize
+        (self.columns() * self.rows()) as usize
     }
 
     /// Checks what the editor can get wrong: sizes and whether the gradients fit.
@@ -193,13 +216,23 @@ impl Gradients {
         for (key, value) in [("width", self.width), ("height", self.height)] {
             in_range(key, i64::from(value), 1, MAX_SIZE)?;
         }
-        in_range("stripe", i64::from(self.stripe), 1, i64::from(self.height))?;
-        let needed = self.gradients.len() as u32 * self.stripe;
-        if needed > self.height {
+        in_range(
+            "cell_width",
+            i64::from(self.cell_width),
+            1,
+            i64::from(self.width),
+        )?;
+        in_range(
+            "cell_height",
+            i64::from(self.cell_height),
+            1,
+            i64::from(self.height),
+        )?;
+        let n = self.gradients.len();
+        if n > self.capacity() {
             return Err(format!(
-                "{} gradients need {needed} px but height is {}",
-                self.gradients.len(),
-                self.height
+                "{n} gradients need {n} cells but the grid has {}",
+                self.capacity()
             ));
         }
         Ok(())
@@ -210,15 +243,24 @@ impl Gradients {
         !self.gradients.iter().all(Gradient::is_opaque)
     }
 
-    /// The image: one stripe per gradient, top to bottom, the rest transparent.
+    /// The image: one cell per gradient, left to right then top to bottom, the rest transparent.
     pub fn render(&self) -> Result<Image, String> {
         self.validate()?;
         let (width, height) = (self.width, self.height);
+        let (cell_width, cell_height) = (self.cell_width, self.cell_height);
         let mut pixels = vec![0; (width * height * 4) as usize];
         for (i, gradient) in self.gradients.iter().enumerate() {
-            let stripe = gradient.render(width, self.stripe);
-            let start = (i as u32 * self.stripe * width * 4) as usize;
-            pixels[start..start + stripe.len()].copy_from_slice(&stripe);
+            let i = i as u32;
+            let (left, top) = (
+                i % self.columns() * cell_width,
+                i / self.columns() * cell_height,
+            );
+            let cell = gradient.render(cell_width, cell_height);
+            let row_bytes = (cell_width * 4) as usize;
+            for (y, row) in cell.chunks_exact(row_bytes).enumerate() {
+                let start = (((top + y as u32) * width + left) * 4) as usize;
+                pixels[start..start + row_bytes].copy_from_slice(row);
+            }
         }
         Ok(Image {
             width,
@@ -242,8 +284,9 @@ impl Gradients {
             }
         };
         let width = size("width", 256)?;
-        let height = size("height", 64)?;
-        let stripe = size("stripe", 8)?;
+        let height = size("height", 256)?;
+        let cell_width = size("cell_width", 16)?;
+        let cell_height = size("cell_height", 64)?;
         let gradients = match table.remove("gradients") {
             None => Vec::new(),
             Some(toml::Value::Array(items)) => items
@@ -261,7 +304,8 @@ impl Gradients {
         let gradients = Self {
             width,
             height,
-            stripe,
+            cell_width,
+            cell_height,
             gradients,
         };
         gradients.validate()?;
@@ -271,8 +315,8 @@ impl Gradients {
     /// The written form, see docs/spec/gradient.md#written-form.
     pub fn to_toml(&self) -> String {
         let mut out = format!(
-            "width = {}\nheight = {}\nstripe = {}\n",
-            self.width, self.height, self.stripe
+            "width = {}\nheight = {}\ncell_width = {}\ncell_height = {}\n",
+            self.width, self.height, self.cell_width, self.cell_height
         );
         for gradient in &self.gradients {
             out += "\n[[gradients]]\n";
@@ -403,9 +447,10 @@ fn in_range(key: &str, v: i64, min: i64, max: i64) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    const SAMPLE: &str = r##"width = 256
+    const SAMPLE: &str = r##"width = 32
 height = 64
-stripe = 8
+cell_width = 16
+cell_height = 32
 
 [[gradients]]
 name = "Sunset"
@@ -451,15 +496,18 @@ stops = [
     }
 
     #[test]
-    fn ends_are_exact_and_stripes_stack() {
+    fn cells_fill_the_grid_bottom_up() {
         let image = Gradients::parse(SAMPLE).unwrap().render().unwrap();
-        assert_eq!((image.width, image.height), (256, 64));
-        assert_eq!(pixel(&image, 0, 0), [0x1b, 0x10, 0x36, 255]);
-        assert_eq!(pixel(&image, 255, 7), [0xff, 0xe6, 0x6d, 255]);
-        assert_eq!(pixel(&image, 0, 8), [255, 255, 255, 255]);
-        assert_eq!(pixel(&image, 255, 15)[3], 0);
-        // Below the last stripe: transparent.
-        assert_eq!(pixel(&image, 100, 16), [0; 4]);
+        assert_eq!((image.width, image.height), (32, 64));
+        // First cell: first stop on the bottom row, last on the top, every column alike.
+        assert_eq!(pixel(&image, 0, 31), [0x1b, 0x10, 0x36, 255]);
+        assert_eq!(pixel(&image, 15, 31), [0x1b, 0x10, 0x36, 255]);
+        assert_eq!(pixel(&image, 0, 0), [0xff, 0xe6, 0x6d, 255]);
+        // Second cell to its right.
+        assert_eq!(pixel(&image, 16, 31), [255, 255, 255, 255]);
+        assert_eq!(pixel(&image, 31, 0)[3], 0);
+        // Unused cells (the second row): transparent.
+        assert_eq!(pixel(&image, 5, 40), [0; 4]);
     }
 
     #[test]
@@ -481,36 +529,39 @@ stops = [
     fn pixel_dither_keeps_the_palette() {
         let mut g = Gradient::new(String::new());
         g.dither = Dither::Pixel;
-        let pixels = g.render(64, 4);
+        let pixels = g.render(4, 64);
         for p in pixels.as_chunks::<4>().0 {
             assert!(p == &[0, 0, 0, 255] || p == &[255, 255, 255, 255], "{p:?}");
         }
         // Crosshatch varies between neighbours where plain rounding does not.
         g.dither = Dither::Crosshatch;
-        let row = g.render(64, 1);
+        let column = g.render(1, 64);
         g.dither = Dither::None;
-        assert_ne!(row, g.render(64, 1));
+        assert_ne!(column, g.render(1, 64));
+        // The bar shows the same blend on its side.
+        assert_eq!(g.render_sideways(64, 1)[..4], g.render(1, 64)[63 * 4..]);
     }
 
     #[test]
     fn gradients_must_fit() {
         let mut g = Gradients::new();
-        g.height = 16;
+        assert_eq!((g.columns(), g.rows(), g.capacity()), (16, 4, 64));
+        g.width = 40;
+        g.height = 64;
         g.gradients.push(Gradient::new("2".into()));
         assert!(g.validate().is_ok());
         g.gradients.push(Gradient::new("3".into()));
         assert_eq!(
             g.validate().unwrap_err(),
-            "3 gradients need 24 px but height is 16"
+            "3 gradients need 3 cells but the grid has 2"
         );
-        assert_eq!(g.capacity(), 2);
     }
 
     #[test]
     fn errors_name_the_problem() {
         let err = |text: &str| Gradients::parse(text).unwrap_err();
         assert_eq!(err("depth = 1"), "unknown key depth");
-        assert_eq!(err("stripe = 100"), "stripe 100 is outside 1–64");
+        assert_eq!(err("cell_height = 300"), "cell_height 300 is outside 1–256");
         assert!(
             err("[[gradients]]\nstops = [{ at = 0, color = \"#000000\" }]")
                 .contains("at least two")
