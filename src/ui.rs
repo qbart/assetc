@@ -2009,7 +2009,8 @@ fn gradient_output_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradien
                                             &mut file.layout,
                                             layout,
                                             layout.name(),
-                                        );
+                                        )
+                                        .on_hover_text(layout.description());
                                     }
                                 });
                         });

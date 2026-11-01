@@ -76,8 +76,15 @@ impl Layout {
 
     pub fn name(self) -> &'static str {
         match self {
-            Self::Rows => "Rows (left to right, then down)",
-            Self::Columns => "Columns (top to bottom, then right)",
+            Self::Rows => "Rows",
+            Self::Columns => "Columns",
+        }
+    }
+
+    pub fn description(self) -> &'static str {
+        match self {
+            Self::Rows => "Left to right, then down",
+            Self::Columns => "Top to bottom, then right",
         }
     }
 }
