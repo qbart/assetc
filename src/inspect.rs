@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::Path;
 
-use crate::build::{relative, strip_extension};
+use crate::build::{is_texture_source, relative, strip_extension};
 use crate::config::Project;
 use crate::hash::fnv1a64;
 use crate::texture::{self, ColorSpace, Image, Settings};
@@ -83,7 +83,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         .and_then(|dir| relative(dir, file).ok())
         .unwrap_or_else(|| out.name.clone());
     let kind = match location {
-        Location::Input if has_ext("png") => Kind::SourceTexture,
+        Location::Input if is_texture_source(file) => Kind::SourceTexture,
         Location::Input => Kind::Ignored,
         Location::Output if has_ext("ktx2") => Kind::CompiledTexture,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,

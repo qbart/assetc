@@ -131,10 +131,7 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
                 continue;
             }
         };
-        let is_png = file
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("png"));
-        if !is_png {
+        if !is_texture_source(file) {
             outcome.skipped += 1;
             continue;
         }
@@ -242,6 +239,17 @@ fn flatten<'a>(nodes: &'a [Node], files: &mut Vec<&'a Path>) {
             None => files.push(&node.path),
         }
     }
+}
+
+/// Source image formats compiled to textures, matched case-insensitively.
+const TEXTURE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
+
+pub fn is_texture_source(file: &Path) -> bool {
+    file.extension().is_some_and(|ext| {
+        TEXTURE_EXTENSIONS
+            .iter()
+            .any(|known| ext.eq_ignore_ascii_case(known))
+    })
 }
 
 /// `input`-relative, `/`-separated path.
@@ -356,6 +364,43 @@ mod tests {
         assert!(outcome.summary().starts_with("Build failed: broken.png:"));
         assert!(output.join("ok.ktx2").is_file());
         assert!(!output.join(manifest::FILE_NAME).exists());
+    }
+
+    #[test]
+    fn builds_jpeg_with_opaque_alpha() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        image::RgbImage::from_pixel(4, 4, image::Rgb([200, 100, 50]))
+            .save(input.join("brick.n.JPEG"))
+            .unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(outcome.built[0].output, "brick.n.ktx2");
+        let ktx = fs::read(output.join("brick.n.ktx2")).unwrap();
+        let reader = ::ktx2::Reader::new(&ktx[..]).unwrap();
+        let texel = &reader.levels().next().unwrap().data[..4];
+        // Lossy, so only roughly the source color; alpha is exact.
+        assert!(
+            texel[0].abs_diff(200) < 8 && texel[2].abs_diff(50) < 8,
+            "{texel:?}"
+        );
+        assert_eq!(texel[3], 255);
+    }
+
+    #[test]
+    fn png_and_jpeg_with_same_asset_path_collide() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("a.png"), 1, 1);
+        image::RgbImage::new(1, 1)
+            .save(input.join("a.jpg"))
+            .unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 2);
+        assert!(outcome.failures[0].message.contains("collides"));
     }
 
     #[test]
