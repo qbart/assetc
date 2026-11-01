@@ -75,8 +75,8 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   menu.
 - **Sidecars**: a file's [`.amod`](../spec/amod.md) (`Fox.glb.amod` for
   `Fox.glb`) is listed right below that file, one level deeper, instead of in
-  name order, and the file shows a `link` icon (`TEXT_WEAK`) in the chevron's
-  place. It does not fold: the sidecar row is always shown. Sidecar rows are
+  name order. It does not fold: the sidecar row is always shown, and the file
+  has no chevron. Sidecar rows are
   dimmed: icon and name in `TEXT_WEAK`. A sidecar whose file is missing stays
   in name order, still dimmed. Sidecar rows select, rename and delete like any
   file.
@@ -143,7 +143,7 @@ toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `bo
 `grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab),
 `grip-vertical` (LUT compare divider), `box-checker`, `box-shaded`, `box`, `squares-unite`, `image`, `boxes` (compiled mesh display modes), `loader`
 (status bar), `folder`, `folder-open`, `file`, `sun-medium`, `type`,
-`aperture`, `image-play`, `swatch-book`, `image`, `torus`, `settings-2`, `link`, `chevron-right`, `chevron-down` (file tree,
+`aperture`, `image-play`, `swatch-book`, `image`, `torus`, `settings-2`, `chevron-right`, `chevron-down` (file tree,
 see [Tree icons](#tree-icons)), `image` (texture assets). Two icons are assetc's own, drawn
 on Lucide's `box` (same outline, stroke and license): `box-checker` (each
 visible face split 2 × 2 with two opposite cells filled solid in the
