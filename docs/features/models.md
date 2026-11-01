@@ -170,6 +170,30 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   has hue `i × 0.618034` (fractional part, the golden ratio, so neighbours
   differ), saturation 0.65, value 0.9. Triangles are lit as usual (the
   file's normals), so shapes stay readable.
+- A second toolbar group, below the first, draws **bounds** over the mesh.
+  Its buttons are toggles: any number of them can be on at once (none to
+  start with), each click turns one on or off, and the choice lasts for the
+  session:
+
+  | Button          | Icon            | Draws                                                    |
+  |-----------------|-----------------|----------------------------------------------------------|
+  | Bounding box    | `scan`          | the mesh's box (`BOUNDS` `aabb_min`–`aabb_max`) in `ACCENT` |
+  | Bounding sphere | `circle-dashed` | the mesh's sphere (`BOUNDS` `sphere_center`, `sphere_radius`) in `ACCENT` |
+  | Submesh boxes   | `group`         | each submesh's box (its `SUBMESH` `bounds`) in the submesh's color |
+  | Meshlet boxes   | `layout-grid`   | each meshlet's box, around the vertices of its triangles, in the meshlet's color |
+  | Meshlet spheres | `circle-dot`    | each meshlet's bounding sphere (`MLBOUNDS` `center`, `radius`) in the meshlet's color |
+  | Meshlet cones   | `cone`          | each meshlet's normal cone, in the meshlet's color: apex at its sphere's center, axis `cone_axis`, half-angle `asin(cone_cutoff)`, slant `radius` long; meshlets with `cone_cutoff ≥ 1` (no cone, never culled) draw none |
+
+- Bounds are drawn in every display mode as unlit 1 px lines, hidden behind
+  nearer faces like the mesh's own (switch to Wireframe to see inside).
+  Boxes draw their 12 edges; spheres three great circles (in the XY, YZ and
+  XZ planes, 48 segments each); cones their axis, the circle at their base
+  (32 segments) and four lines from the apex to it. Colors are the ID modes'
+  ones (see below), so a meshlet's bounds match its color in the Meshlets
+  mode.
+- The file's bounds are of LOD 0 and are drawn for every level. Meshlets
+  exist only for LOD 0: with another level chosen, the three meshlet buttons
+  are disabled (their choice is kept) and draw nothing.
 - Left of the toolbar, level with its first button, a label shows the
   level of detail drawn: `LOD 0` to start, plain 13 px `TEXT` without a
   background, centered vertically on the 32 px button and ending 8 px from
