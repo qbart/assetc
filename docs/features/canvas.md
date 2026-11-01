@@ -54,7 +54,7 @@ Only while the pointer is over the canvas; see also [`KEYS.md`](../../KEYS.md).
 
 | Input                                   | Action                                         |
 |-----------------------------------------|------------------------------------------------|
-| Scroll wheel (vertical scroll)          | zoom around the pointer: the image point under the pointer stays under it. One wheel notch zooms by about ×1.2 |
+| Scroll wheel (vertical scroll)          | zoom around the pointer: the image point under the pointer stays under it. Each wheel notch zooms by exactly ×1.2; smooth (touchpad) scrolling zooms continuously, ×1.2 per 50 points |
 | `Ctrl` + scroll, pinch                  | zoom around the pointer, as above              |
 | Drag with the right button              | pan                                            |
 | Double-click (left)                     | fit                                            |
