@@ -15,6 +15,7 @@ use crate::config::Project;
 use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
+use crate::lut::Lut;
 use crate::manifest::Kind;
 use crate::preview3d::{CubemapUpload, Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
@@ -23,6 +24,7 @@ use crate::theme::{
     CHECKER_DARK, CHECKER_LIGHT, STROKE, TEXT, TEXT_WEAK,
 };
 use crate::tree::{FileTrees, Listing, Node};
+use crate::{chart, preview3d};
 
 pub struct UiPlugin;
 
@@ -51,6 +53,8 @@ struct UiState {
     inspected: Option<Inspected>,
     view: View,
     mode: ViewMode,
+    lut: LutUi,
+    last_image: Option<LastImage>,
     /// Canvas toolbar state of each image, by path.
     canvas_options: HashMap<PathBuf, CanvasOptions>,
 }
@@ -101,6 +105,70 @@ struct Inspected {
     /// Environment map faces, kept to upload to the 3D preview.
     cubemap: Option<Vec<Image>>,
     uploaded_cubemap: bool,
+    lut: Option<Lut>,
+    lut_compare: Option<CompareCache>,
+    lut_slices: Option<egui::TextureHandle>,
+    uploaded_color_cube: bool,
+}
+
+/// Before / after textures of the LUT compare view for one source image.
+struct CompareCache {
+    /// Path of the source image; `None` for the reference chart.
+    key: Option<PathBuf>,
+    before: egui::TextureHandle,
+    after: egui::TextureHandle,
+}
+
+/// The last image selected, for the LUT compare view.
+struct LastImage {
+    path: PathBuf,
+    name: String,
+    image: Image,
+}
+
+/// LUT view state, see docs/features/lut.md#views.
+struct LutUi {
+    view: LutView,
+    source: LutSource,
+    /// Divider position across the image, 0..1.
+    split: f32,
+}
+
+impl Default for LutUi {
+    fn default() -> Self {
+        Self {
+            view: LutView::Compare,
+            source: LutSource::Chart,
+            split: 0.5,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LutView {
+    Compare,
+    Slices,
+    Cube,
+    Curves,
+}
+
+impl LutView {
+    const ALL: [Self; 4] = [Self::Compare, Self::Slices, Self::Cube, Self::Curves];
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Compare => "Compare",
+            Self::Slices => "Slices",
+            Self::Cube => "Cube",
+            Self::Curves => "Curves",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LutSource {
+    Chart,
+    Image,
 }
 
 /// Canvas view mode, see docs/features/canvas.md#view-bar.
@@ -186,6 +254,8 @@ impl Default for UiState {
             inspected: None,
             view: View::default(),
             mode: ViewMode::default(),
+            lut: LutUi::default(),
+            last_image: None,
             canvas_options: HashMap::new(),
         }
     }
@@ -327,10 +397,12 @@ fn shell(
     preview3d.viewport = None;
     preview3d.dragging = false;
     preview3d.environment = false;
+    preview3d.colors = false;
     let shown = Shown::of(state.inspected.as_ref());
     let show_3d = match shown {
         Shown::Image => state.mode == ViewMode::ThreeD,
         Shown::Environment => true,
+        Shown::Lut => state.lut.view == LutView::Cube,
         Shown::Other => false,
     };
     let fill = if show_3d {
@@ -344,12 +416,36 @@ fn shell(
             let state = &mut *state;
             let full = ui.max_rect();
             let bar = Rect::from_min_size(full.min, vec2(full.width(), 36.0));
-            view_bar(ui, bar, &mut state.mode, shown);
+            let modes = ViewMode::ALL.map(ViewMode::name);
+            let mode = ViewMode::ALL.iter().position(|m| *m == state.mode);
+            let lut_views = LutView::ALL.map(LutView::name);
+            let lut_view = LutView::ALL.iter().position(|v| *v == state.lut.view);
+            // Only images have a 2D/3D choice; an environment map only exists in 3D.
+            let (options, active, enabled): (&[&str], _, _) = match shown {
+                Shown::Image => (&modes, mode, true),
+                Shown::Lut => (&lut_views, lut_view, true),
+                Shown::Environment => (&[], None, false),
+                Shown::Other => (&modes, None, false),
+            };
+            if let Some(i) = view_bar(ui, bar, options, active, enabled) {
+                match shown {
+                    Shown::Lut => state.lut.view = LutView::ALL[i],
+                    _ => state.mode = ViewMode::ALL[i],
+                }
+            }
             let rect = Rect::from_min_max(pos2(full.left(), bar.bottom()), full.max);
             match (shown, state.mode) {
                 (Shown::Environment, _) => {
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
                 }
+                (Shown::Lut, _) => canvas_lut(
+                    ui,
+                    rect,
+                    state.inspected.as_mut(),
+                    &mut state.lut,
+                    state.last_image.as_ref(),
+                    &mut preview3d,
+                ),
                 (_, ViewMode::TwoD) => canvas(
                     ui,
                     rect,
@@ -382,6 +478,16 @@ fn shell(
             .selection
             .as_ref()
             .map(|selection| inspect_selection(&ctx, &project, selection));
+        // Remembered as the LUT compare view's "Image" source.
+        if let Some(inspected) = &state.inspected
+            && let Some(pixels) = &inspected.pixels
+        {
+            state.last_image = Some(LastImage {
+                path: inspected.path.clone(),
+                name: inspected.inspection.name.clone(),
+                image: pixels.clone(),
+            });
+        }
         ctx.request_repaint();
     }
 
@@ -391,6 +497,7 @@ fn shell(
 fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selection) -> Inspected {
     let mut inspection = inspect::inspect(project, selection.location, &selection.path);
     let cubemap = inspection.cubemap.take();
+    let lut = inspection.lut.take();
     let max_side = ctx.input(|i| i.max_texture_side) as u32;
     let pixels = inspection
         .preview
@@ -408,6 +515,10 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
         uploaded_3d: None,
         cubemap,
         uploaded_cubemap: false,
+        lut,
+        lut_compare: None,
+        lut_slices: None,
+        uploaded_color_cube: false,
     }
 }
 
@@ -418,9 +529,20 @@ fn load_preview(
     image: &Image,
     pixels: &[u8],
 ) -> egui::TextureHandle {
+    load_texture(ctx, name, image, pixels, egui::TextureFilter::Nearest)
+}
+
+/// Uploads RGBA8 `pixels` of `image`'s size, smoothed when minified.
+fn load_texture(
+    ctx: &egui::Context,
+    name: &str,
+    image: &Image,
+    pixels: &[u8],
+    magnification: egui::TextureFilter,
+) -> egui::TextureHandle {
     let size = [image.width as usize, image.height as usize];
     let options = egui::TextureOptions {
-        magnification: egui::TextureFilter::Nearest,
+        magnification,
         minification: egui::TextureFilter::Linear,
         ..Default::default()
     };
@@ -905,14 +1027,20 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
         });
 }
 
-/// `View [2D | 3D]` across the top of the canvas, see docs/features/canvas.md#view-bar.
-fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
+/// The view bar: `View` and a segmented choice of `options`, see docs/features/canvas.md#view-bar.
+/// No options draws an empty bar. Returns the clicked option.
+fn view_bar(
+    ui: &mut Ui,
+    bar: Rect,
+    options: &[&str],
+    active: Option<usize>,
+    enabled: bool,
+) -> Option<usize> {
     let painter = ui.painter_at(bar);
     painter.rect_filled(bar, 0.0, BG_PANEL);
     painter.hline(bar.x_range(), bar.bottom() - 0.5, Stroke::new(1.0, STROKE));
-    // An environment map only exists in 3D: nothing to choose.
-    if shown == Shown::Environment {
-        return;
+    if options.is_empty() {
+        return None;
     }
     let font = FontId::proportional(13.0);
     let label = painter.text(
@@ -925,26 +1053,27 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
 
     const HEIGHT: f32 = 24.0;
     const RADIUS: u8 = 4;
-    let widths = ViewMode::ALL.map(|m| {
-        painter
-            .layout_no_wrap(m.name().into(), font.clone(), TEXT)
-            .size()
-            .x
-            + 20.0
-    });
+    let widths: Vec<f32> = options
+        .iter()
+        .map(|name| {
+            painter
+                .layout_no_wrap((*name).into(), font.clone(), TEXT)
+                .size()
+                .x
+                + 20.0
+        })
+        .collect();
     let group = Rect::from_min_size(
         pos2(label.right() + 12.0, bar.center().y - HEIGHT / 2.0),
         vec2(widths.iter().sum(), HEIGHT),
     );
     painter.rect_filled(group, RADIUS, BG_BAR);
     let mut x = group.left();
-    let last = ViewMode::ALL.len() - 1;
-    for (i, (option, width)) in ViewMode::ALL.into_iter().zip(widths).enumerate() {
+    let last = options.len() - 1;
+    let mut clicked = None;
+    for (i, (name, width)) in options.iter().zip(widths).enumerate() {
         let rect = Rect::from_min_size(pos2(x, group.top()), vec2(width, HEIGHT));
         x += width;
-        // The mode only applies to images.
-        let enabled = shown == Shown::Image;
-        let active = enabled && *mode == option;
         let sense = if enabled {
             Sense::click()
         } else {
@@ -958,7 +1087,7 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
             ne: outer(i == last),
             se: outer(i == last),
         };
-        let color = if active {
+        let color = if active == Some(i) {
             painter.rect_filled(rect, radius, ACCENT);
             BG_BAR
         } else if !enabled {
@@ -972,14 +1101,15 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            option.name(),
+            *name,
             font.clone(),
             color,
         );
         if enabled && response.clicked() {
-            *mode = option;
+            clicked = Some(i);
         }
     }
+    clicked
 }
 
 /// What the canvas shows for the selection.
@@ -987,6 +1117,7 @@ fn view_bar(ui: &mut Ui, bar: Rect, mode: &mut ViewMode, shown: Shown) {
 enum Shown {
     Image,
     Environment,
+    Lut,
     Other,
 }
 
@@ -994,6 +1125,7 @@ impl Shown {
     fn of(inspected: Option<&Inspected>) -> Self {
         match inspected {
             Some(i) if i.cubemap.is_some() => Self::Environment,
+            Some(i) if i.lut.is_some() => Self::Lut,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
             _ => Self::Other,
         }
@@ -1244,6 +1376,192 @@ fn canvas_3d(
         }
         ui.ctx().request_repaint();
     }
+}
+
+/// LUT views, see docs/features/lut.md#views.
+fn canvas_lut(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: Option<&mut Inspected>,
+    lut_ui: &mut LutUi,
+    last_image: Option<&LastImage>,
+    preview: &mut Preview3d,
+) {
+    let Some(Inspected {
+        lut: Some(lut),
+        lut_compare,
+        lut_slices,
+        uploaded_color_cube,
+        ..
+    }) = inspected
+    else {
+        return;
+    };
+    match lut_ui.view {
+        LutView::Compare => compare_view(ui, rect, lut, lut_compare, lut_ui, last_image),
+        LutView::Slices => {
+            let texture = lut_slices.get_or_insert_with(|| {
+                let image = lut.slices(BG_CENTER.to_array());
+                load_texture(
+                    ui.ctx(),
+                    "lut_slices",
+                    &image,
+                    &image.pixels,
+                    egui::TextureFilter::Nearest,
+                )
+            });
+            ui.painter_at(rect).image(
+                texture.id(),
+                fit_rect(rect, texture.size_vec2()),
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+        LutView::Cube => {
+            if !*uploaded_color_cube {
+                preview.color_cube = Some(preview3d::color_cube(lut));
+                *uploaded_color_cube = true;
+            }
+            preview.colors = true;
+            view_3d(ui, rect, preview);
+        }
+        LutView::Curves => curves_view(ui, rect, lut),
+    }
+}
+
+/// `size` scaled to fit `rect` with the fit margin, centered.
+fn fit_rect(rect: Rect, size: Vec2) -> Rect {
+    let room = (rect.size() - Vec2::splat(2.0 * FIT_MARGIN)).max(Vec2::splat(1.0));
+    Rect::from_center_size(rect.center(), size * (room / size).min_elem())
+}
+
+/// Reference image, original left and graded right of a draggable divider.
+fn compare_view(
+    ui: &mut Ui,
+    rect: Rect,
+    lut: &Lut,
+    cache: &mut Option<CompareCache>,
+    lut_ui: &mut LutUi,
+    last_image: Option<&LastImage>,
+) {
+    let (key, image) = match (lut_ui.source, last_image) {
+        (LutSource::Image, Some(last)) => (Some(&last.path), &last.image),
+        _ => (None, &*chart::CHART),
+    };
+    if cache.as_ref().is_none_or(|c| c.key.as_ref() != key) {
+        let graded = lut.grade(image);
+        let linear = egui::TextureFilter::Linear;
+        *cache = Some(CompareCache {
+            key: key.cloned(),
+            before: load_texture(ui.ctx(), "lut_before", image, &image.pixels, linear),
+            after: load_texture(ui.ctx(), "lut_after", &graded, &graded.pixels, linear),
+        });
+    }
+    let cache = cache.as_ref().unwrap();
+    let shown = fit_rect(rect, cache.before.size_vec2());
+
+    let response = ui.interact(rect, ui.id().with("lut_compare"), Sense::click_and_drag());
+    if (response.clicked() || response.dragged_by(PointerButton::Primary))
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        lut_ui.split = ((pointer.x - shown.left()) / shown.width()).clamp(0.0, 1.0);
+    }
+    let x = shown.left() + shown.width() * lut_ui.split;
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    let painter = ui.painter_at(rect);
+    let left = Rect::from_min_max(shown.min, pos2(x, shown.bottom()));
+    let right = Rect::from_min_max(pos2(x, shown.top()), shown.max);
+    let white = egui::Color32::WHITE;
+    painter
+        .with_clip_rect(left.intersect(rect))
+        .image(cache.before.id(), shown, uv, white);
+    painter
+        .with_clip_rect(right.intersect(rect))
+        .image(cache.after.id(), shown, uv, white);
+    painter.vline(x, shown.y_range(), Stroke::new(2.0, TEXT));
+    let pill = |text: &str, anchor: egui::Pos2, align: Align2| {
+        let galley = painter.layout_no_wrap(text.into(), FontId::proportional(12.0), TEXT);
+        let body = align.anchor_size(anchor, galley.size() + vec2(12.0, 6.0));
+        painter.rect_filled(body, 4.0, BG_BAR);
+        painter.galley(body.min + vec2(6.0, 3.0), galley, TEXT);
+    };
+    pill(
+        "Before",
+        pos2(x - 8.0, shown.top() + 8.0),
+        Align2::RIGHT_TOP,
+    );
+    pill("After", pos2(x + 8.0, shown.top() + 8.0), Align2::LEFT_TOP);
+
+    let sources = [
+        Tool {
+            glyph: Glyph::Icon(Icon::Palette),
+            name: "Chart".into(),
+            on: key.is_none(),
+            enabled: true,
+        },
+        Tool {
+            glyph: Glyph::Icon(Icon::Image),
+            name: match last_image {
+                Some(last) => format!("Image ({})", last.name),
+                None => "Image (no image selected yet)".into(),
+            },
+            on: key.is_some(),
+            enabled: last_image.is_some(),
+        },
+    ];
+    if let Some((_, button)) = toolbar(ui, rect, &[&sources]) {
+        lut_ui.source = [LutSource::Chart, LutSource::Image][button];
+        ui.ctx().request_repaint();
+    }
+}
+
+/// Output R, G, B for gray input 0..1; see docs/features/lut.md#curves.
+fn curves_view(ui: &mut Ui, rect: Rect, lut: &Lut) {
+    let side = (rect.size().min_elem() - 96.0).max(32.0);
+    let plot = Rect::from_center_size(rect.center(), Vec2::splat(side));
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(plot, 0.0, BG_PANEL);
+    let grid = Stroke::new(1.0, STROKE);
+    for i in 1..4 {
+        let t = i as f32 / 4.0;
+        painter.vline(plot.left() + side * t, plot.y_range(), grid);
+        painter.hline(plot.x_range(), plot.bottom() - side * t, grid);
+    }
+    painter.rect_stroke(plot, 0.0, grid, StrokeKind::Inside);
+    painter.line_segment(
+        [plot.left_bottom(), plot.right_top()],
+        Stroke::new(1.0, TEXT_WEAK),
+    );
+    for (channel, color) in [CHANNEL_R, CHANNEL_G, CHANNEL_B].into_iter().enumerate() {
+        let points = (0..256)
+            .map(|i| {
+                let x = i as f32 / 255.0;
+                let y = lut.apply([x; 3])[channel];
+                pos2(plot.left() + x * side, plot.bottom() - y * side)
+            })
+            .collect();
+        painter.add(egui::Shape::line(points, Stroke::new(2.0, color)));
+    }
+    let label = |text: &str, pos: egui::Pos2, align: Align2| {
+        painter.text(pos, align, text, FontId::proportional(12.0), TEXT_WEAK);
+    };
+    label("0", plot.left_bottom() + vec2(-6.0, 4.0), Align2::RIGHT_TOP);
+    label(
+        "1",
+        plot.right_bottom() + vec2(0.0, 4.0),
+        Align2::CENTER_TOP,
+    );
+    label("1", plot.left_top() + vec2(-6.0, 0.0), Align2::RIGHT_CENTER);
+    label(
+        "Input",
+        plot.center_bottom() + vec2(0.0, 4.0),
+        Align2::CENTER_TOP,
+    );
+    label(
+        "Output",
+        plot.left_center() + vec2(-6.0, 0.0),
+        Align2::RIGHT_CENTER,
+    );
 }
 
 /// 3D canvas for an environment map: the chosen shape lit by it, with it as the background.

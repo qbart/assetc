@@ -1,11 +1,13 @@
 mod assets;
 mod build;
+mod chart;
 mod config;
 mod hash;
 mod icons;
 mod inspect;
 mod ktx2;
 mod logo;
+mod lut;
 mod manifest;
 mod material;
 mod plan;

@@ -11,6 +11,7 @@ use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
 };
 
+use crate::lut::Lut;
 use crate::theme::BG_CENTER;
 
 pub struct Preview3dPlugin;
@@ -116,6 +117,10 @@ pub struct Preview3d {
     pub upload: Option<Upload>,
     /// Show the environment map (skybox + lighting) instead of the textured shape.
     pub environment: bool,
+    /// Show the color cube (unlit, vertex colors) instead of the shape.
+    pub colors: bool,
+    /// A new color cube mesh, taken by [`sync`].
+    pub color_cube: Option<Mesh>,
     /// A new environment map, taken by [`sync`].
     pub cubemap: Option<CubemapUpload>,
 }
@@ -140,6 +145,9 @@ struct Scene {
     material: Handle<StandardMaterial>,
     /// Mirror-like, to show an environment map's lighting.
     chrome: Handle<StandardMaterial>,
+    /// Unlit, showing vertex colors.
+    unlit: Handle<StandardMaterial>,
+    color_cube: Option<Handle<Mesh>>,
     cubemap: Option<Handle<Image>>,
 }
 
@@ -147,21 +155,23 @@ struct Scene {
 const ENVIRONMENT_BRIGHTNESS: f32 = 1000.0;
 const AMBIENT_BRIGHTNESS: f32 = 600.0;
 
+/// (normal, right, up) per cube face, sides first; right × up = normal, so corners
+/// listed bottom-left, bottom-right, top-right, top-left are counter-clockwise from outside.
+const CUBE_FACES: [(Vec3, Vec3, Vec3); 6] = [
+    (Vec3::Z, Vec3::X, Vec3::Y),
+    (Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y),
+    (Vec3::X, Vec3::NEG_Z, Vec3::Y),
+    (Vec3::NEG_X, Vec3::Z, Vec3::Y),
+    (Vec3::Y, Vec3::X, Vec3::NEG_Z),
+    (Vec3::NEG_Y, Vec3::X, Vec3::Z),
+];
+
 /// Cube with the whole image on each face, upright on the sides (Bevy's `Cuboid` turns some
 /// faces); see docs/features/canvas.md#scene.
 fn cube(size: f32) -> Mesh {
-    // (normal, right, up) per face; right × up = normal, so corners in order are counter-clockwise.
-    let faces = [
-        (Vec3::Z, Vec3::X, Vec3::Y),
-        (Vec3::NEG_Z, Vec3::NEG_X, Vec3::Y),
-        (Vec3::X, Vec3::NEG_Z, Vec3::Y),
-        (Vec3::NEG_X, Vec3::Z, Vec3::Y),
-        (Vec3::Y, Vec3::X, Vec3::NEG_Z),
-        (Vec3::NEG_Y, Vec3::X, Vec3::Z),
-    ];
     let half = size / 2.0;
     let (mut positions, mut normals, mut uvs, mut indices) = (vec![], vec![], vec![], vec![]);
-    for (normal, right, up) in faces {
+    for (normal, right, up) in CUBE_FACES {
         let base = positions.len() as u32;
         // Bottom-left, bottom-right, top-right, top-left; UV v grows downward.
         for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
@@ -178,6 +188,42 @@ fn cube(size: f32) -> Mesh {
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_indices(Indices::U32(indices))
+}
+
+/// The RGB cube transformed by `lut`: red along +X, green +Y, blue +Z, each face an
+/// N × N grid colored with the LUT output; see docs/features/lut.md#cube.
+pub fn color_cube(lut: &Lut) -> Mesh {
+    const SIZE: f32 = 1.2;
+    let n = lut.size;
+    let (mut positions, mut colors, mut indices) = (vec![], vec![], vec![]);
+    for (normal, right, up) in CUBE_FACES {
+        let base = positions.len() as u32;
+        for j in 0..n {
+            for i in 0..n {
+                let (x, y) = (i as f32 / (n - 1) as f32, j as f32 / (n - 1) as f32);
+                let p = (normal + right * (2.0 * x - 1.0) + up * (2.0 * y - 1.0)) * 0.5;
+                let input = (p + 0.5).to_array();
+                let [r, g, b] = lut.apply(input);
+                positions.push((p * SIZE).to_array());
+                // The LUT's output is display (sRGB) encoded; vertex colors are linear.
+                colors.push(Color::srgb(r, g, b).to_linear().to_f32_array());
+            }
+        }
+        let n = n as u32;
+        for j in 0..n - 1 {
+            for i in 0..n - 1 {
+                let a = base + j * n + i;
+                indices.extend([a, a + 1, a + n + 1, a, a + n + 1, a + n]);
+            }
+        }
+    }
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors)
     .with_inserted_indices(Indices::U32(indices))
 }
 
@@ -220,6 +266,11 @@ fn setup(
         ..default()
     });
 
+    let unlit = materials.add(StandardMaterial {
+        unlit: true,
+        ..default()
+    });
+
     commands
         .spawn((
             PreviewCamera,
@@ -257,6 +308,8 @@ fn setup(
         meshes,
         material,
         chrome,
+        unlit,
+        color_cube: None,
         cubemap: None,
     });
 }
@@ -268,6 +321,7 @@ fn sync(
     mut scene: ResMut<Scene>,
     time: Res<Time>,
     mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut camera: Single<(Entity, &mut Camera, &mut Transform), With<PreviewCamera>>,
@@ -385,21 +439,27 @@ fn sync(
         };
     }
 
-    let (mesh, material, transform) = &mut *shape;
-    let wanted = if environment {
-        &scene.chrome
-    } else {
-        &scene.material
-    };
-    if material.0 != *wanted {
-        material.0 = wanted.clone();
+    if let Some(cube) = preview.color_cube.take()
+        && let Some(old) = scene.color_cube.replace(meshes.add(cube))
+    {
+        meshes.remove(&old);
     }
+
+    let (mesh, material, transform) = &mut *shape;
     let index = Shape::ALL
         .iter()
         .position(|s| *s == preview.shape)
         .unwrap_or(0);
-    if mesh.0 != scene.meshes[index] {
-        mesh.0 = scene.meshes[index].clone();
+    let (wanted_mesh, wanted_material) = match &scene.color_cube {
+        Some(cube) if preview.colors => (cube, &scene.unlit),
+        _ if environment => (&scene.meshes[index], &scene.chrome),
+        _ => (&scene.meshes[index], &scene.material),
+    };
+    if mesh.0 != *wanted_mesh {
+        mesh.0 = wanted_mesh.clone();
+    }
+    if material.0 != *wanted_material {
+        material.0 = wanted_material.clone();
     }
     if active && !preview.dragging {
         transform.rotate_y(SPIN * time.delta_secs());
@@ -437,6 +497,44 @@ mod tests {
             for v in face * 4..face * 4 + 4 {
                 assert_eq!(uvs[v][1] == 0.0, positions[v][1] > 0.0);
             }
+        }
+    }
+
+    #[test]
+    fn color_cube_maps_inputs_through_the_lut() {
+        let mut text = String::from("LUT_3D_SIZE 2\n");
+        // Inverting LUT.
+        for i in 0..8 {
+            text += &format!(
+                "{} {} {}\n",
+                1 - (i & 1),
+                1 - ((i >> 1) & 1),
+                1 - ((i >> 2) & 1)
+            );
+        }
+        let mesh = color_cube(&Lut::parse(&text).unwrap());
+        let positions = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .unwrap()
+            .as_float3()
+            .unwrap();
+        let Some(bevy::mesh::VertexAttributeValues::Float32x4(colors)) =
+            mesh.attribute(Mesh::ATTRIBUTE_COLOR)
+        else {
+            panic!("no colors");
+        };
+        assert_eq!(positions.len(), 6 * 4);
+        for (p, c) in positions.iter().zip(colors) {
+            // Input red at +X (x = 0.6) inverts to 0.
+            let expected = if p[0] > 0.0 { 0.0 } else { 1.0 };
+            assert_eq!(c[0], expected, "{p:?} {c:?}");
+        }
+        let Some(Indices::U32(indices)) = mesh.indices() else {
+            panic!("no indices");
+        };
+        for triangle in indices.as_chunks::<3>().0 {
+            let [a, b, c] = triangle.map(|i| Vec3::from(positions[i as usize]));
+            assert!((b - a).cross(c - a).dot((a + b + c) / 3.0) > 0.0);
         }
     }
 

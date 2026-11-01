@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::build::{is_texture_source, relative, strip_extension};
 use crate::config::Project;
 use crate::hash::fnv1a64;
+use crate::lut::Lut;
 use crate::material::{self, AlphaMode, HeightMode};
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
@@ -31,6 +32,8 @@ pub struct Inspection {
     pub note: Option<String>,
     /// Environment map faces in cube layer order (+X, −X, +Y, −Y, +Z, −Z).
     pub cubemap: Option<Vec<Image>>,
+    /// A parsed color LUT.
+    pub lut: Option<Lut>,
 }
 
 /// Face file stems of an environment map folder, in cube layer order.
@@ -46,6 +49,7 @@ pub fn is_environment_map(dir: &Path) -> bool {
 enum Kind {
     SourceTexture,
     MaterialSource,
+    ColorLut,
     CompiledTexture,
     CompiledMaterial,
     Manifest,
@@ -58,6 +62,7 @@ impl Kind {
         match self {
             Self::SourceTexture => "Source texture",
             Self::MaterialSource => "Material source",
+            Self::ColorLut => "Color LUT",
             Self::CompiledTexture => "Compiled texture",
             Self::CompiledMaterial => "Compiled material",
             Self::Manifest => "Manifest",
@@ -111,6 +116,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         .filter(|name| !name.is_empty());
     let kind = match location {
         Location::Input if material_name.is_some() => Kind::MaterialSource,
+        Location::Input if has_ext("cube") => Kind::ColorLut,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
         Location::Input => Kind::Ignored,
         Location::Output if has_ext(manifest::Kind::Texture.extension()) => Kind::CompiledTexture,
@@ -124,6 +130,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
     let result = match kind {
         Kind::SourceTexture => source_texture(project, file, &rel, &mut out),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
+        Kind::ColorLut => color_lut(file, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
         Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
         Kind::Manifest => manifest(file, &mut out),
@@ -228,6 +235,22 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
         }
         None => out.note = Some("No preview for this format".into()),
     }
+    Ok(())
+}
+
+fn color_lut(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let lut = Lut::parse(&text).inspect_err(|e| out.note = Some(e.clone()))?;
+    let n = lut.size;
+    let list = |v: [f32; 3]| v.map(|c| c.to_string()).join(", ");
+    out.rows
+        .push(("Title", lut.title.clone().unwrap_or_else(|| "—".into())));
+    out.rows.push(("Size", format!("{n} × {n} × {n}")));
+    out.rows.push((
+        "Domain",
+        format!("{} – {}", list(lut.domain_min), list(lut.domain_max)),
+    ));
+    out.lut = Some(lut);
     Ok(())
 }
 
@@ -583,6 +606,30 @@ mod tests {
         assert_eq!(channels("rgb.jpg"), [true, true, true, false]);
         assert_eq!(channels("gray.png"), [false; 4]);
         assert_eq!(channels("gray_alpha.png"), [false, false, false, true]);
+    }
+
+    #[test]
+    fn color_luts() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        let file = dir.path().join("assets/grade.lut.CUBE");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let mut text = String::from("TITLE \"Warm\"\nLUT_3D_SIZE 2\n");
+        for i in 0..8 {
+            text += &format!("{} {} {}\n", i & 1, (i >> 1) & 1, (i >> 2) & 1);
+        }
+        fs::write(&file, text).unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Kind"), "Color LUT");
+        assert_eq!(row(&i, "Title"), "Warm");
+        assert_eq!(row(&i, "Size"), "2 × 2 × 2");
+        assert_eq!(row(&i, "Domain"), "0, 0, 0 – 1, 1, 1");
+        assert!(i.lut.is_some());
+
+        fs::write(&file, "LUT_3D_SIZE 2\n").unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert!(row(&i, "Error").contains("expected 8 entries"));
+        assert_eq!(i.note.as_deref(), Some(row(&i, "Error")));
     }
 
     #[test]
