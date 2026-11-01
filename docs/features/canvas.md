@@ -26,6 +26,8 @@ View  [ 2D | 3D ]
 - Otherwise the bar is always shown, but the mode only applies to **images**:
   - an [environment map](#environment-maps) only exists in 3D, so the bar is
     empty (no `View` label, no buttons);
+  - a font's [specimen](fonts.md#specimen) only exists in 2D, so the bar is
+    empty too;
   - with anything else (or nothing) selected, both buttons are disabled
     (`TEXT_WEAK` at 50%, no hover or clicks) and neither is active.
 
@@ -50,6 +52,7 @@ Both modes show the same messages when there is no image to show.
 | compiled texture (Output `*.ktx2`)| level 0, if the file is in assetc's own KTX2 subset (`R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression, see [`ktx2.md`](../spec/ktx2.md)); otherwise "No preview for this format" |
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
 | an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
+| a font (Input `*.ttf`, `*.otf`)   | its specimen sheet, without the toolbar, see [`fonts.md`](fonts.md#specimen) |
 | any other file or folder          | "No preview"                              |
 | a selected file that disappeared  | "<name> no longer exists"                 |
 

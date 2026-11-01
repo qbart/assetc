@@ -53,6 +53,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.mat.toml`               | Material source    |
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
 | Input  | `*.noise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |
+| Input  | `*.ttf`, `*.otf` (any case) | Font, see [`fonts.md`](fonts.md#inspector) |
 | Input  | anything else              | Ignored            |
 | Output | `*.ktx2` (any case)        | Compiled texture   |
 | Output | `*.mat`                    | Compiled material  |
@@ -138,7 +139,8 @@ Lists the assets a file contains, as recorded in `<output>/assets.manifest`
 ## Loading
 
 Inspecting a file (reading and decoding it, generating a `.noise` image,
-loading an environment map's faces, parsing a LUT) runs on a background
+loading an environment map's faces, parsing a LUT, rendering a font
+specimen) runs on a background
 thread, so the UI never waits for it. There is no file watching.
 
 - **When**: the selection changes, after a rescan (button or finished build),
