@@ -404,6 +404,65 @@ pub fn encode(
     (writer.finish(), summary)
 }
 
+/// Inverse of [`octahedral`].
+fn octahedral_decode([u, v]: [i16; 2]) -> [f32; 3] {
+    let (mut x, mut y) = (f32::from(u) / 32767.0, f32::from(v) / 32767.0);
+    let z = 1.0 - x.abs() - y.abs();
+    if z < 0.0 {
+        let sign = |s: f32| if s >= 0.0 { 1.0 } else { -1.0 };
+        (x, y) = ((1.0 - y.abs()) * sign(x), (1.0 - x.abs()) * sign(y));
+    }
+    let length = (x * x + y * y + z * z).sqrt().max(f32::EPSILON);
+    [x / length, y / length, z / length]
+}
+
+/// A compiled mesh as triangles for the canvas: three corners per triangle and the meshlet
+/// each triangle belongs to; see docs/features/models.md#compiled-mesh-preview.
+#[derive(Clone, Debug, Default)]
+pub struct Preview {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    /// One per triangle.
+    pub meshlets: Vec<u32>,
+}
+
+pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
+    let reader = chunks::Reader::parse(bytes, FORMAT)?;
+    let vertices = reader.require("VERTICES")?;
+    let meshlets = reader.require("MESHLETS")?;
+    let meshlet_vertices = reader.require("MLVERTS")?;
+    let triangles = reader.require("MLTRIS")?;
+    let vertex = |i: usize| -> Option<([f32; 3], [f32; 3])> {
+        let base = i.checked_mul(28)?;
+        let raw = vertices.get(base..base + 28)?;
+        let f = |at: usize| f32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
+        let s = |at: usize| i16::from_le_bytes(raw[at..at + 2].try_into().unwrap());
+        Some(([f(0), f(4), f(8)], octahedral_decode([s(12), s(14)])))
+    };
+    let bad = || "meshlet data out of range".to_owned();
+    let mut out = Preview::default();
+    for m in 0..meshlets.len() / 16 {
+        let field = |at| chunks::u32_at(meshlets, m, 16, at).map(|v| v as usize);
+        let (vertex_offset, triangle_offset, triangle_count) = (
+            field(0).ok_or_else(bad)?,
+            field(8).ok_or_else(bad)?,
+            field(12).ok_or_else(bad)?,
+        );
+        for t in triangle_offset..triangle_offset + triangle_count {
+            let corners = triangles.get(t * 3..t * 3 + 3).ok_or_else(bad)?;
+            for &local in corners {
+                let global = chunks::u32_at(meshlet_vertices, vertex_offset + local as usize, 4, 0)
+                    .ok_or_else(bad)?;
+                let (position, normal) = vertex(global as usize).ok_or_else(bad)?;
+                out.positions.push(position);
+                out.normals.push(normal);
+            }
+            out.meshlets.push(m as u32);
+        }
+    }
+    Ok(out)
+}
+
 /// Inspector rows of an `.amesh` file; see docs/features/models.md#inspector.
 pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     let reader = chunks::Reader::parse(bytes, FORMAT)?;
@@ -486,6 +545,27 @@ mod tests {
             vertices,
             indices,
             material: Some(0),
+        }
+    }
+
+    #[test]
+    fn previews_meshlet_triangles() {
+        let (bytes, summary) = encode(&[grid(16)], &[], None, true, MeshletLimits::default());
+        let preview = preview(&bytes).unwrap();
+        assert_eq!(preview.meshlets.len(), summary.triangles);
+        assert_eq!(preview.positions.len(), summary.triangles * 3);
+        assert_eq!(
+            *preview.meshlets.last().unwrap() as usize,
+            summary.meshlets - 1
+        );
+        // Normals decode back to +Z.
+        assert!(preview.normals.iter().all(|n| (n[2] - 1.0).abs() < 1e-3));
+        for n in [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.6, -0.8]] {
+            let back = octahedral_decode(octahedral(n));
+            assert!(
+                (0..3).all(|c| (back[c] - n[c]).abs() < 1e-3),
+                "{n:?} {back:?}"
+            );
         }
     }
 

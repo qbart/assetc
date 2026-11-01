@@ -154,6 +154,12 @@ pub struct Preview3d {
     pub model_status: ModelStatus,
     /// The model's animation to play, by index in the file; `None` is the rest pose.
     pub animation: Option<usize>,
+    /// A compiled mesh to show instead of the shape, taken by [`sync`].
+    pub compiled: Option<crate::amesh::Preview>,
+    /// Show the last compiled mesh uploaded.
+    pub compiled_shown: bool,
+    /// Color the compiled mesh by meshlet rather than plain gray.
+    pub meshlet_colors: bool,
 }
 
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -196,6 +202,10 @@ struct Scene {
     unlit: Handle<StandardMaterial>,
     /// Untransformed and LUT color cubes.
     color_cube: Option<(Handle<Mesh>, Handle<Mesh>)>,
+    /// A compiled mesh: gray, and colored by meshlet.
+    compiled: Option<[Handle<Mesh>; 2]>,
+    /// Lit, showing vertex colors.
+    vertex_colors: Handle<StandardMaterial>,
     cubemap: Option<Handle<Image>>,
 }
 
@@ -323,6 +333,10 @@ fn setup(
         unlit: true,
         ..default()
     });
+    let vertex_colors = materials.add(StandardMaterial {
+        perceptual_roughness: 0.8,
+        ..default()
+    });
 
     commands
         .spawn((
@@ -363,6 +377,8 @@ fn setup(
         chrome,
         unlit,
         color_cube: None,
+        compiled: None,
+        vertex_colors,
         cubemap: None,
     });
 }
@@ -501,6 +517,18 @@ fn sync(
         meshes.remove(&old.1);
     }
 
+    if let Some(compiled) = preview.compiled.take() {
+        let [gray, colored] = compiled_meshes(compiled);
+        if let Some(old) = scene
+            .compiled
+            .replace([meshes.add(gray), meshes.add(colored)])
+        {
+            for handle in old {
+                meshes.remove(&handle);
+            }
+        }
+    }
+
     let (mesh, material, transform, visibility) = &mut *shape;
     // A model replaces the shape.
     let wanted_visibility = if preview.model.is_some() {
@@ -517,7 +545,15 @@ fn sync(
         preview.shape
     };
     let index = Shape::ALL.iter().position(|s| *s == current).unwrap_or(0);
+    let compiled = scene
+        .compiled
+        .as_ref()
+        .filter(|_| preview.compiled_shown && !environment);
     let (wanted_mesh, wanted_material) = match &scene.color_cube {
+        _ if let Some(both) = compiled => (
+            &both[usize::from(preview.meshlet_colors)],
+            &scene.vertex_colors,
+        ),
         Some((before, after)) if preview.colors => {
             let cube = if preview.colors_before { before } else { after };
             (cube, &scene.unlit)
@@ -531,9 +567,54 @@ fn sync(
     if material.0 != *wanted_material {
         material.0 = wanted_material.clone();
     }
-    if active && !preview.dragging {
+    // Compiled meshes are 3D files: they do not auto-rotate.
+    if compiled.is_some() {
+        transform.rotation = Quat::IDENTITY;
+    } else if active && !preview.dragging {
         transform.rotate_y(SPIN * time.delta_secs());
     }
+}
+
+/// Gray and per-meshlet colored meshes of a compiled mesh, centered and scaled like a model;
+/// see docs/features/models.md#compiled-mesh-preview.
+fn compiled_meshes(preview: crate::amesh::Preview) -> [Mesh; 2] {
+    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    for p in &preview.positions {
+        (min, max) = (min.min(Vec3::from(*p)), max.max(Vec3::from(*p)));
+    }
+    let size = (max - min).max_element();
+    let scale = if size > 0.0 { MODEL_SIZE / size } else { 1.0 };
+    let center = (min + max) / 2.0;
+    let positions: Vec<[f32; 3]> = preview
+        .positions
+        .iter()
+        .map(|p| ((Vec3::from(*p) - center) * scale).to_array())
+        .collect();
+    let gray = Color::srgb(0.8, 0.8, 0.8).to_linear().to_f32_array();
+    let colors = |by_meshlet: bool| -> Vec<[f32; 4]> {
+        preview
+            .meshlets
+            .iter()
+            .flat_map(|&m| {
+                let color = if by_meshlet {
+                    let hue = (m as f32 * 0.618_034).fract() * 360.0;
+                    Color::hsv(hue, 0.65, 0.9).to_linear().to_f32_array()
+                } else {
+                    gray
+                };
+                [color; 3]
+            })
+            .collect()
+    };
+    [false, true].map(|by_meshlet| {
+        Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, preview.normals.clone())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors(by_meshlet))
+    })
 }
 
 /// The model being shown, see docs/features/models.md#preview.

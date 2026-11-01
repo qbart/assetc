@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::amesh::{MeshSettings, MeshletLimits};
+use crate::amod::{self, Amod};
 use crate::assets::Assets;
 use crate::build::{self, Outcome};
 use crate::color_picker::{self, Picker};
@@ -22,6 +24,7 @@ use crate::inspect::{self, Inspection, Location};
 use crate::logo;
 use crate::lut::Lut;
 use crate::manifest::Kind;
+use crate::model;
 use crate::noise::{GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Value};
 use crate::preview3d::{CubemapUpload, ModelStatus, Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
@@ -74,6 +77,8 @@ struct UiState {
     animations: HashMap<PathBuf, Option<usize>>,
     /// Mip level shown for each compiled texture, by path.
     mip_levels: HashMap<PathBuf, usize>,
+    /// Compiled meshes are colored by meshlet (else gray).
+    meshlet_colors: bool,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -131,10 +136,15 @@ struct Inspected {
     noise: Option<Result<NoiseEdit, String>>,
     /// A `.gradient` file being edited, or why it can't be read.
     gradient: Option<Result<GradientEdit, String>>,
+    /// A model's `.amod` mesh settings being edited, or why they can't be read.
+    mesh: Option<Result<MeshEdit, String>>,
     lut_compare: Option<CompareCache>,
     uploaded_color_cube: bool,
     /// A glTF model's input-relative path and this inspection's generation, for the 3D view.
     model: Option<(PathBuf, u64)>,
+    /// A compiled mesh's triangles, and whether the 3D view has them.
+    compiled_mesh: Option<crate::amesh::Preview>,
+    uploaded_compiled_mesh: bool,
 }
 
 /// Before / after textures of the LUT compare view for one source image.
@@ -292,6 +302,7 @@ impl Default for UiState {
             canvas_options: HashMap::new(),
             animations: HashMap::new(),
             mip_levels: HashMap::new(),
+            meshlet_colors: true,
         }
     }
 }
@@ -375,7 +386,9 @@ impl InspectorTab {
             }
             Self::Parameters => selection.is_some_and(|s| {
                 s.location == Location::Input
-                    && (build::is_noise(&s.path) || gradient::is_gradient(&s.path))
+                    && (build::is_noise(&s.path)
+                        || gradient::is_gradient(&s.path)
+                        || model::is_model(&s.path))
                     && s.path.is_file()
             }),
             Self::Modifiers => selection.is_some_and(|s| {
@@ -502,10 +515,11 @@ fn shell(
     preview3d.environment = false;
     preview3d.colors = false;
     preview3d.model = None;
+    preview3d.compiled_shown = false;
     let shown = Shown::of(state.inspected.as_ref());
     let show_3d = match shown {
         Shown::Image => state.mode == ViewMode::ThreeD,
-        Shown::Environment | Shown::Model => true,
+        Shown::Environment | Shown::Model | Shown::CompiledMesh => true,
         Shown::Lut => state.lut.view == LutView::Cube,
         Shown::Specimen | Shown::Other => false,
     };
@@ -529,7 +543,9 @@ fn shell(
             let (options, active, enabled): (&[&str], _, _) = match shown {
                 Shown::Image => (&modes, mode, true),
                 Shown::Lut => (&lut_views, lut_view, true),
-                Shown::Environment | Shown::Specimen | Shown::Model => (&[], None, false),
+                Shown::Environment | Shown::Specimen | Shown::Model | Shown::CompiledMesh => {
+                    (&[], None, false)
+                }
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -553,6 +569,13 @@ fn shell(
                 (Shown::Environment, _) => {
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
                 }
+                (Shown::CompiledMesh, _) => canvas_compiled_mesh(
+                    ui,
+                    rect,
+                    state.inspected.as_mut(),
+                    &mut preview3d,
+                    &mut state.meshlet_colors,
+                ),
                 (Shown::Model, _) => {
                     let inspected = state.inspected.as_ref();
                     let animation = inspected
@@ -625,7 +648,10 @@ struct Prepared {
     lut: Option<Lut>,
     noise: Option<Result<Noise, String>>,
     gradient: Option<Result<Gradients, String>>,
+    /// A model's sidecar and the meshlet limits the project gives it.
+    mesh: Option<Result<(Amod, MeshletLimits), String>>,
     model: Option<(PathBuf, u64)>,
+    compiled_mesh: Option<crate::amesh::Preview>,
 }
 
 fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
@@ -689,8 +715,21 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
             .map_err(|e| e.to_string())
             .and_then(|text| Gradients::parse(&text))
     });
+    let mesh =
+        (selection.location == Location::Input && model::is_model(&selection.path)).then(|| {
+            let settings = MeshSettings::new(&project.config.meshes)
+                .map_err(|e| format!("assetc.toml [meshes]: {e}"))?;
+            let rel = project
+                .input_dir()
+                .and_then(|dir| build::relative(&dir, &selection.path).ok())
+                .unwrap_or_default();
+            let amod = amod::read(&selection.path)?.unwrap_or_default();
+            Ok((amod, settings.limits(&rel)))
+        });
     Prepared {
+        compiled_mesh: inspection.compiled_mesh.take(),
         gradient,
+        mesh,
         model,
         pixels: inspection
             .preview
@@ -760,11 +799,22 @@ fn inspected(
     prepared: Prepared,
     previous: Option<Inspected>,
 ) -> Inspected {
-    let (kept, kept_gradient) = previous.map_or((None, None), |p| {
+    let (kept, kept_gradient, kept_mesh) = previous.map_or((None, None, None), |p| {
         (
             p.noise.and_then(Result::ok),
             p.gradient.and_then(Result::ok),
+            p.mesh.and_then(Result::ok),
         )
+    });
+    let mesh = prepared.mesh.map(|parsed| {
+        parsed.map(|(amod, project)| match kept_mesh {
+            Some(edit) if edit.saved == amod => MeshEdit { project, ..edit },
+            _ => MeshEdit {
+                edit: amod.clone(),
+                saved: amod,
+                project,
+            },
+        })
     });
     let gradient = prepared.gradient.map(|parsed| {
         parsed.map(|g| match kept_gradient {
@@ -809,6 +859,9 @@ fn inspected(
         lut: prepared.lut,
         noise,
         gradient,
+        mesh,
+        compiled_mesh: prepared.compiled_mesh,
+        uploaded_compiled_mesh: false,
         lut_compare: None,
         uploaded_color_cube: false,
         model: prepared.model,
@@ -1649,6 +1702,19 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
             match (state.inspector_tab, &mut state.inspected, &state.selection) {
                 (_, _, None) => placeholder(ui, "Nothing selected"),
                 (_, None, Some(_)) => placeholder(ui, "Loading…"),
+                (InspectorTab::Parameters, Some(inspected), Some(_))
+                    if inspected.mesh.is_some() =>
+                {
+                    if let Some(amod) = mesh_tab(ui, inspected) {
+                        match amod::write(&inspected.path, &amod) {
+                            Ok(()) => {
+                                state.reinspect = true;
+                                state.rescan = true;
+                            }
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (
                     tab @ (InspectorTab::Parameters | InspectorTab::Gradients),
                     Some(inspected),
@@ -1975,6 +2041,90 @@ fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
             });
         });
     noise_commit(ui, edit)
+}
+
+/// A model's `.amod` mesh settings being edited; see docs/features/models.md#parameters-tab.
+struct MeshEdit {
+    edit: Amod,
+    /// As last written.
+    saved: Amod,
+    /// What `assetc.toml` gives the model, shown where the sidecar sets nothing.
+    project: MeshletLimits,
+}
+
+/// Meshlet limits of a model, written to its sidecar; see docs/features/models.md#parameters-tab.
+fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
+    let name = inspected.inspection.name.clone();
+    let edit = match &mut inspected.mesh {
+        Some(Ok(edit)) => edit,
+        Some(Err(e)) => {
+            placeholder(ui, e);
+            return None;
+        }
+        None => {
+            placeholder(ui, "No parameters");
+            return None;
+        }
+    };
+    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let project = edit.project;
+                let mesh = &mut edit.edit.mesh;
+                prop_section(
+                    ui,
+                    "mesh_meshlets",
+                    Fold::Open,
+                    RichText::new("Meshlets"),
+                    |_| {},
+                    |_, _| {},
+                    |ui| {
+                        let mut vertices =
+                            mesh.meshlet_max_vertices.unwrap_or(project.max_vertices);
+                        prop_row(ui, "Max vertices", |ui, width| {
+                            let field = egui::DragValue::new(&mut vertices).range(3..=256);
+                            if ui.add_sized(vec2(width, 22.0), field).changed() {
+                                mesh.meshlet_max_vertices = Some(vertices);
+                            }
+                        });
+                        let mut triangles =
+                            mesh.meshlet_max_triangles.unwrap_or(project.max_triangles);
+                        prop_row(ui, "Max triangles", |ui, width| {
+                            let field = egui::DragValue::new(&mut triangles)
+                                .range(4..=512)
+                                .speed(4.0);
+                            if ui.add_sized(vec2(width, 22.0), field).changed() {
+                                mesh.meshlet_max_triangles = Some(triangles);
+                            }
+                        });
+                        // Meshoptimizer needs a multiple of 4; rounded once the edit is done.
+                        if !busy && let Some(t) = &mut mesh.meshlet_max_triangles {
+                            *t = ((*t + 2) / 4 * 4).clamp(4, 512);
+                        }
+                        ui.weak(if mesh.is_empty() {
+                            "Project settings (assetc.toml)".to_owned()
+                        } else {
+                            format!("Set for this file ({name}.amod)")
+                        });
+                        ui.add_space(4.0);
+                        let reset = ui.add_enabled(
+                            !mesh.is_empty(),
+                            egui::Button::new("Use project settings"),
+                        );
+                        if reset.clicked() {
+                            *mesh = Default::default();
+                        }
+                    },
+                );
+            });
+        });
+    (!busy && edit.edit != edit.saved).then(|| {
+        edit.saved = edit.edit.clone();
+        edit.edit.clone()
+    })
 }
 
 /// A `.gradient` file being edited; see docs/features/gradients.md#parameters-tab.
@@ -2829,6 +2979,8 @@ enum Shown {
     Specimen,
     Environment,
     Model,
+    /// An `.amesh` from the Output tree, with its meshlets.
+    CompiledMesh,
     Lut,
     Other,
 }
@@ -2838,6 +2990,7 @@ impl Shown {
         match inspected {
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.model.is_some() => Self::Model,
+            Some(i) if i.compiled_mesh.is_some() => Self::CompiledMesh,
             Some(i) if i.lut.is_some() => Self::Lut,
             Some(i) if i.inspection.specimen && i.preview.is_some() => Self::Specimen,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
@@ -3352,6 +3505,48 @@ fn canvas_environment(
     let shapes = shape_tools(preview.environment_shape());
     if let Some((_, button)) = toolbar(ui, rect, &[&shapes]) {
         preview.environment_shape = Some(Shape::ALL[button]);
+        ui.ctx().request_repaint();
+    }
+}
+
+/// A compiled mesh in the 3D view, by meshlet or gray; see
+/// docs/features/models.md#compiled-mesh-preview.
+fn canvas_compiled_mesh(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: Option<&mut Inspected>,
+    preview: &mut Preview3d,
+    meshlet_colors: &mut bool,
+) {
+    let Some(inspected) = inspected else {
+        return;
+    };
+    let Some(mesh) = &inspected.compiled_mesh else {
+        return;
+    };
+    if !inspected.uploaded_compiled_mesh {
+        preview.compiled = Some(mesh.clone());
+        inspected.uploaded_compiled_mesh = true;
+    }
+    preview.compiled_shown = true;
+    preview.meshlet_colors = *meshlet_colors;
+    view_3d(ui, rect, preview);
+    let tools = [
+        Tool {
+            glyph: Glyph::Icon(Icon::Shapes),
+            name: "Meshlets".into(),
+            on: *meshlet_colors,
+            enabled: true,
+        },
+        Tool {
+            glyph: Glyph::Icon(Icon::Box),
+            name: "Shaded".into(),
+            on: !*meshlet_colors,
+            enabled: true,
+        },
+    ];
+    if let Some((_, button)) = toolbar(ui, rect, &[&tools]) {
+        *meshlet_colors = button == 0;
         ui.ctx().request_repaint();
     }
 }

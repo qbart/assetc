@@ -42,6 +42,8 @@ pub struct Inspection {
     pub model: bool,
     /// A compiled texture's mip levels after level 0 (which is `preview`).
     pub mips: Vec<Image>,
+    /// A compiled mesh's triangles by meshlet, for the canvas.
+    pub compiled_mesh: Option<crate::amesh::Preview>,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
 }
@@ -172,10 +174,11 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
         Kind::CompiledMesh => fs::read(file)
             .map_err(|e| e.to_string())
-            .and_then(|bytes| amesh::rows(&bytes))
-            .map(|rows| {
+            .and_then(|bytes| Ok((amesh::rows(&bytes)?, amesh::preview(&bytes)?)))
+            .map(|(rows, preview)| {
                 out.rows.extend(rows);
                 asset_rows(&rel, &mut out);
+                out.compiled_mesh = Some(preview);
             }),
         Kind::CompiledAnimation => fs::read(file)
             .map_err(|e| e.to_string())
@@ -190,7 +193,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
     if let Err(message) = result {
         out.preview = None;
         // A LUT has no image to fall back on, so the canvas shows the error itself.
-        out.note = matches!(kind, Kind::ColorLut).then(|| message.clone());
+        out.note = matches!(kind, Kind::ColorLut | Kind::CompiledMesh).then(|| message.clone());
         out.rows.push(("Error", message));
     }
     out
