@@ -114,31 +114,6 @@ impl Lut {
             pixels,
         }
     }
-
-    /// One N × N tile per blue slice, red along x, green down, in `ceil(√N)` columns.
-    /// `background` fills unused cells.
-    pub fn slices(&self, background: [u8; 4]) -> Image {
-        let n = self.size;
-        let columns = (n as f64).sqrt().ceil() as usize;
-        let rows = n.div_ceil(columns);
-        let (width, height) = (columns * n, rows * n);
-        let mut pixels = background.repeat(width * height);
-        for b in 0..n {
-            let (tx, ty) = ((b % columns) * n, (b / columns) * n);
-            for g in 0..n {
-                for r in 0..n {
-                    let rgb = self.entry(r, g, b).map(|v| to_u8(v.clamp(0.0, 1.0)));
-                    let i = ((ty + g) * width + tx + r) * 4;
-                    pixels[i..i + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
-                }
-            }
-        }
-        Image {
-            width: width as u32,
-            height: height as u32,
-            pixels,
-        }
-    }
 }
 
 fn triple(text: &str) -> Option<[f32; 3]> {
@@ -211,19 +186,6 @@ mod tests {
             pixels: vec![0, 255, 51, 7],
         };
         assert_eq!(invert.grade(&image).pixels, [255, 0, 204, 7]);
-    }
-
-    #[test]
-    fn slices_layout() {
-        let lut = Lut::parse(&cube(3, |c| c)).unwrap();
-        let image = lut.slices([1, 2, 3, 4]);
-        // ceil(√3) = 2 columns, 2 rows of 3 × 3 tiles.
-        assert_eq!((image.width, image.height), (6, 6));
-        let px = |x: usize, y: usize| &image.pixels[(y * 6 + x) * 4..][..4];
-        assert_eq!(px(2, 0), [255, 0, 0, 255]); // tile b=0: r=2, g=0
-        assert_eq!(px(0, 2), [0, 255, 0, 255]); // r=0, g=2
-        assert_eq!(px(3, 0), [0, 0, 128, 255]); // tile b=1 starts at x=3
-        assert_eq!(px(3, 3), [1, 2, 3, 4]); // unused cell
     }
 
     #[test]

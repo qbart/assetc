@@ -107,7 +107,6 @@ struct Inspected {
     uploaded_cubemap: bool,
     lut: Option<Lut>,
     lut_compare: Option<CompareCache>,
-    lut_slices: Option<egui::TextureHandle>,
     uploaded_color_cube: bool,
 }
 
@@ -147,18 +146,16 @@ impl Default for LutUi {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LutView {
     Compare,
-    Slices,
     Cube,
     Curves,
 }
 
 impl LutView {
-    const ALL: [Self; 4] = [Self::Compare, Self::Slices, Self::Cube, Self::Curves];
+    const ALL: [Self; 3] = [Self::Compare, Self::Cube, Self::Curves];
 
     fn name(self) -> &'static str {
         match self {
             Self::Compare => "Compare",
-            Self::Slices => "Slices",
             Self::Cube => "Cube",
             Self::Curves => "Curves",
         }
@@ -517,7 +514,6 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
         uploaded_cubemap: false,
         lut,
         lut_compare: None,
-        lut_slices: None,
         uploaded_color_cube: false,
     }
 }
@@ -1390,7 +1386,6 @@ fn canvas_lut(
     let Some(Inspected {
         lut: Some(lut),
         lut_compare,
-        lut_slices,
         uploaded_color_cube,
         ..
     }) = inspected
@@ -1399,24 +1394,6 @@ fn canvas_lut(
     };
     match lut_ui.view {
         LutView::Compare => compare_view(ui, rect, lut, lut_compare, lut_ui, last_image),
-        LutView::Slices => {
-            let texture = lut_slices.get_or_insert_with(|| {
-                let image = lut.slices(BG_CENTER.to_array());
-                load_texture(
-                    ui.ctx(),
-                    "lut_slices",
-                    &image,
-                    &image.pixels,
-                    egui::TextureFilter::Nearest,
-                )
-            });
-            ui.painter_at(rect).image(
-                texture.id(),
-                fit_rect(rect, texture.size_vec2()),
-                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-        }
         LutView::Cube => {
             if !*uploaded_color_cube {
                 preview.color_cube = Some(preview3d::color_cube(lut));
