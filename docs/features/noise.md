@@ -62,12 +62,19 @@ restores what was set; the file only ever stores the current type's.
 The **Modifiers** tab (`wrench`) edits the selected `.noise` file's modifiers
 (disabled for anything else). Each modifier is a section card, in order:
 
-- Header: chevron (collapse), an eye button (`eye` enabled / `eye-off`
-  disabled; a disabled modifier's title is drawn in `TEXT_WEAK`), the
-  modifier name (Invert, Levels, Brightness / Contrast, Threshold, Posterize,
-  Blur, Normalize, Colorize), and on the right **move up** (`arrow-up`),
-  **move down** (`arrow-down`, each disabled at the ends) and **remove**
-  (`trash-2`) icon buttons with tooltips.
+- Modifier cards do not collapse (no chevron); their parameters are always
+  shown.
+- Header: a **drag handle** (`grip-horizontal`) in the chevron's place, an
+  eye button (`eye` enabled / `eye-off` disabled; a disabled modifier's
+  title is drawn in `TEXT_WEAK`), the modifier name (Invert, Levels,
+  Brightness / Contrast, Threshold, Posterize, Blur, Normalize, Colorize), and
+  on the right a **remove** (`trash-2`) icon button with a tooltip.
+- **Reordering**: press the drag handle and move the pointer (cursor `grab`
+  on hover, `grabbing` while dragging). The dragged card gets a 1 px `ACCENT`
+  outline and a 2 px `ACCENT` line shows where it will go: before the first
+  card whose vertical center is below the pointer, or after the last. Releasing
+  moves the modifier there; releasing where it already is (directly above or
+  below itself) changes nothing.
 - Body: the modifier's parameters as rows (as in Parameters), or weak
   "No parameters".
 - Below the list: an **Add modifier** button (`plus` icon and text) opening a
@@ -79,8 +86,8 @@ The **Modifiers** tab (`wrench`) edits the selected `.noise` file's modifiers
 
 Edits are **written to the file** in the
 [written form](../spec/noise.md#written-form) when committed: dropdowns,
-checkboxes, color changes and the modifier buttons (add, remove, move,
-enable) immediately; sliders and fields when the pointer is released (or
+checkboxes, color changes and the modifier buttons (add, remove, enable)
+and drops immediately; sliders and fields when the pointer is released (or
 Enter is pressed). The file is then inspected again, so the canvas and Info
 update. If the file does not parse, both tabs show the error instead.
 

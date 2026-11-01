@@ -106,8 +106,8 @@ tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart), `eye`, `eye-off` (LUT cube before / after),
-`sliders-vertical` (Inspector Parameters tab), `wrench`, `arrow-up`,
-`arrow-down`, `trash-2`, `plus` (Inspector Modifiers tab), `folder`, `folder-open`, `file`,
+`sliders-vertical` (Inspector Parameters tab), `wrench`,
+`grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 
@@ -126,8 +126,10 @@ property sheet, inside 8 px margins:
 - **Sections**: cards with 6 px rounded corners and `BG_HEADER` fill, 8 px
   apart. The header row (28 px) has a `chevron-down` / `chevron-right` icon
   and the title (14 px, `TEXT`); clicking the chevron or title collapses /
-  expands the card (open by default, remembered for the session). Optional
-  header buttons sit on the right. The body is inset 10 px.
+  expands the card (open by default, remembered for the session). Cards may
+  be non-collapsible: no chevron, always open. Optional header buttons sit
+  after the chevron (before the title) and on the right. The body is inset
+  10 px.
 - **Rows**: 26 px tall, 6 px apart. The label (13 px, `TEXT_WEAK`) is
   right-aligned in a column 40% of the card width (at least 80 px); the
   control fills the rest.
