@@ -118,8 +118,8 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   | Button      | Icon          | Shows                                                    |
   |-------------|---------------|----------------------------------------------------------|
   | Material    | `box-checker` | the mesh with its compiled materials (default), see below |
-  | Wireframe   | `box`         | every triangle edge as a 1 px `TEXT` line, unlit, no faces |
   | Shaded      | `box-shaded`  | the whole mesh in light gray                             |
+  | Wireframe   | `box`         | every triangle edge as a 1 px `TEXT` line, unlit, no faces |
   | Meshlets    | `squares-unite` | each meshlet in its own color                          |
   | Material ID | `image`       | each material slot in its own color; no material in gray |
   | Submeshes   | `boxes`       | each submesh in its own color                            |
