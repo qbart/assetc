@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 use bevy::prelude::Resource;
 
-use crate::build::strip_extension;
 use crate::config::Project;
 use crate::manifest::{self, Kind};
 
@@ -49,7 +48,7 @@ impl Assets {
             .map(|entry| Asset {
                 id: entry.id,
                 kind: entry.kind,
-                asset_path: strip_extension(&entry.path).to_owned(),
+                asset_path: entry.kind.asset_path(&entry.path).to_owned(),
                 file: output.join(&entry.path),
             })
             .collect();

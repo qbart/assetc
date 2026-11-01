@@ -12,21 +12,40 @@ const ENTRY_SIZE: usize = 16;
 #[repr(u8)]
 pub enum Kind {
     Texture = 0,
+    Material = 1,
 }
 
 impl Kind {
-    pub const ALL: [Self; 1] = [Self::Texture];
+    pub const ALL: [Self; 2] = [Self::Texture, Self::Material];
 
     /// Extension of the files assets of this kind are written to.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Texture => "ktx2",
+            Self::Material => "mat",
         }
     }
 
     pub fn name(self) -> &'static str {
         match self {
             Self::Texture => "Texture",
+            Self::Material => "Material",
+        }
+    }
+
+    /// Output path (relative to `output`) of an asset; material asset paths already end in `.mat`.
+    pub fn output_path(self, asset_path: &str) -> String {
+        match self {
+            Self::Texture => format!("{asset_path}.{}", self.extension()),
+            Self::Material => asset_path.to_owned(),
+        }
+    }
+
+    /// Inverse of [`Self::output_path`].
+    pub fn asset_path(self, output: &str) -> &str {
+        match self {
+            Self::Texture => output.strip_suffix(".ktx2").unwrap_or(output),
+            Self::Material => output,
         }
     }
 }
@@ -107,6 +126,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, DecodeError> {
         let path = std::str::from_utf8(path).map_err(|_| DecodeError("path is not UTF-8"))?;
         let kind = match e[14] {
             0 => Kind::Texture,
+            1 => Kind::Material,
             _ => continue,
         };
         entries.push(Entry {

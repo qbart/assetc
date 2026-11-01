@@ -1,26 +1,28 @@
 //! Compiles `input` into `output`, see docs/features/build.md.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::config;
-use crate::hash::fnv1a64;
 use crate::manifest::{self, Kind};
-use crate::texture::{self, ColorSpace, Settings};
-use crate::tree::{self, Node};
+use crate::material;
+use crate::plan::{self, Job, flatten};
+use crate::texture::{self, ColorSpace};
+use crate::tree;
 
-/// One compiled source.
+/// One compiled asset.
 #[derive(Debug)]
 pub struct Built {
-    /// Source path relative to `input`.
+    /// Source path(s) relative to `input`.
     pub source: String,
     /// Output path relative to `output`.
     pub output: String,
-    pub color: ColorSpace,
-    pub levels: usize,
+    pub kind: Kind,
+    /// E.g. `srgb, 11 levels` or `material: base_color, orm`.
+    pub detail: String,
 }
 
 #[derive(Debug)]
@@ -55,13 +57,24 @@ impl Outcome {
                 format!("Build failed: {first} ({n} errors)")
             }
         } else {
-            let n = self.built.len();
-            let noun = if n == 1 { "texture" } else { "textures" };
+            let count = |kind| self.built.iter().filter(|b| b.kind == kind).count();
+            let noun = |n, one: &str| match n {
+                1 => format!("1 {one}"),
+                n => format!("{n} {one}s"),
+            };
+            let materials = match count(Kind::Material) {
+                0 => String::new(),
+                n => format!(", {}", noun(n, "material")),
+            };
             let removed = match self.removed.len() {
                 0 => String::new(),
                 k => format!(", {k} removed"),
             };
-            format!("Built {n} {noun} ({} skipped{removed})", self.skipped)
+            format!(
+                "Built {}{materials} ({} skipped{removed})",
+                noun(count(Kind::Texture), "texture"),
+                self.skipped
+            )
         }
     }
 }
@@ -95,15 +108,9 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-struct Texture {
-    id: u64,
-    source: PathBuf,
-    source_rel: String,
-    output_rel: String,
-}
-
 pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<Outcome, Error> {
-    let settings = Settings::new(textures).map_err(Error::Pattern)?;
+    // Checked first so a bad pattern is reported even without an input directory.
+    texture::Settings::new(textures).map_err(Error::Pattern)?;
     if !input.is_dir() {
         return Err(Error::MissingInput(input.to_path_buf()));
     }
@@ -114,86 +121,90 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
             return Err(Error::OutputContainsInput(output.to_path_buf()));
         }
     }
-    let nodes = tree::scan(input).map_err(|e| Error::Io(input.to_path_buf(), e))?;
-    let mut files = Vec::new();
-    flatten(&nodes, &mut files);
+    let plan = plan::plan(input, textures)?;
+    let mut outcome = Outcome {
+        skipped: plan.skipped,
+        failures: plan.failures,
+        ..Default::default()
+    };
 
-    let mut outcome = Outcome::default();
-    let mut textures = Vec::new();
-    for file in files {
-        let source_rel = match relative(input, file) {
-            Ok(rel) => rel,
-            Err(message) => {
-                outcome.failures.push(Failure {
-                    source: file.display().to_string(),
-                    message,
-                });
-                continue;
+    for asset in &plan.assets {
+        let dest = output.join(&asset.output);
+        let result = match &asset.job {
+            Job::Texture {
+                source,
+                color,
+                mipmaps,
+                flip_green,
+            } => compile_texture(&input.join(source), &dest, *color, *mipmaps, *flip_green)
+                .map(|levels| levels_detail(*color, levels)),
+            Job::Orm { sources } => compile_orm(input, sources, &dest)
+                .map(|levels| levels_detail(ColorSpace::Linear, levels)),
+            Job::Material { material, .. } => {
+                write(&dest, &material::encode(material)).map(|()| material_detail(material))
             }
         };
-        if !is_texture_source(file) {
-            outcome.skipped += 1;
-            continue;
-        }
-        let asset_path = strip_extension(&source_rel);
-        textures.push(Texture {
-            id: fnv1a64(asset_path.as_bytes()),
-            source: file.to_path_buf(),
-            output_rel: format!("{asset_path}.{}", Kind::Texture.extension()),
-            source_rel,
-        });
-    }
-
-    let mut by_id: HashMap<u64, Vec<&str>> = HashMap::new();
-    for t in &textures {
-        by_id.entry(t.id).or_default().push(&t.source_rel);
-    }
-    for t in &textures {
-        let sources = &by_id[&t.id];
-        if sources.len() > 1 {
-            let others: Vec<_> = sources.iter().filter(|s| **s != t.source_rel).collect();
-            outcome.failures.push(Failure {
-                source: t.source_rel.clone(),
-                message: format!("asset ID {:#018x} collides with {others:?}", t.id),
-            });
-            continue;
-        }
-        let color = settings.color_space(&t.source_rel);
-        let mipmaps = settings.mipmaps(&t.source_rel);
-        match compile_texture(&t.source, &output.join(&t.output_rel), color, mipmaps) {
-            Ok(levels) => outcome.built.push(Built {
-                source: t.source_rel.clone(),
-                output: t.output_rel.clone(),
-                color,
-                levels,
+        match result {
+            Ok(detail) => outcome.built.push(Built {
+                source: asset.source(),
+                output: asset.output.clone(),
+                kind: asset.kind,
+                detail,
             }),
             Err(message) => outcome.failures.push(Failure {
-                source: t.source_rel.clone(),
+                source: asset.source(),
                 message,
             }),
         }
     }
 
     if outcome.failures.is_empty() {
-        let entries: Vec<_> = textures
+        let entries: Vec<_> = plan
+            .assets
             .iter()
-            .map(|t| manifest::Entry {
-                id: t.id,
-                kind: Kind::Texture,
-                path: t.output_rel.clone(),
+            .map(|a| manifest::Entry {
+                id: a.id,
+                kind: a.kind,
+                path: a.output.clone(),
             })
             .collect();
         let path = output.join(manifest::FILE_NAME);
         fs::create_dir_all(output).map_err(|e| Error::Io(output.to_path_buf(), e))?;
         fs::write(&path, manifest::encode(&entries)).map_err(|e| Error::Io(path, e))?;
 
-        let produced = textures
+        let produced = plan
+            .assets
             .iter()
-            .map(|t| t.output_rel.to_lowercase())
+            .map(|a| a.output.to_lowercase())
             .collect();
         outcome.removed = remove_stale(output, &produced)?;
     }
     Ok(outcome)
+}
+
+fn levels_detail(color: ColorSpace, levels: usize) -> String {
+    let noun = if levels == 1 { "level" } else { "levels" };
+    format!("{color}, {levels} {noun}")
+}
+
+fn material_detail(m: &material::Material) -> String {
+    let t = &m.textures;
+    let slots: Vec<_> = [
+        ("base_color", t.base_color),
+        ("normal", t.normal),
+        ("orm", t.orm),
+        ("emissive", t.emissive),
+        ("height", t.height),
+    ]
+    .into_iter()
+    .filter(|(_, id)| *id != 0)
+    .map(|(name, _)| name)
+    .collect();
+    if slots.is_empty() {
+        "material: no textures".into()
+    } else {
+        format!("material: {}", slots.join(", "))
+    }
 }
 
 /// Deletes outputs not in `produced` (lowercased `output`-relative paths) and
@@ -232,15 +243,6 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
     Ok(removed)
 }
 
-fn flatten<'a>(nodes: &'a [Node], files: &mut Vec<&'a Path>) {
-    for node in nodes {
-        match &node.children {
-            Some(children) => flatten(children, files),
-            None => files.push(&node.path),
-        }
-    }
-}
-
 /// Source image formats compiled to textures, matched case-insensitively.
 const TEXTURE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
 
@@ -269,20 +271,74 @@ pub fn strip_extension(rel: &str) -> &str {
     }
 }
 
+fn decode(source: &Path) -> Result<image::RgbaImage, String> {
+    Ok(image::ImageReader::open(source)
+        .map_err(|e| e.to_string())?
+        .with_guessed_format()
+        .map_err(|e| e.to_string())?
+        .decode()
+        .map_err(|e| e.to_string())?
+        .to_rgba8())
+}
+
 /// Returns the number of levels written.
 fn compile_texture(
     source: &Path,
     dest: &Path,
     color: ColorSpace,
     mipmaps: bool,
+    flip_green: bool,
 ) -> Result<usize, String> {
-    let image = image::ImageReader::open(source)
-        .map_err(|e| e.to_string())?
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?
-        .decode()
-        .map_err(|e| e.to_string())?
-        .to_rgba8();
+    let mut image = decode(source)?;
+    if flip_green {
+        for pixel in image.pixels_mut() {
+            pixel[1] = 255 - pixel[1];
+        }
+    }
+    write_texture(image, dest, color, mipmaps)
+}
+
+/// Packs the red channels of occlusion, roughness, metallic into R, G, B;
+/// missing ones are 255. Returns the number of levels written.
+fn compile_orm(input: &Path, sources: &[Option<String>; 3], dest: &Path) -> Result<usize, String> {
+    let mut size = None;
+    let mut channels: Vec<(usize, image::RgbaImage)> = Vec::new();
+    for (channel, source) in sources.iter().enumerate() {
+        let Some(source) = source else {
+            continue;
+        };
+        let image = decode(&input.join(source)).map_err(|e| format!("{source}: {e}"))?;
+        match size {
+            None => size = Some((source, image.dimensions())),
+            Some((first, dims)) if dims != image.dimensions() => {
+                let (w, h) = image.dimensions();
+                return Err(format!(
+                    "ORM inputs differ in size: {first} is {} × {}, {source} is {w} × {h}",
+                    dims.0, dims.1
+                ));
+            }
+            Some(_) => {}
+        }
+        channels.push((channel, image));
+    }
+    let Some((_, (width, height))) = size else {
+        return Err("no ORM inputs".into());
+    };
+    let mut packed = image::RgbaImage::from_pixel(width, height, image::Rgba([255; 4]));
+    for (channel, image) in &channels {
+        for (out, src) in packed.pixels_mut().zip(image.pixels()) {
+            out[*channel] = src[0];
+        }
+    }
+    write_texture(packed, dest, ColorSpace::Linear, true)
+}
+
+fn write_texture(
+    image: image::RgbaImage,
+    dest: &Path,
+    color: ColorSpace,
+    mipmaps: bool,
+) -> Result<usize, String> {
     let base = texture::Image {
         width: image.width(),
         height: image.height(),
@@ -293,12 +349,15 @@ fn compile_texture(
     } else {
         vec![base]
     };
-    let bytes = crate::ktx2::encode_rgba8(color, &levels);
+    write(dest, &crate::ktx2::encode_rgba8(color, &levels))?;
+    Ok(levels.len())
+}
+
+fn write(dest: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(dir) = dest.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    fs::write(dest, bytes).map_err(|e| format!("{}: {e}", dest.display()))?;
-    Ok(levels.len())
+    fs::write(dest, bytes).map_err(|e| format!("{}: {e}", dest.display()))
 }
 
 #[cfg(test)]
@@ -433,18 +492,233 @@ mod tests {
         let built: Vec<_> = outcome
             .built
             .iter()
-            .map(|b| (b.source.as_str(), b.color, b.levels))
+            .map(|b| (b.source.as_str(), b.detail.as_str()))
             .collect();
         assert_eq!(
             built,
             [
-                ("rock_n.png", ColorSpace::Linear, 3),
-                ("ui/button.png", ColorSpace::Srgb, 1)
+                ("rock_n.png", "linear, 3 levels"),
+                ("ui/button.png", "srgb, 1 level")
             ]
         );
         let ktx = fs::read(output.join("rock_n.ktx2")).unwrap();
         let header = ::ktx2::Reader::new(&ktx[..]).unwrap().header();
         assert_eq!(header.format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+    }
+
+    fn gray(path: &Path, w: u32, h: u32, value: u8) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        image::GrayImage::from_pixel(w, h, image::Luma([value]))
+            .save(path)
+            .unwrap();
+    }
+
+    fn level0(path: &Path) -> (Option<::ktx2::Format>, Vec<u8>) {
+        let ktx = fs::read(path).unwrap();
+        let reader = ::ktx2::Reader::new(&ktx[..]).unwrap();
+        let data = reader.levels().next().unwrap().data.to_vec();
+        (reader.header().format, data)
+    }
+
+    fn texture_id(asset_path: &str) -> u64 {
+        crate::hash::fnv1a64(asset_path.as_bytes())
+    }
+
+    #[test]
+    fn convention_material_with_orm() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("brick/brick.png"), 4, 4);
+        png(&input.join("brick/brick.n.png"), 4, 4);
+        gray(&input.join("brick/brick.r.png"), 4, 4, 100);
+        gray(&input.join("brick/brick.ao.png"), 4, 4, 50);
+        png(&input.join("brick/grass.png"), 2, 2);
+        png(&input.join("brick/a.b.png"), 2, 2);
+        let textures = config::Textures {
+            // Slot color space wins over the globs.
+            linear: vec!["**/brick.png".into()],
+            no_mipmaps: vec![],
+        };
+
+        let outcome = run(&input, &output, &textures).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        let lines: Vec<_> = outcome
+            .built
+            .iter()
+            .map(|b| format!("{} -> {} ({})", b.source, b.output, b.detail))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "brick/a.b.png -> brick/a.b.ktx2 (srgb, 2 levels)",
+                "brick/brick.n.png -> brick/brick.n.ktx2 (linear, 3 levels)",
+                "brick/brick.png -> brick/brick.ktx2 (srgb, 3 levels)",
+                "brick/grass.png -> brick/grass.ktx2 (srgb, 2 levels)",
+                "brick/brick.ao.png, brick/brick.r.png -> brick/brick.orm.ktx2 (linear, 3 levels)",
+                "brick/brick.* -> brick/brick.mat (material: base_color, normal, orm)",
+            ]
+        );
+        assert_eq!(
+            outcome.summary(),
+            "Built 5 textures, 1 material (0 skipped)"
+        );
+        assert!(!output.join("brick/brick.r.ktx2").exists());
+        assert!(!output.join("brick/brick.ao.ktx2").exists());
+
+        let (format, orm) = level0(&output.join("brick/brick.orm.ktx2"));
+        assert_eq!(format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+        assert_eq!(orm[..4], [50, 100, 255, 255]);
+        assert_eq!(
+            level0(&output.join("brick/brick.ktx2")).0,
+            Some(::ktx2::Format::R8G8B8A8_SRGB)
+        );
+
+        let m = material::decode(&fs::read(output.join("brick/brick.mat")).unwrap()).unwrap();
+        assert_eq!(m.textures.base_color, texture_id("brick/brick"));
+        assert_eq!(m.textures.normal, texture_id("brick/brick.n"));
+        assert_eq!(m.textures.orm, texture_id("brick/brick.orm"));
+        assert_eq!((m.textures.emissive, m.textures.height), (0, 0));
+        assert_eq!(m.metallic, 0.0);
+
+        let entries =
+            manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
+        let material = entries.iter().find(|e| e.kind == Kind::Material).unwrap();
+        assert_eq!(material.id, texture_id("brick/brick.mat"));
+        assert_eq!(material.path, "brick/brick.mat");
+        assert_eq!(entries.len(), 6);
+    }
+
+    #[test]
+    fn scalar_only_material() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        fs::write(
+            input.join("gold.mat.toml"),
+            "metallic = 1.0\nroughness = 0.3\n",
+        )
+        .unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(outcome.built[0].source, "gold.mat.toml");
+        assert_eq!(outcome.built[0].detail, "material: no textures");
+        assert_eq!(
+            outcome.summary(),
+            "Built 0 textures, 1 material (0 skipped)"
+        );
+        let m = material::decode(&fs::read(output.join("gold.mat")).unwrap()).unwrap();
+        assert_eq!((m.metallic, m.roughness), (1.0, 0.3));
+        assert_eq!(m.textures, material::TextureIds::default());
+    }
+
+    #[test]
+    fn toml_overrides_slots_and_flips_dx_normals() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        image::RgbaImage::from_pixel(1, 1, image::Rgba([128, 40, 255, 255]))
+            .save({
+                fs::create_dir_all(input.join("wall")).unwrap();
+                input.join("wall/wall.n.png")
+            })
+            .unwrap();
+        gray(&input.join("wall/wall.ao.png"), 1, 1, 10);
+        gray(&input.join("shared/ao.png"), 1, 1, 90);
+        fs::write(
+            input.join("wall/wall.mat.toml"),
+            "normal_y = \"dx\"\n[textures]\nocclusion = \"../shared/ao.png\"\n",
+        )
+        .unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(
+            level0(&output.join("wall/wall.n.ktx2")).1,
+            [128, 215, 255, 255]
+        );
+        assert_eq!(level0(&output.join("wall/wall.orm.ktx2")).1[0], 90);
+        // The replaced convention file is a plain texture again.
+        assert!(output.join("wall/wall.ao.ktx2").is_file());
+        assert!(!output.join("shared/ao.ktx2").exists());
+    }
+
+    #[test]
+    fn material_failures() {
+        let cases: [(&[(&str, &str)], &str); 4] = [
+            (&[("m.mat.toml", "roughness = 2.0")], "out of range"),
+            (
+                &[("m.mat.toml", "[textures]\nnormal = \"../../x.png\"")],
+                "not a texture source",
+            ),
+            (
+                &[("m.mat.toml", "[textures]\nnormal = \"missing.png\"")],
+                "not a texture source",
+            ),
+            (
+                &[
+                    ("m.mat.toml", "[textures]\nnormal = \"shared.png\""),
+                    ("k.mat.toml", "[textures]\nbase_color = \"shared.png\""),
+                ],
+                "differently by another material",
+            ),
+        ];
+        for (files, expected) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+            png(&input.join("shared.png"), 1, 1);
+            for (name, text) in files {
+                fs::write(input.join(name), text).unwrap();
+            }
+            let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+            assert!(
+                outcome
+                    .failures
+                    .iter()
+                    .any(|f| f.message.contains(expected)),
+                "{expected}: {:?}",
+                outcome.failures
+            );
+            assert!(!output.join(manifest::FILE_NAME).exists());
+        }
+    }
+
+    #[test]
+    fn orm_inputs_must_match_in_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        gray(&input.join("m.r.png"), 4, 4, 1);
+        gray(&input.join("m.ao.png"), 2, 2, 1);
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert!(outcome.failures[0].message.contains("differ in size"));
+        assert_eq!(outcome.failures[0].source, "m.ao.png, m.r.png");
+    }
+
+    #[test]
+    fn orm_name_collides_with_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        gray(&input.join("m.r.png"), 1, 1, 1);
+        png(&input.join("m.orm.png"), 1, 1);
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert!(
+            outcome
+                .failures
+                .iter()
+                .any(|f| f.message.contains("collides"))
+        );
+    }
+
+    #[test]
+    fn stale_materials_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        fs::write(input.join("a.mat.toml"), "").unwrap();
+        run(&input, &output, &config::Textures::default()).unwrap();
+        fs::remove_file(input.join("a.mat.toml")).unwrap();
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert_eq!(outcome.removed, ["a.mat"]);
     }
 
     #[test]

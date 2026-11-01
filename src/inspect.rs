@@ -6,7 +6,9 @@ use std::path::Path;
 use crate::build::{is_texture_source, relative, strip_extension};
 use crate::config::Project;
 use crate::hash::fnv1a64;
-use crate::texture::{self, ColorSpace, Image, Settings};
+use crate::material::{self, AlphaMode, HeightMode};
+use crate::plan::{self, Job, join, split_dir};
+use crate::texture::{self, ColorSpace, Image};
 use crate::{ktx2, manifest};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,7 +32,9 @@ pub struct Inspection {
 #[derive(Clone, Copy)]
 enum Kind {
     SourceTexture,
+    MaterialSource,
     CompiledTexture,
+    CompiledMaterial,
     Manifest,
     Ignored,
     File,
@@ -40,7 +44,9 @@ impl Kind {
     fn name(self) -> &'static str {
         match self {
             Self::SourceTexture => "Source texture",
+            Self::MaterialSource => "Material source",
             Self::CompiledTexture => "Compiled texture",
+            Self::CompiledMaterial => "Compiled material",
             Self::Manifest => "Manifest",
             Self::Ignored => "Ignored",
             Self::File => "File",
@@ -82,10 +88,16 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         .as_deref()
         .and_then(|dir| relative(dir, file).ok())
         .unwrap_or_else(|| out.name.clone());
+    let material_name = split_dir(&rel)
+        .1
+        .strip_suffix(material::SOURCE_SUFFIX)
+        .filter(|name| !name.is_empty());
     let kind = match location {
+        Location::Input if material_name.is_some() => Kind::MaterialSource,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
         Location::Input => Kind::Ignored,
-        Location::Output if has_ext("ktx2") => Kind::CompiledTexture,
+        Location::Output if has_ext(manifest::Kind::Texture.extension()) => Kind::CompiledTexture,
+        Location::Output if has_ext(manifest::Kind::Material.extension()) => Kind::CompiledMaterial,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output => Kind::File,
     };
@@ -94,7 +106,9 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
 
     let result = match kind {
         Kind::SourceTexture => source_texture(project, file, &rel, &mut out),
+        Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
+        Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
         Kind::Manifest => manifest(file, &mut out),
         Kind::Ignored | Kind::File => Ok(()),
     };
@@ -125,39 +139,59 @@ fn source_texture(
         .push(("Dimensions", format!("{width} × {height} px")));
     asset_rows(asset_path, out);
 
-    match Settings::new(&project.config.textures) {
-        Ok(settings) => {
-            let color = match settings.color_space(rel) {
-                ColorSpace::Srgb => "sRGB",
-                ColorSpace::Linear => "linear",
-            };
-            let levels = if settings.mipmaps(rel) {
-                texture::level_count(width, height)
-            } else {
-                1
-            };
-            out.rows.push(("Color", color.into()));
-            out.rows.push(("Mip levels", levels.to_string()));
+    let color_name = |color| match color {
+        ColorSpace::Srgb => "sRGB",
+        ColorSpace::Linear => "linear",
+    };
+    let mut output = None;
+    match project
+        .input_dir()
+        .map(|dir| plan::plan(&dir, &project.config.textures))
+    {
+        Some(Ok(plan)) => {
+            let uses = plan.uses.get(rel).map(Vec::as_slice).unwrap_or_default();
+            if !uses.is_empty() {
+                let materials: Vec<_> = uses
+                    .iter()
+                    .map(|u| format!("{} ({})", u.material, u.slot.name()))
+                    .collect();
+                out.rows.push(("Material", materials.join(", ")));
+            }
+            let orm_use = uses.iter().find_map(|u| {
+                let channel = u.slot.orm_channel()?;
+                let orm_path = format!("{}.orm", u.material.strip_suffix(".mat")?);
+                Some((plan.by_asset_path(&orm_path)?, channel))
+            });
+            if let Some(asset) = plan.texture(rel)
+                && let Job::Texture { color, mipmaps, .. } = asset.job
+            {
+                let levels = if mipmaps {
+                    texture::level_count(width, height)
+                } else {
+                    1
+                };
+                out.rows.push(("Color", color_name(color).into()));
+                out.rows.push(("Mip levels", levels.to_string()));
+                output = Some((asset.output.clone(), ""));
+            } else if let Some((orm, channel)) = orm_use {
+                out.rows
+                    .push(("Color", color_name(ColorSpace::Linear).into()));
+                let levels = texture::level_count(width, height);
+                out.rows.push(("Mip levels", levels.to_string()));
+                let channel = [" (channel R)", " (channel G)", " (channel B)"][channel];
+                output = Some((orm.output.clone(), channel));
+            }
         }
-        Err(e) => {
-            let message = format!("invalid [textures] pattern: {e}");
-            out.rows.push(("Color", message.clone()));
-            out.rows.push(("Mip levels", message));
+        Some(Err(e)) => {
+            out.rows.push(("Color", e.to_string()));
+            out.rows.push(("Mip levels", e.to_string()));
         }
+        None => {}
     }
 
-    let output_rel = format!("{asset_path}.ktx2");
-    let built = project
-        .output_dir()
-        .is_some_and(|dir| dir.join(&output_rel).is_file());
-    out.rows.push((
-        "Output",
-        if built {
-            output_rel
-        } else {
-            format!("{output_rel} (not built)")
-        },
-    ));
+    let (output_rel, note) =
+        output.unwrap_or_else(|| (manifest::Kind::Texture.output_path(asset_path), ""));
+    output_row(project, &output_rel, note, out);
 
     out.preview = Some(to_image(image));
     Ok(())
@@ -179,6 +213,99 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
             out.preview = Some(to_image(image));
         }
         None => out.note = Some("No preview for this format"),
+    }
+    Ok(())
+}
+
+/// `Output` row: the output-relative path, `note`, and `(not built)` when missing.
+fn output_row(project: &Project, output_rel: &str, note: &str, out: &mut Inspection) {
+    let built = project
+        .output_dir()
+        .is_some_and(|dir| dir.join(output_rel).is_file());
+    let missing = if built { "" } else { " (not built)" };
+    out.rows
+        .push(("Output", format!("{output_rel}{note}{missing}")));
+}
+
+fn material_source(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+    out: &mut Inspection,
+) -> Result<(), String> {
+    let (dir, name) = split_dir(rel);
+    let name = name.strip_suffix(material::SOURCE_SUFFIX).unwrap_or(name);
+    let asset_path = join(dir, &format!("{name}.mat"));
+    asset_rows(&asset_path, out);
+    output_row(
+        project,
+        &manifest::Kind::Material.output_path(&asset_path),
+        "",
+        out,
+    );
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    material::Source::parse(&text)?;
+    Ok(())
+}
+
+fn compiled_material(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), String> {
+    let bytes = fs::read(file).map_err(|e| e.to_string())?;
+    let m = material::decode(&bytes)?;
+    asset_rows(manifest::Kind::Material.asset_path(rel), out);
+    let list = |values: &[f32]| {
+        values
+            .iter()
+            .map(|v| format!("{v:.2}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let height_mode = match m.height_mode {
+        HeightMode::Parallax => "parallax",
+        HeightMode::Displacement => "displacement",
+    };
+    let alpha = match m.alpha_mode {
+        AlphaMode::Opaque => "opaque".to_owned(),
+        AlphaMode::Mask => format!("mask, cutoff {:.2}", m.alpha_cutoff),
+        AlphaMode::Blend => "blend".to_owned(),
+    };
+    let rows = [
+        ("Base color", list(&m.base_color)),
+        ("Metallic", format!("{:.2}", m.metallic)),
+        ("Roughness", format!("{:.2}", m.roughness)),
+        ("Occlusion", format!("{:.2}", m.occlusion_strength)),
+        ("Normal scale", format!("{:.2}", m.normal_scale)),
+        (
+            "Emissive",
+            format!("{} × {:.2}", list(&m.emissive), m.emissive_strength),
+        ),
+        (
+            "Height",
+            format!(
+                "{height_mode}, scale {:.2}, midlevel {:.2}",
+                m.height_scale, m.height_midlevel
+            ),
+        ),
+        ("Alpha", alpha),
+        (
+            "Double-sided",
+            if m.double_sided { "yes" } else { "no" }.into(),
+        ),
+    ];
+    out.rows.extend(rows);
+    let t = m.textures;
+    for (label, id) in [
+        ("Base color map", t.base_color),
+        ("Normal map", t.normal),
+        ("ORM map", t.orm),
+        ("Emissive map", t.emissive),
+        ("Height map", t.height),
+    ] {
+        let value = if id == 0 {
+            "—".to_owned()
+        } else {
+            format!("{id:#018x}")
+        };
+        out.rows.push((label, value));
     }
     Ok(())
 }
@@ -355,6 +482,64 @@ mod tests {
             pixels: vec![0; 12],
         };
         assert_eq!(fit_within(small.clone(), 512), small);
+    }
+
+    #[test]
+    fn material_sources_and_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        png(&dir.path().join("assets/brick/brick.png"), 4, 4);
+        png(&dir.path().join("assets/brick/brick.r.png"), 4, 4);
+        fs::write(
+            dir.path().join("assets/brick/brick.mat.toml"),
+            "roughness = 0.5\nalpha_mode = \"mask\"\n",
+        )
+        .unwrap();
+        let file = |p: &str| dir.path().join(p);
+
+        let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
+        assert_eq!(row(&r, "Material"), "brick/brick.mat (roughness)");
+        assert_eq!(row(&r, "Color"), "linear");
+        assert_eq!(
+            row(&r, "Output"),
+            "brick/brick.orm.ktx2 (channel G) (not built)"
+        );
+        let base = inspect(&project, Location::Input, &file("assets/brick/brick.png"));
+        assert_eq!(row(&base, "Material"), "brick/brick.mat (base_color)");
+        assert_eq!(row(&base, "Color"), "sRGB");
+        let toml = inspect(
+            &project,
+            Location::Input,
+            &file("assets/brick/brick.mat.toml"),
+        );
+        assert_eq!(row(&toml, "Kind"), "Material source");
+        assert_eq!(row(&toml, "Asset path"), "brick/brick.mat");
+        assert_eq!(row(&toml, "Output"), "brick/brick.mat (not built)");
+
+        let input = project.input_dir().unwrap();
+        let output = project.output_dir().unwrap();
+        build::run(&input, &output, &project.config.textures).unwrap();
+        let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
+        assert_eq!(row(&r, "Output"), "brick/brick.orm.ktx2 (channel G)");
+
+        let mat = inspect(&project, Location::Output, &file("build/brick/brick.mat"));
+        assert_eq!(row(&mat, "Kind"), "Compiled material");
+        assert_eq!(row(&mat, "Asset path"), "brick/brick.mat");
+        assert_eq!(row(&mat, "Roughness"), "0.50");
+        assert_eq!(row(&mat, "Alpha"), "mask, cutoff 0.50");
+        assert_eq!(
+            row(&mat, "ORM map"),
+            format!("{:#018x}", fnv1a64(b"brick/brick.orm"))
+        );
+        assert_eq!(row(&mat, "Normal map"), "—");
+
+        fs::write(file("assets/brick/brick.mat.toml"), "roughness = 3.0").unwrap();
+        let bad = inspect(
+            &project,
+            Location::Input,
+            &file("assets/brick/brick.mat.toml"),
+        );
+        assert!(row(&bad, "Error").contains("out of range"));
     }
 
     #[test]

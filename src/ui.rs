@@ -162,12 +162,14 @@ impl InspectorTab {
     fn enabled(self, selection: Option<&Selection>) -> bool {
         match self {
             Self::Info | Self::Settings => true,
-            // Only compiled textures are asset containers for now.
+            // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
                 s.location == Location::Output
-                    && s.path
-                        .extension()
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case(Kind::Texture.extension()))
+                    && s.path.extension().is_some_and(|ext| {
+                        Kind::ALL
+                            .iter()
+                            .any(|kind| ext.eq_ignore_ascii_case(kind.extension()))
+                    })
             }),
         }
     }
@@ -740,6 +742,7 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
                     ui.horizontal(|ui| {
                         let icon = match asset.kind {
                             Kind::Texture => Icon::Image,
+                            Kind::Material => Icon::File,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {

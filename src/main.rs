@@ -7,6 +7,8 @@ mod inspect;
 mod ktx2;
 mod logo;
 mod manifest;
+mod material;
+mod plan;
 mod texture;
 mod theme;
 mod tree;
@@ -62,11 +64,7 @@ fn build() -> Result<(), Box<dyn std::error::Error>> {
     };
     let outcome = build::run(&input, &output, &project.config.textures)?;
     for built in &outcome.built {
-        let levels = if built.levels == 1 { "level" } else { "levels" };
-        println!(
-            "{} -> {} ({}, {} {levels})",
-            built.source, built.output, built.color, built.levels
-        );
+        println!("{} -> {} ({})", built.source, built.output, built.detail);
     }
     for removed in &outcome.removed {
         println!("removed {removed}");
