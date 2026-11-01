@@ -231,6 +231,8 @@ fn setup(
                 clear_color: ClearColorConfig::Custom(Color::srgb_u8(r, g, b)),
                 ..default()
             },
+            // Colors as stored, like the 2D view.
+            bevy::render::view::Tonemapping::None,
             Projection::Perspective(PerspectiveProjection {
                 fov: 45f32.to_radians(),
                 ..default()
