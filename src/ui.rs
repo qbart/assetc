@@ -3220,10 +3220,7 @@ fn orientation_gizmo(ui: &Ui, rect: Rect, orbit: &Orbit) {
     use bevy::math::Vec3;
     const SIZE: f32 = 64.0;
     const LENGTH: f32 = 22.0;
-    let area = Rect::from_min_size(
-        pos2(rect.left() + 8.0, rect.bottom() - 8.0 - SIZE),
-        vec2(SIZE, SIZE),
-    );
+    let area = Rect::from_min_size(pos2(rect.left() + 8.0, rect.top() + 8.0), vec2(SIZE, SIZE));
     let center = area.center();
     let painter = ui.painter_at(rect);
     painter.circle_filled(center, SIZE / 2.0, BG_BAR.gamma_multiply(0.7));
