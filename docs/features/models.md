@@ -34,8 +34,10 @@ images are not read for these rows.
 | Animations | number of animations                                               |
 
 Counts are per mesh, not per instance: a mesh used by two nodes counts once.
-After them, **Meshlet limits** (`64 vertices, 124 triangles`: the values
-this model builds with, from `[meshes]` and its `.amod`, or the error), then **Asset path** and
+After them, **Meshlet limits** (`64 vertices, 124 triangles`) and **Levels
+of detail** (`50%, 25%`, or `none`): what this model builds with, from
+`[meshes]` and its `.amod` (a **Mesh settings** row with the error instead
+when either is invalid), then **Asset path** and
 **Output** (the `.amesh`; `(not built)` appended when it does not exist), as
 for source textures.
 
