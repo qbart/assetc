@@ -1954,14 +1954,15 @@ fn prop_section(
 
 /// A row: `label` right-aligned in the label column, then `control` given the rest of the width.
 fn prop_row(ui: &mut Ui, label: &str, control: impl FnOnce(&mut Ui, f32)) {
-    prop_row_colored(ui, label, TEXT_WEAK, control);
+    prop_row_colored(ui, label, TEXT_WEAK, None, control);
 }
 
-/// [`prop_row`] with the label in `color`.
+/// [`prop_row`] with the label in `color`, explained by `hint` on hover.
 fn prop_row_colored(
     ui: &mut Ui,
     label: &str,
     color: egui::Color32,
+    hint: Option<&str>,
     control: impl FnOnce(&mut Ui, f32),
 ) {
     let width = ui.available_width();
@@ -1971,7 +1972,11 @@ fn prop_row_colored(
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            let (rect, _) = ui.allocate_exact_size(vec2(label_width - 8.0, 26.0), Sense::hover());
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(label_width - 8.0, 26.0), Sense::hover());
+            if let Some(hint) = hint {
+                response.on_hover_text(hint);
+            }
             ui.painter().text(
                 rect.right_center(),
                 Align2::RIGHT_CENTER,
@@ -2124,51 +2129,71 @@ fn set_color(set: bool) -> egui::Color32 {
 fn patch_int(
     ui: &mut Ui,
     label: &str,
+    hint: &str,
     value: &mut Option<u32>,
     project: u32,
     range: std::ops::RangeInclusive<u32>,
     speed: f64,
 ) {
-    prop_row_colored(ui, label, set_color(value.is_some()), |ui, width| {
-        let mut v = value.unwrap_or(project);
-        let before = v;
-        let field = egui::DragValue::new(&mut v).range(range).speed(speed);
-        ui.add_sized(vec2(width, 22.0), field);
-        // Only a new value is an override; a click alone writes nothing.
-        if v != before {
-            *value = Some(v);
-        }
-    });
+    prop_row_colored(
+        ui,
+        label,
+        set_color(value.is_some()),
+        Some(hint),
+        |ui, width| {
+            let mut v = value.unwrap_or(project);
+            let before = v;
+            let field = egui::DragValue::new(&mut v).range(range).speed(speed);
+            ui.add_sized(vec2(width, 22.0), field);
+            // Only a new value is an override; a click alone writes nothing.
+            if v != before {
+                *value = Some(v);
+            }
+        },
+    );
 }
 
 /// A float setting as a slider with a value box.
 fn patch_float(
     ui: &mut Ui,
     label: &str,
+    hint: &str,
     value: &mut Option<f64>,
     project: f64,
     range: std::ops::RangeInclusive<f64>,
     decimals: usize,
 ) {
-    prop_row_colored(ui, label, set_color(value.is_some()), |ui, width| {
-        let mut v = value.unwrap_or(project);
-        let before = v;
-        slider_box(ui, width, &mut v, range, Some(decimals));
-        if v != before {
-            let scale = 10f64.powi(decimals as i32);
-            *value = Some((v * scale).round() / scale);
-        }
-    });
+    prop_row_colored(
+        ui,
+        label,
+        set_color(value.is_some()),
+        Some(hint),
+        |ui, width| {
+            let mut v = value.unwrap_or(project);
+            let before = v;
+            slider_box(ui, width, &mut v, range, Some(decimals));
+            if v != before {
+                let scale = 10f64.powi(decimals as i32);
+                *value = Some((v * scale).round() / scale);
+            }
+        },
+    );
 }
 
 /// A boolean setting as a checkbox.
-fn patch_bool(ui: &mut Ui, label: &str, value: &mut Option<bool>, project: bool) {
-    prop_row_colored(ui, label, set_color(value.is_some()), |ui, _| {
-        let mut v = value.unwrap_or(project);
-        if ui.checkbox(&mut v, "").changed() {
-            *value = Some(v);
-        }
-    });
+fn patch_bool(ui: &mut Ui, label: &str, hint: &str, value: &mut Option<bool>, project: bool) {
+    prop_row_colored(
+        ui,
+        label,
+        set_color(value.is_some()),
+        Some(hint),
+        |ui, _| {
+            let mut v = value.unwrap_or(project);
+            if ui.checkbox(&mut v, "").changed() {
+                *value = Some(v);
+            }
+        },
+    );
 }
 
 /// Meshoptimizer settings of a model, written to its sidecar; see
@@ -2205,6 +2230,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_int(
                             ui,
                             "Max vertices",
+                            "Most vertices one meshlet may use. Match what your mesh shader outputs per workgroup (64 is common).",
                             &mut mesh.meshlet_max_vertices,
                             project.meshlet_max_vertices,
                             3..=256,
@@ -2213,6 +2239,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_int(
                             ui,
                             "Max triangles",
+                            "Most triangles one meshlet may hold, a multiple of 4. Match what your mesh shader outputs per workgroup (124 is common).",
                             &mut mesh.meshlet_max_triangles,
                             project.meshlet_max_triangles,
                             4..=512,
@@ -2225,6 +2252,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_float(
                             ui,
                             "Cone weight",
+                            "0 packs triangles into as few meshlets as possible. Higher groups triangles that face the same way, so whole meshlets facing away from the camera can be skipped.",
                             &mut mesh.meshlet_cone_weight,
                             project.meshlet_cone_weight,
                             0.0..=1.0,
@@ -2247,7 +2275,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                             .unwrap_or_else(|| project.lod_ratios.clone());
                         let before = ratios.clone();
                         let mut count = ratios.len() as u32;
-                        prop_row_colored(ui, "Levels", set_color(set), |ui, width| {
+                        prop_row_colored(ui, "Levels", set_color(set), Some("How many simplified copies of the mesh to build, for drawing it far away. 0 builds none."), |ui, width| {
                             let field = egui::DragValue::new(&mut count).range(0..=8);
                             ui.add_sized(vec2(width, 22.0), field);
                         });
@@ -2265,6 +2293,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                                 ui,
                                 &format!("LOD {}", i + 1),
                                 set_color(set),
+                                Some("Size of this level as a share of the full mesh's triangles (0.25 = a quarter). Each level must be smaller than the one before."),
                                 |ui, width| {
                                     slider_box(ui, width, ratio, 0.01..=0.99, Some(2));
                                 },
@@ -2280,6 +2309,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_float(
                             ui,
                             "Error",
+                            "How far simplification may move the surface, as a share of the mesh's size (0.05 = 5%). Lower keeps the shape better but may stop before reaching the target size.",
                             &mut mesh.lod_error,
                             project.lod_error,
                             0.0..=1.0,
@@ -2288,6 +2318,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_float(
                             ui,
                             "Error step",
+                            "How much the allowed error grows on each retry, when a level cannot get smaller.",
                             &mut mesh.lod_error_step,
                             project.lod_error_step,
                             0.0..=1.0,
@@ -2296,6 +2327,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_int(
                             ui,
                             "Attempts",
+                            "How many times to retry with more allowed error before giving up (or falling back to sloppy).",
                             &mut mesh.lod_attempts,
                             project.lod_attempts,
                             0..=10,
@@ -2304,6 +2336,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_float(
                             ui,
                             "UV weight",
+                            "How much keeping texture coordinates matters. Higher keeps textures from stretching; lower simplifies more freely.",
                             &mut mesh.lod_uv_weight,
                             project.lod_uv_weight,
                             0.0..=10.0,
@@ -2312,6 +2345,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_float(
                             ui,
                             "Normal weight",
+                            "How much keeping normals (the shading) matters. Higher keeps the lighting; lower simplifies more freely.",
                             &mut mesh.lod_normal_weight,
                             project.lod_normal_weight,
                             0.0..=10.0,
@@ -2320,28 +2354,32 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                         patch_bool(
                             ui,
                             "Sloppy fallback",
+                            "When careful simplification cannot reach the target, merge nearby vertices regardless of how the mesh is built. Always gets smaller, but can stretch textures and leave holes. Off: the level reuses the previous one.",
                             &mut mesh.lod_sloppy_fallback,
                             project.lod_sloppy_fallback,
                         );
                         patch_bool(
                             ui,
                             "Permissive",
+                            "Allow simplifying across seams where UVs or normals split, such as every edge of a flat-shaded model. Flat-shaded models need it; the UV and normal weights keep it in check.",
                             &mut mesh.lod_permissive,
                             project.lod_permissive,
                         );
                         patch_bool(
                             ui,
                             "Lock border",
+                            "Keep vertices on the mesh's open edges in place, so pieces that meet along their edges (such as terrain tiles) stay sealed.",
                             &mut mesh.lod_lock_border,
                             project.lod_lock_border,
                         );
                         patch_bool(
                             ui,
                             "Regularize",
+                            "Prefer evenly sized triangles, at some cost to accuracy.",
                             &mut mesh.lod_regularize,
                             project.lod_regularize,
                         );
-                        patch_bool(ui, "Prune", &mut mesh.lod_prune, project.lod_prune);
+                        patch_bool(ui, "Prune", "Remove small, disconnected pieces while simplifying, when they are too small to matter.", &mut mesh.lod_prune, project.lod_prune);
                     },
                 );
                 ui.weak(if mesh.is_empty() {
