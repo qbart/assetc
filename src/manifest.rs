@@ -13,16 +13,20 @@ const ENTRY_SIZE: usize = 16;
 pub enum Kind {
     Texture = 0,
     Material = 1,
+    Mesh = 2,
+    Animation = 3,
 }
 
 impl Kind {
-    pub const ALL: [Self; 2] = [Self::Texture, Self::Material];
+    pub const ALL: [Self; 4] = [Self::Texture, Self::Material, Self::Mesh, Self::Animation];
 
     /// Extension of the files assets of this kind are written to.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Texture => "ktx2",
-            Self::Material => "mat",
+            Self::Material => "amat",
+            Self::Mesh => "amesh",
+            Self::Animation => "aanim",
         }
     }
 
@@ -30,14 +34,17 @@ impl Kind {
         match self {
             Self::Texture => "Texture",
             Self::Material => "Material",
+            Self::Mesh => "Mesh",
+            Self::Animation => "Animation",
         }
     }
 
-    /// Output path (relative to `output`) of an asset; material asset paths already end in `.mat`.
+    /// Output path (relative to `output`) of an asset; asset paths of every kind but textures
+    /// already end in their extension (`.amat`, `.amesh`, `.aanim`).
     pub fn output_path(self, asset_path: &str) -> String {
         match self {
             Self::Texture => format!("{asset_path}.{}", self.extension()),
-            Self::Material => asset_path.to_owned(),
+            Self::Material | Self::Mesh | Self::Animation => asset_path.to_owned(),
         }
     }
 
@@ -45,7 +52,7 @@ impl Kind {
     pub fn asset_path(self, output: &str) -> &str {
         match self {
             Self::Texture => output.strip_suffix(".ktx2").unwrap_or(output),
-            Self::Material => output,
+            Self::Material | Self::Mesh | Self::Animation => output,
         }
     }
 }
@@ -127,6 +134,8 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, DecodeError> {
         let kind = match e[14] {
             0 => Kind::Texture,
             1 => Kind::Material,
+            2 => Kind::Mesh,
+            3 => Kind::Animation,
             _ => continue,
         };
         entries.push(Entry {

@@ -209,7 +209,7 @@ fn source_texture(
             }
             let orm_use = uses.iter().find_map(|u| {
                 let channel = u.slot.orm_channel()?;
-                let orm_path = format!("{}.orm", u.material.strip_suffix(".mat")?);
+                let orm_path = format!("{}.orm", u.material.strip_suffix(".amat")?);
                 Some((plan.by_asset_path(&orm_path)?, channel))
             });
             if let Some(asset) = plan.texture(rel)
@@ -467,7 +467,7 @@ fn material_source(
 ) -> Result<(), String> {
     let (dir, name) = split_dir(rel);
     let name = name.strip_suffix(material::SOURCE_SUFFIX).unwrap_or(name);
-    let asset_path = join(dir, &format!("{name}.mat"));
+    let asset_path = join(dir, &format!("{name}.amat"));
     asset_rows(&asset_path, out);
     output_row(
         project,
@@ -873,14 +873,14 @@ mod tests {
         let file = |p: &str| dir.path().join(p);
 
         let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
-        assert_eq!(row(&r, "Material"), "brick/brick.mat (roughness)");
+        assert_eq!(row(&r, "Material"), "brick/brick.amat (roughness)");
         assert_eq!(row(&r, "Color"), "linear");
         assert_eq!(
             row(&r, "Output"),
             "brick/brick.orm.ktx2 (channel G) (not built)"
         );
         let base = inspect(&project, Location::Input, &file("assets/brick/brick.png"));
-        assert_eq!(row(&base, "Material"), "brick/brick.mat (base_color)");
+        assert_eq!(row(&base, "Material"), "brick/brick.amat (base_color)");
         assert_eq!(row(&base, "Color"), "sRGB");
         let toml = inspect(
             &project,
@@ -888,8 +888,8 @@ mod tests {
             &file("assets/brick/brick.mat.toml"),
         );
         assert_eq!(row(&toml, "Kind"), "Material source");
-        assert_eq!(row(&toml, "Asset path"), "brick/brick.mat");
-        assert_eq!(row(&toml, "Output"), "brick/brick.mat (not built)");
+        assert_eq!(row(&toml, "Asset path"), "brick/brick.amat");
+        assert_eq!(row(&toml, "Output"), "brick/brick.amat (not built)");
 
         let input = project.input_dir().unwrap();
         let output = project.output_dir().unwrap();
@@ -897,9 +897,9 @@ mod tests {
         let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
         assert_eq!(row(&r, "Output"), "brick/brick.orm.ktx2 (channel G)");
 
-        let mat = inspect(&project, Location::Output, &file("build/brick/brick.mat"));
+        let mat = inspect(&project, Location::Output, &file("build/brick/brick.amat"));
         assert_eq!(row(&mat, "Kind"), "Compiled material");
-        assert_eq!(row(&mat, "Asset path"), "brick/brick.mat");
+        assert_eq!(row(&mat, "Asset path"), "brick/brick.amat");
         assert_eq!(row(&mat, "Roughness"), "0.50");
         assert_eq!(row(&mat, "Alpha"), "mask, cutoff 0.50");
         assert_eq!(

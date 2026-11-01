@@ -1,4 +1,4 @@
-//! PBR materials: `.mat.toml` sources and `.mat` files, see docs/features/materials.md
+//! PBR materials: `.mat.toml` sources and `.amat` files, see docs/features/materials.md
 //! and docs/spec/material.md.
 
 use serde::Deserialize;
@@ -235,7 +235,7 @@ pub struct TextureIds {
     pub height: u64,
 }
 
-/// The contents of a `.mat` file.
+/// The contents of a `.amat` file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Material {
     pub base_color: [f32; 4],

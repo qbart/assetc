@@ -1321,7 +1321,8 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "cube" => Icon::Aperture,
         "noise" => Icon::ImagePlay,
         "gradient" => Icon::SwatchBook,
-        "gltf" | "glb" | "obj" => Icon::Torus,
+        "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
+        "aanim" => Icon::Film,
         _ => Icon::File,
     }
 }
@@ -2717,6 +2718,8 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
                         let icon = match asset.kind {
                             Kind::Texture => Icon::Image,
                             Kind::Material => Icon::File,
+                            Kind::Mesh => Icon::Torus,
+                            Kind::Animation => Icon::Film,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {

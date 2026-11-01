@@ -19,7 +19,7 @@ use crate::tree::{self, Node};
 
 #[derive(Debug, Default)]
 pub struct Plan {
-    /// In build order: textures in input order, then each material's ORM and `.mat`.
+    /// In build order: textures in input order, then each material's ORM and `.amat`.
     pub assets: Vec<Asset>,
     /// Problems found while planning; any of them fails the build.
     pub failures: Vec<Failure>,
@@ -63,7 +63,7 @@ pub enum Job {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Use {
-    /// Material asset path, e.g. `brick/brick.mat`.
+    /// Material asset path, e.g. `brick/brick.amat`.
     pub material: String,
     pub slot: Slot,
 }
@@ -175,7 +175,7 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
         if group.source.is_none() && group.slots.is_empty() {
             continue;
         }
-        let asset_path = join(dir, &format!("{name}.mat"));
+        let asset_path = join(dir, &format!("{name}.amat"));
         let label = group
             .source
             .clone()

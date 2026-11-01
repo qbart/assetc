@@ -618,7 +618,7 @@ mod tests {
         assert_eq!(pixels[..4], [pixels[0], pixels[0], pixels[0], 255]);
         // In a material slot: compiled under its slot.
         assert!(output.join("rock/rock.h.ktx2").is_file());
-        assert!(output.join("rock/rock.mat").is_file());
+        assert!(output.join("rock/rock.amat").is_file());
     }
 
     #[test]
@@ -712,7 +712,7 @@ mod tests {
                 "brick/brick.png -> brick/brick.ktx2 (srgb, 3 levels)",
                 "brick/grass.png -> brick/grass.ktx2 (srgb, 2 levels)",
                 "brick/brick.ao.png, brick/brick.r.png -> brick/brick.orm.ktx2 (linear, 3 levels)",
-                "brick/brick.* -> brick/brick.mat (material: base_color, normal, orm)",
+                "brick/brick.* -> brick/brick.amat (material: base_color, normal, orm)",
             ]
         );
         assert_eq!(
@@ -730,7 +730,7 @@ mod tests {
             Some(::ktx2::Format::R8G8B8A8_SRGB)
         );
 
-        let m = material::decode(&fs::read(output.join("brick/brick.mat")).unwrap()).unwrap();
+        let m = material::decode(&fs::read(output.join("brick/brick.amat")).unwrap()).unwrap();
         assert_eq!(m.textures.base_color, fnv1a64(b"brick/brick"));
         assert_eq!(m.textures.normal, fnv1a64(b"brick/brick.n"));
         assert_eq!(m.textures.orm, fnv1a64(b"brick/brick.orm"));
@@ -740,8 +740,8 @@ mod tests {
         let entries =
             manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
         let material = entries.iter().find(|e| e.kind == Kind::Material).unwrap();
-        assert_eq!(material.id, fnv1a64(b"brick/brick.mat"));
-        assert_eq!(material.path, "brick/brick.mat");
+        assert_eq!(material.id, fnv1a64(b"brick/brick.amat"));
+        assert_eq!(material.path, "brick/brick.amat");
         assert_eq!(entries.len(), 6);
     }
 
@@ -764,7 +764,7 @@ mod tests {
             outcome.summary(),
             "Built 0 textures, 1 material (0 skipped)"
         );
-        let m = material::decode(&fs::read(output.join("gold.mat")).unwrap()).unwrap();
+        let m = material::decode(&fs::read(output.join("gold.amat")).unwrap()).unwrap();
         assert_eq!((m.metallic, m.roughness), (1.0, 0.3));
         assert_eq!(m.textures, material::TextureIds::default());
     }
@@ -875,7 +875,7 @@ mod tests {
         run(&input, &output, &config::Textures::default()).unwrap();
         fs::remove_file(input.join("a.mat.toml")).unwrap();
         let outcome = run(&input, &output, &config::Textures::default()).unwrap();
-        assert_eq!(outcome.removed, ["a.mat"]);
+        assert_eq!(outcome.removed, ["a.amat"]);
     }
 
     #[test]
