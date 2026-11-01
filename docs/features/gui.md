@@ -33,7 +33,7 @@ frame that later features plug into; it has no asset functionality of its own.
 - **Status bar** (bottom, fixed height): status message on the left (a
   failed [file operation](file-operations.md#errors) shows there until the
   next operation or build), preceded by the **loader**: the `loader` icon
-  (14 px, `TEXT_WEAK`) spinning one turn per second while background work
+  (14 px, `ACCENT`) spinning one turn per second while background work
   runs (a [build](build.md#gui) or an [inspection](inspector.md#loading)).
   It appears only once the work has run for 150 ms, so quick work does not
   flicker it
