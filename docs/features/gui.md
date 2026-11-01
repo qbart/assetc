@@ -101,7 +101,7 @@ embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info`, `settings` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
-(canvas 3D shapes), `folder`, `folder-open`, `file`,
+(canvas 3D shapes), `palette` (LUT reference chart), `folder`, `folder-open`, `file`,
 `chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 

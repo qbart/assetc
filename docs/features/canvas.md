@@ -21,7 +21,9 @@ View  [ 2D | 3D ]
   `TEXT_WEAK` text, `TEXT` and a `BG_HEADER` fill on hover.
 - **2D** is the default. The mode is global (not per image) and lasts for the
   session.
-- The bar is always shown, but the mode only applies to **images**:
+- With a color LUT selected, the bar offers the LUT views instead (Compare,
+  Slices, Cube, Curves), see [`lut.md`](lut.md#views).
+- Otherwise the bar is always shown, but the mode only applies to **images**:
   - an [environment map](#environment-maps) only exists in 3D, so the bar is
     empty (no `View` label, no buttons);
   - with anything else (or nothing) selected, both buttons are disabled

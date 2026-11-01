@@ -24,3 +24,12 @@ Active while the pointer is over the canvas (see
 | Left or right drag                     | Orbit the camera                 |
 | Scroll wheel, pinch                    | Move the camera closer / farther |
 | Double-click                           | Reset the camera                 |
+
+## Canvas (color LUT)
+
+See [`docs/features/lut.md`](docs/features/lut.md#views).
+
+| View    | Input              | Action                              |
+|---------|--------------------|-------------------------------------|
+| Compare | Left click / drag  | Move the before / after divider     |
+| Cube    | as Canvas (3D)     | Orbit, move closer / farther, reset |

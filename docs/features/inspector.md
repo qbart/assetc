@@ -49,6 +49,7 @@ The kind is decided by tab and file name, the same way the build decides it
 |--------|----------------------------|--------------------|
 | Input  | `*.png`, `*.jpg`, `*.jpeg` (any case) | Source texture |
 | Input  | `*.mat.toml`               | Material source    |
+| Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
 | Input  | anything else              | Ignored            |
 | Output | `*.ktx2` (any case)        | Compiled texture   |
 | Output | `*.mat`                    | Compiled material  |
