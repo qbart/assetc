@@ -14,6 +14,8 @@ const CONE_WEIGHT: f32 = 0.25;
 const LOD_RATIOS: [f32; 2] = [0.5, 0.25];
 const LOD_ERROR: f32 = 0.05;
 const LOD_RETRIES: usize = 3;
+/// UV (u, v) and normal (x, y, z) weights for simplification.
+const LOD_ATTRIBUTE_WEIGHTS: [f32; 5] = [1.0, 1.0, 0.5, 0.5, 0.5];
 const NO_MATERIAL: u32 = 0xFFFF_FFFF;
 const VERTEX_STRIDE: u16 = 28;
 
@@ -273,14 +275,32 @@ pub fn encode(
         }
 
         // Reduced levels: each from the full mesh, stopping progress counts as no level.
+        // UVs and normals weigh in, so surviving vertices keep fitting their faces, and
+        // collapses may cross attribute seams (every edge of a flat-shaded mesh is one).
+        let attributes: Vec<f32> = primitive
+            .vertices
+            .iter()
+            .flat_map(|v| [v.uv[0], v.uv[1], v.normal[0], v.normal[1], v.normal[2]])
+            .collect();
+        let unlocked = vec![false; primitive.vertices.len()];
         let mut previous = local.len();
         for ratio in LOD_RATIOS {
             let target = ((local.len() as f32 * ratio / 3.0).round() as usize * 3).max(3);
             let mut error = LOD_ERROR;
             let mut level = Vec::new();
             for _ in 0..=LOD_RETRIES {
-                level =
-                    meshopt::simplify(&local, &adapter, target, error, SimplifyOptions::None, None);
+                level = meshopt::simplify_with_attributes_and_locks(
+                    &local,
+                    &adapter,
+                    &attributes,
+                    &LOD_ATTRIBUTE_WEIGHTS,
+                    5 * 4,
+                    &unlocked,
+                    target,
+                    error,
+                    SimplifyOptions::Permissive,
+                    None,
+                );
                 if level.len() < previous {
                     break;
                 }
