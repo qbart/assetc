@@ -19,9 +19,7 @@ use crate::inspect::{self, Inspection, Location};
 use crate::logo;
 use crate::lut::Lut;
 use crate::manifest::Kind;
-use crate::noise::{
-    GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Params, Value,
-};
+use crate::noise::{GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Value};
 use crate::preview3d::{CubemapUpload, Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
 use crate::theme::{
@@ -67,8 +65,6 @@ struct UiState {
     confirm_delete: Option<PathBuf>,
     /// A failed file operation, shown in the status bar until the next operation or build.
     notice: Option<String>,
-    /// Per `.noise` file: parameters of generator types switched away from this session.
-    noise_memory: HashMap<PathBuf, HashMap<GeneratorKind, Params>>,
     /// Canvas toolbar state of each image, by path.
     canvas_options: HashMap<PathBuf, CanvasOptions>,
 }
@@ -278,7 +274,6 @@ impl Default for UiState {
             rename: None,
             confirm_delete: None,
             notice: None,
-            noise_memory: HashMap::new(),
             canvas_options: HashMap::new(),
         }
     }
@@ -1476,14 +1471,10 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                 (
                     tab @ (InspectorTab::Parameters | InspectorTab::Modifiers),
                     Some(inspected),
-                    Some(selection),
+                    Some(_),
                 ) => {
                     let save = if tab == InspectorTab::Parameters {
-                        let others = state
-                            .noise_memory
-                            .entry(selection.path.clone())
-                            .or_default();
-                        parameters_tab(ui, inspected, others)
+                        parameters_tab(ui, inspected)
                     } else {
                         modifiers_tab(ui, inspected)
                     };
@@ -1702,13 +1693,7 @@ fn param_row(ui: &mut Ui, spec: &ParamSpec, value: &mut Value) {
 }
 
 /// Generator and its parameters; see docs/features/noise.md#parameters-tab.
-/// `others` holds the file's parameters of other generator types set this session; saving
-/// re-inspects the file, so they live outside [`Inspected`].
-fn parameters_tab(
-    ui: &mut Ui,
-    inspected: &mut Inspected,
-    others: &mut HashMap<GeneratorKind, Params>,
-) -> Option<Noise> {
+fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
     let edit = noise_edit(ui, inspected)?;
     egui::ScrollArea::vertical()
         .auto_shrink(false)
@@ -1752,15 +1737,8 @@ fn parameters_tab(
                         });
                     },
                 );
-                if kind != noise.kind {
-                    // Each type keeps its own parameters for the session.
-                    let params = others
-                        .remove(&kind)
-                        .unwrap_or_else(|| Params::defaults(kind.specs()));
-                    let old = std::mem::replace(&mut noise.params, params);
-                    others.insert(noise.kind, old);
-                    noise.kind = kind;
-                }
+                // The file keeps each type's parameters in its own section.
+                noise.set_kind(kind);
                 let specs = noise.kind.specs();
                 prop_section(
                     ui,

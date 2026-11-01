@@ -640,7 +640,7 @@ mod tests {
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(
             &file,
-            "type = \"noise/value\"\nsize = 16\nseed = 3\n\n[[modifiers]]\ntype = \"blur\"\nenabled = false\n",
+            "type = \"noise/value\"\nsize = 16\n\n[noise.value]\nseed = 3\n\n[[modifiers]]\ntype = \"blur\"\nenabled = false\n",
         )
         .unwrap();
         let i = inspect(&project, Location::Input, &file);
@@ -656,7 +656,7 @@ mod tests {
         assert_eq!(i.channels, [false, false, false, false]);
         assert!(i.preview.is_some());
 
-        fs::write(&file, "type = \"noise/fbm\"\noctaves = 99\n").unwrap();
+        fs::write(&file, "type = \"noise/fbm\"\n[noise.fbm]\noctaves = 99\n").unwrap();
         let i = inspect(&project, Location::Input, &file);
         assert!(row(&i, "Error").contains("octaves"));
         assert!(i.preview.is_none());

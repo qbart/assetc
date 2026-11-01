@@ -285,7 +285,7 @@ impl GeneratorKind {
     /// The `type` value in the file.
     pub fn key(self) -> &'static str {
         match self {
-            Self::Checkerboard => "checkerboard",
+            Self::Checkerboard => "pattern/checkerboard",
             Self::Uniform => "noise/uniform",
             Self::Value => "noise/value",
             Self::Perlin => "noise/perlin",
@@ -319,8 +319,18 @@ impl GeneratorKind {
         }
     }
 
+    /// The table holding its parameters, e.g. `noise.perlin`; see
+    /// docs/spec/noise.md#generator-sections.
+    pub fn section(self) -> String {
+        self.key().replace('/', ".")
+    }
+
     fn from_key(key: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|k| k.key() == key)
+    }
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
     }
 }
 
@@ -441,7 +451,10 @@ impl Modifier {
 pub struct Noise {
     pub kind: GeneratorKind,
     pub size: u32,
+    /// Parameters of `kind`.
     pub params: Params,
+    /// Kept parameters of other generators, in [`GeneratorKind::ALL`] order.
+    pub kept: Vec<(GeneratorKind, Params)>,
     pub modifiers: Vec<Modifier>,
 }
 
@@ -572,8 +585,27 @@ impl Noise {
             kind,
             size: 512,
             params: Params::defaults(kind.specs()),
+            kept: Vec::new(),
             modifiers: Vec::new(),
         }
+    }
+
+    /// Switches the generator, keeping the current parameters and restoring `kind`'s.
+    pub fn set_kind(&mut self, kind: GeneratorKind) {
+        if kind == self.kind {
+            return;
+        }
+        let params = match self.kept.iter().position(|(k, _)| *k == kind) {
+            Some(i) => self.kept.remove(i).1,
+            None => Params::defaults(kind.specs()),
+        };
+        let old = std::mem::replace(&mut self.params, params);
+        // All-default parameters are not written, so there is nothing to keep.
+        if old != Params::defaults(self.kind.specs()) {
+            self.kept.push((self.kind, old));
+            self.kept.sort_by_key(|(k, _)| k.index());
+        }
+        self.kind = kind;
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -606,14 +638,40 @@ impl Noise {
                 .collect::<Result<_, _>>()?,
             Some(_) => return Err("modifiers must be an array of tables".into()),
         };
-        let params = Params::take(kind.specs(), &mut table)?;
-        if let Some(key) = table.keys().next() {
-            return Err(format!("{} has no parameter {key}", kind.key()));
+        let mut sections = Vec::new();
+        for (group, value) in table {
+            let toml::Value::Table(group_table) = value else {
+                return Err(format!(
+                    "unknown key {group} (parameters go in [{}])",
+                    kind.section()
+                ));
+            };
+            for (name, value) in group_table {
+                let section = format!("{group}.{name}");
+                let generator = GeneratorKind::from_key(&format!("{group}/{name}"))
+                    .ok_or_else(|| format!("unknown section [{section}]"))?;
+                let toml::Value::Table(mut values) = value else {
+                    return Err(format!("[{section}] must be a table"));
+                };
+                let params = Params::take(generator.specs(), &mut values)
+                    .map_err(|e| format!("[{section}] {e}"))?;
+                if let Some(key) = values.keys().next() {
+                    return Err(format!("[{section}] has no parameter {key}"));
+                }
+                sections.push((generator, params));
+            }
         }
+        let params = match sections.iter().position(|(k, _)| *k == kind) {
+            Some(i) => sections.remove(i).1,
+            None => Params::defaults(kind.specs()),
+        };
+        sections.retain(|(k, p)| *p != Params::defaults(k.specs()));
+        sections.sort_by_key(|(k, _)| k.index());
         Ok(Self {
             kind,
             size,
             params,
+            kept: sections,
             modifiers,
         })
     }
@@ -621,11 +679,18 @@ impl Noise {
     /// The written form, see docs/spec/noise.md#written-form.
     pub fn to_toml(&self) -> String {
         let mut out = format!(
-            "type = {}\nsize = {}\n",
+            "type = {}\nsize = {}\n\n[{}]\n",
             toml::Value::String(self.kind.key().into()),
-            self.size
+            self.size,
+            self.kind.section()
         );
         self.params.write(self.kind.specs(), &mut out);
+        for (kind, params) in &self.kept {
+            if *params != Params::defaults(kind.specs()) {
+                out.push_str(&format!("\n[{}]\n", kind.section()));
+                params.write(kind.specs(), &mut out);
+            }
+        }
         for m in &self.modifiers {
             out.push_str(&format!(
                 "\n[[modifiers]]\ntype = {}\nenabled = {}\n",
@@ -1244,7 +1309,7 @@ mod tests {
         noise.modifiers.push(off);
         let text = noise.to_toml();
         assert!(text.starts_with(
-            "type = \"noise/fbm\"\nsize = 512\nseed = 0\nbasis = \"perlin\"\nfrequency_x = 4\nfrequency_y = 4\ntranslate_x = 0.0\ntranslate_y = 0.0\noctaves = 5\nlacunarity = 2\ngain = 0.5\nwarp = 0.0\n\n[[modifiers]]\ntype = \"levels\"\nenabled = true\nblack = 0.0\n"
+            "type = \"noise/fbm\"\nsize = 512\n\n[noise.fbm]\nseed = 0\nbasis = \"perlin\"\nfrequency_x = 4\nfrequency_y = 4\ntranslate_x = 0.0\ntranslate_y = 0.0\noctaves = 5\nlacunarity = 2\ngain = 0.5\nwarp = 0.0\n\n[[modifiers]]\ntype = \"levels\"\nenabled = true\nblack = 0.0\n"
         ), "{text}");
         assert!(text.contains("color_a = [0.0, 0.0, 0.0]"), "{text}");
         assert_eq!(Noise::parse(&text).unwrap(), noise);
@@ -1252,23 +1317,58 @@ mod tests {
     }
 
     #[test]
+    fn switching_type_keeps_parameters() {
+        let mut noise = Noise::new(GeneratorKind::Fbm);
+        noise.params.0[0] = Value::Int(7);
+        noise.set_kind(GeneratorKind::Checkerboard);
+        noise.set_kind(GeneratorKind::Voronoi);
+        // Checkerboard's untouched defaults are not kept.
+        assert_eq!(noise.kept.len(), 1);
+        let text = noise.to_toml();
+        assert!(text.starts_with("type = \"noise/voronoi\"\nsize = 512\n\n[noise.voronoi]\n"));
+        assert!(text.contains("\n[noise.fbm]\nseed = 7\n"), "{text}");
+        assert!(!text.contains("[pattern.checkerboard]"), "{text}");
+        let mut read = Noise::parse(&text).unwrap();
+        assert_eq!(read, noise);
+        read.set_kind(GeneratorKind::Fbm);
+        assert_eq!(read.params.0[0], Value::Int(7));
+        assert!(read.kept.is_empty());
+        // Only the current section affects the image.
+        let mut plain = Noise::new(GeneratorKind::Voronoi);
+        plain.size = 16;
+        noise.size = 16;
+        assert_eq!(noise.generate(), plain.generate());
+    }
+
+    #[test]
     fn parameters_belong_to_their_type() {
-        assert!(Noise::parse("type = \"checkerboard\"\nseed = 1").is_err());
-        assert!(Noise::parse("type = \"noise/perlin\"\nbasis = \"value\"").is_err());
-        assert!(Noise::parse("type = \"noise/uniform\"\nwarp = 1").is_err());
-        assert!(Noise::parse("type = \"noise/perlin\"\nfrequency = 3").is_err());
-        let ok = Noise::parse("type = \"noise/fbm\"\noctaves = 3\ngain = 1").unwrap();
+        assert!(
+            Noise::parse("type = \"pattern/checkerboard\"\n[pattern.checkerboard]\nseed = 1")
+                .is_err()
+        );
+        assert!(Noise::parse("[noise.perlin]\nbasis = \"value\"").is_err());
+        assert!(Noise::parse("[noise.uniform]\nwarp = 1").is_err());
+        // Parameters must be in a section.
+        let error = Noise::parse("type = \"noise/perlin\"\nseed = 3").unwrap_err();
+        assert!(error.contains("[noise.perlin]"), "{error}");
+        let ok = Noise::parse("type = \"noise/fbm\"\n[noise.fbm]\noctaves = 3\ngain = 1").unwrap();
         assert_eq!(ok.params.display(GeneratorKind::Fbm.specs(), 6), "3");
+        // Other sections are validated too.
+        assert!(Noise::parse("[noise.voronoi]\njitter = 3").is_err());
         for bad in [
             "size = 0",
             "size = 5000",
             "type = \"noise/blue\"",
-            "frequency_x = 0",
-            "translate_y = 1.5",
-            "warp = 5",
-            "type = \"noise/value\"\ninterpolation = \"cosine\"",
-            "type = \"noise/fbm\"\nbasis = \"cubic\"",
-            "type = \"noise/fbm\"\nlacunarity = 2.5",
+            "type = \"checkerboard\"",
+            "[noise.blue]",
+            "[pattern]\nperlin = 1",
+            "noise = 1",
+            "[noise.perlin]\nfrequency_x = 0",
+            "[noise.perlin]\ntranslate_y = 1.5",
+            "[noise.perlin]\nwarp = 5",
+            "[noise.value]\ninterpolation = \"cosine\"",
+            "[noise.fbm]\nbasis = \"cubic\"",
+            "[noise.fbm]\nlacunarity = 2.5",
             "[[modifiers]]\ntype = \"levels\"\ngamma = 0",
             "[[modifiers]]\ntype = \"blur\"\nsteps = 2",
             "[[modifiers]]\ntype = \"sharpen\"",
