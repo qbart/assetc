@@ -11,27 +11,48 @@ Inspector.
 
 [TOML 1.1](https://toml.io/en/v1.1.0), UTF-8, extension `.noise` (any case).
 
-| Key           | Type            | Meaning                                         | Default          |
-|---------------|-----------------|-------------------------------------------------|------------------|
-| `type`        | string          | generator, see [Generators](#generators)        | `"noise/perlin"` |
-| `size`        | integer         | `1..=4096`, width = height in pixels            | `512`            |
-| *parameters*  | per generator   | only the keys of the chosen generator           | per generator    |
-| `[[modifiers]]` | array of tables | applied in order, see [Modifiers](#modifiers) | none             |
+Top level:
 
-Every key is optional. A key that the chosen generator (or a modifier's type)
-does not have is an error, so a file only ever holds the parameters of its own
-generator. Integers must be TOML integers; floats accept integers too.
+| Key             | Type            | Meaning                                         | Default          |
+|-----------------|-----------------|-------------------------------------------------|------------------|
+| `type`          | string          | generator, see [Generators](#generators)        | `"noise/perlin"` |
+| `size`          | integer         | `1..=4096`, width = height in pixels            | `512`            |
+| *sections*      | tables          | generator parameters, see below                 | none             |
+| `[[modifiers]]` | array of tables | applied in order, see [Modifiers](#modifiers)   | none             |
+
+### Generator sections
+
+A generator's parameters live in a table named after its `type`, with `/`
+as the table path separator: `noise/perlin` → `[noise.perlin]`,
+`pattern/checkerboard` → `[pattern.checkerboard]`.
+
+- Only the section of the current `type` is used to generate the image;
+  missing keys (or a missing section) take their defaults.
+- A file may also hold sections of other generators. They are parameters kept
+  for when `type` switches back to them (the editor uses this, see
+  [`docs/features/noise.md`](../features/noise.md#parameters-tab)) and do not
+  affect the image, but they are validated the same way.
+- Errors: a top-level key other than `type`, `size`, `modifiers` and the
+  section groups (`noise`, `pattern`); a section that is not a table or not a
+  known generator; a key that the section's generator does not have; a value
+  of the wrong type or out of range. Modifiers likewise only accept their own
+  type's keys. Integers must be TOML integers; floats accept integers too.
 
 ### Written form
 
-When assetc writes a `.noise` file it writes `type`, `size`, then every
-parameter of the generator in the order of its table below, one per line
-(`key = value`), then each modifier as a `[[modifiers]]` table with `type`,
-`enabled` and its parameters in table order, separated by blank lines:
+When assetc writes a `.noise` file it writes `type` and `size`; then, after a
+blank line, the current generator's section with every parameter in the
+order of its table below, one per line (`key = value`); then the kept
+sections of other generators, in the order of the [Generators](#generators)
+table, skipping any whose parameters are all defaults; then each modifier as
+a `[[modifiers]]` table with `type`, `enabled` and its parameters in table
+order. Tables are separated by blank lines:
 
 ```toml
 type = "noise/fbm"
 size = 512
+
+[noise.fbm]
 seed = 0
 basis = "perlin"
 frequency_x = 4
@@ -41,6 +62,17 @@ translate_y = 0.0
 octaves = 5
 lacunarity = 2
 gain = 0.5
+warp = 0.0
+
+[noise.voronoi]
+seed = 7
+frequency_x = 8
+frequency_y = 8
+translate_x = 0.0
+translate_y = 0.0
+jitter = 0.6
+metric = "euclidean"
+output = "edge"
 warp = 0.0
 
 [[modifiers]]
@@ -76,7 +108,7 @@ order where present):
 
 | `type`               | Parameters (key: type, range, default; shared keys by name)                     |
 |----------------------|----------------------------------------------------------------------------------|
-| `checkerboard`       | `cells_x`: int 1–256, 8 · `cells_y`: int 1–256, 8 · `translate_x` · `translate_y` · `color_a`: gray, 0 · `color_b`: gray, 1 |
+| `pattern/checkerboard` | `cells_x`: int 1–256, 8 · `cells_y`: int 1–256, 8 · `translate_x` · `translate_y` · `color_a`: gray, 0 · `color_b`: gray, 1 |
 | `noise/uniform`      | `seed`                                                                           |
 | `noise/value`        | `seed` · `interpolation` · `frequency_x`, `frequency_y`: 8 · `translate_x` · `translate_y` · `octaves`: 1 · `lacunarity` · `gain` · `warp` |
 | `noise/perlin`       | `seed` · `frequency_x`, `frequency_y`: 8 · `translate_x` · `translate_y` · `octaves`: 1 · `lacunarity` · `gain` · `warp` |
@@ -95,8 +127,8 @@ order where present):
 `size × size` pixels, each an RGB value in `0..1`, stored as 8-bit
 `round(c × 255)` with `A = 255`. Every generator except `noise/curl` produces
 gray (`R = G = B`). Everything tiles seamlessly, since every lattice has a
-whole number of cells across the image (`checkerboard` when `cells_x` and
-`cells_y` are even).
+whole number of cells across the image (`pattern/checkerboard` when `cells_x`
+and `cells_y` are even).
 
 Pixel `(px, py)` samples at `u = (px + 0.5) / size`, `v = (py + 0.5) / size`.
 A lattice of periods `(p, q)` (cells across and down the image) uses
@@ -167,7 +199,7 @@ Before a generator samples `(u, v)`, the sample position is moved:
 
 ### Generators
 
-- **checkerboard**: `color_a` where `floor(u × cells_x) + floor(v × cells_y)`
+- **pattern/checkerboard**: `color_a` where `floor(u × cells_x) + floor(v × cells_y)`
   is even, else `color_b`.
 - **noise/uniform**: `unit(hash(px, py, seed))` per pixel.
 - **noise/value**, **noise/perlin**, **noise/simplex**: fractal of the basic

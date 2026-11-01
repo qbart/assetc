@@ -11,7 +11,7 @@ material `rock`).
 
 | Menu / dropdown name | `type`                |
 |----------------------|-----------------------|
-| Checkerboard         | `checkerboard`        |
+| Checkerboard         | `pattern/checkerboard` |
 | Uniform              | `noise/uniform`       |
 | Value                | `noise/value`         |
 | Perlin               | `noise/perlin`        |
@@ -59,9 +59,11 @@ the [property editor](gui.md#property-editor) look, with two sections:
 
   A generator without parameters besides `seed` still shows its section.
 
-Changing **Type** switches to that generator's parameters. Parameters are
-kept per type for the rest of the session (per file), so switching back
-restores what was set; the file only ever stores the current type's.
+Changing **Type** switches to that generator's parameters. The previous
+type's parameters stay in the file as its own
+[section](../spec/noise.md#generator-sections) (unless they are all
+defaults), so switching back restores them, also after reopening assetc. Only
+the current type's section affects the image.
 
 ## Modifiers tab
 
