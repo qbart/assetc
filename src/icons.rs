@@ -5,8 +5,6 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 /// Lucide icons vendored in assets/icons, see docs/features/gui.md.
 #[derive(Clone, Copy)]
 pub enum Icon {
-    ArrowDown,
-    ArrowUp,
     Box,
     Check,
     ChevronDown,
@@ -20,6 +18,7 @@ pub enum Icon {
     Folder,
     FolderOpen,
     Globe,
+    GripHorizontal,
     Grid3x3,
     Hammer,
     Image,
@@ -35,9 +34,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 27] = [
-    ("arrow-down", include_str!("../assets/icons/arrow-down.svg")),
-    ("arrow-up", include_str!("../assets/icons/arrow-up.svg")),
+const SVGS: [(&str, &str); 26] = [
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
     (
@@ -63,6 +60,10 @@ const SVGS: [(&str, &str); 27] = [
         include_str!("../assets/icons/folder-open.svg"),
     ),
     ("globe", include_str!("../assets/icons/globe.svg")),
+    (
+        "grip-horizontal",
+        include_str!("../assets/icons/grip-horizontal.svg"),
+    ),
     ("grid-3x3", include_str!("../assets/icons/grid-3x3.svg")),
     ("hammer", include_str!("../assets/icons/hammer.svg")),
     ("image", include_str!("../assets/icons/image.svg")),

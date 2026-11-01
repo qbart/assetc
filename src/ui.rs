@@ -927,6 +927,25 @@ fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, enabled: bool) -> Respons
     response.on_hover_text(tooltip)
 }
 
+/// The grip a modifier card is dragged by, see docs/features/noise.md#modifiers-tab.
+fn drag_handle(ui: &mut Ui) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::drag());
+    let color = if response.hovered() || response.dragged() {
+        TEXT
+    } else {
+        TEXT_WEAK
+    };
+    Icon::GripHorizontal
+        .image(16.0, color)
+        .paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+    if response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    response
+}
+
 fn select(state: &mut UiState, location: Location, path: PathBuf) {
     let selection = Some(Selection { location, path });
     if state.selection != selection {
@@ -1381,19 +1400,21 @@ fn property_style(ui: &mut Ui) {
     ui.spacing_mut().item_spacing.y = 6.0;
 }
 
-/// A collapsible section card, see docs/features/gui.md#property-editor. `leading` draws
-/// after the chevron (before the title), `trailing` on the right of the header.
+/// A section card, see docs/features/gui.md#property-editor. When `collapsible`, a chevron
+/// starts the header; `leading` draws next (before the title), `trailing` on the right.
+#[allow(clippy::too_many_arguments)]
 fn prop_section(
     ui: &mut Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
+    collapsible: bool,
     title: RichText,
     leading: impl FnOnce(&mut Ui),
     trailing: impl FnOnce(&mut Ui),
     body: impl FnOnce(&mut Ui),
-) {
+) -> Rect {
     let id = ui.make_persistent_id(id);
-    let open = ui.data(|d| d.get_temp::<bool>(id).unwrap_or(true));
-    Frame::new()
+    let open = !collapsible || ui.data(|d| d.get_temp::<bool>(id).unwrap_or(true));
+    let card = Frame::new()
         .fill(BG_HEADER)
         .corner_radius(6)
         .show(ui, |ui| {
@@ -1405,20 +1426,25 @@ fn prop_section(
                 |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
                     ui.add_space(6.0);
-                    let (rect, chevron) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
-                    let icon = if open {
-                        Icon::ChevronDown
-                    } else {
-                        Icon::ChevronRight
-                    };
-                    icon.image(14.0, TEXT_WEAK).paint_at(ui, rect.shrink(1.0));
+                    let chevron = collapsible.then(|| {
+                        let (rect, chevron) =
+                            ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+                        let icon = if open {
+                            Icon::ChevronDown
+                        } else {
+                            Icon::ChevronRight
+                        };
+                        icon.image(14.0, TEXT_WEAK).paint_at(ui, rect.shrink(1.0));
+                        chevron
+                    });
                     leading(ui);
-                    let title = ui.add(
-                        egui::Label::new(title.size(14.0))
-                            .selectable(false)
-                            .sense(Sense::click()),
-                    );
-                    if chevron.clicked() || title.clicked() {
+                    let title = egui::Label::new(title.size(14.0)).selectable(false);
+                    let title = ui.add(if collapsible {
+                        title.sense(Sense::click())
+                    } else {
+                        title
+                    });
+                    if chevron.is_some_and(|c| c.clicked()) || (collapsible && title.clicked()) {
                         ui.data_mut(|d| d.insert_temp(id, !open));
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1443,6 +1469,7 @@ fn prop_section(
             }
         });
     ui.add_space(8.0);
+    card.response.rect
 }
 
 /// A row: `label` right-aligned in the label column, then `control` given the rest of the width.
@@ -1542,6 +1569,7 @@ fn parameters_tab(
                 prop_section(
                     ui,
                     "generator",
+                    true,
                     RichText::new("Generator"),
                     |_| {},
                     |_| {},
@@ -1586,6 +1614,7 @@ fn parameters_tab(
                 prop_section(
                     ui,
                     ("generator_params", noise.kind),
+                    true,
                     RichText::new(noise.kind.name()),
                     |_| {},
                     |_| {},
@@ -1602,8 +1631,6 @@ fn parameters_tab(
 
 enum ModifierAction {
     Toggle(usize),
-    Up(usize),
-    Down(usize),
     Remove(usize),
 }
 
@@ -1616,18 +1643,28 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
                 let modifiers = &mut edit.edit.modifiers;
-                let count = modifiers.len();
                 // Set from the header closures, applied after the list is drawn.
                 let action = std::cell::Cell::new(None);
+                let dragging = std::cell::Cell::new(None);
+                let dropped = std::cell::Cell::new(None);
+                let mut cards = Vec::with_capacity(modifiers.len());
                 for (i, m) in modifiers.iter_mut().enumerate() {
                     let enabled = m.enabled;
                     let title =
                         RichText::new(m.kind.name()).color(if enabled { TEXT } else { TEXT_WEAK });
-                    prop_section(
+                    cards.push(prop_section(
                         ui,
                         ("modifier", i, m.kind.key()),
+                        false,
                         title,
                         |ui| {
+                            let grip = drag_handle(ui);
+                            if grip.dragged() {
+                                dragging.set(Some(i));
+                            }
+                            if grip.drag_stopped() {
+                                dropped.set(Some(i));
+                            }
                             let (icon, tip) = if enabled {
                                 (Icon::Eye, "Disable")
                             } else {
@@ -1641,14 +1678,6 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                             if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
                                 action.set(Some(ModifierAction::Remove(i)));
                             }
-                            if icon_button(ui, Icon::ArrowDown, "Move down", i + 1 < count)
-                                .clicked()
-                            {
-                                action.set(Some(ModifierAction::Down(i)));
-                            }
-                            if icon_button(ui, Icon::ArrowUp, "Move up", i > 0).clicked() {
-                                action.set(Some(ModifierAction::Up(i)));
-                            }
                         },
                         |ui| {
                             let specs = m.kind.specs();
@@ -1659,12 +1688,36 @@ fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
                                 param_row(ui, spec, value);
                             }
                         },
-                    );
+                    ));
+                }
+                if let Some(from) = dragging.get().or(dropped.get()) {
+                    let pointer = ui.ctx().pointer_latest_pos().map_or(0.0, |p| p.y);
+                    let to = cards.iter().filter(|r| r.center().y < pointer).count();
+                    if dropped.get().is_some() {
+                        if to != from && to != from + 1 {
+                            let m = modifiers.remove(from);
+                            modifiers.insert(if to > from { to - 1 } else { to }, m);
+                        }
+                    } else {
+                        let painter = ui.painter();
+                        painter.rect_stroke(
+                            cards[from],
+                            6,
+                            Stroke::new(1.0, ACCENT),
+                            egui::StrokeKind::Inside,
+                        );
+                        if to != from && to != from + 1 {
+                            // In the middle of the 8 px gap above card `to` (or below the last).
+                            let y = cards
+                                .get(to)
+                                .map_or(cards[to - 1].bottom() + 4.0, |r| r.top() - 4.0);
+                            let rect = cards[from];
+                            painter.hline(rect.x_range(), y, Stroke::new(2.0, ACCENT));
+                        }
+                    }
                 }
                 match action.take() {
                     Some(ModifierAction::Toggle(i)) => modifiers[i].enabled ^= true,
-                    Some(ModifierAction::Up(i)) => modifiers.swap(i - 1, i),
-                    Some(ModifierAction::Down(i)) => modifiers.swap(i, i + 1),
                     Some(ModifierAction::Remove(i)) => {
                         modifiers.remove(i);
                     }
