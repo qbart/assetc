@@ -24,10 +24,10 @@ Four icon tabs, top to bottom: **Info** (`info`), **Parameters**
 files in the Input tree (see [`noise.md`](noise.md#parameters-tab)), and
 **Assets** (`files`). Hovering a tab shows its name.
 
-A tab that does not apply to the selected file is disabled: its icon is drawn
-in `TEXT_WEAK` at 50% opacity, it does not react to hover or clicks. If the
-active tab becomes disabled by a new selection, the Inspector switches to
-Info.
+Only tabs that apply to the selected file are shown, stacked from the top in
+the order above with no gaps; the others are hidden (with nothing selected,
+only Info). If the active tab stops applying after a new selection, the
+Inspector switches to Info.
 
 ## Info tab
 

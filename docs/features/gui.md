@@ -116,7 +116,8 @@ Tabs are attached to the pane they switch, not drawn as separate buttons:
 - Inspector tabs (vertical): 36 × 36 px, 18 px icon, indicator on the left
   edge.
 - Disabled tabs (not applicable right now): `TEXT_WEAK` at 50% opacity, no
-  hover, not clickable.
+  hover, not clickable. The Inspector hides tabs that do not apply instead,
+  see [`inspector.md`](inspector.md#tabs).
 
 ## Icons
 
