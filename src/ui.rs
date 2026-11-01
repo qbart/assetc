@@ -3652,7 +3652,6 @@ fn canvas_compiled_mesh(
 /// A compiled mesh's chunks: a list, and the chosen one's table; see
 /// docs/features/models.md#chunks-view.
 fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
-    use egui_extras::{Column, TableBuilder};
     let Ok(reader) = crate::chunks::Reader::parse(bytes, crate::amesh::FORMAT) else {
         return;
     };
@@ -3730,42 +3729,56 @@ fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
             .color(TEXT),
         );
         ui.add_space(6.0);
-        let mut columns: Vec<&str> = Vec::new();
-        if table.numbered {
-            columns.push("#");
-        }
-        columns.extend(&table.columns);
-        let text = |s: String| RichText::new(s).monospace().size(12.0);
-        let mut builder = TableBuilder::new(ui)
-            .id_salt(("chunk_table", &entry.name))
-            .striped(true)
-            .resizable(true)
+        egui::ScrollArea::horizontal()
+            .id_salt("chunk_table_wide")
             .auto_shrink(false)
-            .cell_layout(Layout::left_to_right(Align::Center));
-        for _ in 1..columns.len() {
-            builder = builder.column(Column::auto().at_least(40.0));
-        }
-        builder
-            .column(Column::remainder().at_least(40.0))
-            .header(20.0, |mut header| {
-                for name in &columns {
-                    header.col(|ui| {
-                        ui.label(text((*name).to_owned()).color(TEXT_WEAK));
+            .show(ui, |ui| chunk_table(ui, bytes, entry, &table));
+    });
+}
+
+/// The rows of one chunk; see docs/features/models.md#chunks-view.
+fn chunk_table(
+    ui: &mut Ui,
+    bytes: &[u8],
+    entry: &crate::chunks::Entry,
+    table: &crate::amesh::Table,
+) {
+    use egui_extras::{Column, TableBuilder};
+    let mut columns: Vec<&str> = Vec::new();
+    if table.numbered {
+        columns.push("#");
+    }
+    columns.extend(&table.columns);
+    let text = |s: String| RichText::new(s).monospace().size(12.0);
+    let mut builder = TableBuilder::new(ui)
+        .id_salt(("chunk_table", &entry.name))
+        .striped(true)
+        .resizable(true)
+        .auto_shrink(false)
+        .cell_layout(Layout::left_to_right(Align::Center));
+    for _ in 1..columns.len() {
+        builder = builder.column(Column::auto().at_least(40.0));
+    }
+    builder
+        .column(Column::remainder().at_least(40.0))
+        .header(20.0, |mut header| {
+            for name in &columns {
+                header.col(|ui| {
+                    ui.label(text((*name).to_owned()).color(TEXT_WEAK));
+                });
+            }
+        })
+        .body(|body| {
+            body.rows(20.0, table.rows, |mut row| {
+                let index = row.index();
+                for column in 0..columns.len() {
+                    row.col(|ui| {
+                        let value = crate::amesh::cell(bytes, &entry.name, index, column);
+                        ui.add(egui::Label::new(text(value).color(TEXT)).extend());
                     });
                 }
-            })
-            .body(|body| {
-                body.rows(20.0, table.rows, |mut row| {
-                    let index = row.index();
-                    for column in 0..columns.len() {
-                        row.col(|ui| {
-                            let value = crate::amesh::cell(bytes, &entry.name, index, column);
-                            ui.add(egui::Label::new(text(value).color(TEXT)).extend());
-                        });
-                    }
-                });
             });
-    });
+        });
 }
 
 /// A glTF model in the 3D view, see docs/features/models.md#preview.

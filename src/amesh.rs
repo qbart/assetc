@@ -1004,7 +1004,10 @@ mod tests {
         assert_eq!(cell(&bytes, "DESC", 0, 0), "vertex_count");
         assert_eq!(cell(&bytes, "DESC", 0, 1), "25");
         assert_eq!(cell(&bytes, "DESC", 5, 1), "28 B");
-        assert_eq!(cell(&bytes, "DESC", 7, 1), "0x05 (tangents, levels of detail)");
+        assert_eq!(
+            cell(&bytes, "DESC", 7, 1),
+            "0x05 (tangents, levels of detail)"
+        );
         let vertices = table(&bytes, "VERTICES").unwrap();
         assert_eq!(vertices.rows, summary.vertices);
         assert_eq!(cell(&bytes, "VERTICES", 1, 0), "1");
