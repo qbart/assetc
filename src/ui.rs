@@ -872,7 +872,9 @@ fn canvas(
                 // Grayscale and opaque: the channel's value in R, G and B.
                 let gray: Vec<u8> = pixels
                     .pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .flat_map(|p| [p[channel], p[channel], p[channel], 255])
                     .collect();
                 let texture = load_preview(ui.ctx(), "canvas_channel", pixels, &gray);
