@@ -172,7 +172,8 @@ otherwise `<dir>/<name>.*`.
 - **Compiled material** (Output `*.amat`): every value from the `.amat` file,
   one row each (Base color, Metallic, Roughness, Occlusion, Normal scale,
   Emissive, Height mode, Height scale, Height midlevel, Alpha, Double-sided),
-  and each texture slot's asset ID (or `—`).
+  and each texture slot's asset ID (or `—`). The canvas shows the file's
+  fields as a table, see [Material view](inspector.md#material-view).
 - The Assets tab is enabled for `.amat` files too and lists the material.
 
 ## Keybindings

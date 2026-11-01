@@ -71,7 +71,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `*.amesh`                  | Compiled mesh, see [`models.md`](models.md#inspector) |
 | Output | `*.aanim`                  | Compiled animation, see [`models.md`](models.md#inspector) |
 | Output | `*.afont`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
-| Output | `assets.manifest` at the output root | Manifest |
+| Output | `assets.aman` at the output root | Manifest, see [Manifest view](#manifest-view) |
 | Output | anything else              | File               |
 | either | folder named `*.env` (any case) | Environment map |
 | either | any other folder           | Folder             |
@@ -107,7 +107,47 @@ instead.
 Material sources, compiled materials, and source textures used by a material
 get extra rows, see [`materials.md`](materials.md#inspector).
 
-**Manifest:** Version, Entries (count).
+**Manifest:** Version, Entries (count). The canvas shows its entries, see
+[Manifest view](#manifest-view).
+
+## Data tables
+
+Files without an image or 3D preview show their data in the canvas as a
+table, like a compiled mesh's [Chunks view](models.md#chunks-view): a header
+line (13 px monospace, `TEXT`), then a table with a header row
+(`TEXT_WEAK`) and striped 20 px rows in 12 px monospace; long tables scroll
+(only visible rows are drawn), columns size to their content and can be
+resized. The view bar is empty (no `View` label, no buttons) and the canvas
+toolbar is not shown.
+
+### Manifest view
+
+Selecting `assets.aman` (Output tree root) shows its entries:
+
+- Header line: `AMAN v1   <n> entries   <size>`, then a **Filter path…**
+  field (240 px): only entries whose asset path or file contains the text
+  (ignoring case) are listed; empty lists all. The filter lasts for the
+  session.
+- Columns: **#** (entry index in the file), **Asset ID** (`0x` + 16 hex
+  digits), **Kind** (`Texture`, `Material`, `Mesh`, `Animation`, `Font`),
+  **Asset path**, **File** (the entry's path in `output`). Rows are in file
+  order (by ID). A file that does not exist in `output` is drawn in
+  `TEXT_WEAK` with ` (missing)` appended.
+- A manifest that does not decode shows its error as the canvas message.
+
+### Material view
+
+Selecting a compiled material (`*.amat`) shows the record field by field, in
+the [spec](../spec/amat.md)'s order:
+
+- Header line: `ACMT v1   <size>`.
+- Columns: **Offset** (bytes), **Field** (the spec's name), **Value**:
+  floats with 3 decimals; `base_color` and `emissive` start with a 12 × 12 px
+  swatch of the color (sRGB-encoded, alpha ignored); `flags` as `0x05` and
+  their meaning, e.g. `(mask, double-sided, parallax)`; texture IDs as
+  `0x…` followed by the file the manifest maps them to, `(not in manifest)`,
+  or `—` for `0`.
+- A material that does not decode shows its error as the canvas message.
 
 **Folder:** Kind and Items (number of direct entries, hidden ones excluded);
 no Size row.
@@ -152,8 +192,8 @@ switches which level the [canvas](canvas.md) shows.
 
 ## Assets tab
 
-Lists the assets a file contains, as recorded in `<output>/assets.manifest`
-(see [`docs/spec/manifest.md`](../spec/manifest.md)).
+Lists the assets a file contains, as recorded in `<output>/assets.aman`
+(see [`docs/spec/aman.md`](../spec/aman.md)).
 
 - Enabled only for compiled files (`.ktx2`, `.amat`, `.amesh`, `.aanim` or `.afont` selected in the Output
   tree) for now. Each holds exactly one asset; later container formats

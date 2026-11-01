@@ -157,7 +157,7 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   | Submeshes   | `boxes`       | each submesh in its own color                            |
 
 - **Material**: each submesh uses its `.amat` (looked up by the `MATERIAL`
-  asset IDs in the output's [`assets.manifest`](../spec/manifest.md)) as a
+  asset IDs in the output's [`assets.aman`](../spec/aman.md)) as a
   physically based material: base color factor and texture, metallic and
   roughness factors with the ORM texture (G roughness, B metallic, R
   occlusion), normal texture, emissive factor × strength and texture, alpha

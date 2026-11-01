@@ -53,7 +53,7 @@ JPEGs are supported). Color space and mipmaps follow the `[textures]` settings, 
 
 ```
 <output>/
-  assets.manifest            see docs/spec/manifest.md
+  assets.aman                see docs/spec/aman.md
   <asset path>.ktx2          one per texture (incl. <name>.orm.ktx2), same directory structure as input
   <dir>/<name>.amat          one per material
   <model>.amesh              one per glTF model, with <model>/… for its materials and textures
@@ -84,8 +84,10 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | font       | `*.afont`      |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
-  touched. `assets.manifest` is rewritten, never removed. Entries starting with `.` and the contents of symlinked directories
-  are not looked at, as in the file browser.
+  touched. `assets.aman` is rewritten, never removed; a leftover
+  `assets.manifest` (its name before) at the output root is removed. Entries
+  starting with `.` and the contents of symlinked directories are not looked
+  at, as in the file browser.
 - A candidate is kept if its `output`-relative path matches an output of this
   build, compared **case-insensitively**, so that on case-insensitive file
   systems an output whose case changed is not deleted right after being
@@ -102,7 +104,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
 
 - Every source is attempted; failures are collected and reported together.
 - If any source fails, or an ID collision is found, the build fails and
-  `assets.manifest` is **not** written, so a manifest never refers to a broken
+  `assets.aman` is **not** written, so a manifest never refers to a broken
   set of outputs. Individual `.ktx2` files that did succeed are still written.
 - Building without a project (`assetc.toml` not found) is an error.
 - An invalid glob pattern in `[textures]` is an error; nothing is compiled.

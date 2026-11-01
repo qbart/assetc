@@ -1,8 +1,8 @@
-# `assets.manifest`
+# `assets.aman`
 
 Maps every asset ID (see [`docs/features/build.md`](../features/build.md#asset-ids))
 to the output file holding it. Written once per successful build to
-`<output>/assets.manifest`.
+`<output>/assets.aman`.
 
 The layout is designed for direct use from a memory-mapped file: entries have
 a fixed stride and are sorted by ID, so a reader can binary-search them
@@ -26,7 +26,7 @@ All integers are little-endian. No padding other than what is listed.
 
 | Offset | Size | Field          | Value                                     |
 |-------:|-----:|----------------|-------------------------------------------|
-|      0 |    4 | `magic`        | ASCII `ACMF` (`41 43 4D 46`)              |
+|      0 |    4 | `magic`        | ASCII `AMAN` (`41 4D 41 4E`)              |
 |      4 |    4 | `version`      | `1`                                       |
 |      8 |    4 | `count`        | number of entries                         |
 |     12 |    4 | `strings_size` | byte length of the string data section    |
@@ -72,7 +72,7 @@ when `16 + 16 * count + strings_size` differs from the file size, or when any
 One texture `textures/dirt` (ID `0x…`) at `textures/dirt.ktx2`:
 
 ```
-41 43 4D 46  01 00 00 00  01 00 00 00  12 00 00 00   header: ACMF, v1, 1 entry, 18 bytes of strings
+41 4D 41 4E  01 00 00 00  01 00 00 00  12 00 00 00   header: AMAN, v1, 1 entry, 18 bytes of strings
 <id u64 LE>  00 00 00 00  12 00  00  00              entry: offset 0, len 18, texture
 74 65 78 74 75 72 65 73 2F 64 69 72 74 2E 6B 74 78 32   "textures/dirt.ktx2"
 ```

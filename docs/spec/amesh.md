@@ -126,7 +126,7 @@ As computed by meshoptimizer's `meshopt_computeMeshletBounds`.
 
 `MATERIAL` lists the asset IDs of the `.amat` files the submeshes use, each
 once, in order of first use; `SubMesh.material` indexes into it. The IDs
-resolve through [`assets.manifest`](manifest.md).
+resolve through [`assets.aman`](aman.md).
 
 ## LodTable
 
