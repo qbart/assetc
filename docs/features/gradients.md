@@ -125,7 +125,7 @@ Below the handles, for the selected stop:
 ## Inspector Info
 
 Kind `Gradient`, the file Size, **Gradients** (count), **Cell**
-(`16 × 64 px`), **Grid** (`16 × 4`),
+(`16 × 64 px`), **Grid** (`16 × 4`), **Layout** (`rows` or `columns`),
 then the usual source texture rows (Dimensions, Asset path, Asset ID,
 Material, Color, Mip levels, Output). An invalid file shows an **Error** row
 and no image.
