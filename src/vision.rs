@@ -10,9 +10,6 @@ pub enum Vision {
     Monochromacy,
 }
 
-const RED_GREEN: &str = "Red-Green Color Blindness: The most common form (including deuteranomaly \
-and protanomaly), affecting about 8% of males and 0.5% of females of Northern European descent.";
-
 impl Vision {
     pub const ALL: [Self; 4] = [
         Self::Protanopia,
@@ -30,17 +27,35 @@ impl Vision {
         }
     }
 
-    /// Who it affects, for the button's tooltip.
+    /// What it is and how common, for the button's tooltip; see
+    /// docs/features/canvas.md#color-vision.
     pub fn hint(self) -> &'static str {
         match self {
-            Self::Protanopia | Self::Deuteranopia => RED_GREEN,
+            Self::Protanopia => {
+                "Red-Green Color Blindness (protan): no working red (L) cones, so reds look \
+darker and are confused with greens. Protanopia affects roughly 1% of males; all \
+red-green forms together (including the milder protanomaly and deuteranomaly) \
+affect about 8% of males and 0.5% of females of Northern European descent."
+            }
+            Self::Deuteranopia => {
+                "Red-Green Color Blindness (deutan): no working green (M) cones, so reds, oranges \
+and greens are confused. Deuteranopia affects roughly 1% of males; its milder \
+form, deuteranomaly, is the most common color vision deficiency (about 5% of \
+males). All red-green forms together affect about 8% of males and 0.5% of \
+females of Northern European descent."
+            }
             Self::Tritanopia => {
-                "Blue-Yellow Color Blindness (Tritan-type): Much rarer (affecting roughly 0.01% \
-to 0.03% of the population) and affects men and women equally."
+                "Blue-Yellow Color Blindness (tritan): no working blue (S) cones, so blue and \
+green, and yellow and pink, are confused. Very rare when inherited (estimates \
+range from about 1 in 10,000 to 1 in 20,000 people, roughly 0.005% to 0.01%) and \
+affects men and women equally, as it is not X-linked. Acquired tritan defects \
+(ageing, eye disease) are more common."
             }
             Self::Monochromacy => {
-                "Complete Color Blindness (Achromatopsia): Extremely rare, affecting a tiny \
-fraction of the global population."
+                "Complete Color Blindness (achromatopsia, rod monochromacy): no working cones, so \
+everything is seen in shades of gray, usually with light sensitivity and low \
+sharpness. About 1 in 30,000 people; blue cone monochromacy is rarer, about 1 in \
+100,000."
             }
         }
     }
@@ -101,6 +116,15 @@ fn srgb_to_linear(v: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hints_match_the_spec() {
+        let spec = include_str!("../docs/features/canvas.md");
+        for vision in Vision::ALL {
+            let line = format!("- **{}**: {}", vision.name(), vision.hint());
+            assert!(spec.contains(&line), "{line}");
+        }
+    }
 
     #[test]
     fn grays_and_alpha_stay() {
