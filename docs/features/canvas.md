@@ -258,6 +258,26 @@ Bevy into the canvas area (below the view bar) behind the egui overlay.
 - Background: `BG_CENTER`. No checkerboard.
 - The zoom bar is not shown; tiling does not apply.
 
+## Orientation gizmo
+
+Every 3D view (images, [environment maps](#environment-maps),
+[models](models.md#preview), the [LUT cube](lut.md#cube)) shows the world
+axes as seen from the camera, in the canvas' bottom-left corner, 8 px from
+both edges:
+
+- A 64 × 64 px area with a `BG_BAR` circle at 70% opacity filling it.
+- From its center, the **+X**, **+Y** and **+Z** axes as 2 px lines, 22 px
+  long when the axis lies in the screen plane (shorter as it points toward or
+  away from the camera), in `CHANNEL_R`, `CHANNEL_G` and `CHANNEL_B`. Each
+  ends in a 7 px radius dot of its color with its letter (`X`, `Y`, `Z`,
+  10 px, `BG_BAR`) inside.
+- The negative axes are 4 px radius dots of the same colors at 50% opacity,
+  without lines or letters.
+- Axes and dots are drawn back to front (farthest from the camera first), so
+  nearer ones cover farther ones.
+- It follows the orbit camera, not the shape's auto-rotation, and does not
+  take the pointer: orbiting and dollying work over it.
+
 ## Camera
 
 An orbit camera looks at the shape's center.
