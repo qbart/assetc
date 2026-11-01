@@ -21,7 +21,7 @@ id = FNV-1a-64(utf8(asset path))
 - The ID does not depend on the source format, so replacing `grass.png` with a
   different image format later keeps the same ID.
 - Two sources with the same asset path are a build error, e.g. `a/b.png` and
-  `a/b.PNG`, or (once more formats exist) `a/b.png` and `a/b.jpg`.
+  `a/b.PNG`, or `a/b.png` and `a/b.jpg`.
 
 ## Inputs
 
@@ -30,11 +30,12 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 
 | Source             | Asset kind | Output                                        |
 |--------------------|------------|-----------------------------------------------|
-| `*.png` (any case) | texture    | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
+| `*.png`, `*.jpg`, `*.jpeg` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
 | anything else      | —          | ignored, counted as skipped                   |
 
 Textures are decoded to 8-bit RGBA (other bit depths and color types are
-converted). Color space and mipmaps follow the `[textures]` settings, see
+converted; JPEGs, having no alpha, get alpha 255; baseline and progressive
+JPEGs are supported). Color space and mipmaps follow the `[textures]` settings, see
 [`textures.md`](textures.md). No compression yet.
 
 ## Outputs

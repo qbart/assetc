@@ -46,7 +46,7 @@ The kind is decided by tab and file name, the same way the build decides it
 
 | Tab    | File                       | Kind               |
 |--------|----------------------------|--------------------|
-| Input  | `*.png` (any case)         | Source texture     |
+| Input  | `*.png`, `*.jpg`, `*.jpeg` (any case) | Source texture |
 | Input  | anything else              | Ignored            |
 | Output | `*.ktx2` (any case)        | Compiled texture   |
 | Output | `assets.manifest` at the output root | Manifest |

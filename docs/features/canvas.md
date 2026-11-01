@@ -10,7 +10,7 @@ produced.
 | Selection                         | Canvas                                    |
 |-----------------------------------|-------------------------------------------|
 | nothing                           | "Select a file to preview"                |
-| source texture (Input `*.png`)    | the decoded PNG                           |
+| source texture (Input `*.png`, `*.jpg`, `*.jpeg`) | the decoded image |
 | compiled texture (Output `*.ktx2`)| level 0, if the file is in assetc's own KTX2 subset (`R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression, see [`ktx2.md`](../spec/ktx2.md)); otherwise "No preview for this format" |
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
 | any other file                    | "No preview"                              |
