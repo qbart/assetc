@@ -32,7 +32,7 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 
 | Source             | Asset kind | Output                                        |
 |--------------------|------------|-----------------------------------------------|
-| `*.png`, `*.jpg`, `*.jpeg` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
+| `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
 | `*.noise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
 | `*.gradient` (any case) | texture, generated | `<asset path>.ktx2`, see [`gradients.md`](gradients.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
@@ -46,7 +46,8 @@ describes (slot color space, ORM packing), see [`materials.md`](materials.md).
 
 Textures are decoded to 8-bit RGBA (other bit depths and color types are
 converted; JPEGs, having no alpha, get alpha 255; baseline and progressive
-JPEGs are supported). Color space and mipmaps follow the `[textures]` settings, see
+JPEGs are supported; TGAs may be uncompressed or RLE-compressed, true-color,
+grayscale or color-mapped, with either origin). Color space and mipmaps follow the `[textures]` settings, see
 [`textures.md`](textures.md). No compression yet.
 
 ## Outputs

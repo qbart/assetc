@@ -21,7 +21,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 Eight icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient` and model files, **Modifiers**
-(`wrench`) for `.noise` files and images (`.png`, `.jpg`, `.jpeg`) and **Gradients** (`palette`) for `.gradient`
+(`wrench`) for `.noise` files and images (`.png`, `.jpg`, `.jpeg`, `.tga`) and **Gradients** (`palette`) for `.gradient`
 files, all three only in the Input tree (see
 [`noise.md`](noise.md#parameters-tab), [`gradients.md`](gradients.md#parameters-tab)),
 **Animations** (`film`), only for models with animations (see
@@ -58,7 +58,7 @@ The kind is decided by tab and file name, the same way the build decides it
 
 | Tab    | File                       | Kind               |
 |--------|----------------------------|--------------------|
-| Input  | `*.png`, `*.jpg`, `*.jpeg` (any case) | Source texture |
+| Input  | `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | Source texture |
 | Input  | `*.mat.toml`               | Material source    |
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
 | Input  | `*.noise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |

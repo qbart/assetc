@@ -31,7 +31,7 @@ value.
 
 ## `[[modifiers]]`
 
-For images (`*.png`, `*.jpg`, `*.jpeg`); see
+For images (`*.png`, `*.jpg`, `*.jpeg`, `*.tga`); see
 [`docs/features/textures.md`](../features/textures.md#modifiers). A list of
 modifiers, exactly as in a `.noise` file: each table has `type`, `enabled`
 and the modifier's parameters, see

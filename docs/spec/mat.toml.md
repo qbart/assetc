@@ -41,7 +41,7 @@ Keys are slot names: `base_color`, `normal`, `roughness`, `metallic`,
 
 - relative to the directory holding the `.mat.toml`, `/`-separated;
 - `.` and `..` are allowed but the result must stay inside `input`;
-- the file must exist and be a texture source (`*.png`, `*.jpg`, `*.jpeg`).
+- the file must exist and be a texture source (`*.png`, `*.jpg`, `*.jpeg`, `*.tga`).
 
 A key here replaces the convention file for that slot.
 

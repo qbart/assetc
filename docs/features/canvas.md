@@ -55,7 +55,7 @@ Both modes show the same messages when there is no image to show.
 | Selection                         | Canvas                                    |
 |-----------------------------------|-------------------------------------------|
 | nothing                           | "Select a file to preview"                |
-| source texture (Input `*.png`, `*.jpg`, `*.jpeg`) | the decoded image |
+| source texture (Input `*.png`, `*.jpg`, `*.jpeg`, `*.tga`) | the decoded image |
 | compiled texture (Output `*.ktx2`)| level 0 (a 3D texture's slices side by side, left to right), if the file is in assetc's own KTX2 subset (`R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression, see [`ktx2.md`](../spec/ktx2.md)); otherwise "No preview for this format" |
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
 | an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
@@ -319,7 +319,7 @@ A folder named `*.env` (any case) is a cubemap given as six face images:
 | `nz.*` | −Z  | 5          |
 
 - Faces are direct children with those names (case-sensitive) and a texture
-  source extension (`png`, `jpg`, `jpeg`) in the Input tree, or `.ktx2`
+  source extension (`png`, `jpg`, `jpeg`, `tga`) in the Input tree, or `.ktx2`
   (assetc's subset, level 0) in the Output tree.
 - All six must exist, decode, be square, have the same size, and that size
   must be a power of two; otherwise the canvas shows the problem as its

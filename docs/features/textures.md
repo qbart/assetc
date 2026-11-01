@@ -68,7 +68,7 @@ Unless the texture matches `no_mipmaps`, a full mip chain is written, down to
 
 ## Modifiers
 
-A `.png` / `.jpg` / `.jpeg` in `input` can carry the same modifier stack as
+A `.png` / `.jpg` / `.jpeg` / `.tga` in `input` can carry the same modifier stack as
 a [`.noise`](noise.md#modifiers-tab) file, kept in its
 [`.amod`](../spec/amod.md#modifiers) sidecar (`brick.jpg.amod`) and edited
 in the Inspector's Modifiers tab.

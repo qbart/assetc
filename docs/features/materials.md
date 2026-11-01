@@ -23,7 +23,7 @@ channel; there is no separate opacity slot yet.
 
 ## Finding materials
 
-Texture sources (`*.png`, `*.jpg`, `*.jpeg`, see [`build.md`](build.md#inputs))
+Texture sources (`*.png`, `*.jpg`, `*.jpeg`, `*.tga`, see [`build.md`](build.md#inputs))
 and material files (`*.mat.toml`) are grouped per directory by **name**:
 
 - `<name>.<suffix>.<ext>` with a suffix from the table joins material `<name>`
