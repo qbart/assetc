@@ -314,17 +314,10 @@ enum InspectorTab {
     Parameters,
     Modifiers,
     Assets,
-    Settings,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 5] = [
-        Self::Info,
-        Self::Parameters,
-        Self::Modifiers,
-        Self::Assets,
-        Self::Settings,
-    ];
+    const ALL: [Self; 4] = [Self::Info, Self::Parameters, Self::Modifiers, Self::Assets];
 
     fn icon(self) -> Icon {
         match self {
@@ -332,7 +325,6 @@ impl InspectorTab {
             Self::Parameters => Icon::SlidersVertical,
             Self::Modifiers => Icon::Wrench,
             Self::Assets => Icon::Files,
-            Self::Settings => Icon::Settings,
         }
     }
 
@@ -342,13 +334,12 @@ impl InspectorTab {
             Self::Parameters => "Parameters",
             Self::Modifiers => "Modifiers",
             Self::Assets => "Assets",
-            Self::Settings => "Settings",
         }
     }
 
     fn enabled(self, selection: Option<&Selection>) -> bool {
         match self {
-            Self::Info | Self::Settings => true,
+            Self::Info => true,
             Self::Parameters | Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input && build::is_noise(&s.path) && s.path.is_file()
             }),
@@ -1507,7 +1498,6 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                 (InspectorTab::Assets, _, Some(selection)) => {
                     assets_tab(ui, assets, &selection.path)
                 }
-                (InspectorTab::Settings, ..) => placeholder(ui, "No settings for this file"),
             }
         });
 }

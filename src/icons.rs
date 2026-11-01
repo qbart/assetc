@@ -27,7 +27,6 @@ pub enum Icon {
     Palette,
     Plus,
     RefreshCw,
-    Settings,
     SlidersVertical,
     Torus,
     Trash2,
@@ -35,7 +34,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 27] = [
+const SVGS: [(&str, &str); 26] = [
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
     (
@@ -73,7 +72,6 @@ const SVGS: [(&str, &str); 27] = [
     ("palette", include_str!("../assets/icons/palette.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
-    ("settings", include_str!("../assets/icons/settings.svg")),
     (
         "sliders-vertical",
         include_str!("../assets/icons/sliders-vertical.svg"),
@@ -111,7 +109,7 @@ mod tests {
         let names: Vec<_> = SVGS.iter().map(|(name, _)| *name).collect();
         assert_eq!(names[Icon::Info as usize], "info");
         assert_eq!(names[Icon::Image as usize], "image");
-        assert_eq!(names[Icon::Settings as usize], "settings");
+        assert_eq!(names[Icon::Wrench as usize], "wrench");
         for (name, svg) in SVGS {
             assert!(svg.contains(&format!("lucide-{name}\"")), "{name}");
         }
