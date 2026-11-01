@@ -41,10 +41,13 @@ for source textures.
 
 Compiled files in the Output tree:
 
-- **Compiled mesh** (`*.amesh`): Vertices, Triangles, Submeshes, Meshlets,
-  Materials, Levels of detail (`2` or `none`), Skin (`<n> joints` or `none`),
-  Bounds (`min – max`), Asset path, Asset ID. A file that does not read shows
-  an Error row.
+- **Compiled mesh** (`*.amesh`), every `DESC` value and more: Format
+  (`AMESH v1, 14 chunks`), Vertices, Vertex stride (`28 B`), Indices
+  (`1728 (u16)`), Triangles, Submeshes, Meshlets, Meshlet limits
+  (`64 vertices, 124 triangles`), Materials, Flags (`0x07 (tangents,
+  skinned, levels of detail)`, or `0x00 (none)`), Levels of detail (`2` or
+  `none`), Skin (`<n> joints` or `none`), Bounds (`min – max`), Asset path,
+  Asset ID. A file that does not read shows an Error row.
 - **Compiled animation** (`*.aanim`): Clips (names with durations), Channels,
   Keys, Asset path, Asset ID.
 A file that fails to parse shows an **Error** row (`not a valid glTF file:
@@ -99,10 +102,12 @@ section (collapsible, open):
 
 ## Compiled mesh preview
 
-Selecting a compiled mesh (`*.amesh` in the Output tree) shows it in the 3D
-view, to check what the build produced.
+Selecting a compiled mesh (`*.amesh` in the Output tree) shows it in the
+canvas, to check what the build produced. The [view bar](canvas.md#view-bar)
+offers **3D** (the default) and **Chunks** (the file's data as tables, see
+[Chunks view](#chunks-view)); the choice lasts for the session.
 
-- The view bar is empty: a mesh only exists in 3D. The mesh is read from the
+- In 3D the mesh is read from the
   file (vertices, submeshes, meshlets) on the
   [inspector thread](inspector.md#loading), centered and scaled like a
   [model](#preview), and does not auto-rotate. A skinned mesh is shown in its
@@ -138,6 +143,48 @@ view, to check what the build produced.
   start with), in every mode. Meshlets exist only for LOD 0: with another
   level chosen, the Meshlets mode shows it in light gray.
 - A file that does not read shows its error as the canvas message.
+
+## Chunks view
+
+The **Chunks** view shows the data inside the `.amesh`
+[chunked file](../spec/chunks.md), chunk by chunk:
+
+- **Chunk list** on the left (220 px, `BG_PANEL`, 1 px `STROKE` line on its
+  right): one 40 px row per chunk in file order with the chunk name
+  (13 px monospace, `TEXT`), its description below (12 px, `TEXT_WEAK`), and
+  its size on the right (12 px, `TEXT_WEAK`). Rows highlight like other
+  choice lists; the chosen chunk (by name, `DESC` to start with, kept for the
+  session while the next file has it) is filled with `ACCENT` at 25%.
+- **Table** on the right: a header line `<NAME> — <description>   @<offset>
+  <size> bytes` (13 px monospace), then the chunk's data as a table with a
+  header row (`TEXT_WEAK`) and striped rows, 20 px tall, 12 px monospace;
+  long tables scroll (only visible rows are drawn). Columns size to their
+  content and can be resized.
+- Records (`DESC`, `BOUNDS`) show one row per field: **Field**, **Value**
+  (the spec's field names; sizes in bytes as `28 B`, flags as `0x07
+  (tangents, skinned, levels of detail)`). Arrays show one row per element,
+  with **#** (the element's index) first:
+
+  | Chunk      | Description         | Columns after #                                       |
+  |------------|---------------------|-------------------------------------------------------|
+  | `DESC`     | Mesh descriptor     | (record)                                              |
+  | `BOUNDS`   | Mesh bounds         | (record: AABB min, AABB max, sphere center, radius)    |
+  | `VERTICES` | Vertices            | Position, Normal, Tangent (`x, y, z, ±1`), UV         |
+  | `INDICES`  | Indices             | per triangle: i0, i1, i2                              |
+  | `SUBMESH`  | Submeshes           | First index, Index count, First meshlet, Meshlet count, Material (slot or `—`), AABB min, AABB max |
+  | `MATERIAL` | Material asset IDs  | Asset ID                                              |
+  | `MESHLETS` | Meshlets            | Vertex offset, Vertices, Triangle offset, Triangles   |
+  | `MLVERTS`  | Meshlet vertices    | Vertex                                                |
+  | `MLTRIS`   | Meshlet triangles   | i0, i1, i2                                            |
+  | `MLBOUNDS` | Meshlet bounds      | Center, Radius, Cone axis, Cone cutoff                |
+  | `LODIDX`   | LOD indices         | per triangle: i0, i1, i2                              |
+  | `LODTABLE` | LOD table           | Submesh, Level, First index, Index count (the header's counts in the header line) |
+  | `SKIN`     | Skin weights        | Joints, Weights                                       |
+  | `SKELETON` | Skeleton            | Parent (or `—`), Translation, Rotation, Scale          |
+  | other      | Unknown chunk       | Offset, Bytes (16 per row, hex)                        |
+
+  Normals and tangents are decoded from their octahedral encoding. Floats
+  show three decimals; vectors as `x, y, z`.
 
 ## Levels of detail tab
 
