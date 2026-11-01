@@ -27,9 +27,6 @@ pub enum ParamKind {
     Gray {
         default: f64,
     },
-    Color {
-        default: [f64; 3],
-    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -45,7 +42,6 @@ pub enum Value {
     /// Floats and grays.
     Float(f64),
     Choice(usize),
-    Color([f64; 3]),
 }
 
 /// Parameter values, in the order of their [`ParamSpec`]s.
@@ -334,16 +330,6 @@ impl GeneratorKind {
     }
 }
 
-const COLOR_A: ParamSpec = ParamSpec {
-    key: "color_a",
-    label: "Color A",
-    kind: ParamKind::Color { default: [0.0; 3] },
-};
-const COLOR_B: ParamSpec = ParamSpec {
-    key: "color_b",
-    label: "Color B",
-    kind: ParamKind::Color { default: [1.0; 3] },
-};
 const MODIFIER_NONE: &[ParamSpec] = &[];
 const MODIFIER_LEVELS: &[ParamSpec] = &[
     float("black", "Black", 0.0, 1.0, 0.0),
@@ -363,7 +349,11 @@ const MODIFIER_BLUR: &[ParamSpec] = &[
     int("radius", "Radius", 1, 64, 2),
     choice("edges", "Edges", &["wrap", "clamp"], 0),
 ];
-const MODIFIER_COLORIZE: &[ParamSpec] = &[COLOR_A, COLOR_B];
+const MODIFIER_COLORIZE: &[ParamSpec] = &[
+    float("hue", "Hue", 0.0, 360.0, 180.0),
+    float("saturation", "Saturation", 0.0, 1.0, 0.5),
+    float("lightness", "Lightness", -1.0, 1.0, 0.0),
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModifierKind {
@@ -478,7 +468,6 @@ impl Params {
                         Value::Float(default)
                     }
                     ParamKind::Choice { default, .. } => Value::Choice(default),
-                    ParamKind::Color { default } => Value::Color(default),
                 })
                 .collect(),
         )
@@ -515,15 +504,6 @@ impl Params {
                     })?;
                     Value::Choice(i)
                 }
-                ParamKind::Color { .. } => {
-                    let array = raw.as_array().filter(|a| a.len() == 3).ok_or_else(bad)?;
-                    let mut rgb = [0.0; 3];
-                    for (c, v) in rgb.iter_mut().zip(array) {
-                        *c = number(v).ok_or_else(bad)?;
-                        in_range(spec.key, *c, 0.0, 1.0)?;
-                    }
-                    Value::Color(rgb)
-                }
             };
         }
         Ok(params)
@@ -537,9 +517,6 @@ impl Params {
                 (Value::Choice(i), ParamKind::Choice { options, .. }) => {
                     toml::Value::String(options[*i].into())
                 }
-                (Value::Color(rgb), _) => {
-                    toml::Value::Array(rgb.iter().map(|c| toml::Value::Float(*c)).collect())
-                }
                 (Value::Choice(_), _) => unreachable!("choice without options"),
             };
             out.push_str(&format!("{} = {value}\n", spec.key));
@@ -552,7 +529,6 @@ impl Params {
             (Value::Int(v), _) => v.to_string(),
             (Value::Float(v), _) => format!("{v:.2}"),
             (Value::Choice(c), ParamKind::Choice { options, .. }) => options[*c].into(),
-            (Value::Color(rgb), _) => rgb.map(|c| format!("{c:.2}")).join(", "),
             (Value::Choice(c), _) => c.to_string(),
         }
     }
@@ -1208,10 +1184,6 @@ fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], width: usize, height: u
         Value::Int(v) => *v,
         _ => unreachable!(),
     };
-    let color = |key| match m.params.get(specs, key) {
-        Value::Color(c) => *c,
-        _ => unreachable!(),
-    };
     let each = |pixels: &mut [[f64; 3]], f: &dyn Fn(f64) -> f64| {
         for c in pixels.iter_mut().flatten() {
             *c = f(*c).clamp(0.0, 1.0);
@@ -1268,13 +1240,36 @@ fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], width: usize, height: u
             }
         }
         ModifierKind::Colorize => {
-            let (a, b) = (color("color_a"), color("color_b"));
+            let (hue, saturation, lightness) =
+                (float("hue"), float("saturation"), float("lightness"));
             for c in pixels.iter_mut() {
-                let l = (c[0] + c[1] + c[2]) / 3.0;
-                *c = std::array::from_fn(|i| (a[i] + (b[i] - a[i]) * l).clamp(0.0, 1.0));
+                let l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+                let l = if lightness > 0.0 {
+                    l * (1.0 - lightness) + lightness
+                } else {
+                    l * (1.0 + lightness)
+                };
+                *c = hsl_to_rgb(hue, saturation, l).map(|v| v.clamp(0.0, 1.0));
             }
         }
     }
+}
+
+/// HSL (hue in degrees) to RGB; see docs/spec/noise.md#colorize.
+fn hsl_to_rgb(hue: f64, saturation: f64, l: f64) -> [f64; 3] {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * saturation;
+    let h = (hue / 60.0).clamp(0.0, 6.0);
+    let x = c * (1.0 - (h % 2.0 - 1.0).abs());
+    let (r, g, b) = match h as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = l - c / 2.0;
+    [r + m, g + m, b + m]
 }
 
 /// One `(2 radius + 1)`-wide box blur pass along rows or columns of a `width × height` image;
@@ -1398,7 +1393,10 @@ mod tests {
         assert!(text.starts_with(
             "type = \"noise/fbm\"\nsize = 512\n\n[noise.fbm]\nseed = 0\nbasis = \"perlin\"\nfrequency_x = 4\nfrequency_y = 4\ntranslate_x = 0.0\ntranslate_y = 0.0\noctaves = 5\nlacunarity = 2\ngain = 0.5\nwarp = 0.0\n\n[[modifiers]]\ntype = \"levels\"\nenabled = true\nblack = 0.0\n"
         ), "{text}");
-        assert!(text.contains("color_a = [0.0, 0.0, 0.0]"), "{text}");
+        assert!(
+            text.contains("hue = 180.0\nsaturation = 0.5\nlightness = 0.0\n"),
+            "{text}"
+        );
         assert_eq!(Noise::parse(&text).unwrap(), noise);
         assert_eq!(Noise::parse("").unwrap(), Noise::default());
     }
@@ -1540,14 +1538,23 @@ mod tests {
             apply(ModifierKind::Posterize, &[(0, Value::Int(2))], [0.4; 3]),
             [0.0; 3]
         );
-        assert_eq!(
-            apply(
-                ModifierKind::Colorize,
-                &[(0, Value::Color([1.0, 0.0, 0.0]))],
-                [0.0; 3]
-            ),
-            [1.0, 0.0, 0.0]
-        );
+        // Colorize: mid gray at full saturation is the pure hue; no saturation keeps gray.
+        let colorize = |hue, saturation, lightness, c| {
+            let params = [
+                (0, Value::Float(hue)),
+                (1, Value::Float(saturation)),
+                (2, Value::Float(lightness)),
+            ];
+            apply(ModifierKind::Colorize, &params, c).map(|v| (v * 1e6).round() / 1e6)
+        };
+        assert_eq!(colorize(0.0, 1.0, 0.0, [0.5; 3]), [1.0, 0.0, 0.0]);
+        assert_eq!(colorize(120.0, 1.0, 0.0, [0.5; 3]), [0.0, 1.0, 0.0]);
+        assert_eq!(colorize(240.0, 1.0, 0.0, [0.5; 3]), [0.0, 0.0, 1.0]);
+        assert_eq!(colorize(360.0, 1.0, 0.0, [0.5; 3]), [1.0, 0.0, 0.0]);
+        assert_eq!(colorize(60.0, 0.0, 0.0, [0.25; 3]), [0.25; 3]);
+        assert_eq!(colorize(30.0, 1.0, 1.0, [0.0; 3]), [1.0; 3]);
+        assert_eq!(colorize(30.0, 1.0, -1.0, [1.0; 3]), [0.0; 3]);
+        assert_eq!(colorize(30.0, 1.0, -0.5, [1.0; 3]), [1.0, 0.5, 0.0]);
         // Blur of a uniform image keeps it; blur spreads a single bright pixel.
         assert_eq!(
             apply(ModifierKind::Blur, &[], [0.3; 3]).map(|c| (c * 1e6).round()),

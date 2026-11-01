@@ -918,7 +918,7 @@ mod tests {
         .unwrap();
         fs::write(
             input.join("g.png.amod"),
-            "[[modifiers]]\ntype = \"colorize\"\ncolor_a = [1.0, 0.0, 0.0]\ncolor_b = [1.0, 0.0, 0.0]\n",
+            "[[modifiers]]\ntype = \"colorize\"\nhue = 0.0\nsaturation = 1.0\n",
         )
         .unwrap();
 
@@ -929,10 +929,10 @@ mod tests {
         // Inverted (x = 0, y = 0, b = 7), alpha kept.
         let (_, pixels) = level0(&output.join("a.ktx2"));
         assert_eq!(pixels[..4], [255, 255, 248, 255]);
-        // Colorize turns the grayscale image red.
+        // Colorize turns the dark gray image dark red.
         let (image, color) = load_source(&input.join("g.png")).unwrap();
         assert!(color.has_color());
-        assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(0, 0).0, [128, 0, 0, 255]);
 
         // A broken sidecar fails its image.
         fs::write(

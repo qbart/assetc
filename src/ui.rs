@@ -2116,12 +2116,6 @@ fn param_row(ui: &mut Ui, spec: &ParamSpec, value: &mut Value) {
                     }
                 });
         }
-        (ParamKind::Color { .. }, Value::Color(rgb)) => {
-            let mut srgb = rgb.map(|c| (c * 255.0).round() as u8);
-            if ui.color_edit_button_srgb(&mut srgb).changed() {
-                *rgb = srgb.map(|c| c as f64 / 255.0);
-            }
-        }
         _ => {
             ui.weak("—");
         }

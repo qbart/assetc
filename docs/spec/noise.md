@@ -86,7 +86,8 @@ gamma = 1.0
 ## Generators
 
 Parameter types: *int* (TOML integer), *float*, *choice* (a string from the
-list), *gray* (float `0..=1`). All ranges are inclusive; a value outside its range is an error.
+list), *gray* (float `0..=1`). All ranges are inclusive; a value outside its
+range is an error.
 
 Most generators share these parameters (listed per generator below, in this
 order where present):
