@@ -137,9 +137,10 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::Ignored | Kind::File => Ok(()),
     };
     if let Err(message) = result {
-        out.rows.push(("Error", message));
         out.preview = None;
-        out.note = None;
+        // A LUT has no image to fall back on, so the canvas shows the error itself.
+        out.note = matches!(kind, Kind::ColorLut).then(|| message.clone());
+        out.rows.push(("Error", message));
     }
     out
 }
@@ -240,7 +241,7 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
 
 fn color_lut(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
-    let lut = Lut::parse(&text).inspect_err(|e| out.note = Some(e.clone()))?;
+    let lut = Lut::parse(&text)?;
     let n = lut.size;
     let list = |v: [f32; 3]| v.map(|c| c.to_string()).join(", ");
     out.rows
