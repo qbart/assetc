@@ -11,7 +11,7 @@ use crate::material::{self, AlphaMode, HeightMode};
 use crate::noise::Noise;
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
-use crate::{ktx2, manifest};
+use crate::{font, ktx2, manifest};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
@@ -35,6 +35,8 @@ pub struct Inspection {
     pub cubemap: Option<Vec<Image>>,
     /// A parsed color LUT.
     pub lut: Option<Lut>,
+    /// `preview` is a rendered font specimen, not an image file: no tiling, channels or 3D.
+    pub specimen: bool,
 }
 
 /// Face file stems of an environment map folder, in cube layer order.
@@ -52,6 +54,7 @@ enum Kind {
     Noise,
     MaterialSource,
     ColorLut,
+    Font,
     CompiledTexture,
     CompiledMaterial,
     Manifest,
@@ -66,6 +69,7 @@ impl Kind {
             Self::Noise => "Noise",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
+            Self::Font => "Font",
             Self::CompiledTexture => "Compiled texture",
             Self::CompiledMaterial => "Compiled material",
             Self::Manifest => "Manifest",
@@ -121,6 +125,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if material_name.is_some() => Kind::MaterialSource,
         Location::Input if has_ext("cube") => Kind::ColorLut,
         Location::Input if is_noise(file) => Kind::Noise,
+        Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
         Location::Input => Kind::Ignored,
         Location::Output if has_ext(manifest::Kind::Texture.extension()) => Kind::CompiledTexture,
@@ -138,6 +143,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         }
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(file, &mut out),
+        Kind::Font => font_rows(file, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
         Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
         Kind::Manifest => manifest(file, &mut out),
@@ -270,6 +276,15 @@ fn noise_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
             modifiers.join(", ")
         },
     ));
+    Ok(())
+}
+
+fn font_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    let data = fs::read(file).map_err(|e| e.to_string())?;
+    out.rows.extend(font::rows(&data)?);
+    out.preview = Some(font::specimen(&data)?);
+    out.channels = [true; 4];
+    out.specimen = true;
     Ok(())
 }
 
@@ -807,6 +822,35 @@ mod tests {
             &file("assets/brick/brick.mat.toml"),
         );
         assert!(row(&bad, "Error").contains("out of range"));
+    }
+
+    #[test]
+    fn fonts() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        fs::create_dir_all(dir.path().join("assets")).unwrap();
+        let font = dir.path().join("assets/monogram.ttf");
+        fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/samples/monogram.ttf"),
+            &font,
+        )
+        .unwrap();
+        let i = inspect(&project, Location::Input, &font);
+        assert_eq!(row(&i, "Kind"), "Font");
+        assert_eq!(row(&i, "Outlines"), "TrueType");
+        assert!(i.specimen);
+        assert!(i.preview.is_some());
+
+        let broken = dir.path().join("assets/broken.otf");
+        fs::write(&broken, "nope").unwrap();
+        let i = inspect(&project, Location::Input, &broken);
+        assert_eq!(row(&i, "Kind"), "Font");
+        assert!(row(&i, "Error").starts_with("not a valid font"));
+        assert!(i.preview.is_none());
+
+        // Fonts are only inspected as sources.
+        let i = inspect(&project, Location::Output, &font);
+        assert_eq!(row(&i, "Kind"), "File");
     }
 
     #[test]

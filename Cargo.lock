@@ -322,6 +322,7 @@ dependencies = [
 name = "assetc"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "bevy",
  "bevy_egui",
  "clap",
@@ -332,6 +333,7 @@ dependencies = [
  "serde",
  "tempfile",
  "toml",
+ "ttf-parser",
 ]
 
 [[package]]

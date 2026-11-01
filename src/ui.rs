@@ -445,7 +445,7 @@ fn shell(
         Shown::Image => state.mode == ViewMode::ThreeD,
         Shown::Environment => true,
         Shown::Lut => state.lut.view == LutView::Cube,
-        Shown::Other => false,
+        Shown::Specimen | Shown::Other => false,
     };
     let fill = if show_3d {
         egui::Color32::TRANSPARENT
@@ -462,11 +462,12 @@ fn shell(
             let mode = ViewMode::ALL.iter().position(|m| *m == state.mode);
             let lut_views = LutView::ALL.map(LutView::name);
             let lut_view = LutView::ALL.iter().position(|v| *v == state.lut.view);
-            // Only images have a 2D/3D choice; an environment map only exists in 3D.
+            // Only images have a 2D/3D choice; an environment map only exists in 3D, a
+            // specimen in 2D.
             let (options, active, enabled): (&[&str], _, _) = match shown {
                 Shown::Image => (&modes, mode, true),
                 Shown::Lut => (&lut_views, lut_view, true),
-                Shown::Environment => (&[], None, false),
+                Shown::Environment | Shown::Specimen => (&[], None, false),
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -498,7 +499,7 @@ fn shell(
                     state.last_image.as_ref(),
                     &mut preview3d,
                 ),
-                (_, ViewMode::TwoD) => canvas(
+                (Shown::Specimen, _) | (_, ViewMode::TwoD) => canvas(
                     ui,
                     rect,
                     state.inspected.as_mut(),
@@ -637,6 +638,7 @@ fn poll_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) 
     // Remembered as the LUT compare view's "Image" source.
     if let Some(inspected) = &state.inspected
         && let Some(pixels) = &inspected.pixels
+        && !inspected.inspection.specimen
     {
         state.last_image = Some(LastImage {
             path: inspected.path.clone(),
@@ -2046,6 +2048,8 @@ fn view_bar(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Shown {
     Image,
+    /// A font's specimen sheet: an image without tiling, channels or 3D.
+    Specimen,
     Environment,
     Lut,
     Other,
@@ -2056,6 +2060,7 @@ impl Shown {
         match inspected {
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.lut.is_some() => Self::Lut,
+            Some(i) if i.inspection.specimen && i.preview.is_some() => Self::Specimen,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
             _ => Self::Other,
         }
@@ -2245,6 +2250,12 @@ fn canvas(
     }
 
     // Drawn last so they sit on top; their clicks apply next frame.
+    if inspected.inspection.specimen {
+        if zoom_bar(ui, rect, view, fit) {
+            ui.ctx().request_repaint();
+        }
+        return;
+    }
     let tile = [Tool {
         glyph: Glyph::Icon(Icon::Grid3x3),
         name: "Tile".into(),

@@ -5,6 +5,7 @@ edition = "2024"
 description = "Compiles source assets into runtime-friendly binary formats for video games"
 
 [dependencies]
+ab_glyph = "0.2.32"
 bevy_egui = "0.43.1"
 clap = { version = "4.6.7", features = ["derive"] }
 egui_extras = { version = "0.36.2", default-features = false, features = ["svg"] }
@@ -12,6 +13,7 @@ globset = "0.4.21"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
+ttf-parser = "0.25.1"
 
 [dependencies.bevy]
 version = "0.20.1"

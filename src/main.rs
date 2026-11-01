@@ -3,6 +3,7 @@ mod build;
 mod chart;
 mod config;
 mod fileops;
+mod font;
 mod hash;
 mod icons;
 mod inspect;
