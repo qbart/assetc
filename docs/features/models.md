@@ -296,8 +296,8 @@ line per model, e.g.
   tangent), so its quality depends on which vertices survive.
   Simplification therefore weighs the vertices' UVs (`lod_uv_weight`, 1)
   and normals (`lod_normal_weight`, 0.5) next to their positions, and may
-  collapse across attribute seams (`lod_permissive`) (vertices sharing a position but not their UV or normal, as on every
-  edge of a flat-shaded mesh) when the attribute error stays within the
+  collapse across attribute seams (`lod_permissive`): vertices sharing a
+  position but not their UV or normal, as on every edge of a flat-shaded mesh when the attribute error stays within the
   limit. Without that, flat-shaded meshes could not be simplified at all.
   It starts with a 5% error limit (`lod_error`) and raises it by 5%
   (`lod_error_step`) up to three times (`lod_attempts`) while it makes no
