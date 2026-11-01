@@ -24,9 +24,12 @@ The Inspector's **Parameters** tab (`sliders-vertical`) edits the selected
 `.gradient` file from the Input tree (the Modifiers tab does not apply). It
 uses the [property editor](gui.md#property-editor) look:
 
-- **Output** section (collapsible): **Width** and **Height** (integer fields,
-  1–4096, drag or type) and **Stripe** (integer field, 1–Height), then a weak
-  line `<n> of <m> stripes used` (`m = floor(height / stripe)`).
+- **Output** section (collapsible): **Width** (integer field, 1–4096, drag
+  or type), **Height** (integer field, from what the gradients need,
+  gradients × stripe, to 4096) and **Stripe** (integer field, 1 to
+  Height ÷ gradients), then a weak line `<n> of <m> stripes used`
+  (`m = floor(height / stripe)`). The limits keep the gradients fitting, so
+  the editor never writes an invalid file.
 - One card per gradient, in order (non-collapsible, like modifier cards):
   - Header: a **drag handle** (`grip-horizontal`) to reorder gradients
     exactly as modifiers are reordered (see
@@ -46,8 +49,7 @@ uses the [property editor](gui.md#property-editor) look:
 Edits are saved like noise parameters (see [`noise.md`](noise.md#saving)):
 written to the file in the [written form](../spec/gradient.md#written-form)
 once nothing is being dragged or typed, then inspected again in the
-background. If the gradients no longer fit (e.g. Height lowered), the file is
-still saved and the Inspector shows the error until it is fixed.
+background.
 
 ## Gradient editor
 
