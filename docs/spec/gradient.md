@@ -1,7 +1,7 @@
 # `.gradient` file format
 
 A `.gradient` file describes one image holding several color gradients, one
-per horizontal **stripe**, stacked top to bottom. It is a texture source: the
+per **cell** of a grid, each running vertically (first stop at the bottom). It is a texture source: the
 build compiles the image to KTX2 (see
 [`docs/features/gradients.md`](../features/gradients.md#build)). The file is
 TOML, UTF-8.
@@ -10,8 +10,9 @@ TOML, UTF-8.
 
 ```toml
 width = 256
-height = 64
-stripe = 8
+height = 256
+cell_width = 16
+cell_height = 64
 
 [[gradients]]
 name = "Sunset"
@@ -31,8 +32,8 @@ stops = [
 ]
 ```
 
-assetc writes files exactly in this form: `width`, `height`, `stripe`, a
-blank line, then one `[[gradients]]` table per gradient (separated by blank
+assetc writes files exactly in this form: `width`, `height`, `cell_width`,
+`cell_height`, a blank line, then one `[[gradients]]` table per gradient (separated by blank
 lines) with `name`, `dither` and `stops` (one inline table per line, sorted
 by `at`). Numbers are written in their shortest form that reads back to the
 same value (`0.0`, `0.25`, `0.333`).
@@ -41,14 +42,16 @@ same value (`0.0`, `0.25`, `0.333`).
 
 | Key         | Type    | Range        | Default | Meaning                               |
 |-------------|---------|--------------|---------|---------------------------------------|
-| `width`     | integer | 1–4096       | 256     | image width, px                       |
-| `height`    | integer | 1–4096       | 64      | image height, px                      |
-| `stripe`    | integer | 1–`height`   | 8       | height of each gradient's stripe, px  |
-| `gradients` | array of tables | —    | empty   | the gradients, top to bottom          |
+| `width`       | integer | 1–4096       | 256     | image width, px                     |
+| `height`      | integer | 1–4096       | 256     | image height, px                    |
+| `cell_width`  | integer | 1–`width`    | 16      | width of each gradient's cell, px   |
+| `cell_height` | integer | 1–`height`   | 64      | height of each gradient's cell, px  |
+| `gradients`   | array of tables | —    | empty   | the gradients, in cell order        |
 
-`gradients.len() × stripe` must not exceed `height`
-(`<n> gradients need <n × stripe> px but height is <height>`). Any other
-key is an error (`unknown key <key>`).
+The grid has `columns = floor(width / cell_width)` and
+`rows = floor(height / cell_height)`; `gradients.len()` must not exceed
+`columns × rows` (`<n> gradients need <n> cells but the grid has <m>`).
+Any other key is an error (`unknown key <key>`).
 
 ## Gradient
 
@@ -75,13 +78,17 @@ color that is not one of the two forms, a missing key, or any other key.
 ## Image
 
 The image is `width × height` RGBA8 (straight alpha), starting fully
-transparent (`0 0 0 0`). Gradient `i` (from 0) fills rows
-`i × stripe … (i + 1) × stripe − 1`, every column. Rows below the last
-stripe stay transparent.
+transparent (`0 0 0 0`). Cells are filled left to right, then top to
+bottom: gradient `i` (from 0) fills the cell at column `i mod columns`, row
+`floor(i / columns)`, whose top-left pixel is
+`(column × cell_width, row × cell_height)`. Unused cells, and any columns or
+rows the grid does not cover, stay transparent.
 
-Within a stripe, pixel `(x, y)` (`y` counted from the stripe's top row) has
-position `t = x / (width − 1)` (`0` when `width` is 1), so the first and last
-columns are exactly the end stops' colors.
+Gradients run **vertically**, the first stop at the bottom: within a cell,
+pixel `(x, y)` (counted from the cell's top-left) has position
+`t = (cell_height − 1 − y) / (cell_height − 1)` (`0` when `cell_height` is
+1), so the bottom and top rows are exactly the end stops' colors. Every
+column of a cell is the same gradient (apart from dithering).
 
 **Segment**: with the stops sorted, `k` is the first index for which
 `t ≤ at[k + 1]`, or the last segment (`stops.len() − 2`) if none.
@@ -127,9 +134,10 @@ with the 8 × 8 Bayer matrix
 63 31 55 23 61 29 53 21
 ```
 
-Dither patterns use stripe-local coordinates, so every stripe looks the same
+Dither patterns use cell-local coordinates, so every cell looks the same
 wherever it sits in the image.
 
 This matches the `gradient` command of the `img` toolkit in
-[SoftKiwiGames/cli](https://github.com/SoftKiwiGames/cli) (`img/gradient.go`),
-laid out horizontally and stored with straight alpha.
+[SoftKiwiGames/cli](https://github.com/SoftKiwiGames/cli) (`img/gradient.go`):
+the same vertical cells (its default cell is 16 × 64), placed on a grid like
+its `--position`, stored with straight alpha.

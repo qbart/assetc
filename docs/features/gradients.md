@@ -2,8 +2,8 @@
 
 Color gradients stored as stops in `.gradient` files (format and exact
 rendering: [`docs/spec/gradient.md`](../spec/gradient.md)). One file holds
-several gradients, each drawn as a horizontal **stripe** of one image (a
-gradient lookup atlas). Like `.noise` files they are texture sources: the
+several gradients, each drawn as a vertical gradient (first stop at the
+bottom) in one **cell** of a grid in one image (a gradient lookup atlas). Like `.noise` files they are texture sources: the
 build turns them into `.ktx2`, the canvas previews them (2D and 3D), and they
 can fill material slots.
 
@@ -11,8 +11,9 @@ can fill material slots.
 
 In the Input tree's context menu, **New Gradient** (a plain item after New
 Pattern, see [`file-operations.md`](file-operations.md)) creates
-`gradient.gradient` (`gradient 2.gradient`, … if taken) with width 256,
-height 64, stripe 8 and one gradient named `Gradient 1`, black (`#000000`) at
+`gradient.gradient` (`gradient 2.gradient`, … if taken) with a 256 × 256
+image of 16 × 64 cells (16 columns × 4 rows, room for 64 gradients) and one
+gradient named `Gradient 1`, black (`#000000`) at
 0 to white (`#ffffff`) at 1, no dithering. It then selects it and starts
 renaming it.
 
@@ -24,12 +25,11 @@ The Inspector's **Parameters** tab (`sliders-vertical`) edits the selected
 `.gradient` file from the Input tree (the Modifiers tab does not apply). It
 uses the [property editor](gui.md#property-editor) look:
 
-- **Output** section (collapsible): **Width** (integer field, 1–4096, drag
-  or type), **Height** (integer field, from what the gradients need,
-  gradients × stripe, to 4096) and **Stripe** (integer field, 1 to
-  Height ÷ gradients), then a weak line `<n> of <m> stripes used`
-  (`m = floor(height / stripe)`). The limits keep the gradients fitting, so
-  the editor never writes an invalid file.
+- **Output** section (collapsible): **Width**, **Height** (integer fields,
+  1–4096), **Cell width** (1–Width) and **Cell height** (1–Height), drag or
+  type, then a weak line `<n> of <m> cells used (<columns> × <rows>)`. A
+  change that would leave too few cells for the gradients is undone, so the
+  editor never writes an invalid file.
 - One card per gradient, in order (non-collapsible, like modifier cards):
   - Header: a **drag handle** (`grip-horizontal`) to reorder gradients
     exactly as modifiers are reordered (see
@@ -41,8 +41,8 @@ uses the [property editor](gui.md#property-editor) look:
   - The [gradient editor](#gradient-editor).
 - Below the cards: an **Add gradient** button (`plus` icon and text) that
   appends `Gradient <n>` (black to white, no dithering). It is disabled when
-  every stripe is used, with the tooltip "No room: raise Height or lower
-  Stripe".
+  every cell is used, with the tooltip "No room: enlarge the image or shrink
+  the cells".
 - With no gradients, a weak "No gradients" line precedes the button.
 - If the file does not parse, the tab shows the error instead.
 
@@ -61,8 +61,9 @@ the selected stop's fields. Each gradient card remembers its selected stop
 
 - **Bar**: the card body's full width, 24 px tall, 4 px corners, drawn over
   an 8 px `CHECKER_LIGHT` / `CHECKER_DARK` checkerboard. It shows the
-  gradient rendered exactly as in the image (same blending and dithering) at
-  the bar's size in screen pixels.
+  gradient laid on its side, first stop on the left (as positions run in the
+  editor), with the image's blending and dithering, at the bar's size in
+  screen pixels.
 - **Handles**: under the bar, one per stop, centered on its position: a
   12 × 12 px square of the stop's color (over a checkerboard when it is
   translucent) with a 1 px `TEXT_WEAK` border and a small triangle pointing
@@ -107,7 +108,8 @@ Below the handles, for the selected stop:
 
 ## Inspector Info
 
-Kind `Gradient`, the file Size, **Gradients** (count), **Stripe** (`8 px`),
+Kind `Gradient`, the file Size, **Gradients** (count), **Cell**
+(`16 × 64 px`), **Grid** (`16 × 4`),
 then the usual source texture rows (Dimensions, Asset path, Asset ID,
 Material, Color, Mip levels, Output). An invalid file shows an **Error** row
 and no image.
@@ -119,7 +121,7 @@ and no image.
 - Gradients are colors: **sRGB** unless a `[textures] linear` glob matches
   (or a linear material slot uses the file).
 - They are **never mipmapped** (1 level): smaller levels would blend
-  neighbouring stripes. `no_mipmaps` changes nothing.
+  neighbouring cells. `no_mipmaps` changes nothing.
 - The image has an alpha channel only if some stop is not opaque.
 - An invalid file fails like an undecodable image: the build reports
   `<path>: <error>` and writes no manifest.
