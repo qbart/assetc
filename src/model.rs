@@ -505,7 +505,7 @@ fn read_primitive<'s>(
     read: &Read<'s>,
     instance: &Instance<'_>,
 ) -> Result<(Vec<Vertex>, Vec<u32>, bool), String> {
-    let reader = primitive.reader(|b| read(b));
+    let reader = primitive.reader(read);
     let positions: Vec<[f32; 3]> = reader
         .read_positions()
         .ok_or("primitive without POSITION")?
@@ -551,7 +551,7 @@ fn read_primitive<'s>(
     // Flat normals: every triangle gets its own vertices.
     if normals.is_none() {
         let mut flat = Vec::with_capacity(indices.len());
-        for triangle in indices.chunks_exact(3) {
+        for triangle in indices.as_chunks::<3>().0 {
             let [a, b, c] = [0, 1, 2].map(|k| Vec3::from(vertices[triangle[k] as usize].position));
             let normal = (b - a).cross(c - a).normalize_or_zero().to_array();
             for &i in triangle {
@@ -566,13 +566,15 @@ fn read_primitive<'s>(
     }
 
     let mut has_tangents = tangents.is_some();
-    if !has_tangents && uvs.is_some() && !indices.is_empty() {
-        if let Some(generated) = generate_tangents(&vertices, &indices) {
-            for (v, t) in vertices.iter_mut().zip(generated) {
-                v.tangent = t;
-            }
-            has_tangents = true;
+    if !has_tangents
+        && uvs.is_some()
+        && !indices.is_empty()
+        && let Some(generated) = generate_tangents(&vertices, &indices)
+    {
+        for (v, t) in vertices.iter_mut().zip(generated) {
+            v.tangent = t;
         }
+        has_tangents = true;
     }
 
     if !instance.skinned {
@@ -594,7 +596,7 @@ fn read_primitive<'s>(
         }
         if mirror < 0.0 {
             // Keep triangles front-facing after a mirroring transform.
-            for triangle in indices.chunks_exact_mut(3) {
+            for triangle in indices.as_chunks_mut::<3>().0 {
                 triangle.swap(1, 2);
             }
         }
@@ -639,7 +641,7 @@ fn skeleton(document: &Document, skin: &gltf::Skin<'_>, read: &Read<'_>) -> Vec<
     let joints: Vec<Node<'_>> = skin.joints().collect();
     let index_of = |node: usize| joints.iter().position(|j| j.index() == node);
     let inverse_binds: Vec<[[f32; 4]; 4]> = skin
-        .reader(|b| read(b))
+        .reader(read)
         .read_inverse_bind_matrices()
         .map(Iterator::collect)
         .unwrap_or_default();
@@ -688,7 +690,7 @@ fn clips(document: &Document, read: &Read<'_>) -> Result<Vec<aanim::Clip>, Strin
                 Property::Scale => (2, 3),
                 Property::MorphTargetWeights => continue,
             };
-            let reader = channel.reader(|b| read(b));
+            let reader = channel.reader(read);
             let times: Vec<f32> = reader
                 .read_inputs()
                 .ok_or("animation channel without input")?
@@ -814,7 +816,10 @@ mod tests {
 
     #[test]
     fn names_are_unique_and_safe() {
-        let names = leaves(&[Some("Wood"), None, Some("a/b"), Some("Dup"), Some("Dup")], "m");
+        let names = leaves(
+            &[Some("Wood"), None, Some("a/b"), Some("Dup"), Some("Dup")],
+            "m",
+        );
         assert_eq!(names, ["Wood", "m_1", "m_2", "m_3", "m_4"]);
     }
 
@@ -845,7 +850,11 @@ mod tests {
             reader.require("MATERIAL").unwrap(),
             fnv1a64(b"props/tri/Paint.amat").to_le_bytes()
         );
-        assert!(compiled.detail.starts_with("3 vertices, 1 triangle, 1 submesh, 1 meshlet"));
+        assert!(
+            compiled
+                .detail
+                .starts_with("3 vertices, 1 triangle, 1 submesh, 1 meshlet")
+        );
     }
 
     #[test]

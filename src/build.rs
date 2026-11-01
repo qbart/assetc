@@ -657,7 +657,8 @@ mod tests {
         assert!(output.join("models/Fox/image_0.ktx2").is_file());
 
         // Every output is in the manifest with its kind; the mesh lists the material's ID.
-        let entries = manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
+        let entries =
+            manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
         let kind = |path: &str| entries.iter().find(|e| e.path == path).map(|e| e.kind);
         assert_eq!(kind("models/Fox.amesh"), Some(Kind::Mesh));
         assert_eq!(kind("models/Fox.aanim"), Some(Kind::Animation));
