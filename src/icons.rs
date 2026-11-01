@@ -5,6 +5,7 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 /// Lucide icons vendored in assets/icons, see docs/features/gui.md.
 #[derive(Clone, Copy)]
 pub enum Icon {
+    Aperture,
     Box,
     Check,
     ChevronDown,
@@ -23,6 +24,7 @@ pub enum Icon {
     Grid3x3,
     Hammer,
     Image,
+    ImagePlay,
     Info,
     Loader,
     Palette,
@@ -30,7 +32,6 @@ pub enum Icon {
     RefreshCw,
     SlidersVertical,
     SunMedium,
-    SwatchBook,
     Torus,
     Trash2,
     Type,
@@ -38,7 +39,8 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 30] = [
+const SVGS: [(&str, &str); 31] = [
+    ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
     (
@@ -75,6 +77,7 @@ const SVGS: [(&str, &str); 30] = [
     ("grid-3x3", include_str!("../assets/icons/grid-3x3.svg")),
     ("hammer", include_str!("../assets/icons/hammer.svg")),
     ("image", include_str!("../assets/icons/image.svg")),
+    ("image-play", include_str!("../assets/icons/image-play.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
@@ -85,10 +88,6 @@ const SVGS: [(&str, &str); 30] = [
         include_str!("../assets/icons/sliders-vertical.svg"),
     ),
     ("sun-medium", include_str!("../assets/icons/sun-medium.svg")),
-    (
-        "swatch-book",
-        include_str!("../assets/icons/swatch-book.svg"),
-    ),
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
     ("type", include_str!("../assets/icons/type.svg")),
