@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use crate::amesh::{MeshSettings, MeshletLimits};
+use crate::amesh::{MeshOptions, MeshSettings};
 use crate::build::{
     Error, Failure, is_lut, is_noise, is_texture_source, relative, strip_extension,
 };
@@ -59,7 +59,7 @@ pub enum Job {
     /// A glTF model (relative to `input`): writes its `.amesh` and every other output of it.
     Model {
         source: String,
-        limits: MeshletLimits,
+        options: MeshOptions,
     },
     /// Another output of a model, written by its [`Job::Model`].
     ModelPart { source: String },
@@ -117,7 +117,7 @@ struct Group {
 }
 
 /// The assets of one glTF model; see docs/features/models.md#build.
-fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs, limits: MeshletLimits) {
+fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs, options: MeshOptions) {
     let p = strip_extension(source);
     let mut push = |kind: Kind, asset_path: String, job: Job| {
         plan.assets.push(Asset {
@@ -136,7 +136,7 @@ fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs, limits:
         format!("{p}.amesh"),
         Job::Model {
             source: source.to_owned(),
-            limits,
+            options,
         },
     );
     if outputs.animation {
@@ -201,16 +201,16 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             }
             sources.push(rel);
         } else if model::is_model(file) {
-            let limits = crate::amod::read(file).and_then(|amod| {
+            let options = crate::amod::read(file).and_then(|amod| {
                 meshes
-                    .limits_with(&rel, amod.as_ref())
+                    .options_with(&rel, amod.as_ref())
                     .map_err(|e| format!("{}.amod: {e}", split_dir(&rel).1))
             });
-            match limits.and_then(|limits| {
+            match options.and_then(|options| {
                 let data = fs::read(file).map_err(|e| e.to_string())?;
-                Ok((model::outputs(&data)?, limits))
+                Ok((model::outputs(&data)?, options))
             }) {
-                Ok((outputs, limits)) => model_assets(&mut plan, &rel, &outputs, limits),
+                Ok((outputs, options)) => model_assets(&mut plan, &rel, &outputs, options),
                 Err(message) => plan.failures.push(Failure {
                     source: rel,
                     message,

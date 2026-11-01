@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::amesh::{MeshSettings, MeshletLimits};
+use crate::amesh::{MeshOptions, MeshSettings};
 use crate::amod::{self, Amod};
 use crate::assets::Assets;
 use crate::build::{self, Outcome};
@@ -690,7 +690,7 @@ struct Prepared {
     noise: Option<Result<Noise, String>>,
     gradient: Option<Result<Gradients, String>>,
     /// A model's sidecar and the meshlet limits the project gives it.
-    mesh: Option<Result<(Amod, MeshletLimits), String>>,
+    mesh: Option<Result<(Amod, MeshOptions), String>>,
     model: Option<(PathBuf, u64)>,
     compiled_mesh: Option<crate::amesh::Preview>,
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
@@ -767,7 +767,7 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
                 .and_then(|dir| build::relative(&dir, &selection.path).ok())
                 .unwrap_or_default();
             let amod = amod::read(&selection.path)?.unwrap_or_default();
-            Ok((amod, settings.limits(&rel)))
+            Ok((amod, settings.options(&rel)))
         });
     Prepared {
         compiled_mesh: inspection.compiled_mesh.take(),
@@ -1954,6 +1954,16 @@ fn prop_section(
 
 /// A row: `label` right-aligned in the label column, then `control` given the rest of the width.
 fn prop_row(ui: &mut Ui, label: &str, control: impl FnOnce(&mut Ui, f32)) {
+    prop_row_colored(ui, label, TEXT_WEAK, control);
+}
+
+/// [`prop_row`] with the label in `color`.
+fn prop_row_colored(
+    ui: &mut Ui,
+    label: &str,
+    color: egui::Color32,
+    control: impl FnOnce(&mut Ui, f32),
+) {
     let width = ui.available_width();
     let label_width = (width * 0.4).max(80.0);
     ui.allocate_ui_with_layout(
@@ -1967,7 +1977,7 @@ fn prop_row(ui: &mut Ui, label: &str, control: impl FnOnce(&mut Ui, f32)) {
                 Align2::RIGHT_CENTER,
                 label,
                 FontId::proportional(13.0),
-                TEXT_WEAK,
+                color,
             );
             control(ui, (width - label_width).max(40.0));
         },
@@ -2102,10 +2112,67 @@ struct MeshEdit {
     /// As last written.
     saved: Amod,
     /// What `assetc.toml` gives the model, shown where the sidecar sets nothing.
-    project: MeshletLimits,
+    project: MeshOptions,
 }
 
-/// Meshlet limits of a model, written to its sidecar; see docs/features/models.md#parameters-tab.
+/// Label color of a mesh setting: `ACCENT` when the sidecar sets it.
+fn set_color(set: bool) -> egui::Color32 {
+    if set { ACCENT } else { TEXT_WEAK }
+}
+
+/// An integer setting: the sidecar's value, or the project's until edited.
+fn patch_int(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut Option<u32>,
+    project: u32,
+    range: std::ops::RangeInclusive<u32>,
+    speed: f64,
+) {
+    prop_row_colored(ui, label, set_color(value.is_some()), |ui, width| {
+        let mut v = value.unwrap_or(project);
+        let before = v;
+        let field = egui::DragValue::new(&mut v).range(range).speed(speed);
+        ui.add_sized(vec2(width, 22.0), field);
+        // Only a new value is an override; a click alone writes nothing.
+        if v != before {
+            *value = Some(v);
+        }
+    });
+}
+
+/// A float setting as a slider with a value box.
+fn patch_float(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut Option<f64>,
+    project: f64,
+    range: std::ops::RangeInclusive<f64>,
+    decimals: usize,
+) {
+    prop_row_colored(ui, label, set_color(value.is_some()), |ui, width| {
+        let mut v = value.unwrap_or(project);
+        let before = v;
+        slider_box(ui, width, &mut v, range, Some(decimals));
+        if v != before {
+            let scale = 10f64.powi(decimals as i32);
+            *value = Some((v * scale).round() / scale);
+        }
+    });
+}
+
+/// A boolean setting as a checkbox.
+fn patch_bool(ui: &mut Ui, label: &str, value: &mut Option<bool>, project: bool) {
+    prop_row_colored(ui, label, set_color(value.is_some()), |ui, _| {
+        let mut v = value.unwrap_or(project);
+        if ui.checkbox(&mut v, "").changed() {
+            *value = Some(v);
+        }
+    });
+}
+
+/// Meshoptimizer settings of a model, written to its sidecar; see
+/// docs/features/models.md#parameters-tab.
 fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
     let name = inspected.inspection.name.clone();
     let edit = match &mut inspected.mesh {
@@ -2125,7 +2192,7 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
-                let project = edit.project;
+                let project = edit.project.clone();
                 let mesh = &mut edit.edit.mesh;
                 prop_section(
                     ui,
@@ -2135,48 +2202,159 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
                     |_| {},
                     |_, _| {},
                     |ui| {
-                        let mut vertices =
-                            mesh.meshlet_max_vertices.unwrap_or(project.max_vertices);
-                        prop_row(ui, "Max vertices", |ui, width| {
-                            // Only a new value is an override; a click alone writes nothing.
-                            let before = vertices;
-                            let field = egui::DragValue::new(&mut vertices).range(3..=256);
-                            ui.add_sized(vec2(width, 22.0), field);
-                            if vertices != before {
-                                mesh.meshlet_max_vertices = Some(vertices);
-                            }
-                        });
-                        let mut triangles =
-                            mesh.meshlet_max_triangles.unwrap_or(project.max_triangles);
-                        prop_row(ui, "Max triangles", |ui, width| {
-                            let before = triangles;
-                            let field = egui::DragValue::new(&mut triangles)
-                                .range(4..=512)
-                                .speed(4.0);
-                            ui.add_sized(vec2(width, 22.0), field);
-                            if triangles != before {
-                                mesh.meshlet_max_triangles = Some(triangles);
-                            }
-                        });
+                        patch_int(
+                            ui,
+                            "Max vertices",
+                            &mut mesh.meshlet_max_vertices,
+                            project.meshlet_max_vertices,
+                            3..=256,
+                            1.0,
+                        );
+                        patch_int(
+                            ui,
+                            "Max triangles",
+                            &mut mesh.meshlet_max_triangles,
+                            project.meshlet_max_triangles,
+                            4..=512,
+                            4.0,
+                        );
                         // Meshoptimizer needs a multiple of 4; rounded once the edit is done.
                         if !busy && let Some(t) = &mut mesh.meshlet_max_triangles {
                             *t = ((*t + 2) / 4 * 4).clamp(4, 512);
                         }
-                        ui.weak(if mesh.is_empty() {
-                            "Project settings (assetc.toml)".to_owned()
-                        } else {
-                            format!("Set for this file ({name}.amod)")
-                        });
-                        ui.add_space(4.0);
-                        let reset = ui.add_enabled(
-                            !mesh.is_empty(),
-                            egui::Button::new("Use project settings"),
+                        patch_float(
+                            ui,
+                            "Cone weight",
+                            &mut mesh.meshlet_cone_weight,
+                            project.meshlet_cone_weight,
+                            0.0..=1.0,
+                            2,
                         );
-                        if reset.clicked() {
-                            *mesh = Default::default();
-                        }
                     },
                 );
+                prop_section(
+                    ui,
+                    "mesh_lods",
+                    Fold::Open,
+                    RichText::new("Levels of detail"),
+                    |_| {},
+                    |_, _| {},
+                    |ui| {
+                        let set = mesh.lod_ratios.is_some();
+                        let mut ratios = mesh
+                            .lod_ratios
+                            .clone()
+                            .unwrap_or_else(|| project.lod_ratios.clone());
+                        let before = ratios.clone();
+                        let mut count = ratios.len() as u32;
+                        prop_row_colored(ui, "Levels", set_color(set), |ui, width| {
+                            let field = egui::DragValue::new(&mut count).range(0..=8);
+                            ui.add_sized(vec2(width, 22.0), field);
+                        });
+                        while ratios.len() > count as usize {
+                            ratios.pop();
+                        }
+                        while ratios.len() < count as usize {
+                            let half = ratios.last().copied().unwrap_or(1.0) / 2.0;
+                            ratios.push((half * 100.0).round().max(1.0) / 100.0);
+                        }
+                        // Each level stays below the one before.
+                        let mut ceiling = 1.0;
+                        for (i, ratio) in ratios.iter_mut().enumerate() {
+                            prop_row_colored(
+                                ui,
+                                &format!("LOD {}", i + 1),
+                                set_color(set),
+                                |ui, width| {
+                                    slider_box(ui, width, ratio, 0.01..=0.99, Some(2));
+                                },
+                            );
+                            *ratio = ((*ratio * 100.0).round() / 100.0)
+                                .min(((ceiling - 0.01) * 100.0f64).round() / 100.0)
+                                .max(0.01);
+                            ceiling = *ratio;
+                        }
+                        if ratios != before {
+                            mesh.lod_ratios = Some(ratios);
+                        }
+                        patch_float(
+                            ui,
+                            "Error",
+                            &mut mesh.lod_error,
+                            project.lod_error,
+                            0.0..=1.0,
+                            3,
+                        );
+                        patch_float(
+                            ui,
+                            "Error step",
+                            &mut mesh.lod_error_step,
+                            project.lod_error_step,
+                            0.0..=1.0,
+                            3,
+                        );
+                        patch_int(
+                            ui,
+                            "Attempts",
+                            &mut mesh.lod_attempts,
+                            project.lod_attempts,
+                            0..=10,
+                            0.1,
+                        );
+                        patch_float(
+                            ui,
+                            "UV weight",
+                            &mut mesh.lod_uv_weight,
+                            project.lod_uv_weight,
+                            0.0..=10.0,
+                            2,
+                        );
+                        patch_float(
+                            ui,
+                            "Normal weight",
+                            &mut mesh.lod_normal_weight,
+                            project.lod_normal_weight,
+                            0.0..=10.0,
+                            2,
+                        );
+                        patch_bool(
+                            ui,
+                            "Sloppy fallback",
+                            &mut mesh.lod_sloppy_fallback,
+                            project.lod_sloppy_fallback,
+                        );
+                        patch_bool(
+                            ui,
+                            "Permissive",
+                            &mut mesh.lod_permissive,
+                            project.lod_permissive,
+                        );
+                        patch_bool(
+                            ui,
+                            "Lock border",
+                            &mut mesh.lod_lock_border,
+                            project.lod_lock_border,
+                        );
+                        patch_bool(
+                            ui,
+                            "Regularize",
+                            &mut mesh.lod_regularize,
+                            project.lod_regularize,
+                        );
+                        patch_bool(ui, "Prune", &mut mesh.lod_prune, project.lod_prune);
+                    },
+                );
+                ui.weak(if mesh.is_empty() {
+                    "Project settings (assetc.toml)".to_owned()
+                } else {
+                    format!("Set for this file ({name}.amod)")
+                });
+                ui.add_space(4.0);
+                let reset =
+                    ui.add_enabled(!mesh.is_empty(), egui::Button::new("Use project settings"));
+                if reset.clicked() {
+                    *mesh = Default::default();
+                }
             });
         });
     (!busy && edit.edit != edit.saved).then(|| {

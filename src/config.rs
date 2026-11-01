@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::Resource;
 use serde::Deserialize;
 
+use crate::amesh::{MeshOptions, MeshPatch};
+
 // See docs/spec/assetc.toml.md.
 pub const FILE_NAME: &str = "assetc.toml";
 
@@ -30,7 +32,7 @@ output = \"build\"
 # meshlet_max_triangles = 256
 ";
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Source assets directory, relative to the project root.
@@ -54,35 +56,56 @@ pub struct Textures {
 }
 
 /// Mesh build settings, see docs/spec/assetc.toml.md#meshes.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "toml::Table")]
 pub struct Meshes {
-    pub meshlet_max_vertices: u32,
-    pub meshlet_max_triangles: u32,
+    pub defaults: MeshOptions,
     /// Per-model values; the last matching one setting a value wins.
     pub overrides: Vec<MeshOverride>,
 }
 
-impl Default for Meshes {
-    fn default() -> Self {
-        Self {
-            meshlet_max_vertices: 64,
-            meshlet_max_triangles: 124,
-            overrides: Vec::new(),
-        }
+impl TryFrom<toml::Table> for Meshes {
+    type Error = String;
+
+    fn try_from(mut table: toml::Table) -> Result<Self, String> {
+        let overrides = match table.remove("overrides") {
+            None => Vec::new(),
+            Some(value) => value
+                .try_into()
+                .map_err(|e: toml::de::Error| format!("overrides: {}", e.message()))?,
+        };
+        let defaults = toml::Value::Table(table)
+            .try_into()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
+        Ok(Self {
+            defaults,
+            overrides,
+        })
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "toml::Table")]
 pub struct MeshOverride {
     /// Globs of model paths, as in `[textures]`.
-    #[serde(rename = "match")]
     pub patterns: Vec<String>,
-    #[serde(default)]
-    pub meshlet_max_vertices: Option<u32>,
-    #[serde(default)]
-    pub meshlet_max_triangles: Option<u32>,
+    pub patch: MeshPatch,
+}
+
+impl TryFrom<toml::Table> for MeshOverride {
+    type Error = String;
+
+    fn try_from(mut table: toml::Table) -> Result<Self, String> {
+        let patterns = table
+            .remove("match")
+            .ok_or("missing match")?
+            .try_into()
+            .map_err(|e: toml::de::Error| format!("match: {}", e.message()))?;
+        let patch = toml::Value::Table(table)
+            .try_into()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
+        Ok(Self { patterns, patch })
+    }
 }
 
 impl Default for Config {
@@ -269,10 +292,10 @@ mod tests {
             "[meshes]\nmeshlet_max_vertices = 96\n\n[[meshes.overrides]]\nmatch = [\"a/**\"]\nmeshlet_max_triangles = 64\n",
         )
         .unwrap();
-        assert_eq!(config.meshes.meshlet_max_vertices, 96);
-        assert_eq!(config.meshes.meshlet_max_triangles, 124);
+        assert_eq!(config.meshes.defaults.meshlet_max_vertices, 96);
+        assert_eq!(config.meshes.defaults.meshlet_max_triangles, 124);
         assert_eq!(config.meshes.overrides[0].patterns, ["a/**"]);
-        assert_eq!(config.meshes.overrides[0].meshlet_max_triangles, Some(64));
+        assert_eq!(config.meshes.overrides[0].patch.meshlet_max_triangles, Some(64));
         assert!(
             toml::from_str::<Config>("[[meshes.overrides]]\nmeshlet_max_vertices = 8\n").is_err()
         );
@@ -285,7 +308,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let template: Config = toml::from_str(&uncommented).unwrap();
-        assert_eq!(template.meshes.overrides[0].meshlet_max_vertices, Some(128));
+        assert_eq!(template.meshes.overrides[0].patch.meshlet_max_vertices, Some(128));
     }
 
     #[test]

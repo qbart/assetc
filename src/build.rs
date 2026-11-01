@@ -146,7 +146,7 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
                 .map(|levels| levels_detail(*color, levels)),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
-            Job::Model { source, limits } => compile_model(input, source, output, *limits),
+            Job::Model { source, options } => compile_model(input, source, output, options),
             // Written with its model.
             Job::ModelPart { .. } => continue,
             Job::Lut { source, volume } => {
@@ -334,10 +334,10 @@ fn compile_model(
     input: &Path,
     source: &str,
     output: &Path,
-    limits: crate::amesh::MeshletLimits,
+    options: &crate::amesh::MeshOptions,
 ) -> Result<String, String> {
     let p = strip_extension(source);
-    let model = crate::model::compile(&input.join(source), p, limits)?;
+    let model = crate::model::compile(&input.join(source), p, options)?;
     write(&output.join(format!("{p}.amesh")), &model.mesh)?;
     if let Some(animation) = &model.animation {
         write(&output.join(format!("{p}.aanim")), animation)?;
@@ -690,8 +690,11 @@ mod tests {
         let mut config = config::Config::default();
         config.meshes.overrides.push(config::MeshOverride {
             patterns: vec!["models/*.glb".into()],
-            meshlet_max_vertices: Some(32),
-            meshlet_max_triangles: Some(32),
+            patch: crate::amesh::MeshPatch {
+                meshlet_max_vertices: Some(32),
+                meshlet_max_triangles: Some(32),
+                ..Default::default()
+            },
         });
         run(&input, &output, &config).unwrap();
         let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
@@ -723,7 +726,7 @@ mod tests {
             "Fox.glb.amod: meshlet_max_vertices 1 is outside 3–256"
         );
         fs::remove_file(input.join("models/Fox.glb.amod")).unwrap();
-        config.meshes.meshlet_max_triangles = 7;
+        config.meshes.defaults.meshlet_max_triangles = 7;
         let error = run(&input, &output, &config).unwrap_err().to_string();
         assert_eq!(
             error,

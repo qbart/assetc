@@ -6,24 +6,13 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+use crate::amesh::MeshPatch;
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Amod {
-    pub mesh: Mesh,
-}
-
-/// `[mesh]`: settings of a glTF model.
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Mesh {
-    pub meshlet_max_vertices: Option<u32>,
-    pub meshlet_max_triangles: Option<u32>,
-}
-
-impl Mesh {
-    pub fn is_empty(&self) -> bool {
-        self.meshlet_max_vertices.is_none() && self.meshlet_max_triangles.is_none()
-    }
+    /// `[mesh]`: meshoptimizer settings of a glTF model.
+    pub mesh: MeshPatch,
 }
 
 impl Amod {
@@ -40,12 +29,7 @@ impl Amod {
         let mut out = String::new();
         if !self.mesh.is_empty() {
             out += "[mesh]\n";
-            if let Some(v) = self.mesh.meshlet_max_vertices {
-                out += &format!("meshlet_max_vertices = {v}\n");
-            }
-            if let Some(v) = self.mesh.meshlet_max_triangles {
-                out += &format!("meshlet_max_triangles = {v}\n");
-            }
+            out += &self.mesh.to_toml();
         }
         out
     }
@@ -95,15 +79,17 @@ mod tests {
     #[test]
     fn written_form_round_trips() {
         let amod = Amod {
-            mesh: Mesh {
+            mesh: MeshPatch {
                 meshlet_max_vertices: Some(128),
                 meshlet_max_triangles: Some(256),
+                lod_ratios: Some(vec![0.5, 0.1]),
+                ..Default::default()
             },
         };
         let text = amod.to_toml();
         assert_eq!(
             text,
-            "[mesh]\nmeshlet_max_vertices = 128\nmeshlet_max_triangles = 256\n"
+            "[mesh]\nmeshlet_max_vertices = 128\nmeshlet_max_triangles = 256\nlod_ratios = [0.5, 0.1]\n"
         );
         assert_eq!(Amod::parse(&text).unwrap(), amod);
         assert_eq!(Amod::parse("").unwrap(), Amod::default());

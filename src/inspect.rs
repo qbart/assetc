@@ -370,16 +370,31 @@ fn model_rows(
     out.animations = model::animations(&data)?;
     out.model = true;
     // Compiled to an `.amesh` and more, see docs/features/models.md#build.
-    out.rows.push((
-        "Meshlet limits",
-        match meshlet_limits(project, file, rel) {
-            Ok(limits) => format!(
-                "{} vertices, {} triangles",
-                limits.max_vertices, limits.max_triangles
-            ),
-            Err(e) => e,
-        },
-    ));
+    match mesh_options(project, file, rel) {
+        Ok(options) => {
+            out.rows.push((
+                "Meshlet limits",
+                format!(
+                    "{} vertices, {} triangles",
+                    options.meshlet_max_vertices, options.meshlet_max_triangles
+                ),
+            ));
+            let ratios: Vec<String> = options
+                .lod_ratios
+                .iter()
+                .map(|r| format!("{}%", (r * 100.0).round()))
+                .collect();
+            out.rows.push((
+                "Levels of detail",
+                if ratios.is_empty() {
+                    "none".into()
+                } else {
+                    ratios.join(", ")
+                },
+            ));
+        }
+        Err(e) => out.rows.push(("Mesh settings", e)),
+    }
     let mesh = format!("{}.amesh", strip_extension(rel));
     out.rows.push(("Asset path", mesh.clone()));
     output_row(project, &mesh, "", out);
@@ -429,16 +444,16 @@ fn compiled_materials(project: &Project, ids: &[u64]) -> Vec<Option<MaterialPrev
         .collect()
 }
 
-/// The meshlet limits a model builds with: `assetc.toml` `[meshes]` and its `.amod`.
-pub fn meshlet_limits(
+/// The meshoptimizer settings a model builds with: `assetc.toml` `[meshes]` and its `.amod`.
+pub fn mesh_options(
     project: &Project,
     file: &Path,
     rel: &str,
-) -> Result<crate::amesh::MeshletLimits, String> {
+) -> Result<crate::amesh::MeshOptions, String> {
     let settings = crate::amesh::MeshSettings::new(&project.config.meshes)
         .map_err(|e| format!("assetc.toml [meshes]: {e}"))?;
     let amod = crate::amod::read(file)?;
-    settings.limits_with(rel, amod.as_ref()).map_err(|e| {
+    settings.options_with(rel, amod.as_ref()).map_err(|e| {
         let name = file.file_name().unwrap_or_default().to_string_lossy();
         format!("{name}.amod: {e}")
     })

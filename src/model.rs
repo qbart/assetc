@@ -264,7 +264,7 @@ fn load_uri(uri: &str, dir: &Path) -> Result<Vec<u8>, String> {
 pub fn compile(
     file: &Path,
     asset_path: &str,
-    limits: amesh::MeshletLimits,
+    options: &amesh::MeshOptions,
 ) -> Result<Compiled, String> {
     let data = std::fs::read(file).map_err(|e| e.to_string())?;
     let gltf = parse(&data)?;
@@ -342,7 +342,7 @@ pub fn compile(
         &material_ids,
         skeleton.as_deref(),
         tangents,
-        limits,
+        options,
     );
 
     // Animations, for the skeleton.
@@ -843,7 +843,7 @@ mod tests {
         assert_eq!(outputs.materials, [(0, "Paint".to_owned())]);
         assert!(!outputs.animation);
 
-        let compiled = compile(&file, "props/tri", amesh::MeshletLimits::default()).unwrap();
+        let compiled = compile(&file, "props/tri", &amesh::MeshOptions::default()).unwrap();
         assert!(compiled.animation.is_none());
         assert_eq!(compiled.materials[0].0, "Paint");
         assert_eq!(compiled.materials[0].1.base_color, [1.0, 0.0, 0.0, 1.0]);

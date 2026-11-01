@@ -3,71 +3,156 @@
 
 use meshopt::{SimplifyOptions, VertexDataAdapter};
 
+use serde::Deserialize;
+
 use crate::chunks::{self, Bytes, Writer};
 use crate::config;
 use crate::texture::glob_set;
 
 pub const FORMAT: &str = "AMESH";
 pub const VERSION: u32 = 1;
-const CONE_WEIGHT: f32 = 0.25;
-/// Reduced levels of detail, as fractions of the full triangle count.
-const LOD_RATIOS: [f32; 2] = [0.5, 0.25];
-const LOD_ERROR: f32 = 0.05;
-const LOD_RETRIES: usize = 3;
-/// UV (u, v) and normal (x, y, z) weights for simplification.
-const LOD_ATTRIBUTE_WEIGHTS: [f32; 5] = [1.0, 1.0, 0.5, 0.5, 0.5];
 const NO_MATERIAL: u32 = 0xFFFF_FFFF;
 const VERTEX_STRIDE: u16 = 28;
 
-/// Most vertices and triangles per meshlet; see docs/spec/assetc.toml.md#meshes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MeshletLimits {
-    pub max_vertices: u32,
-    pub max_triangles: u32,
-}
-
-impl Default for MeshletLimits {
-    fn default() -> Self {
-        Self {
-            max_vertices: 64,
-            max_triangles: 124,
+/// Declares the meshoptimizer settings once: [`MeshOptions`] (resolved values) and
+/// [`MeshPatch`] (the same keys, each optional, for overrides and `.amod` sidecars).
+macro_rules! mesh_options {
+    ($($name:ident: $ty:ty = $default:expr,)*) => {
+        /// Meshoptimizer settings of a mesh; see docs/spec/assetc.toml.md#meshes.
+        #[derive(Clone, Debug, PartialEq, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        pub struct MeshOptions {
+            $(pub $name: $ty,)*
         }
-    }
+
+        impl Default for MeshOptions {
+            fn default() -> Self {
+                Self {
+                    $($name: $default,)*
+                }
+            }
+        }
+
+        /// Settings that replace a mesh's resolved ones, key by key.
+        #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        pub struct MeshPatch {
+            $(pub $name: Option<$ty>,)*
+        }
+
+        impl MeshPatch {
+            pub fn apply(&self, options: &mut MeshOptions) {
+                $(if let Some(value) = &self.$name {
+                    options.$name = value.clone();
+                })*
+            }
+
+            pub fn is_empty(&self) -> bool {
+                true $(&& self.$name.is_none())*
+            }
+
+            /// `key = value` lines of the keys that are set, in declaration order.
+            pub fn to_toml(&self) -> String {
+                let mut out = String::new();
+                $(if let Some(value) = &self.$name {
+                    let value = toml::Value::try_from(value).expect("TOML value");
+                    out += &format!("{} = {value}\n", stringify!($name));
+                })*
+                out
+            }
+        }
+    };
 }
 
-impl MeshletLimits {
-    /// The ranges meshoptimizer accepts.
+mesh_options! {
+    meshlet_max_vertices: u32 = 64,
+    meshlet_max_triangles: u32 = 124,
+    meshlet_cone_weight: f64 = 0.25,
+    lod_ratios: Vec<f64> = vec![0.5, 0.25],
+    lod_error: f64 = 0.05,
+    lod_error_step: f64 = 0.05,
+    lod_attempts: u32 = 3,
+    lod_sloppy_fallback: bool = true,
+    lod_uv_weight: f64 = 1.0,
+    lod_normal_weight: f64 = 0.5,
+    lod_permissive: bool = true,
+    lod_lock_border: bool = false,
+    lod_regularize: bool = false,
+    lod_prune: bool = false,
+}
+
+impl MeshOptions {
+    /// The ranges assetc and meshoptimizer accept; see docs/spec/assetc.toml.md#meshes.
     fn check(self) -> Result<Self, String> {
-        let MeshletLimits {
-            max_vertices: v,
-            max_triangles: t,
-        } = self;
+        let within = |name: &str, v: f64, max: f64| {
+            if (0.0..=max).contains(&v) {
+                Ok(())
+            } else {
+                Err(format!("{name} {v} is outside 0–{max}"))
+            }
+        };
+        let v = self.meshlet_max_vertices;
         if !(3..=256).contains(&v) {
             return Err(format!("meshlet_max_vertices {v} is outside 3–256"));
         }
+        let t = self.meshlet_max_triangles;
         if !(4..=512).contains(&t) || !t.is_multiple_of(4) {
             return Err(format!(
                 "meshlet_max_triangles {t} must be 4–512 and a multiple of 4"
             ));
         }
+        within("meshlet_cone_weight", self.meshlet_cone_weight, 1.0)?;
+        if self.lod_ratios.len() > 8 {
+            return Err("lod_ratios has more than 8 levels".into());
+        }
+        let mut previous = 1.0;
+        for &r in &self.lod_ratios {
+            if !(r > 0.0 && r < previous) {
+                return Err(format!(
+                    "lod_ratios must be decreasing and between 0 and 1 (exclusive), got {r}"
+                ));
+            }
+            previous = r;
+        }
+        within("lod_error", self.lod_error, 1.0)?;
+        within("lod_error_step", self.lod_error_step, 1.0)?;
+        if self.lod_attempts > 10 {
+            return Err(format!(
+                "lod_attempts {} is outside 0–10",
+                self.lod_attempts
+            ));
+        }
+        within("lod_uv_weight", self.lod_uv_weight, 100.0)?;
+        within("lod_normal_weight", self.lod_normal_weight, 100.0)?;
         Ok(self)
+    }
+
+    fn simplify_options(&self) -> SimplifyOptions {
+        let mut options = SimplifyOptions::None;
+        for (on, flag) in [
+            (self.lod_permissive, SimplifyOptions::Permissive),
+            (self.lod_lock_border, SimplifyOptions::LockBorder),
+            (self.lod_regularize, SimplifyOptions::Regularize),
+            (self.lod_prune, SimplifyOptions::Prune),
+        ] {
+            if on {
+                options |= flag;
+            }
+        }
+        options
     }
 }
 
 /// `[meshes]` resolved: defaults and per-model overrides.
 pub struct MeshSettings {
-    defaults: MeshletLimits,
-    overrides: Vec<(globset::GlobSet, Option<u32>, Option<u32>)>,
+    defaults: MeshOptions,
+    overrides: Vec<(globset::GlobSet, MeshPatch)>,
 }
 
 impl MeshSettings {
-    /// Checks every value and glob.
+    /// Checks the defaults, every override (applied to them) and every glob.
     pub fn new(meshes: &config::Meshes) -> Result<Self, String> {
-        let defaults = MeshletLimits {
-            max_vertices: meshes.meshlet_max_vertices,
-            max_triangles: meshes.meshlet_max_triangles,
-        }
-        .check()?;
+        let defaults = meshes.defaults.clone().check()?;
         let mut overrides = Vec::new();
         for (i, o) in meshes.overrides.iter().enumerate() {
             let at = |e: String| format!("override {}: {e}", i + 1);
@@ -75,13 +160,10 @@ impl MeshSettings {
                 return Err(at("match is empty".into()));
             }
             let set = glob_set(&o.patterns).map_err(|e| at(e.to_string()))?;
-            MeshletLimits {
-                max_vertices: o.meshlet_max_vertices.unwrap_or(defaults.max_vertices),
-                max_triangles: o.meshlet_max_triangles.unwrap_or(defaults.max_triangles),
-            }
-            .check()
-            .map_err(at)?;
-            overrides.push((set, o.meshlet_max_vertices, o.meshlet_max_triangles));
+            let mut options = defaults.clone();
+            o.patch.apply(&mut options);
+            options.check().map_err(at)?;
+            overrides.push((set, o.patch.clone()));
         }
         Ok(Self {
             defaults,
@@ -89,32 +171,30 @@ impl MeshSettings {
         })
     }
 
-    /// Limits for the model at `source` (input-relative, with extension) with its sidecar's
-    /// `[mesh]`, which wins over the project; see docs/spec/amod.md#mesh.
-    pub fn limits_with(
+    /// Settings for the model at `source` (input-relative, with extension) from
+    /// `assetc.toml`; the last matching override that sets a key wins.
+    pub fn options(&self, source: &str) -> MeshOptions {
+        let mut options = self.defaults.clone();
+        for (set, patch) in &self.overrides {
+            if set.is_match(source) {
+                patch.apply(&mut options);
+            }
+        }
+        options
+    }
+
+    /// [`Self::options`] with the model's sidecar `[mesh]`, which wins; see
+    /// docs/spec/amod.md#mesh.
+    pub fn options_with(
         &self,
         source: &str,
         amod: Option<&crate::amod::Amod>,
-    ) -> Result<MeshletLimits, String> {
-        let mut limits = self.limits(source);
-        if let Some(mesh) = amod.map(|a| &a.mesh) {
-            limits.max_vertices = mesh.meshlet_max_vertices.unwrap_or(limits.max_vertices);
-            limits.max_triangles = mesh.meshlet_max_triangles.unwrap_or(limits.max_triangles);
+    ) -> Result<MeshOptions, String> {
+        let mut options = self.options(source);
+        if let Some(amod) = amod {
+            amod.mesh.apply(&mut options);
         }
-        limits.check()
-    }
-
-    /// Limits for the model at `source` (input-relative, with extension) from `assetc.toml`;
-    /// the last matching override that sets a value wins.
-    pub fn limits(&self, source: &str) -> MeshletLimits {
-        let mut limits = self.defaults;
-        for (set, vertices, triangles) in &self.overrides {
-            if set.is_match(source) {
-                limits.max_vertices = vertices.unwrap_or(limits.max_vertices);
-                limits.max_triangles = triangles.unwrap_or(limits.max_triangles);
-            }
-        }
-        limits
+        options.check()
     }
 }
 
@@ -221,10 +301,21 @@ pub fn encode(
     materials: &[u64],
     skeleton: Option<&[Joint]>,
     tangents: bool,
-    limits: MeshletLimits,
+    options: &MeshOptions,
 ) -> (Vec<u8>, Summary) {
-    let (max_vertices, max_triangles) =
-        (limits.max_vertices as usize, limits.max_triangles as usize);
+    let (max_vertices, max_triangles) = (
+        options.meshlet_max_vertices as usize,
+        options.meshlet_max_triangles as usize,
+    );
+    let weights = [
+        options.lod_uv_weight,
+        options.lod_uv_weight,
+        options.lod_normal_weight,
+        options.lod_normal_weight,
+        options.lod_normal_weight,
+    ]
+    .map(|w| w as f32);
+    let simplify_options = options.simplify_options();
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
     let mut submeshes = Bytes::default();
@@ -250,8 +341,13 @@ pub fn encode(
         let first_index = indices.len() as u32;
         let first_meshlet = meshlet_count;
 
-        let built =
-            meshopt::build_meshlets(&local, &adapter, max_vertices, max_triangles, CONE_WEIGHT);
+        let built = meshopt::build_meshlets(
+            &local,
+            &adapter,
+            max_vertices,
+            max_triangles,
+            options.meshlet_cone_weight as f32,
+        );
         for meshlet in built.iter() {
             let triangle_count = meshlet.triangles.len() / 3;
             meshlets
@@ -284,29 +380,29 @@ pub fn encode(
             .collect();
         let unlocked = vec![false; primitive.vertices.len()];
         let mut previous = local.len();
-        for ratio in LOD_RATIOS {
-            let target = ((local.len() as f32 * ratio / 3.0).round() as usize * 3).max(3);
-            let mut error = LOD_ERROR;
+        for &ratio in &options.lod_ratios {
+            let target = ((local.len() as f64 * ratio / 3.0).round() as usize * 3).max(3);
+            let mut error = options.lod_error as f32;
             let mut level = Vec::new();
-            for _ in 0..=LOD_RETRIES {
+            for _ in 0..=options.lod_attempts {
                 level = meshopt::simplify_with_attributes_and_locks(
                     &local,
                     &adapter,
                     &attributes,
-                    &LOD_ATTRIBUTE_WEIGHTS,
+                    &weights,
                     5 * 4,
                     &unlocked,
                     target,
                     error,
-                    SimplifyOptions::Permissive,
+                    simplify_options,
                     None,
                 );
                 if level.len() < previous {
                     break;
                 }
-                error += LOD_ERROR;
+                error += options.lod_error_step as f32;
             }
-            if level.len() >= previous {
+            if level.len() >= previous && options.lod_sloppy_fallback {
                 level = meshopt::simplify_sloppy(&local, &adapter, target, 1.0, None);
             }
             if level.is_empty() || level.len() >= previous {
@@ -335,7 +431,8 @@ pub fn encode(
 
     let wide = vertices.len() > 0xFFFF;
     let mut desc = Bytes::default();
-    let flags = u8::from(tangents) | (u8::from(skeleton.is_some()) << 1) | (1 << 2);
+    let lods = !options.lod_ratios.is_empty() && submesh_count > 0;
+    let flags = u8::from(tangents) | (u8::from(skeleton.is_some()) << 1) | (u8::from(lods) << 2);
     desc.u32(vertices.len() as u32)
         .u32(indices.len() as u32)
         .u32(meshlet_count)
@@ -344,8 +441,8 @@ pub fn encode(
         .u16(VERTEX_STRIDE)
         .u8(if wide { 4 } else { 2 })
         .u8(flags)
-        .u32(limits.max_vertices)
-        .u32(limits.max_triangles);
+        .u32(options.meshlet_max_vertices)
+        .u32(options.meshlet_max_triangles);
     let mut whole = Bytes::default();
     put_bounds(&mut whole, &bounds(vertices.iter().map(|v| &v.position)));
     let mut packed = Bytes::default();
@@ -376,7 +473,9 @@ pub fn encode(
         lod_index_bytes.u32(i);
     }
     let mut lod_table = Bytes::default();
-    lod_table.u32(LOD_RATIOS.len() as u32).u32(submesh_count);
+    lod_table
+        .u32(options.lod_ratios.len() as u32)
+        .u32(submesh_count);
     lod_table.0.extend(lod_ranges.take());
 
     let mut writer = Writer::new(FORMAT, VERSION);
@@ -390,9 +489,12 @@ pub fn encode(
         .chunk("MESHLETS", meshlets.take())
         .chunk("MLVERTS", meshlet_vertices.take())
         .chunk("MLTRIS", meshlet_triangles.take())
-        .chunk("MLBOUNDS", meshlet_bounds.take())
-        .chunk("LODIDX", lod_index_bytes.take())
-        .chunk("LODTABLE", lod_table.take());
+        .chunk("MLBOUNDS", meshlet_bounds.take());
+    if lods {
+        writer
+            .chunk("LODIDX", lod_index_bytes.take())
+            .chunk("LODTABLE", lod_table.take());
+    }
     if let Some(joints) = skeleton {
         let mut skin = Bytes::default();
         for v in &vertices {
@@ -975,7 +1077,7 @@ mod tests {
             &[7],
             None,
             true,
-            MeshletLimits::default(),
+            &MeshOptions::default(),
         );
         let preview = preview(&bytes).unwrap();
         assert_eq!(preview.materials, [7]);
@@ -1017,7 +1119,7 @@ mod tests {
 
     #[test]
     fn chunk_tables_and_info() {
-        let (bytes, summary) = encode(&[grid(4)], &[9], None, true, MeshletLimits::default());
+        let (bytes, summary) = encode(&[grid(4)], &[9], None, true, &MeshOptions::default());
         let desc = table(&bytes, "DESC").unwrap();
         assert!(!desc.numbered);
         assert_eq!(desc.rows, 10);
@@ -1066,7 +1168,7 @@ mod tests {
             &[42],
             None,
             true,
-            MeshletLimits::default(),
+            &MeshOptions::default(),
         );
         assert_eq!(summary.submeshes, 2);
         assert_eq!(summary.triangles, 16 * 16 * 2 + 8);
@@ -1113,66 +1215,72 @@ mod tests {
     }
 
     #[test]
-    fn limits_come_from_settings_and_overrides() {
-        let meshes = config::Meshes {
-            meshlet_max_vertices: 96,
-            overrides: vec![
-                config::MeshOverride {
-                    patterns: vec!["characters/**".into()],
-                    meshlet_max_vertices: Some(128),
-                    meshlet_max_triangles: Some(256),
-                },
-                config::MeshOverride {
-                    patterns: vec!["characters/hero.glb".into()],
-                    meshlet_max_vertices: None,
-                    meshlet_max_triangles: Some(64),
-                },
-            ],
+    fn options_come_from_settings_and_overrides() {
+        let meshes: config::Meshes = toml::from_str(
+            r#"meshlet_max_vertices = 96
+lod_ratios = [0.4]
+
+[[overrides]]
+match = ["characters/**"]
+meshlet_max_vertices = 128
+meshlet_max_triangles = 256
+lod_prune = true
+
+[[overrides]]
+match = ["characters/hero.glb"]
+meshlet_max_triangles = 64
+"#,
+        )
+        .unwrap();
+        let settings = MeshSettings::new(&meshes).unwrap();
+        let limits = |o: MeshOptions| (o.meshlet_max_vertices, o.meshlet_max_triangles);
+        assert_eq!(limits(settings.options("props/box.glb")), (96, 124));
+        assert_eq!(settings.options("props/box.glb").lod_ratios, [0.4]);
+        assert_eq!(limits(settings.options("characters/fox.glb")), (128, 256));
+        assert!(settings.options("characters/fox.glb").lod_prune);
+        // Later overrides win, key by key.
+        assert_eq!(limits(settings.options("characters/hero.glb")), (128, 64));
+        // The sidecar wins over everything.
+        let amod = crate::amod::Amod::parse("[mesh]\nmeshlet_max_vertices = 32\n").unwrap();
+        let options = settings
+            .options_with("characters/hero.glb", Some(&amod))
+            .unwrap();
+        assert_eq!(limits(options), (32, 64));
+
+        // The stored limits are the ones used; no ratios, no LOD chunks.
+        let options = MeshOptions {
+            meshlet_max_vertices: 16,
+            meshlet_max_triangles: 8,
+            lod_ratios: Vec::new(),
             ..Default::default()
         };
-        let settings = MeshSettings::new(&meshes).unwrap();
-        let limits = |v, t| MeshletLimits {
-            max_vertices: v,
-            max_triangles: t,
-        };
-        assert_eq!(settings.limits("props/box.glb"), limits(96, 124));
-        assert_eq!(settings.limits("characters/fox.glb"), limits(128, 256));
-        // Later overrides win, value by value.
-        assert_eq!(settings.limits("characters/hero.glb"), limits(128, 64));
-
-        // The stored limits are the ones used.
-        let (bytes, summary) = encode(&[grid(16)], &[], None, true, limits(16, 8));
+        let (bytes, summary) = encode(&[grid(16)], &[], None, true, &options);
         let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
         let desc = reader.require("DESC").unwrap();
         assert_eq!(chunks::u32_at(desc, 0, 32, 24), Some(16));
         assert_eq!(chunks::u32_at(desc, 0, 32, 28), Some(8));
+        assert_eq!(desc[23], 0b001, "tangents, no LODs");
+        assert!(reader.chunk("LODTABLE").is_none());
         let meshlets = reader.require("MESHLETS").unwrap();
         for m in 0..summary.meshlets {
             assert!(chunks::u32_at(meshlets, m, 16, 12).unwrap() <= 8);
         }
 
-        let bad = |meshes: config::Meshes| MeshSettings::new(&meshes).err().unwrap();
+        let bad = |text: &str| {
+            let meshes: config::Meshes = toml::from_str(text).unwrap();
+            MeshSettings::new(&meshes).err().unwrap()
+        };
+        assert!(bad("meshlet_max_vertices = 300").contains("3–256"));
+        assert!(bad("meshlet_max_triangles = 126").contains("multiple of 4"));
+        assert!(bad("lod_ratios = [0.25, 0.5]").contains("decreasing"));
+        assert!(bad("lod_error = 2.0").contains("lod_error"));
+        assert!(bad("[[overrides]]\nmatch = [\"[\"]").starts_with("override 1:"));
         assert!(
-            bad(config::Meshes {
-                meshlet_max_vertices: 300,
-                ..Default::default()
-            })
-            .contains("3–256")
+            bad("[[overrides]]\nmatch = [\"a\"]\nlod_attempts = 99")
+                .starts_with("override 1: lod_attempts")
         );
-        assert!(
-            bad(config::Meshes {
-                meshlet_max_triangles: 126,
-                ..Default::default()
-            })
-            .contains("multiple of 4")
-        );
-        let mut bad_override = config::Meshes::default();
-        bad_override.overrides.push(config::MeshOverride {
-            patterns: vec!["[".into()],
-            meshlet_max_vertices: None,
-            meshlet_max_triangles: None,
-        });
-        assert!(bad(bad_override).starts_with("override 1:"));
+        assert!(toml::from_str::<config::Meshes>("max = 1").is_err());
+        assert!(toml::from_str::<config::Meshes>("[[overrides]]\nlod_prune = true").is_err());
     }
 
     #[test]
@@ -1189,7 +1297,7 @@ mod tests {
             &[],
             Some(&[joint]),
             false,
-            MeshletLimits::default(),
+            &MeshOptions::default(),
         );
         let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
         assert_eq!(reader.require("SKIN").unwrap().len(), summary.vertices * 24);
