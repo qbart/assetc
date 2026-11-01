@@ -67,7 +67,7 @@ Each tab shows a tree of the directory configured in `assetc.toml`
 (`input` / `output`, see [`docs/spec/assetc.toml.md`](../spec/assetc.toml.md)).
 
 - Each row: chevron (`chevron-right` / `chevron-down`, folders only), icon
-  (`folder` / `folder-open` / `file`), name. Rows are 22 px tall, indented
+  by type (see [Tree icons](#tree-icons)), name. Rows are 22 px tall, indented
   14 px per level, and highlight with `BG_HEADER` on hover. Clicking a folder
   row opens / closes it **and** selects it; clicking a file row selects it
   (see [`inspector.md`](inspector.md#selection)).
@@ -84,6 +84,20 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   - directory missing: "<path> does not exist"
   - directory empty: "Empty"
   - read error: the error message
+
+### Tree icons
+
+The icon follows the entry's type, by extension (any case):
+
+| Entry                                         | Icon                      |
+|-----------------------------------------------|---------------------------|
+| environment map folder (`*.env`)              | `sun-medium`              |
+| other folder                                  | `folder` / `folder-open`  |
+| image: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `tga`, `webp`, `tif`, `tiff`, `exr`, `hdr`, `dds`, `ktx2` | `image` |
+| font: `ttf`, `otf`, `woff`, `woff2`           | `type`                    |
+| color LUT: `cube`                             | `swatch-book`             |
+| mesh: `gltf`, `glb`, `obj`                    | `torus`                   |
+| anything else                                 | `file`                    |
 
 ## Tabs
 
@@ -114,8 +128,9 @@ toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `bo
 (canvas 3D shapes), `palette` (LUT reference chart), `eye`, `eye-off` (LUT cube before / after),
 `sliders-vertical` (Inspector Parameters tab), `wrench`,
 `grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab), `loader`
-(status bar), `folder`, `folder-open`, `file`,
-`chevron-right`, `chevron-down` (file tree), `image` (texture assets). The logo is not a
+(status bar), `folder`, `folder-open`, `file`, `sun-medium`, `type`,
+`swatch-book`, `image`, `torus`, `chevron-right`, `chevron-down` (file tree,
+see [Tree icons](#tree-icons)), `image` (texture assets). The logo is not a
 Lucide icon, see below.
 
 ## Logo
