@@ -26,6 +26,7 @@ pub enum Icon {
     Hammer,
     Image,
     ImagePlay,
+    Images,
     Info,
     Loader,
     Palette,
@@ -41,7 +42,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 33] = [
+const SVGS: [(&str, &str); 34] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
@@ -81,6 +82,7 @@ const SVGS: [(&str, &str); 33] = [
     ("hammer", include_str!("../assets/icons/hammer.svg")),
     ("image", include_str!("../assets/icons/image.svg")),
     ("image-play", include_str!("../assets/icons/image-play.svg")),
+    ("images", include_str!("../assets/icons/images.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),

@@ -100,6 +100,8 @@ pub struct Info {
     pub levels: u32,
     /// Level 0, only for the subset assetc writes.
     pub level0: Option<Image>,
+    /// Levels 1 and up, decoded like level 0 (empty when level 0 is not).
+    pub mips: Vec<Image>,
 }
 
 impl Info {
@@ -135,27 +137,38 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
         vk_format,
         VK_FORMAT_R8G8B8A8_SRGB | VK_FORMAT_R8G8B8A8_UNORM
     );
-    let level0 = (plain_2d && rgba8)
-        .then(|| {
-            let (offset, length) = (u64_at(LEVEL_INDEX_OFFSET), u64_at(LEVEL_INDEX_OFFSET + 8));
-            let expected = width as u64 * height as u64 * 4;
-            let end = offset.checked_add(length)?;
-            if length != expected || end > bytes.len() as u64 {
-                return None;
-            }
-            Some(Image {
-                width,
-                height,
-                pixels: bytes[offset as usize..end as usize].to_vec(),
-            })
+    // Level `i` is `max(1, size >> i)` on each axis; its entry is in the level index.
+    let level = |i: u32| {
+        let entry = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * i as usize;
+        if entry + LEVEL_INDEX_ENTRY > bytes.len() {
+            return None;
+        }
+        let (offset, length) = (u64_at(entry), u64_at(entry + 8));
+        let (w, h) = ((width >> i).max(1), (height >> i).max(1));
+        let end = offset.checked_add(length)?;
+        if length != w as u64 * h as u64 * 4 || end > bytes.len() as u64 {
+            return None;
+        }
+        Some(Image {
+            width: w,
+            height: h,
+            pixels: bytes[offset as usize..end as usize].to_vec(),
         })
-        .flatten();
+    };
+    let readable = plain_2d && rgba8;
+    let level0 = readable.then(|| level(0)).flatten();
+    let mips = if level0.is_some() {
+        (1..levels.max(1)).map_while(level).collect()
+    } else {
+        Vec::new()
+    };
     Ok(Info {
         vk_format,
         width,
         height,
         levels: levels.max(1),
         level0,
+        mips,
     })
 }
 
@@ -268,6 +281,7 @@ mod tests {
         assert_eq!((info.width, info.height, info.levels), (3, 2, 2));
         assert_eq!(info.format_name(), "R8G8B8A8_SRGB");
         assert_eq!(info.level0, Some(levels[0].clone()));
+        assert_eq!(info.mips, levels[1..]);
 
         let info = read(&encode_rgba8(ColorSpace::Linear, &[sample()])).unwrap();
         assert_eq!(info.format_name(), "R8G8B8A8_UNORM");

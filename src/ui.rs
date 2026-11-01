@@ -72,6 +72,8 @@ struct UiState {
     canvas_options: HashMap<PathBuf, CanvasOptions>,
     /// Animation chosen for each model, by path; `None` is the rest pose.
     animations: HashMap<PathBuf, Option<usize>>,
+    /// Mip level shown for each compiled texture, by path.
+    mip_levels: HashMap<PathBuf, usize>,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -112,6 +114,10 @@ struct Inspected {
     inspection: Inspection,
     /// The uploaded image, kept to build single-channel views.
     pixels: Option<Image>,
+    /// A compiled texture's mip levels, level 0 first (empty otherwise), and which one
+    /// `pixels` / `preview` show.
+    levels: Vec<Image>,
+    shown_level: usize,
     preview: Option<egui::TextureHandle>,
     /// Single-channel view of `pixels`, built on demand.
     channel_preview: Option<(Channels, egui::TextureHandle)>,
@@ -285,6 +291,7 @@ impl Default for UiState {
             notice: None,
             canvas_options: HashMap::new(),
             animations: HashMap::new(),
+            mip_levels: HashMap::new(),
         }
     }
 }
@@ -320,16 +327,18 @@ enum InspectorTab {
     Modifiers,
     Gradients,
     Animations,
+    Mipmaps,
     Assets,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 6] = [
+    const ALL: [Self; 7] = [
         Self::Info,
         Self::Parameters,
         Self::Modifiers,
         Self::Gradients,
         Self::Animations,
+        Self::Mipmaps,
         Self::Assets,
     ];
 
@@ -340,6 +349,7 @@ impl InspectorTab {
             Self::Modifiers => Icon::Wrench,
             Self::Gradients => Icon::Palette,
             Self::Animations => Icon::Film,
+            Self::Mipmaps => Icon::Images,
             Self::Assets => Icon::Files,
         }
     }
@@ -351,6 +361,7 @@ impl InspectorTab {
             Self::Modifiers => "Modifiers",
             Self::Gradients => "Gradients",
             Self::Animations => "Animations",
+            Self::Mipmaps => "Mipmaps",
             Self::Assets => "Assets",
         }
     }
@@ -358,6 +369,7 @@ impl InspectorTab {
     fn enabled(self, selection: Option<&Selection>, inspected: Option<&Inspected>) -> bool {
         match self {
             Self::Info => true,
+            Self::Mipmaps => inspected.is_some_and(|i| i.levels.len() > 1),
             Self::Animations => {
                 inspected.is_some_and(|i| i.model.is_some() && !i.inspection.animations.is_empty())
             }
@@ -465,6 +477,23 @@ fn shell(
             .min_size(220.0)
             .frame(Frame::new().fill(BG_PANEL))
             .show(&mut root, |ui| right_sidebar(ui, &mut state, &assets));
+    }
+
+    // The chosen mip level, kept the same size on screen.
+    let ui_state = &mut *state;
+    if let Some(inspected) = ui_state.inspected.as_mut() {
+        let level = ui_state
+            .mip_levels
+            .get(&inspected.path)
+            .copied()
+            .unwrap_or(0);
+        if let Some(before) = show_level(&ctx, inspected, level)
+            && let Some(after) = inspected.pixels.as_ref().map(|p| p.width)
+            && !ui_state.view.fit
+        {
+            ui_state.view.zoom =
+                (ui_state.view.zoom * before as f32 / after as f32).clamp(MIN_ZOOM, MAX_ZOOM);
+        }
     }
 
     // In 3D the canvas is left transparent so the 3D camera's image shows through.
@@ -592,6 +621,7 @@ struct Prepared {
     inspection: Inspection,
     pixels: Option<Image>,
     cubemap: Option<Vec<Image>>,
+    mips: Vec<Image>,
     lut: Option<Lut>,
     noise: Option<Result<Noise, String>>,
     gradient: Option<Result<Gradients, String>>,
@@ -667,6 +697,10 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
             .take()
             .map(|image| inspect::fit_within(image, max_side)),
         cubemap: inspection.cubemap.take(),
+        mips: std::mem::take(&mut inspection.mips)
+            .into_iter()
+            .map(|image| inspect::fit_within(image, max_side))
+            .collect(),
         lut: inspection.lut.take(),
         noise,
         inspection,
@@ -699,7 +733,11 @@ fn poll_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) 
         return;
     };
     let previous = state.inspected.take().filter(|i| i.path == selection.path);
-    state.inspected = Some(inspected(ctx, &selection, prepared, previous));
+    let mut fresh = inspected(ctx, &selection, prepared, previous);
+    if let Some(&level) = state.mip_levels.get(&fresh.path) {
+        show_level(ctx, &mut fresh, level);
+    }
+    state.inspected = Some(fresh);
     // Remembered as the LUT compare view's "Image" source.
     if let Some(inspected) = &state.inspected
         && let Some(pixels) = &inspected.pixels
@@ -751,10 +789,18 @@ fn inspected(
         .pixels
         .as_ref()
         .map(|image| load_preview(ctx, "canvas_preview", image, &image.pixels));
+    let levels = match &prepared.pixels {
+        Some(level0) if !prepared.mips.is_empty() => std::iter::once(level0.clone())
+            .chain(prepared.mips)
+            .collect(),
+        _ => Vec::new(),
+    };
     Inspected {
         path: selection.path.clone(),
         inspection: prepared.inspection,
         pixels: prepared.pixels,
+        levels,
+        shown_level: 0,
         preview,
         channel_preview: None,
         uploaded_3d: None,
@@ -767,6 +813,23 @@ fn inspected(
         uploaded_color_cube: false,
         model: prepared.model,
     }
+}
+
+/// Makes the canvas show mip `level` (clamped) of a compiled texture; returns the width of the
+/// level shown before, if it changed. See docs/features/inspector.md#mipmaps-tab.
+fn show_level(ctx: &egui::Context, inspected: &mut Inspected, level: usize) -> Option<u32> {
+    let level = level.min(inspected.levels.len().checked_sub(1)?);
+    if level == inspected.shown_level {
+        return None;
+    }
+    let before = inspected.levels[inspected.shown_level].width;
+    let image = inspected.levels[level].clone();
+    inspected.preview = Some(load_preview(ctx, "canvas_preview", &image, &image.pixels));
+    inspected.pixels = Some(image);
+    inspected.channel_preview = None;
+    inspected.uploaded_3d = None;
+    inspected.shown_level = level;
+    Some(before)
 }
 
 /// Uploads RGBA8 `pixels` of `image`'s size with the canvas filtering (sharp when magnified).
@@ -1620,6 +1683,10 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                     }
                 }
                 (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
+                (InspectorTab::Mipmaps, Some(inspected), Some(_)) => {
+                    let choice = state.mip_levels.entry(inspected.path.clone()).or_default();
+                    mipmaps_tab(ui, &inspected.levels, choice);
+                }
                 (InspectorTab::Animations, Some(inspected), Some(_)) => {
                     let choice = state.animations.entry(inspected.path.clone()).or_default();
                     animations_tab(ui, &inspected.inspection.animations, choice);
@@ -2559,22 +2626,51 @@ fn info(ui: &mut Ui, inspection: &Inspection) {
 
 /// Rest pose and the model's animations, one chosen; see docs/features/models.md#animations-tab.
 fn animations_tab(ui: &mut Ui, animations: &[(String, f32)], choice: &mut Option<usize>) {
+    let rows: Vec<_> = std::iter::once(("Rest pose".to_owned(), String::new()))
+        .chain(
+            animations
+                .iter()
+                .map(|(name, duration)| (name.clone(), format!("{duration:.2} s"))),
+        )
+        .collect();
+    // Row 0 is the rest pose, row `i + 1` animation `i`.
+    let chosen = choice.map_or(0, |i| i + 1);
+    if let Some(row) = choice_list(ui, &rows, chosen) {
+        *choice = row.checked_sub(1);
+    }
+}
+
+/// One row per mip level, the chosen one shown by the canvas; see
+/// docs/features/inspector.md#mipmaps-tab.
+fn mipmaps_tab(ui: &mut Ui, levels: &[Image], choice: &mut usize) {
+    let rows: Vec<_> = levels
+        .iter()
+        .enumerate()
+        .map(|(i, level)| {
+            (
+                format!("Level {i}"),
+                format!("{} × {}", level.width, level.height),
+            )
+        })
+        .collect();
+    if let Some(row) = choice_list(ui, &rows, *choice) {
+        *choice = row;
+    }
+}
+
+/// Full-width rows of (label, weak right-aligned detail), one chosen; returns the clicked row.
+fn choice_list(ui: &mut Ui, rows: &[(String, String)], chosen: usize) -> Option<usize> {
+    let mut clicked = None;
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                let rows = std::iter::once((None, "Rest pose", None)).chain(
-                    animations
-                        .iter()
-                        .enumerate()
-                        .map(|(i, (name, duration))| (Some(i), name.as_str(), Some(*duration))),
-                );
-                for (index, name, duration) in rows {
+                for (i, (label, detail)) in rows.iter().enumerate() {
                     let (rect, response) =
                         ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
                     let painter = ui.painter();
-                    if *choice == index {
+                    if i == chosen {
                         painter.rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.25));
                     } else if response.hovered() {
                         painter.rect_filled(rect, 0.0, BG_HEADER);
@@ -2582,25 +2678,24 @@ fn animations_tab(ui: &mut Ui, animations: &[(String, f32)], choice: &mut Option
                     painter.text(
                         pos2(rect.left() + 10.0, rect.center().y),
                         Align2::LEFT_CENTER,
-                        name,
+                        label,
                         FontId::proportional(14.0),
                         TEXT,
                     );
-                    if let Some(duration) = duration {
-                        painter.text(
-                            pos2(rect.right() - 10.0, rect.center().y),
-                            Align2::RIGHT_CENTER,
-                            format!("{duration:.2} s"),
-                            FontId::proportional(13.0),
-                            TEXT_WEAK,
-                        );
-                    }
+                    painter.text(
+                        pos2(rect.right() - 10.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        detail,
+                        FontId::proportional(13.0),
+                        TEXT_WEAK,
+                    );
                     if response.clicked() {
-                        *choice = index;
+                        clicked = Some(i);
                     }
                 }
             });
         });
+    clicked
 }
 
 fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {

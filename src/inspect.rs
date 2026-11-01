@@ -40,6 +40,8 @@ pub struct Inspection {
     pub specimen: bool,
     /// A glTF model that parsed, previewed in 3D by the canvas.
     pub model: bool,
+    /// A compiled texture's mip levels after level 0 (which is `preview`).
+    pub mips: Vec<Image>,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
 }
@@ -259,6 +261,7 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
             let image = image::RgbaImage::from_raw(level.width, level.height, level.pixels)
                 .ok_or("level 0 has the wrong size")?;
             out.preview = Some(to_image(image));
+            out.mips = info.mips;
             out.channels = [true; 4];
         }
         None => out.note = Some("No preview for this format".into()),
@@ -658,6 +661,8 @@ mod tests {
         assert_eq!(row(&compiled, "Format"), "R8G8B8A8_UNORM");
         assert_eq!(row(&compiled, "Mip levels"), "4");
         assert_eq!(row(&compiled, "Asset ID"), row(&i, "Asset ID"));
+        let sizes: Vec<_> = compiled.mips.iter().map(|m| (m.width, m.height)).collect();
+        assert_eq!(sizes.len(), 3);
         assert_eq!(compiled.preview.unwrap().pixels[..4], [1, 2, 3, 255]);
 
         let m = inspect(
