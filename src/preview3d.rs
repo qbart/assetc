@@ -109,6 +109,8 @@ pub struct Preview3d {
     /// Canvas area as (position, size) in physical pixels; `None` hides the 3D view.
     pub viewport: Option<(UVec2, UVec2)>,
     pub shape: Shape,
+    /// Shape for environment maps, kept apart from `shape`; `None` is Sphere.
+    pub environment_shape: Option<Shape>,
     pub orbit: Orbit,
     /// Being orbited: auto-rotation pauses.
     pub dragging: bool,
@@ -124,6 +126,12 @@ pub struct Preview3d {
     pub color_cube: Option<(Mesh, Mesh)>,
     /// A new environment map, taken by [`sync`].
     pub cubemap: Option<CubemapUpload>,
+}
+
+impl Preview3d {
+    pub fn environment_shape(&self) -> Shape {
+        self.environment_shape.unwrap_or(Shape::Sphere)
+    }
 }
 
 /// Six square RGBA8 sRGB faces in cube layer order (+X, −X, +Y, −Y, +Z, −Z), concatenated.
@@ -450,10 +458,12 @@ fn sync(
     }
 
     let (mesh, material, transform) = &mut *shape;
-    let index = Shape::ALL
-        .iter()
-        .position(|s| *s == preview.shape)
-        .unwrap_or(0);
+    let current = if environment {
+        preview.environment_shape()
+    } else {
+        preview.shape
+    };
+    let index = Shape::ALL.iter().position(|s| *s == current).unwrap_or(0);
     let (wanted_mesh, wanted_material) = match &scene.color_cube {
         Some((before, after)) if preview.colors => {
             let cube = if preview.colors_before { before } else { after };

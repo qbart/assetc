@@ -2501,8 +2501,9 @@ fn canvas_environment(
     }
     preview.environment = true;
     view_3d(ui, rect, preview);
-    if let Some((_, button)) = toolbar(ui, rect, &[&shape_tools(preview.shape)]) {
-        preview.shape = Shape::ALL[button];
+    let shapes = shape_tools(preview.environment_shape());
+    if let Some((_, button)) = toolbar(ui, rect, &[&shapes]) {
+        preview.environment_shape = Some(Shape::ALL[button]);
         ui.ctx().request_repaint();
     }
 }
