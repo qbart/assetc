@@ -92,7 +92,7 @@ instead.
 
 | Row        | Value                                                               |
 |------------|---------------------------------------------------------------------|
-| Dimensions | `W × H` px (level 0)                                               |
+| Dimensions | `W × H` px (level 0), or `W × H × D` px for a 3D texture (shown as its slices side by side) |
 | Format     | `R8G8B8A8_SRGB`, `R8G8B8A8_UNORM`, or `vkFormat <n>` for any other  |
 | Mip levels | `levelCount`                                                        |
 | Asset path | output-relative path without extension                              |

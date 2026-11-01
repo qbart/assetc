@@ -24,6 +24,7 @@ no_mipmaps = ["ui/**"]
 |--------------|----------------------------------------------|----------------------------|
 | `linear`     | linear data (normal, roughness, masks, …)    | sRGB color                 |
 | `no_mipmaps` | base level only                              | full mip chain             |
+| `volume_luts` | color LUT (`*.cube`) as a 3D texture, see [`lut.md`](lut.md#build) | 2D strip |
 
 Glob syntax:
 

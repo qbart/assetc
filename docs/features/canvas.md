@@ -52,7 +52,7 @@ Both modes show the same messages when there is no image to show.
 |-----------------------------------|-------------------------------------------|
 | nothing                           | "Select a file to preview"                |
 | source texture (Input `*.png`, `*.jpg`, `*.jpeg`) | the decoded image |
-| compiled texture (Output `*.ktx2`)| level 0, if the file is in assetc's own KTX2 subset (`R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression, see [`ktx2.md`](../spec/ktx2.md)); otherwise "No preview for this format" |
+| compiled texture (Output `*.ktx2`)| level 0 (a 3D texture's slices side by side, left to right), if the file is in assetc's own KTX2 subset (`R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression, see [`ktx2.md`](../spec/ktx2.md)); otherwise "No preview for this format" |
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
 | an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
 | a font (Input `*.ttf`, `*.otf`)   | its specimen sheet, without the toolbar, see [`fonts.md`](fonts.md#specimen) |

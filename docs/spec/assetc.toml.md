@@ -28,6 +28,7 @@ for glob syntax and what each setting does.
 |--------------|------------------|---------|---------------------------------------------------|
 | `linear`     | array of strings | `[]`    | Globs of textures holding linear data, not sRGB color. |
 | `no_mipmaps` | array of strings | `[]`    | Globs of textures written without mipmaps.        |
+| `volume_luts` | array of strings | `[]`   | Globs of color LUTs (`*.cube`) compiled as 3D textures instead of 2D strips, see [`lut.md`](../features/lut.md#build). |
 
 Patterns are matched against the source path relative to `input`, with its
 extension (`textures/rock_n.png`).

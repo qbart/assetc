@@ -11,7 +11,7 @@ reader can load them.
 | `vkFormat`                | `VK_FORMAT_R8G8B8A8_SRGB` (`43`) for sRGB textures, `VK_FORMAT_R8G8B8A8_UNORM` (`37`) for linear ones |
 | `typeSize`                | `1`                                           |
 | `pixelWidth`/`pixelHeight`| source image size                             |
-| `pixelDepth`              | `0` (2D)                                      |
+| `pixelDepth`              | `0` (2D); `N` for color LUT volumes, see [Color LUTs](#color-luts) |
 | `layerCount`              | `0` (not an array)                            |
 | `faceCount`               | `1`                                           |
 | `levelCount`              | `1` without mipmaps, else `floor(log2(max(w, h))) + 1` (full chain to 1×1) |
@@ -91,18 +91,30 @@ padding                     zero bytes to a multiple of 4
 
 `kvdByteLength` includes the padding.
 
-## Color LUT strips
+## Color LUTs
 
-A compiled `.cube` LUT (see [`lut.md`](../features/lut.md#build)) uses the
-same profile with `VK_FORMAT_R8G8B8A8_UNORM`, `levelCount` `1`, and
-`pixelWidth` `N²`, `pixelHeight` `N` for a LUT of size `N`. Pixel `(x, y)`
+A compiled `.cube` LUT of size `N` (see [`lut.md`](../features/lut.md#build))
+uses the same profile with `VK_FORMAT_R8G8B8A8_UNORM` and `levelCount` `1`,
+as a strip or a volume. Entries are stored as `round(clamp(value, 0, 1) × 255)`
+per channel with alpha `255`.
+
+### Volume
+
+`pixelWidth`, `pixelHeight` and `pixelDepth` are `N` (a 3D texture). The
+level's data is `N` slices of `N` rows of `N` texels: texel `(x, y, z)` holds
+the entry for input `r = x`, `g = y`, `b = z`, so the bytes follow the
+`.cube` table order (red fastest, then green, then blue). Level 0's
+`byteLength` is `N³ × 4`.
+
+### Strip
+
+`pixelWidth` `N²`, `pixelHeight` `N`, `pixelDepth` `0`. Pixel `(x, y)`
 (`y` from the top row) holds the LUT entry for input
 
 ```
 r = x mod N,  b = floor(x / N),  g = y        (indices 0 … N − 1)
 ```
 
-as `round(clamp(value, 0, 1) × 255)` per channel and alpha `255`. To sample
-it, a shader picks the two blue slices around `b × (N − 1)`, samples each
+To sample it, a shader picks the two blue slices around `b × (N − 1)`, samples each
 bilinearly at `(r, g)` (keeping half a texel inside each slice) and blends
 them.

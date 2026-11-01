@@ -36,27 +36,43 @@ shows its error as the canvas message.
 
 ## Build
 
-`*.cube` (any case) files in `input` are compiled to a **2D strip** texture
-(the layout game engines commonly use for color grading LUTs):
+`*.cube` (any case) files in `input` are compiled to a texture, in one of two
+layouts chosen per file by the `[textures] volume_luts` globs (see
+[`assetc.toml`](../spec/assetc.toml.md#textures)):
+
+```toml
+[textures]
+volume_luts = ["grades/**"]   # these become 3D textures; the rest strips
+```
+
+| Layout | When | Texture |
+|--------|------|---------|
+| **Strip** (default) | the file matches no `volume_luts` glob | 2D, `N² × N` pixels: `N` slices of `N × N` side by side, one per **blue** entry (left to right); within a slice **red** grows left to right and **green** top to bottom. Pixel `(b × N + r, g)` holds entry `(r, g, b)`. The layout game engines commonly use; works where 3D textures do not. |
+| **Volume** | the file matches a `volume_luts` glob | 3D, `N × N × N` (`pixelDepth` `N`): **red** along x, **green** along y (top to bottom), **blue** along z (slice). Sampled directly with hardware trilinear filtering. |
+
+Layout details in [`ktx2.md`](../spec/ktx2.md#color-luts). Both:
 
 - Asset path: the input-relative path without `.cube`, e.g.
   `grades/blue-and-pink.lut.cube` → `grades/blue-and-pink.lut`, output
   `<asset path>.ktx2`, a `texture` in the manifest.
-- `N² × N` pixels for `LUT_3D_SIZE N`: `N` slices of `N × N` side by side,
-  one per **blue** entry (left to right); within a slice **red** grows left
-  to right and **green** top to bottom. Pixel `(b × N + r, g)` holds entry
-  `(r, g, b)`, i.e. table index `r + g × N + b × N²`. Layout details in
-  [`ktx2.md`](../spec/ktx2.md#color-lut-strips).
 - Each entry is stored as is: `round(clamp(v, 0, 1) × 255)` per channel,
   alpha 255, `R8G8B8A8_UNORM` (the values are already display encoded, so the
-  GPU must not convert them), one mip level (filtering between slices would
-  mix unrelated blues).
+  GPU must not convert them), one mip level (mip levels would blend unrelated
+  entries).
 - The domain is not stored: a runtime maps its input from `DOMAIN_MIN`…
-  `DOMAIN_MAX` (usually 0…1) to the strip itself.
-- `N` is limited to 128 (a 16384-pixel-wide strip, the common GPU maximum);
-  a larger LUT fails with `LUT_3D_SIZE <N> is too large to compile (at most
-  128)`. A file that does not parse fails like an undecodable image.
-- `[textures]` settings do not apply.
+  `DOMAIN_MAX` (usually 0…1) to the texture itself.
+- Strips are limited to `N` ≤ 128 (a 16384-pixel-wide strip, the common GPU
+  maximum); a larger LUT fails with `LUT_3D_SIZE <N> is too large to compile
+  as a strip (at most 128; volume_luts allows up to 256)`. Volumes take any
+  size the format allows (up to 256). A file that does not parse fails like
+  an undecodable image.
+- The other `[textures]` settings (`linear`, `no_mipmaps`) do not apply.
+- The build prints the layout, e.g. `33³ LUT strip, linear, 1 level` or
+  `33³ LUT volume, linear, 1 level`.
+
+A compiled volume in the Output tree is previewed as its slices side by side
+(the same picture as the strip), and the Info tab's Dimensions read
+`W × H × D px`.
 
 
 ## Views
