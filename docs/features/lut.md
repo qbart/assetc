@@ -34,12 +34,12 @@ that fails to parse shows its error as the canvas message.
 
 ## Views
 
-With a LUT selected, the [view bar](canvas.md#view-bar) offers four views
+With a LUT selected, the [view bar](canvas.md#view-bar) offers two views
 instead of 2D / 3D (same look; **Compare** is the default; the choice is
 global for the session):
 
 ```
-View  [ Compare | Slices | Cube | Curves ]
+View  [ Compare | Curves ]
 ```
 
 ### Compare
@@ -74,23 +74,6 @@ sRGB values, top to bottom:
    128 × 52 px), using the widely published sRGB values of the X-Rite
    ColorChecker Classic (dark skin `115 82 68` … black `52 52 52`).
 
-### Slices
-
-The LUT unwrapped into 2D, the layout game engines load as a color-grading
-texture: one N × N tile per blue slice (`b = 0 … N−1`), each with red along x
-and green along y (downward), tiles placed left to right, top to bottom in a
-grid of `ceil(√N)` columns, no gaps. Unused grid cells are `BG_CENTER`.
-Fitted like Compare, nearest filtering so entries stay sharp.
-
-### Cube
-
-A 3D view (same [camera and controls](canvas.md#3d-controls), auto-rotation
-and no tonemapping as the 3D image view) of the RGB cube transformed by the
-LUT: a 1.2-unit cube with red along +X, green along +Y and blue along +Z, its
-six faces subdivided into N × N quads, each vertex colored with the LUT output
-for its input color (unlit). An identity LUT shows the plain RGB cube; a grade
-shows where it moves colors. No toolbar.
-
 ### Curves
 
 How neutral gray is mapped: for input `x` from 0 to 1 (gray `x, x, x`), the
@@ -105,5 +88,5 @@ output's R, G and B plotted as three curves (`CHANNEL_R`, `CHANNEL_G`,
 
 ## Keybindings
 
-Compare: left click / drag sets the divider. Cube: as the 3D view. See
+Compare: left click / drag sets the divider. See
 [`KEYS.md`](../../KEYS.md).

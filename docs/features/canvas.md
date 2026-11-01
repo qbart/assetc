@@ -22,7 +22,7 @@ View  [ 2D | 3D ]
 - **2D** is the default. The mode is global (not per image) and lasts for the
   session.
 - With a color LUT selected, the bar offers the LUT views instead (Compare,
-  Slices, Cube, Curves), see [`lut.md`](lut.md#views).
+  Curves), see [`lut.md`](lut.md#views).
 - Otherwise the bar is always shown, but the mode only applies to **images**:
   - an [environment map](#environment-maps) only exists in 3D, so the bar is
     empty (no `View` label, no buttons);
