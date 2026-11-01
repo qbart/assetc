@@ -126,6 +126,37 @@ fn to_u8(v: f32) -> u8 {
     (v * 255.0).round() as u8
 }
 
+/// Largest LUT size that compiles: its strip is `size²` wide, the common GPU maximum at 128.
+pub const MAX_STRIP_SIZE: usize = 128;
+
+impl Lut {
+    /// The `size² × size` strip the build writes: blue slices left to right, red across and
+    /// green down each slice; see docs/spec/ktx2.md#color-lut-strips.
+    pub fn strip(&self) -> Result<Image, String> {
+        let n = self.size;
+        if n > MAX_STRIP_SIZE {
+            return Err(format!(
+                "LUT_3D_SIZE {n} is too large to compile (at most {MAX_STRIP_SIZE})"
+            ));
+        }
+        let mut pixels = Vec::with_capacity(n * n * n * 4);
+        for g in 0..n {
+            for b in 0..n {
+                for r in 0..n {
+                    let entry = self.table[r + g * n + b * n * n];
+                    pixels.extend(entry.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8));
+                    pixels.push(255);
+                }
+            }
+        }
+        Ok(Image {
+            width: (n * n) as u32,
+            height: n as u32,
+            pixels,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,6 +174,32 @@ mod tests {
             }
         }
         text
+    }
+
+    #[test]
+    fn strips_lay_blue_slices_side_by_side() {
+        let lut = Lut::parse(&cube(3, |c| c)).unwrap();
+        let strip = lut.strip().unwrap();
+        assert_eq!((strip.width, strip.height), (9, 3));
+        let pixel = |x: u32, y: u32| {
+            let i = ((y * strip.width + x) * 4) as usize;
+            [
+                strip.pixels[i],
+                strip.pixels[i + 1],
+                strip.pixels[i + 2],
+                strip.pixels[i + 3],
+            ]
+        };
+        // Identity: pixel (b * N + r, g) holds (r, g, b).
+        assert_eq!(pixel(0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(2, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(0, 2), [0, 255, 0, 255]);
+        assert_eq!(pixel(6, 0), [0, 0, 255, 255]);
+        assert_eq!(pixel(4, 1), [128, 128, 128, 255]);
+
+        let mut big = lut.clone();
+        big.size = 129;
+        assert!(big.strip().unwrap_err().contains("at most 128"));
     }
 
     #[test]

@@ -6,7 +6,9 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use crate::build::{Error, Failure, is_noise, is_texture_source, relative, strip_extension};
+use crate::build::{
+    Error, Failure, is_lut, is_noise, is_texture_source, relative, strip_extension,
+};
 use crate::config;
 use crate::gradient::is_gradient;
 use crate::hash::fnv1a64;
@@ -49,6 +51,8 @@ pub enum Job {
     },
     /// Sources (relative to `input`) of the R (occlusion), G (roughness), B (metallic) channels.
     Orm { sources: [Option<String>; 3] },
+    /// A color LUT (relative to `input`) as a strip texture, see docs/features/lut.md#build.
+    Lut { source: String },
     Material {
         /// `<name>.mat.toml`, or `<name>.*` without one.
         source: String,
@@ -74,7 +78,7 @@ impl Asset {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", "),
-            Job::Material { source, .. } => source.clone(),
+            Job::Material { source, .. } | Job::Lut { source } => source.clone(),
         }
     }
 }
@@ -145,6 +149,15 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
                 _ => groups.entry((dir.into(), stem.into())).or_default().base = Some(rel.clone()),
             }
             sources.push(rel);
+        } else if is_lut(file) {
+            let asset_path = strip_extension(&rel).to_owned();
+            plan.assets.push(Asset {
+                id: fnv1a64(asset_path.as_bytes()),
+                kind: Kind::Texture,
+                output: Kind::Texture.output_path(&asset_path),
+                asset_path,
+                job: Job::Lut { source: rel },
+            });
         } else {
             plan.skipped += 1;
         }

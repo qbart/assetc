@@ -142,6 +142,8 @@ pub fn run(input: &Path, output: &Path, textures: &config::Textures) -> Result<O
                 .map(|levels| levels_detail(*color, levels)),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
+            Job::Lut { source } => compile_lut(&input.join(source), &dest)
+                .map(|size| format!("{size}³ LUT, linear, 1 level")),
             Job::Material { material, .. } => {
                 write(&dest, &material::encode(material)).map(|()| material_detail(material))
             }
@@ -314,6 +316,23 @@ pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType)
         .map_err(|e| e.to_string())?;
     let color = decoded.color();
     Ok((decoded.to_rgba8(), color))
+}
+
+pub fn is_lut(file: &Path) -> bool {
+    file.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cube"))
+}
+
+/// Writes a LUT's strip; returns its size. See docs/features/lut.md#build.
+fn compile_lut(source: &Path, dest: &Path) -> Result<usize, String> {
+    let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
+    let lut = crate::lut::Lut::parse(&text)?;
+    let strip = lut.strip()?;
+    write(
+        dest,
+        &crate::ktx2::encode_rgba8(ColorSpace::Linear, &[strip]),
+    )?;
+    Ok(lut.size)
 }
 
 pub fn is_noise(file: &Path) -> bool {
@@ -501,6 +520,37 @@ mod tests {
         let outcome = run(&input, &output, &config::Textures::default()).unwrap();
         assert_eq!(outcome.failures.len(), 2);
         assert!(outcome.failures[0].message.contains("collides"));
+    }
+
+    #[test]
+    fn builds_luts_as_strips() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(input.join("grades")).unwrap();
+        let mut cube = String::from("LUT_3D_SIZE 2\n");
+        for i in 0..8 {
+            cube += &format!("{} {} {}\n", i & 1, (i >> 1) & 1, (i >> 2) & 1);
+        }
+        fs::write(input.join("grades/warm.lut.cube"), cube).unwrap();
+        fs::write(input.join("bad.cube"), "LUT_3D_SIZE 2\n").unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source, "bad.cube");
+        let path = output.join("grades/warm.lut.ktx2");
+        let reader_bytes = fs::read(&path).unwrap();
+        let reader = ::ktx2::Reader::new(&reader_bytes[..]).unwrap();
+        let header = reader.header();
+        assert_eq!(
+            (header.pixel_width, header.pixel_height, header.level_count),
+            (4, 2, 1)
+        );
+        let (format, pixels) = level0(&path);
+        assert_eq!(format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+        // Pixel (b * 2 + r, g): (1, 0) is red, (2, 0) blue, (0, 1) green.
+        assert_eq!(pixels[4..8], [255, 0, 0, 255]);
+        assert_eq!(pixels[8..12], [0, 0, 255, 255]);
+        assert_eq!(pixels[16..20], [0, 255, 0, 255]);
     }
 
     #[test]

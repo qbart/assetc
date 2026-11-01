@@ -157,7 +157,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::Gradient => gradient_rows(file, &mut out)
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
-        Kind::ColorLut => color_lut(file, &mut out),
+        Kind::ColorLut => color_lut(project, file, &rel, &mut out),
         Kind::Font => font_rows(file, &mut out),
         Kind::Model => model_rows(file, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
@@ -330,7 +330,12 @@ fn model_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     Ok(())
 }
 
-fn color_lut(file: &Path, out: &mut Inspection) -> Result<(), String> {
+fn color_lut(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+    out: &mut Inspection,
+) -> Result<(), String> {
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
     let lut = Lut::parse(&text)?;
     let n = lut.size;
@@ -342,6 +347,15 @@ fn color_lut(file: &Path, out: &mut Inspection) -> Result<(), String> {
         "Domain",
         format!("{} – {}", list(lut.domain_min), list(lut.domain_max)),
     ));
+    // Compiled to a strip texture, see docs/features/lut.md#build.
+    let asset_path = strip_extension(rel);
+    asset_rows(asset_path, out);
+    output_row(
+        project,
+        &manifest::Kind::Texture.output_path(asset_path),
+        "",
+        out,
+    );
     out.lut = Some(lut);
     Ok(())
 }
@@ -763,6 +777,8 @@ mod tests {
         assert_eq!(row(&i, "Title"), "Warm");
         assert_eq!(row(&i, "LUT size"), "2 × 2 × 2");
         assert_eq!(row(&i, "Domain"), "0, 0, 0 – 1, 1, 1");
+        assert_eq!(row(&i, "Asset path"), "grade.lut");
+        assert_eq!(row(&i, "Output"), "grade.lut.ktx2 (not built)");
         assert!(i.lut.is_some());
 
         fs::write(&file, "LUT_3D_SIZE 2\n").unwrap();
