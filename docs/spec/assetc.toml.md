@@ -40,19 +40,36 @@ Settings for meshes compiled from glTF models (see
 [`docs/features/models.md`](../features/models.md#build)): project-wide
 defaults, overridden per model by `[[meshes.overrides]]` entries.
 
-| Key                     | Type    | Default | Meaning                                              |
-|-------------------------|---------|---------|------------------------------------------------------|
-| `meshlet_max_vertices`  | integer | `64`    | Most vertices per meshlet, 3–256                     |
-| `meshlet_max_triangles` | integer | `124`   | Most triangles per meshlet, 4–512 and a multiple of 4 |
-| `overrides`             | array of tables | `[]` | Per-model values, see below                    |
+| Key                     | Type            | Default         | Meaning                                                    |
+|-------------------------|-----------------|-----------------|------------------------------------------------------------|
+| `meshlet_max_vertices`  | integer         | `64`            | Most vertices per meshlet, 3–256                           |
+| `meshlet_max_triangles` | integer         | `124`           | Most triangles per meshlet, 4–512 and a multiple of 4      |
+| `meshlet_cone_weight`   | float           | `0.25`          | 0–1: how much meshlet building favours tight normal cones (better back-face culling) over compact meshlets |
+| `lod_ratios`            | array of floats | `[0.5, 0.25]`   | Reduced levels of detail, as fractions of the full triangle count; each in 0–1 (exclusive), decreasing, at most 8; `[]` writes no levels |
+| `lod_error`             | float           | `0.05`          | 0–1: first error limit of simplification, relative to the mesh's size |
+| `lod_error_step`        | float           | `0.05`          | 0–1: how much the limit rises per retry                    |
+| `lod_attempts`          | integer         | `3`             | 0–10: retries with a raised limit while a level makes no progress |
+| `lod_sloppy_fallback`   | boolean         | `true`          | After the retries, fall back to sloppy (topology-ignoring) simplification; otherwise the level reuses the previous one |
+| `lod_uv_weight`         | float           | `1.0`           | 0–100: weight of UV error in simplification                 |
+| `lod_normal_weight`     | float           | `0.5`           | 0–100: weight of normal error in simplification             |
+| `lod_permissive`        | boolean         | `true`          | Allow collapses across attribute seams (UV / normal discontinuities) |
+| `lod_lock_border`       | boolean         | `false`         | Keep vertices on the mesh's open borders in place           |
+| `lod_regularize`        | boolean         | `false`         | Prefer evenly sized triangles, at some cost to accuracy     |
+| `lod_prune`             | boolean         | `false`         | Remove small disconnected parts while simplifying           |
+| `overrides`             | array of tables | `[]`        | Per-model values, see below                                |
+
+These are the [meshoptimizer](https://github.com/zeux/meshoptimizer) settings
+of the [build](../features/models.md#geometry): meshlets come from
+`meshopt_buildMeshlets`, levels of detail from `meshopt_simplifyWithAttributes`
+(the `lod_permissive`, `lod_lock_border`, `lod_regularize` and `lod_prune`
+switches are its options) and `meshopt_simplifySloppy`.
 
 Each `[[meshes.overrides]]` entry:
 
 | Key                     | Type             | Meaning                                              |
 |-------------------------|------------------|------------------------------------------------------|
 | `match`                 | array of strings | Required. Globs matched against the model's input-relative path with its extension (`models/hero.glb`), with the syntax of `[textures]` |
-| `meshlet_max_vertices`  | integer          | Optional, replaces the default for matching models   |
-| `meshlet_max_triangles` | integer          | Optional, replaces the default for matching models   |
+| any key of `[meshes]` except `overrides` | as above | Optional, replaces the default for matching models |
 
 For each setting, the **last** entry that matches the model and sets it wins;
 otherwise the default applies. A model's own [`.amod`](amod.md#mesh) sidecar
@@ -69,10 +86,10 @@ meshlet_max_vertices = 128
 meshlet_max_triangles = 256
 ```
 
-The limits must suit the mesh shaders that draw the meshlets: one meshlet is
-one workgroup's output, so they are a per-GPU tuning choice. A value outside
-its range (in the defaults or any override) or a bad glob fails the build
-before anything is compiled, with `assetc.toml [meshes]: <problem>`.
+The meshlet limits must suit the mesh shaders that draw the meshlets: one
+meshlet is one workgroup's output, so they are a per-GPU tuning choice. A
+value outside its range (in the defaults or any override) or a bad glob fails
+the build before anything is compiled, with `assetc.toml [meshes]: <problem>`.
 
 ### Paths
 

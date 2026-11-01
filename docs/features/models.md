@@ -82,22 +82,32 @@ a shape.
 ## Parameters tab
 
 The Inspector's **Parameters** tab (`sliders-vertical`) is shown for a model
-in the Input tree. It edits the model's [`.amod`](../spec/amod.md) sidecar,
-in the [property editor](gui.md#property-editor) look, with one **Meshlets**
-section (collapsible, open):
+in the Input tree. It edits the model's [`.amod`](../spec/amod.md) sidecar:
+the [meshoptimizer settings](../spec/assetc.toml.md#meshes) it builds with,
+in the [property editor](gui.md#property-editor) look. Every row shows the
+value the model builds with; its label is `ACCENT` when the sidecar sets it
+and `TEXT_WEAK` when it comes from the project.
 
-- **Max vertices** (integer field, 3–256) and **Max triangles** (integer
-  field, 4–512, rounded to a multiple of 4), drag or type. They show the
-  values the model builds with.
-- A weak line saying where they come from: `Project settings (assetc.toml)`,
-  or `Set for this file (<file>.amod)` when the sidecar sets either value.
+- **Meshlets** section (collapsible, open): **Max vertices** (integer field,
+  3–256), **Max triangles** (integer field, 4–512, rounded to a multiple of
+  4), **Cone weight** (slider 0–1).
+- **Levels of detail** section (collapsible, open): **Levels** (integer field,
+  0–8: adding a level appends half the last ratio, removing drops the last),
+  one **LOD <n>** row per level (slider 0.01–0.99, each kept below the one
+  before), **Error** and **Error step** (sliders 0–1, three decimals),
+  **Attempts** (integer field, 0–10), **UV weight** and **Normal weight**
+  (sliders 0–10), and checkboxes **Sloppy fallback**, **Permissive**,
+  **Lock border**, **Regularize**, **Prune**.
+- A weak line saying where the values come from: `Project settings
+  (assetc.toml)`, or `Set for this file (<file>.amod)` when the sidecar sets
+  any.
 - A **Use project settings** button, enabled when the sidecar sets a value:
-  it removes the values (and the file when nothing else is left in it).
+  it removes them (and the file when nothing else is left in it).
 - Changing a value writes it to the sidecar (creating it), saved like noise
   parameters (see [`noise.md`](noise.md#saving)); the file is then inspected
   again. If `assetc.toml` `[meshes]` or the sidecar is invalid, the tab shows
   the error instead.
-- The new limits apply at the next build; check the result in the
+- The new settings apply at the next build; check the result in the
   [compiled mesh preview](#compiled-mesh-preview).
 
 ## Compiled mesh preview
@@ -271,26 +281,28 @@ line per model, e.g.
   Weights are renormalized to sum 1.
 - Per submesh: the vertex order is optimized for the GPU's vertex cache, then
   the submesh is split into **meshlets** with their bounds (cone weight
-  0.25), of at most `meshlet_max_vertices` vertices and
+  `meshlet_cone_weight`, 0.25), of at most `meshlet_max_vertices` vertices and
   `meshlet_max_triangles` triangles: 64 and 124 unless
   [`[meshes]`](../spec/assetc.toml.md#meshes) in `assetc.toml` sets other
   defaults or overrides them for the model, or the model's
   [`.amod`](../spec/amod.md#mesh) sidecar (edited in the
   [Parameters tab](#parameters-tab)) sets its own. The limits used are
-  stored in the `.amesh` `DESC`, and simplified into two
-  **levels of detail** at about 50% and 25% of its triangles, all with
+  stored in the `.amesh` `DESC`, and simplified into **levels of detail**
+  at `lod_ratios` of its triangles (two, at about 50% and 25%; none writes
+  no `LODIDX` / `LODTABLE`), all with
   [meshoptimizer](https://github.com/zeux/meshoptimizer).
 - **Simplification keeps UVs and normals in mind.** A level of detail only
   drops vertices and reuses the remaining ones (with their own UV, normal and
   tangent), so its quality depends on which vertices survive.
-  Simplification therefore weighs the vertices' UVs (weight 1) and normals
-  (weight 0.5) next to their positions, and may collapse across attribute
-  seams (vertices sharing a position but not their UV or normal, as on every
+  Simplification therefore weighs the vertices' UVs (`lod_uv_weight`, 1)
+  and normals (`lod_normal_weight`, 0.5) next to their positions, and may
+  collapse across attribute seams (`lod_permissive`) (vertices sharing a position but not their UV or normal, as on every
   edge of a flat-shaded mesh) when the attribute error stays within the
   limit. Without that, flat-shaded meshes could not be simplified at all.
-  It starts with a 5% error limit and raises it by 5% up to three times
-  while it makes no progress. Only then does it fall back to sloppy
-  (topology-ignoring) simplification, which merges nearby vertices from
+  It starts with a 5% error limit (`lod_error`) and raises it by 5%
+  (`lod_error_step`) up to three times (`lod_attempts`) while it makes no
+  progress. Only then does it fall back to sloppy (topology-ignoring)
+  simplification (`lod_sloppy_fallback`), which merges nearby vertices from
   different faces and so can stretch textures.
 - A file without any triangle primitive fails (`no triangles in the default
   scene`).

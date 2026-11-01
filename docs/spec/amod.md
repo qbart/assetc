@@ -18,10 +18,12 @@ errors (the file it belongs to then fails to build, with
 For glTF models (`*.gltf`, `*.glb`); see
 [`docs/features/models.md`](../features/models.md#build).
 
-| Key                     | Type    | Meaning                                                    |
-|-------------------------|---------|------------------------------------------------------------|
-| `meshlet_max_vertices`  | integer | Most vertices per meshlet, 3–256                           |
-| `meshlet_max_triangles` | integer | Most triangles per meshlet, 4–512 and a multiple of 4      |
+Any key of [`assetc.toml`'s `[meshes]`](assetc.toml.md#meshes) except
+`overrides`, with the same types and ranges (`meshlet_max_vertices`,
+`meshlet_max_triangles`, `meshlet_cone_weight`, `lod_ratios`, `lod_error`,
+`lod_error_step`, `lod_attempts`, `lod_sloppy_fallback`, `lod_uv_weight`,
+`lod_normal_weight`, `lod_permissive`, `lod_lock_border`, `lod_regularize`,
+`lod_prune`).
 
 A key set here wins over [`assetc.toml`](assetc.toml.md#meshes) (its
 defaults and `[[meshes.overrides]]`); a key left out keeps the project's
@@ -29,7 +31,7 @@ value.
 
 ## Written form
 
-assetc writes only the keys that are set, in the order above, each table
+assetc writes only the keys that are set, in the order listed, each table
 preceded by a blank line except the first:
 
 ```toml
