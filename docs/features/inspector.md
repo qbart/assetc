@@ -10,8 +10,8 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
   it. Clicking a folder row also opens / closes it.
 - One file is selected at a time, across both tabs: selecting a file in one
   tab replaces a selection in the other. Switching tabs keeps the selection.
-- The selected row is filled with `ACCENT` at 25% opacity and has a 2 px
-  `ACCENT` bar on its left edge (hover still uses `BG_HEADER`).
+- The selected row is filled with `ACCENT` at 25% opacity, with no edge
+  marker (hover still uses `BG_HEADER`).
 - The selection is kept by path. After a rescan (button or finished build)
   the selected file is inspected again, so the Inspector and canvas show the
   new output of a build. If the file is gone, the Inspector says

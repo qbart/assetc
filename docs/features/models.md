@@ -76,8 +76,8 @@ plays.
   accessors (glTF requires them), read with the other
   [Info rows](#inspector).
 - Hovering a row fills it with `BG_HEADER`; the chosen row is filled with
-  `ACCENT` at 25% opacity with a 2 px `ACCENT` bar on its left edge, like the
-  file tree's selection. Clicking a row chooses it.
+  `ACCENT` at 25% opacity, like the file tree's selection. Clicking a row
+  chooses it.
 - **Rest pose** (the default) shows the model as loaded, without animation.
   Choosing an animation plays it from its start, looping, at normal speed;
   auto-rotation and the orbit camera keep working. Switching to another
