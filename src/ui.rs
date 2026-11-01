@@ -716,7 +716,8 @@ fn info(ui: &mut Ui, inspection: &Inspection) {
                     .show(ui, |ui| {
                         for (label, value) in &inspection.rows {
                             ui.weak(*label);
-                            ui.label(value);
+                            // Wrap rather than widen the sidebar.
+                            ui.add(egui::Label::new(value).wrap());
                             ui.end_row();
                         }
                     });

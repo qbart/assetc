@@ -278,13 +278,9 @@ fn compiled_material(file: &Path, rel: &str, out: &mut Inspection) -> Result<(),
             "Emissive",
             format!("{} × {:.2}", list(&m.emissive), m.emissive_strength),
         ),
-        (
-            "Height",
-            format!(
-                "{height_mode}, scale {:.2}, midlevel {:.2}",
-                m.height_scale, m.height_midlevel
-            ),
-        ),
+        ("Height mode", height_mode.into()),
+        ("Height scale", format!("{:.2}", m.height_scale)),
+        ("Height midlevel", format!("{:.2}", m.height_midlevel)),
         ("Alpha", alpha),
         (
             "Double-sided",
