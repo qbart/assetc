@@ -2718,6 +2718,55 @@ fn view_3d(ui: &mut Ui, rect: Rect, preview: &mut Preview3d) {
             preview.orbit.dolly(factor);
         }
     }
+    orientation_gizmo(ui, rect, &preview.orbit);
+}
+
+/// World axes as seen from the orbit camera, see docs/features/canvas.md#orientation-gizmo.
+fn orientation_gizmo(ui: &Ui, rect: Rect, orbit: &Orbit) {
+    use bevy::math::Vec3;
+    const SIZE: f32 = 64.0;
+    const LENGTH: f32 = 22.0;
+    let area = Rect::from_min_size(
+        pos2(rect.left() + 8.0, rect.bottom() - 8.0 - SIZE),
+        vec2(SIZE, SIZE),
+    );
+    let center = area.center();
+    let painter = ui.painter_at(rect);
+    painter.circle_filled(center, SIZE / 2.0, BG_BAR.gamma_multiply(0.7));
+    let to_view = orbit.transform().rotation.inverse();
+    // (screen offset, depth toward the camera, color, letter of a positive axis)
+    let mut marks = Vec::new();
+    for (axis, color, letter) in [
+        (Vec3::X, CHANNEL_R, "X"),
+        (Vec3::Y, CHANNEL_G, "Y"),
+        (Vec3::Z, CHANNEL_B, "Z"),
+    ] {
+        for (sign, letter) in [(1.0, Some(letter)), (-1.0, None)] {
+            let v = to_view * (axis * sign);
+            marks.push((vec2(v.x, -v.y) * LENGTH, v.z, color, letter));
+        }
+    }
+    // Farthest first, so nearer marks cover them.
+    marks.sort_by(|a, b| a.1.total_cmp(&b.1));
+    for (offset, _, color, letter) in marks {
+        let end = center + offset;
+        match letter {
+            Some(letter) => {
+                painter.line_segment([center, end], Stroke::new(2.0, color));
+                painter.circle_filled(end, 7.0, color);
+                painter.text(
+                    end,
+                    Align2::CENTER_CENTER,
+                    letter,
+                    FontId::proportional(10.0),
+                    BG_BAR,
+                );
+            }
+            None => {
+                painter.circle_filled(end, 4.0, color.gamma_multiply(0.5));
+            }
+        }
+    }
 }
 
 fn shape_tools(current: Shape) -> Vec<Tool> {
