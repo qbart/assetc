@@ -3977,16 +3977,11 @@ fn canvas_compiled_mesh(
     let painter = ui.painter_at(rect);
     let galley = painter.layout_no_wrap(format!("LOD {lod}"), FontId::proportional(13.0), TEXT);
     let toolbar_left = rect.right() - 8.0 - 36.0;
-    let pill = Rect::from_min_size(
-        pos2(
-            toolbar_left - 8.0 - galley.size().x - 20.0,
-            rect.top() + 8.0,
-        ),
-        vec2(galley.size().x + 20.0, 32.0),
-    );
-    painter.rect_filled(pill, 6, BG_BAR);
     painter.galley(
-        pos2(pill.left() + 10.0, pill.center().y - galley.size().y / 2.0),
+        pos2(
+            toolbar_left - 8.0 - galley.size().x,
+            rect.top() + 8.0 + 16.0 - galley.size().y / 2.0,
+        ),
         galley,
         TEXT,
     );
