@@ -3,11 +3,12 @@
 use std::fs;
 use std::path::Path;
 
-use crate::build::{is_texture_source, relative, strip_extension};
+use crate::build::{is_noise, is_texture_source, load_source as decode, relative, strip_extension};
 use crate::config::Project;
 use crate::hash::fnv1a64;
 use crate::lut::Lut;
 use crate::material::{self, AlphaMode, HeightMode};
+use crate::noise::Noise;
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
 use crate::{ktx2, manifest};
@@ -48,6 +49,7 @@ pub fn is_environment_map(dir: &Path) -> bool {
 #[derive(Clone, Copy)]
 enum Kind {
     SourceTexture,
+    Noise,
     MaterialSource,
     ColorLut,
     CompiledTexture,
@@ -61,6 +63,7 @@ impl Kind {
     fn name(self) -> &'static str {
         match self {
             Self::SourceTexture => "Source texture",
+            Self::Noise => "Noise",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::CompiledTexture => "Compiled texture",
@@ -117,6 +120,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
     let kind = match location {
         Location::Input if material_name.is_some() => Kind::MaterialSource,
         Location::Input if has_ext("cube") => Kind::ColorLut,
+        Location::Input if is_noise(file) => Kind::Noise,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
         Location::Input => Kind::Ignored,
         Location::Output if has_ext(manifest::Kind::Texture.extension()) => Kind::CompiledTexture,
@@ -129,6 +133,9 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
 
     let result = match kind {
         Kind::SourceTexture => source_texture(project, file, &rel, &mut out),
+        Kind::Noise => {
+            noise_rows(file, &mut out).and_then(|()| source_texture(project, file, &rel, &mut out))
+        }
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(file, &mut out),
         Kind::CompiledTexture => compiled_texture(file, &rel, &mut out),
@@ -239,6 +246,20 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
     Ok(())
 }
 
+fn noise_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let n = Noise::parse(&text)?;
+    out.rows.extend([
+        ("Type", n.kind.name().to_owned()),
+        ("Seed", n.seed.to_string()),
+        ("Frequency", n.frequency.to_string()),
+        ("Octaves", n.octaves.to_string()),
+        ("Gain", format!("{:.2}", n.gain)),
+        ("Invert", if n.invert { "yes" } else { "no" }.into()),
+    ]);
+    Ok(())
+}
+
 fn color_lut(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
     let lut = Lut::parse(&text)?;
@@ -336,17 +357,6 @@ fn environment_map(location: Location, dir: &Path, out: &mut Inspection) -> Resu
     }
     out.cubemap = Some(faces);
     Ok(())
-}
-
-fn decode(file: &Path) -> Result<(image::RgbaImage, image::ColorType), String> {
-    let decoded = image::ImageReader::open(file)
-        .map_err(|e| e.to_string())?
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?
-        .decode()
-        .map_err(|e| e.to_string())?;
-    let color = decoded.color();
-    Ok((decoded.to_rgba8(), color))
 }
 
 /// `Output` row: the output-relative path, `note`, and `(not built)` when missing.
@@ -607,6 +617,29 @@ mod tests {
         assert_eq!(channels("rgb.jpg"), [true, true, true, false]);
         assert_eq!(channels("gray.png"), [false; 4]);
         assert_eq!(channels("gray_alpha.png"), [false, false, false, true]);
+    }
+
+    #[test]
+    fn noise_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), Default::default());
+        let file = dir.path().join("assets/clouds.noise");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, "type = \"value\"\nsize = 16\nseed = 3\n").unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Kind"), "Noise");
+        assert_eq!(row(&i, "Type"), "Value");
+        assert_eq!(row(&i, "Seed"), "3");
+        assert_eq!(row(&i, "Dimensions"), "16 × 16 px");
+        assert_eq!(row(&i, "Asset path"), "clouds");
+        assert_eq!(row(&i, "Color"), "linear");
+        assert_eq!(i.channels, [false, false, false, false]);
+        assert!(i.preview.is_some());
+
+        fs::write(&file, "octaves = 99\n").unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert!(row(&i, "Error").contains("octaves"));
+        assert!(i.preview.is_none());
     }
 
     #[test]

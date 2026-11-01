@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::config;
 use crate::manifest::{self, Kind};
 use crate::material;
+use crate::noise::Noise;
 use crate::plan::{self, Job, flatten};
 use crate::texture::{self, ColorSpace};
 use crate::tree;
@@ -243,8 +244,8 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
     Ok(removed)
 }
 
-/// Source image formats compiled to textures, matched case-insensitively.
-const TEXTURE_EXTENSIONS: [&str; 3] = ["png", "jpg", "jpeg"];
+/// Texture source extensions, matched case-insensitively: images, and generated noise.
+const TEXTURE_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "noise"];
 
 pub fn is_texture_source(file: &Path) -> bool {
     file.extension().is_some_and(|ext| {
@@ -272,13 +273,32 @@ pub fn strip_extension(rel: &str) -> &str {
 }
 
 fn decode(source: &Path) -> Result<image::RgbaImage, String> {
-    Ok(image::ImageReader::open(source)
+    load_source(source).map(|(image, _)| image)
+}
+
+/// Decodes a texture source, or generates it for a `.noise` file; also returns the
+/// source's color type (noise is grayscale).
+pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType), String> {
+    if is_noise(source) {
+        let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
+        let generated = Noise::parse(&text)?.generate();
+        let image = image::RgbaImage::from_raw(generated.width, generated.height, generated.pixels)
+            .expect("noise image size");
+        return Ok((image, image::ColorType::L8));
+    }
+    let decoded = image::ImageReader::open(source)
         .map_err(|e| e.to_string())?
         .with_guessed_format()
         .map_err(|e| e.to_string())?
         .decode()
-        .map_err(|e| e.to_string())?
-        .to_rgba8())
+        .map_err(|e| e.to_string())?;
+    let color = decoded.color();
+    Ok((decoded.to_rgba8(), color))
+}
+
+pub fn is_noise(file: &Path) -> bool {
+    file.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("noise"))
 }
 
 /// Returns the number of levels written.
@@ -461,6 +481,32 @@ mod tests {
         let outcome = run(&input, &output, &config::Textures::default()).unwrap();
         assert_eq!(outcome.failures.len(), 2);
         assert!(outcome.failures[0].message.contains("collides"));
+    }
+
+    #[test]
+    fn builds_noise_as_linear_texture() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(input.join("rock")).unwrap();
+        fs::write(input.join("clouds.noise"), "size = 16\n").unwrap();
+        fs::write(
+            input.join("rock/rock.h.noise"),
+            "size = 8\ntype = \"worley\"\n",
+        )
+        .unwrap();
+        fs::write(input.join("bad.noise"), "size = 0\n").unwrap();
+
+        let outcome = run(&input, &output, &config::Textures::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source, "bad.noise");
+        assert!(outcome.failures[0].message.contains("size must be"));
+        let (format, pixels) = level0(&output.join("clouds.ktx2"));
+        assert_eq!(format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+        assert_eq!(pixels.len(), 16 * 16 * 4);
+        assert_eq!(pixels[..4], [pixels[0], pixels[0], pixels[0], 255]);
+        // In a material slot: compiled under its slot.
+        assert!(output.join("rock/rock.h.ktx2").is_file());
+        assert!(output.join("rock/rock.mat").is_file());
     }
 
     #[test]

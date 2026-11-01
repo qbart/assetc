@@ -11,7 +11,6 @@ use bevy::render::render_resource::{
     Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
 };
 
-use crate::lut::Lut;
 use crate::theme::BG_CENTER;
 
 pub struct Preview3dPlugin;
@@ -119,8 +118,10 @@ pub struct Preview3d {
     pub environment: bool,
     /// Show the color cube (unlit, vertex colors) instead of the shape.
     pub colors: bool,
-    /// A new color cube mesh, taken by [`sync`].
-    pub color_cube: Option<Mesh>,
+    /// Show the untransformed cube instead of the LUT's.
+    pub colors_before: bool,
+    /// New color cube meshes (before, after), taken by [`sync`].
+    pub color_cube: Option<(Mesh, Mesh)>,
     /// A new environment map, taken by [`sync`].
     pub cubemap: Option<CubemapUpload>,
 }
@@ -147,7 +148,8 @@ struct Scene {
     chrome: Handle<StandardMaterial>,
     /// Unlit, showing vertex colors.
     unlit: Handle<StandardMaterial>,
-    color_cube: Option<Handle<Mesh>>,
+    /// Untransformed and LUT color cubes.
+    color_cube: Option<(Handle<Mesh>, Handle<Mesh>)>,
     cubemap: Option<Handle<Image>>,
 }
 
@@ -191,11 +193,10 @@ fn cube(size: f32) -> Mesh {
     .with_inserted_indices(Indices::U32(indices))
 }
 
-/// The RGB cube transformed by `lut`: red along +X, green +Y, blue +Z, each face an
-/// N × N grid colored with the LUT output; see docs/features/lut.md#cube.
-pub fn color_cube(lut: &Lut) -> Mesh {
+/// The RGB cube transformed by `map`: red along +X, green +Y, blue +Z, each face an
+/// `n` × `n` grid colored with `map(input)`; see docs/features/lut.md#cube.
+pub fn color_cube(n: usize, map: impl Fn([f32; 3]) -> [f32; 3]) -> Mesh {
     const SIZE: f32 = 1.2;
-    let n = lut.size;
     let (mut positions, mut colors, mut indices) = (vec![], vec![], vec![]);
     for (normal, right, up) in CUBE_FACES {
         let base = positions.len() as u32;
@@ -204,7 +205,7 @@ pub fn color_cube(lut: &Lut) -> Mesh {
                 let (x, y) = (i as f32 / (n - 1) as f32, j as f32 / (n - 1) as f32);
                 let p = (normal + right * (2.0 * x - 1.0) + up * (2.0 * y - 1.0)) * 0.5;
                 let input = (p + 0.5).to_array();
-                let [r, g, b] = lut.apply(input);
+                let [r, g, b] = map(input);
                 positions.push((p * SIZE).to_array());
                 // The LUT's output is display (sRGB) encoded; vertex colors are linear.
                 colors.push(Color::srgb(r, g, b).to_linear().to_f32_array());
@@ -439,10 +440,13 @@ fn sync(
         };
     }
 
-    if let Some(cube) = preview.color_cube.take()
-        && let Some(old) = scene.color_cube.replace(meshes.add(cube))
+    if let Some((before, after)) = preview.color_cube.take()
+        && let Some(old) = scene
+            .color_cube
+            .replace((meshes.add(before), meshes.add(after)))
     {
-        meshes.remove(&old);
+        meshes.remove(&old.0);
+        meshes.remove(&old.1);
     }
 
     let (mesh, material, transform) = &mut *shape;
@@ -451,7 +455,10 @@ fn sync(
         .position(|s| *s == preview.shape)
         .unwrap_or(0);
     let (wanted_mesh, wanted_material) = match &scene.color_cube {
-        Some(cube) if preview.colors => (cube, &scene.unlit),
+        Some((before, after)) if preview.colors => {
+            let cube = if preview.colors_before { before } else { after };
+            (cube, &scene.unlit)
+        }
         _ if environment => (&scene.meshes[index], &scene.chrome),
         _ => (&scene.meshes[index], &scene.material),
     };
@@ -469,6 +476,7 @@ fn sync(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lut::Lut;
 
     #[test]
     fn cube_faces_wind_outward_and_stand_upright() {
@@ -512,7 +520,8 @@ mod tests {
                 1 - ((i >> 2) & 1)
             );
         }
-        let mesh = color_cube(&Lut::parse(&text).unwrap());
+        let lut = Lut::parse(&text).unwrap();
+        let mesh = color_cube(lut.size, |rgb| lut.apply(rgb));
         let positions = mesh
             .attribute(Mesh::ATTRIBUTE_POSITION)
             .unwrap()

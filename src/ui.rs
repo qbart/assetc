@@ -5,18 +5,20 @@ use egui::{
     Stroke, StrokeKind, Ui, UiBuilder, Vec2, pos2, vec2,
 };
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::thread::JoinHandle;
 
 use crate::assets::Assets;
 use crate::build::{self, Outcome};
 use crate::config::Project;
+use crate::fileops;
 use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
 use crate::logo;
 use crate::lut::Lut;
 use crate::manifest::Kind;
+use crate::noise::{Noise, NoiseType};
 use crate::preview3d::{CubemapUpload, Orbit, Preview3d, Shape, Upload};
 use crate::texture::Image;
 use crate::theme::{
@@ -55,6 +57,12 @@ struct UiState {
     mode: ViewMode,
     lut: LutUi,
     last_image: Option<LastImage>,
+    /// Open folders in the file browser.
+    open: HashSet<PathBuf>,
+    rename: Option<Rename>,
+    confirm_delete: Option<PathBuf>,
+    /// A failed file operation, shown in the status bar until the next operation or build.
+    notice: Option<String>,
     /// Canvas toolbar state of each image, by path.
     canvas_options: HashMap<PathBuf, CanvasOptions>,
 }
@@ -106,6 +114,8 @@ struct Inspected {
     cubemap: Option<Vec<Image>>,
     uploaded_cubemap: bool,
     lut: Option<Lut>,
+    /// A `.noise` file's parameters: (being edited, as saved), or why they can't be read.
+    noise: Option<Result<(Noise, Noise), String>>,
     lut_compare: Option<CompareCache>,
     uploaded_color_cube: bool,
 }
@@ -131,6 +141,8 @@ struct LutUi {
     source: LutSource,
     /// Divider position across the image, 0..1.
     split: f32,
+    /// Cube view shows the untransformed cube.
+    cube_before: bool,
 }
 
 impl Default for LutUi {
@@ -139,6 +151,7 @@ impl Default for LutUi {
             view: LutView::Compare,
             source: LutSource::Chart,
             split: 0.5,
+            cube_before: false,
         }
     }
 }
@@ -253,6 +266,10 @@ impl Default for UiState {
             mode: ViewMode::default(),
             lut: LutUi::default(),
             last_image: None,
+            open: HashSet::new(),
+            rename: None,
+            confirm_delete: None,
+            notice: None,
             canvas_options: HashMap::new(),
         }
     }
@@ -285,16 +302,18 @@ impl BrowserTab {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum InspectorTab {
     Info,
+    Parameters,
     Assets,
     Settings,
 }
 
 impl InspectorTab {
-    const ALL: [Self; 3] = [Self::Info, Self::Assets, Self::Settings];
+    const ALL: [Self; 4] = [Self::Info, Self::Parameters, Self::Assets, Self::Settings];
 
     fn icon(self) -> Icon {
         match self {
             Self::Info => Icon::Info,
+            Self::Parameters => Icon::SlidersVertical,
             Self::Assets => Icon::Files,
             Self::Settings => Icon::Settings,
         }
@@ -303,6 +322,7 @@ impl InspectorTab {
     fn name(self) -> &'static str {
         match self {
             Self::Info => "Info",
+            Self::Parameters => "Parameters",
             Self::Assets => "Assets",
             Self::Settings => "Settings",
         }
@@ -311,6 +331,9 @@ impl InspectorTab {
     fn enabled(self, selection: Option<&Selection>) -> bool {
         match self {
             Self::Info | Self::Settings => true,
+            Self::Parameters => selection.is_some_and(|s| {
+                s.location == Location::Input && build::is_noise(&s.path) && s.path.is_file()
+            }),
             // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
                 s.location == Location::Output
@@ -368,7 +391,9 @@ fn shell(
 
     egui::Panel::bottom("status_bar")
         .frame(bar_frame())
-        .show(&mut root, |ui| status_bar(ui, &project, &state.build));
+        .show(&mut root, |ui| {
+            status_bar(ui, &project, &state.build, state.notice.as_deref())
+        });
 
     if state.show_left_sidebar {
         egui::Panel::left("left_sidebar")
@@ -460,7 +485,10 @@ fn shell(
             }
         });
 
+    confirm_delete(&ctx, &mut state, &project);
+
     if std::mem::take(&mut state.start_build) {
+        state.notice = None;
         start_build(&mut state, &project);
     }
     poll_build(&mut state);
@@ -495,6 +523,13 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
     let mut inspection = inspect::inspect(project, selection.location, &selection.path);
     let cubemap = inspection.cubemap.take();
     let lut = inspection.lut.take();
+    let noise =
+        (selection.location == Location::Input && build::is_noise(&selection.path)).then(|| {
+            std::fs::read_to_string(&selection.path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| Noise::parse(&text))
+                .map(|n| (n.clone(), n))
+        });
     let max_side = ctx.input(|i| i.max_texture_side) as u32;
     let pixels = inspection
         .preview
@@ -513,6 +548,7 @@ fn inspect_selection(ctx: &egui::Context, project: &Project, selection: &Selecti
         cubemap,
         uploaded_cubemap: false,
         lut,
+        noise,
         lut_compare: None,
         uploaded_color_cube: false,
     }
@@ -680,9 +716,10 @@ fn menu_row(ui: &mut Ui, label: &str, check: Option<bool>, interactive: bool) ->
     response
 }
 
-fn status_bar(ui: &mut Ui, project: &Project, build: &BuildStatus) {
+fn status_bar(ui: &mut Ui, project: &Project, build: &BuildStatus, notice: Option<&str>) {
     ui.horizontal(|ui| {
         match build {
+            _ if let Some(notice) = notice => ui.label(notice),
             BuildStatus::Running(_) => ui.label("Building…"),
             BuildStatus::Finished(message) => ui.label(message),
             BuildStatus::Idle if project.root.is_some() => ui.label("Ready"),
@@ -727,17 +764,57 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
         Listing::NoProject => placeholder(ui, "No project open"),
         Listing::Missing(dir) => placeholder(ui, &format!("{} does not exist", dir.display())),
         Listing::Failed(e) => placeholder(ui, e),
-        Listing::Loaded(nodes) if nodes.is_empty() => placeholder(ui, "Empty"),
         Listing::Loaded(nodes) => {
+            let editable = location == Location::Input;
+            let mut cx = TreeCx {
+                location,
+                selection: state.selection.as_ref(),
+                open: &mut state.open,
+                editable,
+                rename: &mut state.rename,
+                rename_done: None,
+                action: None,
+            };
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     ui.add_space(4.0);
                     ui.spacing_mut().item_spacing.y = 0.0;
-                    if let Some(path) = tree(ui, nodes, 0, location, state.selection.as_ref()) {
-                        select(state, location, path);
+                    if nodes.is_empty() {
+                        placeholder(ui, "Empty");
+                    }
+                    tree(ui, nodes, 0, &mut cx);
+                    // The empty area below the rows stands for the input directory itself.
+                    let rest = vec2(ui.available_width(), ui.available_height().max(24.0));
+                    let (_, response) = ui.allocate_exact_size(rest, Sense::click());
+                    if editable && let Some(input) = project.input_dir() {
+                        response.context_menu(|ui| create_items(ui, &input, &mut cx.action));
                     }
                 });
+            let (action, rename_done) = (cx.action, cx.rename_done);
+            match rename_done {
+                Some(true) => commit_rename(state, project),
+                Some(false) => state.rename = None,
+                None => {}
+            }
+            match action {
+                Some(TreeAction::Select(path)) => select(state, location, path),
+                Some(TreeAction::Op(op)) => apply_file_op(state, project, op),
+                None => {}
+            }
+            // F2 / Delete act on the selected Input entry.
+            let keys_free = editable && !ui.ctx().egui_wants_keyboard_input();
+            if let Some(selection) = state
+                .selection
+                .clone()
+                .filter(|s| keys_free && s.location == location)
+            {
+                if ui.input(|i| i.key_pressed(egui::Key::F2)) {
+                    apply_file_op(state, project, FileOp::Rename(selection.path));
+                } else if ui.input(|i| i.key_pressed(egui::Key::Delete)) {
+                    apply_file_op(state, project, FileOp::Delete(selection.path));
+                }
+            }
         }
     }
 }
@@ -844,47 +921,111 @@ fn select(state: &mut UiState, location: Location, path: PathBuf) {
     }
 }
 
-/// Draws `nodes`; returns the file clicked this frame, if any.
-fn tree(
-    ui: &mut Ui,
-    nodes: &[Node],
-    depth: usize,
-    location: Location,
-    selection: Option<&Selection>,
-) -> Option<PathBuf> {
-    let mut clicked = None;
-    for node in nodes {
-        match &node.children {
-            Some(children) => {
-                let id = ui.make_persistent_id(&node.path);
-                let open = ui.data(|d| d.get_temp::<bool>(id).unwrap_or(false));
-                let (chevron, icon) = if open {
-                    (Icon::ChevronDown, Icon::FolderOpen)
-                } else {
-                    (Icon::ChevronRight, Icon::Folder)
-                };
-                let selected =
-                    selection.is_some_and(|s| s.location == location && s.path == node.path);
-                if tree_row(ui, depth, Some(chevron), icon, &node.name, selected).clicked() {
-                    ui.data_mut(|d| d.insert_temp(id, !open));
-                    clicked = Some(node.path.clone());
-                }
-                if open {
-                    clicked = tree(ui, children, depth + 1, location, selection).or(clicked);
-                }
-            }
-            None => {
-                let selected =
-                    selection.is_some_and(|s| s.location == location && s.path == node.path);
-                if tree_row(ui, depth, None, Icon::File, &node.name, selected).clicked() {
-                    clicked = Some(node.path.clone());
-                }
-            }
-        }
-    }
-    clicked
+/// A file operation requested from the Input tree, see docs/features/file-operations.md.
+enum FileOp {
+    NewFolder(PathBuf),
+    NewNoise(PathBuf, NoiseType),
+    Rename(PathBuf),
+    Delete(PathBuf),
 }
 
+enum TreeAction {
+    Select(PathBuf),
+    Op(FileOp),
+}
+
+/// An inline rename in the Input tree.
+struct Rename {
+    path: PathBuf,
+    text: String,
+    /// Focus and select the name on the first frame.
+    started: bool,
+}
+
+/// What tree rows need while drawing; collects the action of this frame.
+struct TreeCx<'a> {
+    location: Location,
+    selection: Option<&'a Selection>,
+    open: &'a mut HashSet<PathBuf>,
+    /// File operations are only offered in the Input tree.
+    editable: bool,
+    rename: &'a mut Option<Rename>,
+    /// Set when a rename should be committed (`Some(true)`) or cancelled (`Some(false)`).
+    rename_done: Option<bool>,
+    action: Option<TreeAction>,
+}
+
+/// Menu items creating something in `dir`.
+fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
+    if menu_item(ui, "New Folder", None).clicked() {
+        *action = Some(TreeAction::Op(FileOp::NewFolder(dir.to_path_buf())));
+        ui.close();
+    }
+    ui.menu_button("New Noise", |ui| {
+        for kind in NoiseType::ALL {
+            if menu_item(ui, kind.name(), None).clicked() {
+                *action = Some(TreeAction::Op(FileOp::NewNoise(dir.to_path_buf(), kind)));
+                ui.close();
+            }
+        }
+    });
+}
+
+fn tree(ui: &mut Ui, nodes: &[Node], depth: usize, cx: &mut TreeCx) {
+    for node in nodes {
+        let is_dir = node.children.is_some();
+        let open = cx.open.contains(&node.path);
+        let (chevron, icon) = match (is_dir, open) {
+            (true, true) => (Some(Icon::ChevronDown), Icon::FolderOpen),
+            (true, false) => (Some(Icon::ChevronRight), Icon::Folder),
+            (false, _) => (None, Icon::File),
+        };
+        let selected = cx
+            .selection
+            .is_some_and(|s| s.location == cx.location && s.path == node.path);
+        let renaming = cx.rename.as_mut().filter(|r| r.path == node.path);
+        let (response, done) = tree_row(ui, depth, chevron, icon, &node.name, selected, renaming);
+        if done.is_some() {
+            cx.rename_done = done;
+        }
+        if response.clicked() {
+            if is_dir && !cx.open.remove(&node.path) {
+                cx.open.insert(node.path.clone());
+            }
+            cx.action = Some(TreeAction::Select(node.path.clone()));
+        }
+        if cx.editable {
+            if response.secondary_clicked() {
+                cx.action = Some(TreeAction::Select(node.path.clone()));
+            }
+            response.context_menu(|ui| {
+                let dir = if is_dir {
+                    node.path.clone()
+                } else {
+                    node.path.parent().unwrap_or(&node.path).to_path_buf()
+                };
+                create_items(ui, &dir, &mut cx.action);
+                ui.separator();
+                if menu_item(ui, "Rename", None).clicked() {
+                    cx.action = Some(TreeAction::Op(FileOp::Rename(node.path.clone())));
+                    ui.close();
+                }
+                if menu_item(ui, "Delete", None).clicked() {
+                    cx.action = Some(TreeAction::Op(FileOp::Delete(node.path.clone())));
+                    ui.close();
+                }
+            });
+        }
+        if let Some(children) = &node.children
+            && open
+        {
+            tree(ui, children, depth + 1, cx);
+        }
+    }
+}
+
+/// A tree row; while `renaming`, its name is a text field. Returns the row response and,
+/// when the rename ends this frame, whether to commit it.
 fn tree_row(
     ui: &mut Ui,
     depth: usize,
@@ -892,7 +1033,8 @@ fn tree_row(
     icon: Icon,
     name: &str,
     selected: bool,
-) -> Response {
+    renaming: Option<&mut Rename>,
+) -> (Response, Option<bool>) {
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
     if selected {
         ui.painter()
@@ -915,14 +1057,164 @@ fn tree_row(
     }
     icon.image(16.0, TEXT_WEAK)
         .paint_at(ui, icon_rect(x + 16.0));
-    ui.painter().text(
-        pos2(x + 38.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        name,
-        FontId::proportional(13.0),
-        TEXT,
-    );
-    response
+    let text_rect = Rect::from_min_max(pos2(x + 36.0, rect.top() + 1.0), rect.max - vec2(4.0, 1.0));
+    let Some(rename) = renaming else {
+        ui.painter().text(
+            pos2(x + 38.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            name,
+            FontId::proportional(13.0),
+            TEXT,
+        );
+        return (response, None);
+    };
+    let mut output = None;
+    ui.scope_builder(UiBuilder::new().max_rect(text_rect), |ui| {
+        output = Some(
+            egui::TextEdit::singleline(&mut rename.text)
+                .font(FontId::proportional(13.0))
+                .desired_width(text_rect.width())
+                .margin(Margin::symmetric(2, 1))
+                .show(ui),
+        );
+    });
+    let mut output = output.expect("text field shown");
+    if !rename.started {
+        rename.started = true;
+        output.response.request_focus();
+        let all = egui::text::CCursorRange::two(
+            egui::text::CCursor::new(0),
+            egui::text::CCursor::new(rename.text.chars().count()),
+        );
+        output.state.cursor.set_char_range(Some(all));
+        output.state.store(ui.ctx(), output.response.id);
+        return (response, None);
+    }
+    let done = output.response.lost_focus().then(|| {
+        // Enter or clicking elsewhere commits; Escape cancels.
+        !ui.input(|i| i.key_pressed(egui::Key::Escape))
+    });
+    (response, done)
+}
+
+/// Runs a file operation from the Input tree; failures go to the status bar.
+fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
+    let Some(input) = project.input_dir() else {
+        return;
+    };
+    state.notice = None;
+    let created = match op {
+        FileOp::NewFolder(dir) => fileops::create_folder(&input, &dir)
+            .map_err(|e| ("New Folder", e))
+            .map(|path| (dir, path)),
+        FileOp::NewNoise(dir, kind) => fileops::create_noise(&input, &dir, kind)
+            .map_err(|e| ("New Noise", e))
+            .map(|path| (dir, path)),
+        FileOp::Rename(path) => {
+            let text = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            state.rename = Some(Rename {
+                path,
+                text,
+                started: false,
+            });
+            return;
+        }
+        FileOp::Delete(path) => {
+            state.confirm_delete = Some(path);
+            return;
+        }
+    };
+    match created {
+        Ok((dir, path)) => {
+            state.open.insert(dir);
+            state.rescan = true;
+            select(state, Location::Input, path.clone());
+            apply_file_op(state, project, FileOp::Rename(path));
+        }
+        Err((what, e)) => state.notice = Some(format!("{what} failed: {e}")),
+    }
+}
+
+fn commit_rename(state: &mut UiState, project: &Project) {
+    let (Some(rename), Some(input)) = (state.rename.take(), project.input_dir()) else {
+        return;
+    };
+    match fileops::rename(&input, &rename.path, rename.text.trim()) {
+        Ok(new) if new != rename.path => {
+            if state.open.remove(&rename.path) {
+                state.open.insert(new.clone());
+            }
+            state.rescan = true;
+            if state
+                .selection
+                .as_ref()
+                .is_some_and(|s| s.path == rename.path)
+            {
+                select(state, Location::Input, new);
+            }
+        }
+        Ok(_) => {}
+        Err(e) => state.notice = Some(format!("Rename failed: {e}")),
+    }
+}
+
+/// The delete confirmation dialog, see docs/features/file-operations.md#delete.
+fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
+    let Some(path) = state.confirm_delete.clone() else {
+        return;
+    };
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut confirmed = false;
+    let mut cancelled = false;
+    let modal = egui::Modal::new(egui::Id::new("confirm_delete")).show(ctx, |ui| {
+        ui.set_width(320.0);
+        ui.label(RichText::new(format!("Delete {name}?")).strong());
+        ui.add_space(4.0);
+        ui.weak(if path.is_dir() {
+            "This permanently deletes it and everything inside it."
+        } else {
+            "This permanently deletes the file."
+        });
+        ui.add_space(12.0);
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let delete = egui::Button::new(RichText::new("Delete").color(BG_BAR)).fill(ACCENT);
+            if ui.add(delete).clicked() {
+                confirmed = true;
+            }
+            if ui.button("Cancel").clicked() {
+                cancelled = true;
+            }
+        });
+    });
+    if confirmed {
+        state.confirm_delete = None;
+        state.notice = None;
+        let Some(input) = project.input_dir() else {
+            return;
+        };
+        match fileops::delete(&input, &path) {
+            Ok(()) => {
+                state.rescan = true;
+                if state
+                    .selection
+                    .as_ref()
+                    .is_some_and(|s| s.path.starts_with(&path))
+                {
+                    state.selection = None;
+                    state.reinspect = true;
+                }
+            }
+            Err(e) => state.notice = Some(format!("Delete failed: {e}")),
+        }
+    } else if cancelled || modal.should_close() {
+        state.confirm_delete = None;
+    }
 }
 
 fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
@@ -950,8 +1242,16 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
     egui::CentralPanel::default()
         .frame(Frame::new().fill(BG_PANEL))
         .show(ui, |ui| {
-            match (state.inspector_tab, &state.inspected, &state.selection) {
+            match (state.inspector_tab, &mut state.inspected, &state.selection) {
                 (_, None, _) | (_, _, None) => placeholder(ui, "Nothing selected"),
+                (InspectorTab::Parameters, Some(inspected), Some(selection)) => {
+                    if let Some(noise) = parameters_tab(ui, inspected) {
+                        match std::fs::write(&selection.path, noise.to_toml()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (InspectorTab::Info, Some(inspected), _) => info(ui, &inspected.inspection),
                 (InspectorTab::Assets, _, Some(selection)) => {
                     assets_tab(ui, assets, &selection.path)
@@ -959,6 +1259,86 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets) {
                 (InspectorTab::Settings, ..) => placeholder(ui, "No settings for this file"),
             }
         });
+}
+
+/// Noise parameter editor; returns the parameters to write when a change is committed.
+/// See docs/features/noise.md#editing.
+fn parameters_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
+    let (edit, saved) = match &mut inspected.noise {
+        Some(Ok((edit, saved))) => (edit, saved),
+        Some(Err(e)) => {
+            placeholder(ui, e);
+            return None;
+        }
+        None => {
+            placeholder(ui, "No parameters");
+            return None;
+        }
+    };
+    let mut interacting = false;
+    Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+        egui::Grid::new("noise_parameters")
+            .num_columns(2)
+            .spacing(vec2(12.0, 6.0))
+            .show(ui, |ui| {
+                ui.weak("Type");
+                egui::ComboBox::from_id_salt("noise_type")
+                    .selected_text(edit.kind.name())
+                    .show_ui(ui, |ui| {
+                        for kind in NoiseType::ALL {
+                            ui.selectable_value(&mut edit.kind, kind, kind.name());
+                        }
+                    });
+                ui.end_row();
+
+                ui.weak("Size");
+                egui::ComboBox::from_id_salt("noise_size")
+                    .selected_text(edit.size.to_string())
+                    .show_ui(ui, |ui| {
+                        for size in [64, 128, 256, 512, 1024, 2048, 4096] {
+                            ui.selectable_value(&mut edit.size, size, size.to_string());
+                        }
+                    });
+                ui.end_row();
+
+                let mut track = |response: Response| {
+                    interacting |= response.dragged() || response.has_focus();
+                };
+                ui.weak("Seed");
+                track(ui.add(egui::DragValue::new(&mut edit.seed).range(0..=u32::MAX)));
+                ui.end_row();
+
+                let octaves_apply = edit.kind != NoiseType::White;
+                ui.weak("Frequency");
+                track(
+                    ui.add_enabled(
+                        octaves_apply,
+                        egui::Slider::new(&mut edit.frequency, 1..=64)
+                            .clamping(egui::SliderClamping::Never),
+                    ),
+                );
+                ui.end_row();
+                ui.weak("Octaves");
+                track(ui.add_enabled(octaves_apply, egui::Slider::new(&mut edit.octaves, 1..=8)));
+                ui.end_row();
+                ui.weak("Gain");
+                track(ui.add_enabled(
+                    octaves_apply,
+                    egui::Slider::new(&mut edit.gain, 0.0..=1.0).fixed_decimals(2),
+                ));
+                ui.end_row();
+
+                ui.weak("Invert");
+                ui.checkbox(&mut edit.invert, "");
+                ui.end_row();
+            });
+    });
+    edit.frequency = edit.frequency.clamp(1, 256);
+    // Sliders and fields commit when released / unfocused; dropdowns and checkboxes at once.
+    (!interacting && edit != saved).then(|| {
+        *saved = edit.clone();
+        edit.clone()
+    })
 }
 
 fn info(ui: &mut Ui, inspection: &Inspection) {
@@ -1396,11 +1776,35 @@ fn canvas_lut(
         LutView::Compare => compare_view(ui, rect, lut, lut_compare, lut_ui, last_image),
         LutView::Cube => {
             if !*uploaded_color_cube {
-                preview.color_cube = Some(preview3d::color_cube(lut));
+                let before = preview3d::color_cube(lut.size, |rgb| rgb);
+                let after = preview3d::color_cube(lut.size, |rgb| lut.apply(rgb));
+                preview.color_cube = Some((before, after));
                 *uploaded_color_cube = true;
             }
             preview.colors = true;
             view_3d(ui, rect, preview);
+            // Holding Space shows Before, whatever the toolbar says.
+            let held =
+                !ui.ctx().egui_wants_keyboard_input() && ui.input(|i| i.key_down(egui::Key::Space));
+            preview.colors_before = lut_ui.cube_before || held;
+            let tools = [
+                Tool {
+                    glyph: Glyph::Icon(Icon::EyeOff),
+                    name: "Before".into(),
+                    on: lut_ui.cube_before,
+                    enabled: true,
+                },
+                Tool {
+                    glyph: Glyph::Icon(Icon::Eye),
+                    name: "After".into(),
+                    on: !lut_ui.cube_before,
+                    enabled: true,
+                },
+            ];
+            if let Some((_, button)) = toolbar(ui, rect, &[&tools]) {
+                lut_ui.cube_before = button == 0;
+                ui.ctx().request_repaint();
+            }
         }
         LutView::Curves => curves_view(ui, rect, lut),
     }

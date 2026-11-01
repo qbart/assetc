@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use crate::build::{Error, Failure, is_texture_source, relative, strip_extension};
+use crate::build::{Error, Failure, is_noise, is_texture_source, relative, strip_extension};
 use crate::config;
 use crate::hash::fnv1a64;
 use crate::manifest::Kind;
@@ -249,6 +249,8 @@ pub fn plan(input: &Path, textures: &config::Textures) -> Result<Plan, Error> {
         let (color, flip_green) = match claims.get(rel) {
             Some(claim) => (claim.color, claim.flip_green),
             None if orm_inputs.contains(rel) => continue,
+            // Noise is data: linear unless a material slot says otherwise.
+            None if is_noise(Path::new(rel)) => (ColorSpace::Linear, false),
             None => (settings.color_space(rel), false),
         };
         let asset_path = strip_extension(rel).to_owned();

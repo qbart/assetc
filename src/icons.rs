@@ -11,6 +11,8 @@ pub enum Icon {
     ChevronRight,
     CircleSmall,
     Cylinder,
+    Eye,
+    EyeOff,
     File,
     Files,
     Folder,
@@ -23,11 +25,12 @@ pub enum Icon {
     Palette,
     RefreshCw,
     Settings,
+    SlidersVertical,
     Torus,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 19] = [
+const SVGS: [(&str, &str); 22] = [
     ("box", include_str!("../assets/icons/box.svg")),
     ("check", include_str!("../assets/icons/check.svg")),
     (
@@ -43,6 +46,8 @@ const SVGS: [(&str, &str); 19] = [
         include_str!("../assets/icons/circle-small.svg"),
     ),
     ("cylinder", include_str!("../assets/icons/cylinder.svg")),
+    ("eye", include_str!("../assets/icons/eye.svg")),
+    ("eye-off", include_str!("../assets/icons/eye-off.svg")),
     ("file", include_str!("../assets/icons/file.svg")),
     ("files", include_str!("../assets/icons/files.svg")),
     ("folder", include_str!("../assets/icons/folder.svg")),
@@ -58,6 +63,10 @@ const SVGS: [(&str, &str); 19] = [
     ("palette", include_str!("../assets/icons/palette.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("settings", include_str!("../assets/icons/settings.svg")),
+    (
+        "sliders-vertical",
+        include_str!("../assets/icons/sliders-vertical.svg"),
+    ),
     ("torus", include_str!("../assets/icons/torus.svg")),
 ];
 
