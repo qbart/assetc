@@ -76,6 +76,14 @@ impl Writer {
 pub struct Reader<'a> {
     pub version: u32,
     chunks: Vec<([u8; 8], &'a [u8])>,
+    offsets: Vec<u64>,
+}
+
+/// A chunk-table entry, for display.
+pub struct Entry {
+    pub name: String,
+    pub offset: u64,
+    pub size: u64,
 }
 
 impl<'a> Reader<'a> {
@@ -94,6 +102,7 @@ impl<'a> Reader<'a> {
             .filter(|&end| end <= bytes.len())
             .ok_or("chunk table runs past the end of the file")?;
         let mut chunks = Vec::with_capacity(count);
+        let mut offsets = Vec::with_capacity(count);
         for i in 0..count {
             let entry = HEADER_SIZE + i * ENTRY_SIZE;
             let name: [u8; 8] = bytes[entry..entry + 8].try_into().unwrap();
@@ -103,8 +112,26 @@ impl<'a> Reader<'a> {
                 .filter(|&end| offset >= table_end as u64 && end <= bytes.len() as u64)
                 .ok_or_else(|| format!("chunk {} runs past the end of the file", show(&name)))?;
             chunks.push((name, &bytes[offset as usize..end as usize]));
+            offsets.push(offset);
         }
-        Ok(Self { version, chunks })
+        Ok(Self {
+            version,
+            chunks,
+            offsets,
+        })
+    }
+
+    /// Every chunk in table order.
+    pub fn entries(&self) -> Vec<Entry> {
+        self.chunks
+            .iter()
+            .zip(&self.offsets)
+            .map(|((name, payload), offset)| Entry {
+                name: show(name),
+                offset: *offset,
+                size: payload.len() as u64,
+            })
+            .collect()
     }
 
     pub fn chunk(&self, name: &str) -> Option<&'a [u8]> {

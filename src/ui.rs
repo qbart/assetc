@@ -83,6 +83,9 @@ struct UiState {
     mesh_display: MeshDisplay,
     /// Level of detail shown for each compiled mesh, by path.
     lod_levels: HashMap<PathBuf, usize>,
+    /// Compiled meshes in 3D (else their chunks), and the chunk shown.
+    mesh_in_3d: bool,
+    mesh_chunk: String,
 }
 
 /// Canvas zoom and pan, see docs/features/canvas.md#view.
@@ -150,6 +153,7 @@ struct Inspected {
     compiled_mesh: Option<crate::amesh::Preview>,
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
     uploaded_lod: Option<usize>,
+    compiled_bytes: Option<Vec<u8>>,
 }
 
 /// Before / after textures of the LUT compare view for one source image.
@@ -309,6 +313,8 @@ impl Default for UiState {
             mip_levels: HashMap::new(),
             mesh_display: MeshDisplay::default(),
             lod_levels: HashMap::new(),
+            mesh_in_3d: true,
+            mesh_chunk: "DESC".into(),
         }
     }
 }
@@ -532,7 +538,8 @@ fn shell(
     let shown = Shown::of(state.inspected.as_ref());
     let show_3d = match shown {
         Shown::Image => state.mode == ViewMode::ThreeD,
-        Shown::Environment | Shown::Model | Shown::CompiledMesh => true,
+        Shown::Environment | Shown::Model => true,
+        Shown::CompiledMesh => state.mesh_in_3d,
         Shown::Lut => state.lut.view == LutView::Cube,
         Shown::Specimen | Shown::Other => false,
     };
@@ -556,14 +563,18 @@ fn shell(
             let (options, active, enabled): (&[&str], _, _) = match shown {
                 Shown::Image => (&modes, mode, true),
                 Shown::Lut => (&lut_views, lut_view, true),
-                Shown::Environment | Shown::Specimen | Shown::Model | Shown::CompiledMesh => {
-                    (&[], None, false)
-                }
+                Shown::CompiledMesh => (
+                    &["3D", "Chunks"],
+                    Some(usize::from(!state.mesh_in_3d)),
+                    true,
+                ),
+                Shown::Environment | Shown::Specimen | Shown::Model => (&[], None, false),
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
                 match shown {
                     Shown::Lut => state.lut.view = LutView::ALL[i],
+                    Shown::CompiledMesh => state.mesh_in_3d = i == 0,
                     _ => state.mode = ViewMode::ALL[i],
                 }
             }
@@ -581,6 +592,15 @@ fn shell(
             match (shown, state.mode) {
                 (Shown::Environment, _) => {
                     canvas_environment(ui, rect, state.inspected.as_mut(), &mut preview3d)
+                }
+                (Shown::CompiledMesh, _) if !state.mesh_in_3d => {
+                    if let Some(bytes) = state
+                        .inspected
+                        .as_ref()
+                        .and_then(|i| i.compiled_bytes.as_deref())
+                    {
+                        chunks_view(ui, rect, bytes, &mut state.mesh_chunk);
+                    }
                 }
                 (Shown::CompiledMesh, _) => {
                     let lod = state
@@ -674,6 +694,7 @@ struct Prepared {
     model: Option<(PathBuf, u64)>,
     compiled_mesh: Option<crate::amesh::Preview>,
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
+    compiled_bytes: Option<Vec<u8>>,
 }
 
 fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
@@ -751,6 +772,7 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
     Prepared {
         compiled_mesh: inspection.compiled_mesh.take(),
         compiled_materials: std::mem::take(&mut inspection.compiled_materials),
+        compiled_bytes: inspection.compiled_bytes.take(),
         gradient,
         mesh,
         model,
@@ -886,6 +908,7 @@ fn inspected(
         compiled_mesh: prepared.compiled_mesh,
         compiled_materials: prepared.compiled_materials,
         uploaded_lod: None,
+        compiled_bytes: prepared.compiled_bytes,
         lut_compare: None,
         uploaded_color_cube: false,
         model: prepared.model,
@@ -3624,6 +3647,125 @@ fn canvas_compiled_mesh(
         *display = MeshDisplay::ALL[button];
         ui.ctx().request_repaint();
     }
+}
+
+/// A compiled mesh's chunks: a list, and the chosen one's table; see
+/// docs/features/models.md#chunks-view.
+fn chunks_view(ui: &mut Ui, rect: Rect, bytes: &[u8], chosen: &mut String) {
+    use egui_extras::{Column, TableBuilder};
+    let Ok(reader) = crate::chunks::Reader::parse(bytes, crate::amesh::FORMAT) else {
+        return;
+    };
+    let entries = reader.entries();
+    if !entries.iter().any(|e| e.name == *chosen)
+        && let Some(first) = entries.first()
+    {
+        *chosen = first.name.clone();
+    }
+    let list = Rect::from_min_size(rect.min, vec2(220.0, rect.height()));
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(list, 0.0, BG_PANEL);
+    painter.vline(list.right() - 0.5, list.y_range(), Stroke::new(1.0, STROKE));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
+        egui::ScrollArea::vertical()
+            .id_salt("chunk_list")
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for entry in &entries {
+                    let (row, response) =
+                        ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+                    let painter = ui.painter();
+                    if entry.name == *chosen {
+                        painter.rect_filled(row, 0.0, ACCENT.gamma_multiply(0.25));
+                    } else if response.hovered() {
+                        painter.rect_filled(row, 0.0, BG_HEADER);
+                    }
+                    painter.text(
+                        pos2(row.left() + 10.0, row.top() + 12.0),
+                        Align2::LEFT_CENTER,
+                        &entry.name,
+                        FontId::monospace(13.0),
+                        TEXT,
+                    );
+                    painter.text(
+                        pos2(row.left() + 10.0, row.top() + 29.0),
+                        Align2::LEFT_CENTER,
+                        crate::amesh::describe(&entry.name),
+                        FontId::proportional(12.0),
+                        TEXT_WEAK,
+                    );
+                    painter.text(
+                        pos2(row.right() - 10.0, row.top() + 12.0),
+                        Align2::RIGHT_CENTER,
+                        inspect::format_size(entry.size),
+                        FontId::proportional(12.0),
+                        TEXT_WEAK,
+                    );
+                    if response.clicked() {
+                        *chosen = entry.name.clone();
+                    }
+                }
+            });
+    });
+
+    let Some(entry) = entries.iter().find(|e| e.name == *chosen) else {
+        return;
+    };
+    let Some(table) = crate::amesh::table(bytes, &entry.name) else {
+        return;
+    };
+    let area = Rect::from_min_max(pos2(list.right(), rect.top()), rect.max).shrink(10.0);
+    ui.scope_builder(egui::UiBuilder::new().max_rect(area), |ui| {
+        ui.label(
+            RichText::new(format!(
+                "{} — {}   @{}   {} bytes",
+                entry.name,
+                crate::amesh::describe(&entry.name),
+                entry.offset,
+                entry.size
+            ))
+            .monospace()
+            .size(13.0)
+            .color(TEXT),
+        );
+        ui.add_space(6.0);
+        let mut columns: Vec<&str> = Vec::new();
+        if table.numbered {
+            columns.push("#");
+        }
+        columns.extend(&table.columns);
+        let text = |s: String| RichText::new(s).monospace().size(12.0);
+        let mut builder = TableBuilder::new(ui)
+            .id_salt(("chunk_table", &entry.name))
+            .striped(true)
+            .resizable(true)
+            .auto_shrink(false)
+            .cell_layout(Layout::left_to_right(Align::Center));
+        for _ in 1..columns.len() {
+            builder = builder.column(Column::auto().at_least(40.0));
+        }
+        builder
+            .column(Column::remainder().at_least(40.0))
+            .header(20.0, |mut header| {
+                for name in &columns {
+                    header.col(|ui| {
+                        ui.label(text((*name).to_owned()).color(TEXT_WEAK));
+                    });
+                }
+            })
+            .body(|body| {
+                body.rows(20.0, table.rows, |mut row| {
+                    let index = row.index();
+                    for column in 0..columns.len() {
+                        row.col(|ui| {
+                            let value = crate::amesh::cell(bytes, &entry.name, index, column);
+                            ui.add(egui::Label::new(text(value).color(TEXT)).extend());
+                        });
+                    }
+                });
+            });
+    });
 }
 
 /// A glTF model in the 3D view, see docs/features/models.md#preview.

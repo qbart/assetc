@@ -583,8 +583,11 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
         return Err(format!("unsupported {FORMAT} version {}", reader.version));
     }
     let desc = reader.require("DESC")?;
-    let field = |at| chunks::u32_at(desc, 0, 32, at).ok_or("DESC is too short");
-    let flags = *desc.get(23).ok_or("DESC is too short")?;
+    if desc.len() < 32 {
+        return Err("DESC is too short".into());
+    }
+    let field = |at| chunks::u32_at(desc, 0, 32, at).unwrap_or(0);
+    let (stride, width, flags) = (u16::from_le_bytes([desc[20], desc[21]]), desc[22], desc[23]);
     let bounds = reader.require("BOUNDS")?;
     let f = |i: usize| chunks::f32_at(bounds, 0, 40, i * 4).unwrap_or(0.0);
     let joints = reader.chunk("SKELETON").map_or(0, |s| s.len() / 112);
@@ -592,12 +595,28 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
         .chunk("LODTABLE")
         .and_then(|t| chunks::u32_at(t, 0, 8, 0))
         .unwrap_or(0);
+    let index_type = if width == 4 { "u32" } else { "u16" };
     Ok(vec![
-        ("Vertices", field(0)?.to_string()),
-        ("Triangles", (field(4)? / 3).to_string()),
-        ("Submeshes", field(12)?.to_string()),
-        ("Meshlets", field(8)?.to_string()),
-        ("Materials", field(16)?.to_string()),
+        (
+            "Format",
+            format!(
+                "{FORMAT} v{}, {} chunks",
+                reader.version,
+                reader.entries().len()
+            ),
+        ),
+        ("Vertices", field(0).to_string()),
+        ("Vertex stride", format!("{stride} B")),
+        ("Indices", format!("{} ({index_type})", field(4))),
+        ("Triangles", (field(4) / 3).to_string()),
+        ("Submeshes", field(12).to_string()),
+        ("Meshlets", field(8).to_string()),
+        (
+            "Meshlet limits",
+            format!("{} vertices, {} triangles", field(24), field(28)),
+        ),
+        ("Materials", field(16).to_string()),
+        ("Flags", flag_names(flags)),
         (
             "Levels of detail",
             if lods > 0 {
@@ -627,6 +646,272 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             ),
         ),
     ])
+}
+
+/// `DESC.flags` as `0x07 (tangents, skinned, levels of detail)`.
+fn flag_names(flags: u8) -> String {
+    let names: Vec<_> = ["tangents", "skinned", "levels of detail"]
+        .into_iter()
+        .enumerate()
+        .filter(|(bit, _)| flags & (1 << bit) != 0)
+        .map(|(_, name)| name)
+        .collect();
+    let names = if names.is_empty() {
+        "none".to_owned()
+    } else {
+        names.join(", ")
+    };
+    format!("{flags:#04x} ({names})")
+}
+
+/// What a chunk holds, for the Chunks view; see docs/features/models.md#chunks-view.
+pub fn describe(name: &str) -> &'static str {
+    match name {
+        "DESC" => "Mesh descriptor",
+        "BOUNDS" => "Mesh bounds",
+        "VERTICES" => "Vertices",
+        "INDICES" => "Indices",
+        "SUBMESH" => "Submeshes",
+        "MATERIAL" => "Material asset IDs",
+        "MESHLETS" => "Meshlets",
+        "MLVERTS" => "Meshlet vertices",
+        "MLTRIS" => "Meshlet triangles",
+        "MLBOUNDS" => "Meshlet bounds",
+        "LODIDX" => "LOD indices",
+        "LODTABLE" => "LOD table",
+        "SKIN" => "Skin weights",
+        "SKELETON" => "Skeleton",
+        _ => "Unknown chunk",
+    }
+}
+
+/// The shape of a chunk's table: its columns (after `#` for arrays; `Field`, `Value` for
+/// records) and row count.
+pub struct Table {
+    pub columns: Vec<&'static str>,
+    pub rows: usize,
+    /// One row per element, with its index first.
+    pub numbered: bool,
+}
+
+const DESC_FIELDS: [&str; 10] = [
+    "vertex_count",
+    "index_count",
+    "meshlet_count",
+    "submesh_count",
+    "material_count",
+    "vertex_stride",
+    "index_width",
+    "flags",
+    "meshlet_max_vertices",
+    "meshlet_max_triangles",
+];
+const BOUNDS_FIELDS: [&str; 4] = ["aabb_min", "aabb_max", "sphere_center", "sphere_radius"];
+
+pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
+    let reader = chunks::Reader::parse(bytes, FORMAT).ok()?;
+    let payload = reader.chunk(name)?;
+    let wide = reader.chunk("DESC").and_then(|d| d.get(22)) == Some(&4);
+    let array = |columns: Vec<&'static str>, stride: usize| Table {
+        columns,
+        rows: payload.len() / stride,
+        numbered: true,
+    };
+    Some(match name {
+        "DESC" => Table {
+            columns: vec!["Field", "Value"],
+            rows: DESC_FIELDS.len(),
+            numbered: false,
+        },
+        "BOUNDS" => Table {
+            columns: vec!["Field", "Value"],
+            rows: BOUNDS_FIELDS.len(),
+            numbered: false,
+        },
+        "VERTICES" => array(vec!["Position", "Normal", "Tangent", "UV"], 28),
+        "INDICES" => array(vec!["i0", "i1", "i2"], if wide { 12 } else { 6 }),
+        "SUBMESH" => array(
+            vec![
+                "First index",
+                "Index count",
+                "First meshlet",
+                "Meshlet count",
+                "Material",
+                "AABB min",
+                "AABB max",
+            ],
+            64,
+        ),
+        "MATERIAL" => array(vec!["Asset ID"], 8),
+        "MESHLETS" => array(
+            vec!["Vertex offset", "Vertices", "Triangle offset", "Triangles"],
+            16,
+        ),
+        "MLVERTS" => array(vec!["Vertex"], 4),
+        "MLTRIS" => array(vec!["i0", "i1", "i2"], 3),
+        "LODIDX" => array(vec!["i0", "i1", "i2"], 12),
+        "MLBOUNDS" => array(vec!["Center", "Radius", "Cone axis", "Cone cutoff"], 32),
+        // An 8-byte header, then one range per submesh and level.
+        "LODTABLE" => Table {
+            columns: vec!["Submesh", "Level", "First index", "Index count"],
+            rows: payload.len().saturating_sub(8) / 8,
+            numbered: true,
+        },
+        "SKIN" => array(vec!["Joints", "Weights"], 24),
+        "SKELETON" => array(vec!["Parent", "Translation", "Rotation", "Scale"], 112),
+        _ => Table {
+            columns: vec!["Offset", "Bytes"],
+            rows: payload.len().div_ceil(16),
+            numbered: false,
+        },
+    })
+}
+
+fn vector(values: &[f32]) -> String {
+    values
+        .iter()
+        .map(|v| format!("{v:.3}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The text of a cell of a chunk's table (`column` 0 is `#` for numbered tables).
+pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
+    let Ok(reader) = chunks::Reader::parse(bytes, FORMAT) else {
+        return String::new();
+    };
+    let Some(p) = reader.chunk(name) else {
+        return String::new();
+    };
+    let Some(table) = table(bytes, name) else {
+        return String::new();
+    };
+    if table.numbered && column == 0 {
+        return row.to_string();
+    }
+    let column = if table.numbered { column - 1 } else { column };
+    let u32_at =
+        |index: usize, stride: usize, at: usize| chunks::u32_at(p, index, stride, at).unwrap_or(0);
+    let floats = |index: usize, stride: usize, at: usize, n: usize| -> Vec<f32> {
+        (0..n)
+            .map(|k| chunks::f32_at(p, index, stride, at + k * 4).unwrap_or(0.0))
+            .collect()
+    };
+    let i16_at = |at: usize| {
+        p.get(at..at + 2)
+            .map_or(0, |b| i16::from_le_bytes([b[0], b[1]]))
+    };
+    match name {
+        "DESC" if column == 0 => DESC_FIELDS[row].to_owned(),
+        "DESC" => match row {
+            5 => format!(
+                "{} B",
+                p.get(20..22)
+                    .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
+            ),
+            6 => format!("{} B", p.get(22).copied().unwrap_or(0)),
+            7 => flag_names(p.get(23).copied().unwrap_or(0)),
+            8 => u32_at(0, 32, 24).to_string(),
+            9 => u32_at(0, 32, 28).to_string(),
+            _ => u32_at(0, 32, row * 4).to_string(),
+        },
+        "BOUNDS" if column == 0 => BOUNDS_FIELDS[row].to_owned(),
+        "BOUNDS" => match row {
+            3 => vector(&floats(0, 40, 36, 1)),
+            _ => vector(&floats(0, 40, row * 12, 3)),
+        },
+        "VERTICES" => {
+            let base = row * 28;
+            match column {
+                0 => vector(&floats(row, 28, 0, 3)),
+                1 => vector(&octahedral_decode([i16_at(base + 12), i16_at(base + 14)])),
+                2 => {
+                    let x = i16_at(base + 16);
+                    let [tx, ty, tz] = octahedral_decode([x & !1, i16_at(base + 18)]);
+                    let w = if x & 1 == 1 { -1.0 } else { 1.0 };
+                    vector(&[tx, ty, tz, w])
+                }
+                _ => vector(&floats(row, 28, 20, 2)),
+            }
+        }
+        "INDICES" => {
+            let wide = reader.chunk("DESC").and_then(|d| d.get(22)) == Some(&4);
+            if wide {
+                u32_at(row * 3 + column, 4, 0).to_string()
+            } else {
+                let at = (row * 3 + column) * 2;
+                p.get(at..at + 2)
+                    .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
+                    .to_string()
+            }
+        }
+        "SUBMESH" => match column {
+            4 => match u32_at(row, 64, 16) {
+                NO_MATERIAL => "—".into(),
+                slot => slot.to_string(),
+            },
+            5 => vector(&floats(row, 64, 24, 3)),
+            6 => vector(&floats(row, 64, 36, 3)),
+            c => u32_at(row, 64, c * 4).to_string(),
+        },
+        "MATERIAL" => p
+            .get(row * 8..row * 8 + 8)
+            .map(|b| format!("{:#018x}", u64::from_le_bytes(b.try_into().unwrap())))
+            .unwrap_or_default(),
+        "MESHLETS" => u32_at(row, 16, column * 4).to_string(),
+        "MLVERTS" => u32_at(row, 4, 0).to_string(),
+        "MLTRIS" => p.get(row * 3 + column).map_or(String::new(), u8::to_string),
+        "LODIDX" => u32_at(row * 3 + column, 4, 0).to_string(),
+        "MLBOUNDS" => match column {
+            0 => vector(&floats(row, 32, 0, 3)),
+            1 => vector(&floats(row, 32, 12, 1)),
+            2 => vector(&floats(row, 32, 16, 3)),
+            _ => vector(&floats(row, 32, 28, 1)),
+        },
+        "LODTABLE" => {
+            let lods = u32_at(0, 8, 0).max(1) as usize;
+            match column {
+                0 => (row / lods).to_string(),
+                1 => (row % lods + 1).to_string(),
+                c => u32_at(row + 1, 8, (c - 2) * 4).to_string(),
+            }
+        }
+        "SKIN" => {
+            if column == 0 {
+                (0..4)
+                    .map(|k| {
+                        p.get(row * 24 + k * 2..row * 24 + k * 2 + 2)
+                            .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
+                            .to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            } else {
+                vector(&floats(row, 24, 8, 4))
+            }
+        }
+        "SKELETON" => match column {
+            0 => match u32_at(row, 112, 104) as i32 {
+                -1 => "—".into(),
+                parent => parent.to_string(),
+            },
+            1 => vector(&floats(row, 112, 64, 3)),
+            2 => vector(&floats(row, 112, 76, 4)),
+            _ => vector(&floats(row, 112, 92, 3)),
+        },
+        _ => {
+            let bytes = p.get(row * 16..(row * 16 + 16).min(p.len())).unwrap_or(&[]);
+            if column == 0 {
+                format!("{:#06x}", row * 16)
+            } else {
+                bytes
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -708,6 +993,38 @@ mod tests {
         assert!(!lod1.same_as_previous);
         // The small grid's submesh is still there in every level.
         assert!(preview.levels.iter().all(|l| l.submeshes.contains(&1)));
+    }
+
+    #[test]
+    fn chunk_tables_and_info() {
+        let (bytes, summary) = encode(&[grid(4)], &[9], None, true, MeshletLimits::default());
+        let desc = table(&bytes, "DESC").unwrap();
+        assert!(!desc.numbered);
+        assert_eq!(desc.rows, 10);
+        assert_eq!(cell(&bytes, "DESC", 0, 0), "vertex_count");
+        assert_eq!(cell(&bytes, "DESC", 0, 1), "25");
+        assert_eq!(cell(&bytes, "DESC", 5, 1), "28 B");
+        assert_eq!(cell(&bytes, "DESC", 7, 1), "0x05 (tangents, levels of detail)");
+        let vertices = table(&bytes, "VERTICES").unwrap();
+        assert_eq!(vertices.rows, summary.vertices);
+        assert_eq!(cell(&bytes, "VERTICES", 1, 0), "1");
+        assert_eq!(cell(&bytes, "VERTICES", 1, 2), "0.000, 0.000, 1.000");
+        assert_eq!(cell(&bytes, "VERTICES", 1, 3), "1.000, 0.000, 0.000, 1.000");
+        assert_eq!(table(&bytes, "INDICES").unwrap().rows, summary.triangles);
+        assert_eq!(cell(&bytes, "MATERIAL", 0, 1), "0x0000000000000009");
+        assert_eq!(cell(&bytes, "SUBMESH", 0, 5), "0");
+        let lods = table(&bytes, "LODTABLE").unwrap();
+        assert_eq!(lods.rows, 2);
+        assert_eq!(cell(&bytes, "LODTABLE", 1, 2), "2");
+        assert_eq!(describe("MLBOUNDS"), "Meshlet bounds");
+
+        let rows = rows(&bytes).unwrap();
+        let row = |label: &str| rows.iter().find(|(l, _)| *l == label).unwrap().1.clone();
+        assert_eq!(row("Format"), "AMESH v1, 12 chunks");
+        assert_eq!(row("Indices"), format!("{} (u16)", summary.triangles * 3));
+        assert_eq!(row("Vertex stride"), "28 B");
+        assert_eq!(row("Meshlet limits"), "64 vertices, 124 triangles");
+        assert_eq!(row("Flags"), "0x05 (tangents, levels of detail)");
     }
 
     #[test]

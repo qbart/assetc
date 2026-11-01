@@ -44,6 +44,8 @@ pub struct Inspection {
     pub mips: Vec<Image>,
     /// A compiled mesh's triangles by meshlet, for the canvas.
     pub compiled_mesh: Option<crate::amesh::Preview>,
+    /// The compiled mesh file itself, for the Chunks view.
+    pub compiled_bytes: Option<Vec<u8>>,
     /// Its material slots, as found in the output (`None` when missing or unreadable).
     pub compiled_materials: Vec<Option<MaterialPreview>>,
     /// A model's animations: name and duration in seconds.
@@ -176,12 +178,13 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::CompiledMaterial => compiled_material(file, &rel, &mut out),
         Kind::CompiledMesh => fs::read(file)
             .map_err(|e| e.to_string())
-            .and_then(|bytes| Ok((amesh::rows(&bytes)?, amesh::preview(&bytes)?)))
-            .map(|(rows, preview)| {
+            .and_then(|bytes| Ok((amesh::rows(&bytes)?, amesh::preview(&bytes)?, bytes)))
+            .map(|(rows, preview, bytes)| {
                 out.rows.extend(rows);
                 asset_rows(&rel, &mut out);
                 out.compiled_materials = compiled_materials(project, &preview.materials);
                 out.compiled_mesh = Some(preview);
+                out.compiled_bytes = Some(bytes);
             }),
         Kind::CompiledAnimation => fs::read(file)
             .map_err(|e| e.to_string())
