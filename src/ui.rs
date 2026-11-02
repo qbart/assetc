@@ -2061,14 +2061,16 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
             }
         });
     }
-    if menu_item(ui, "New Gradient", None).clicked() {
-        *action = Some(TreeAction::Op(FileOp::NewGradient(dir.to_path_buf())));
-        ui.close();
-    }
-    if menu_item(ui, "New Palette", None).clicked() {
-        *action = Some(TreeAction::Op(FileOp::NewPalette(dir.to_path_buf())));
-        ui.close();
-    }
+    ui.menu_button(RichText::new("New Color").size(14.0).color(TEXT), |ui| {
+        if menu_item(ui, "Gradient", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewGradient(dir.to_path_buf())));
+            ui.close();
+        }
+        if menu_item(ui, "Palette", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewPalette(dir.to_path_buf())));
+            ui.close();
+        }
+    });
     ui.menu_button(RichText::new("New Data").size(14.0).color(TEXT), |ui| {
         if menu_item(ui, "Schema", None).clicked() {
             *action = Some(TreeAction::Op(FileOp::NewSchema(dir.to_path_buf())));

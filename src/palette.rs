@@ -31,7 +31,7 @@ pub struct Palette {
 }
 
 impl Palette {
-    /// The file New Palette creates.
+    /// The file New Color ▸ Palette creates.
     pub fn new() -> Self {
         Self {
             width: 128,

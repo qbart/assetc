@@ -342,7 +342,7 @@ pub struct Gradients {
 }
 
 impl Gradients {
-    /// The file New Gradient creates.
+    /// The file New Color ▸ Gradient creates.
     pub fn new() -> Self {
         Self {
             width: 256,
