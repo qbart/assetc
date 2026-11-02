@@ -93,10 +93,12 @@ One table per region, at most 32:
 | `tags`      | array of strings          | `[]`       | as a locator's |
 | `color`     | string                    | (required) | `#rrggbb`, not compiled |
 | `materials` | array of strings          | `[]`       | glTF material names, each at most once |
+| `submeshes` | array of arrays of 2 integers | `[]`   | whole glTF primitives as `[mesh, primitive]`, each at most once |
 | `triangles` | array of arrays of 4 integers | `[]`   | painted triangles as runs `[mesh, primitive, first, count]`: triangles `first` to `first + count − 1` of primitive `primitive` of glTF mesh `mesh`; `count` ≥ 1 |
 
-assetc writes `triangles` sorted by mesh, primitive and triangle, with
-adjacent and overlapping runs merged, four runs per line.
+assetc writes `submeshes` sorted by mesh and primitive, and `triangles`
+sorted by mesh, primitive and triangle, with adjacent and overlapping runs
+merged, four runs per line.
 
 ## `[[modifiers]]`
 
@@ -158,6 +160,7 @@ name = "armor"
 tags = ["metal"]
 color = "#3b82f6"
 materials = ["Steel"]
+submeshes = [[1, 0]]
 triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
 
 [[modifiers]]

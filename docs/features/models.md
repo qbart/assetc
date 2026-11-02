@@ -96,7 +96,7 @@ The toolbar's first group turns the drawing of each kind of
 |----------|---------------|-------|
 | Locators | `map-pin`     | the visible locators: markers, names, the gizmo and attachment previews |
 | Shapes   | `shapes`      | the visible shapes' wireframes and the gizmo on the chosen shape |
-| Regions  | `paint-bucket`| the visible regions' tint and outline |
+| Regions  | `paint-bucket`| the model in its visible regions' colors instead of its materials, and the chosen region's outline ([regions](regions.md#3d-view)) |
 
 - Toggles, all on to start with, for the session and every model. *Visible*
   is each item's own **Visible** (eye) in its tab: a button that is on shows

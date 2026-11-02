@@ -19,11 +19,15 @@ Inspector's [Regions tab](#regions-tab) and painted in the
 | Name      | Non-empty, unique among the model's regions. The game finds it by the FNV-1a-64 hash of the name. |
 | Tags      | As a [locator's](locators.md#locator): names the game reads (`metal`, `breakable`), none to start with. |
 | Materials | glTF materials whose triangles are all in the region, by name ([as compiled](models.md#names): `material_<index>` for an unnamed one). |
+| Submeshes | glTF primitives whose triangles are all in the region, each by its glTF mesh and primitive index (a [submesh](models.md#geometry) of the compiled mesh). |
 | Triangles | Triangles painted into the region, each by its glTF mesh, primitive and index in the primitive. |
 | Color     | The color it is shown in, for assetc only (not compiled). |
 
 - A triangle is in the region when its primitive's material is one of the
-  region's materials **or** it was painted into it.
+  region's materials, **or** its primitive is one of the region's
+  submeshes, **or** it was painted into it.
+- A primitive of a mesh used by several nodes is several submeshes in the
+  compiled mesh; choosing it puts all of them in the region.
 - A model has at most 32 regions.
 - **Triangle index**: the triangle's place in its primitive's triangle list
   as assetc reads it (strips and fans converted to lists). A triangle of a
@@ -52,6 +56,11 @@ Input tree. It works like the [Locators tab](locators.md#locators-tab):
     color).
   - **Materials**: one checkbox per material the model's triangles use, by
     name, in file order.
+  - **Submeshes**: one checkbox per triangle primitive of the model, in
+    file order: `<mesh> / <primitive>`, with `<mesh>` the glTF mesh's name
+    (`mesh_<index>` when it has none) and `<primitive>` the primitive's
+    index in it; hover shows its material (`no material`) and triangle
+    count.
   - **Painted**: `<n> triangles`, then a **Paint** toggle button
     (`paintbrush` and text, filled with `ACCENT` at 25% while on), a
     **Brush** slider (2–64 px, 12 to start with, for the session) and a
@@ -63,15 +72,22 @@ Input tree. It works like the [Locators tab](locators.md#locators-tab):
 
 ## 3D view
 
-The model's preview shows its visible regions on the triangles they cover,
-over the model (drawn on top, without depth; triangles facing away from the
-camera are left out), following the pose and animation:
+While the toolbar's [Show](models.md#show) **Regions** is on (and the
+model has regions), the model is drawn in its regions' colors instead of its
+materials, following the pose and animation:
 
-- Each covered triangle is filled with its region's color at 30% opacity; a
-  triangle in several visible regions is filled by each, in list order.
-- The chosen region's triangles are also outlined (1 px, its color).
-- The toolbar's [Show](models.md#show) **Regions** button hides them all
-  (and turns Paint off); Paint turns it back on.
+- Each triangle is flat shaded (its own normal, lit like the model) in the
+  color of the last visible region in the list that covers it, or gray
+  (`#808080`) when no visible region does. Hidden regions (eye off) leave
+  their triangles to the others.
+- Turning **Regions** off shows the model's materials again, so the two
+  can be compared.
+- The chosen region's triangles are also outlined (1 px, its color, on top
+  of the model, without depth; triangles facing away from the camera are
+  left out).
+- A primitive with morph targets keeps its materials.
+- Turning Show **Regions** off also turns Paint off; Paint turns it back
+  on.
 
 ### Painting
 
@@ -92,7 +108,7 @@ time; choosing another turns it off):
 A model with regions gets [`REGIONS`, `REGTAGS` and `TRIREGN`](../spec/amesh.md#regions)
 in its `.amesh` (none without regions): one record per region, and one
 32-bit mask per triangle of the full mesh (level of detail 0), bit `i` set
-when the triangle is in region `i`. Reduced levels of detail carry no
+when the triangle is in region `i` (by material, submesh or painting). Reduced levels of detail carry no
 regions. Painted triangles that do not exist in the model (after a
 re-export) are left out without error.
 
