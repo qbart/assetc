@@ -122,24 +122,24 @@ the top:
   **accordion**: at most one card is unfolded, its locator is the *chosen*
   one (in the tab and in the 3D view); unfolding a card folds the others,
   and folding it chooses none. All are folded to start with.
-- **Card header**: the chevron, a 10 px dot in the locator's color (`TEXT`
-  without one), the name (a click on it or the chevron folds and unfolds),
-  and on the right:
-  - **Visible** (a checkbox, on to start with): off hides the locator's
-    marker, gizmo and preview in the 3D view, and markers that are hidden
-    cannot be clicked. It is not saved: it lasts for the session, per model
-    and locator name.
-  - **Move** (`move-3d`) and **Rotate** (`rotate-3d`): turn the
-    [gizmo](#3d-view) on this locator on in that mode (choosing and
-    unfolding it), or off when it already is; the button showing the gizmo's
-    mode on the chosen locator is filled with `ACCENT`. Disabled while an
-    animation plays or the locator is hidden.
-  - Unfolded only: **Delete** (`trash-2`), or **Revert** / disabled Delete for
-    an [inherited](#editing-inherited-locators) locator. Deleting chooses
-    none.
+- **Card header**: the chevron, then **Visible** (`eye`, or `eye-off` in
+  `TEXT_WEAK` when hidden; on to start with), a 10 px dot in the locator's
+  color (`TEXT` without one), the name (a click on it or the chevron folds
+  and unfolds), and on the right, unfolded only, **Delete** (`trash-2`), or
+  **Revert** / disabled Delete for an
+  [inherited](#editing-inherited-locators) locator. Deleting chooses none.
+  - Visible off hides the locator's marker, gizmo and preview in the 3D
+    view, and hidden markers cannot be clicked. It is not saved: it lasts
+    for the session, per model and locator name.
 - **Card body** (unfolded):
   - A weak line for an inherited locator: `From the file` / `From <file>`,
     and `, changed here` when the sidecar replaces it.
+  - **Gizmo**: a group of two buttons, **Move** (`move-3d`) and **Rotate**
+    (`rotate-3d`), joined like the canvas toolbar's groups (`BG_BAR`, 6 px
+    outer corners, a 1 px `STROKE` line between them, 32 × 24 px each): one
+    turns the [gizmo](#3d-view) on this locator on in that mode, or off when
+    it already is; the one showing the gizmo's mode is filled with
+    `ACCENT`. Disabled while an animation plays or the locator is hidden.
   - **Name**: a text field. When it loses focus empty or equal to another
     locator's name, it gets the old name back.
   - **Color**: a row of swatches (18 px squares, 4 px corners): **none**
@@ -229,7 +229,7 @@ and animation. The canvas has no locator buttons: they are in the
   elsewhere (without dragging, and not placing) chooses none. Dragging still
   orbits the camera.
 - **Gizmo** on the chosen locator, in its own (local) axes, when turned on
-  with its card's **Move** or **Rotate** button (or `W` / `E`); off to start
+  with its card's **Gizmo** buttons (or `W` / `E`); off to start
   with, and turned off by the same button again or `Escape`:
 
   | Mode   | Draws | Dragging |
@@ -276,7 +276,7 @@ While the [Animations tab](models.md#animations-tab) plays an animation,
 locators follow their joints, but their transforms cannot be changed: they
 are relative to the joint at rest, and the pose shown moves every frame.
 
-- The gizmo is not drawn; Place on surface and the cards' Move and Rotate
+- The gizmo is not drawn; Place on surface and the cards' Gizmo buttons
   are disabled (placing is disarmed); markers can still be clicked to choose
   them.
 - The cards disable what moves a locator (see
