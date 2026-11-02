@@ -23,7 +23,7 @@ compiled file).
 
 ## Properties tab
 
-The Inspector's **Properties** tab (`list`) is shown for a model in the
+The Inspector's **Properties** tab (`database`) is shown for a model in the
 Input tree. In the [property editor](gui.md#property-editor) look, inside
 8 px margins:
 
