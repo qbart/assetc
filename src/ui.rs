@@ -487,7 +487,7 @@ impl InspectorTab {
             Self::Shapes => Icon::Shapes,
             Self::Regions => Icon::PaintBucket,
             Self::Paths => Icon::Spline,
-            Self::Properties => Icon::List,
+            Self::Properties => Icon::Database,
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
             Self::Animations => Icon::Film,

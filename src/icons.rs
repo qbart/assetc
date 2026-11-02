@@ -39,7 +39,7 @@ pub enum Icon {
     ImagePlay,
     Images,
     Info,
-    List,
+    Database,
     LayoutGrid,
     Loader,
     MapPin,
@@ -135,7 +135,7 @@ const SVGS: [(&str, &str); 59] = [
     ("image-play", include_str!("../assets/icons/image-play.svg")),
     ("images", include_str!("../assets/icons/images.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
-    ("list", include_str!("../assets/icons/list.svg")),
+    ("database", include_str!("../assets/icons/database.svg")),
     (
         "layout-grid",
         include_str!("../assets/icons/layout-grid.svg"),
