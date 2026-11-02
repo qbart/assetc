@@ -91,4 +91,8 @@ px).
 
 ## Build
 
-Trees are not built yet: the build skips them.
+Each tree is written to the same path under `output` (asset kind `tree`,
+asset path its input-relative path with the extension), in its
+[written form](../spec/atree.md#written-form). A file that cannot be read,
+or has [problems](#problems), fails the build with the first one (`(and <n>
+more)`). The CLI line reads `<source> -> <output> (<n> nodes, depth <d>)`.

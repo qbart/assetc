@@ -194,7 +194,14 @@ inspected again. Keys that are not fields are kept.
 
 ## Build
 
-Data files are not built yet: the build skips them.
+Each data file is written to the same path under `output` (asset kind
+`data`, asset path its input-relative path with the extension), in the
+[built form](../spec/adata.md#built-form): every instance with **every
+field resolved**, so a game reads plain values with no defaults to apply.
+A file that cannot be read, whose schema cannot be read, or that has
+errors, fails the build: `<message>` of the first error, `(and <n> more)`
+when there are more; warnings do not. The CLI line reads `<source> ->
+<output> (<n> instances)`.
 
 ## Not yet
 

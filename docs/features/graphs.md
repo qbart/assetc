@@ -176,7 +176,11 @@ Graph tab (`CHANNEL_R`, 12 px).
 
 ## Build
 
-Graphs are not built yet: the build skips them.
+Each graph is written to the same path under `output` (asset kind
+`graph`, asset path its input-relative path with the extension), in its
+[written form](../spec/agraph.md#written-form). A file that cannot be read,
+or has [problems](#problems), fails the build with the first one (`(and <n>
+more)`). The CLI line reads `<source> -> <output> (<n> nodes, <m> edges)`.
 
 ## Not yet
 
