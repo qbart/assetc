@@ -438,6 +438,10 @@ fn compile_model(
         let dest = output.join(format!("{p}/{name}.orm.ktx2"));
         write_texture(image, &dest, ColorSpace::Linear, true)?;
     }
+    for (name, image) in model.color_textures {
+        let dest = output.join(format!("{p}/{name}.colors.ktx2"));
+        write_texture(image, &dest, ColorSpace::Srgb, false)?;
+    }
     Ok(model.detail)
 }
 

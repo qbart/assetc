@@ -217,6 +217,8 @@ pub struct Primitive {
     pub regions: Vec<u32>,
     /// Each of [`Extras::color_sets`], one color per vertex.
     pub colors: Vec<Vec<[u8; 4]>>,
+    /// Each of [`Extras::uv_sets`], one coordinate per vertex.
+    pub uvs: Vec<Vec<[f32; 2]>>,
 }
 
 /// A shape ready to write; see docs/spec/amesh.md#shapes.
@@ -263,6 +265,9 @@ pub struct Extras {
     /// The name and `source` of the color sets every primitive has; see
     /// docs/spec/amesh.md#color-sets.
     pub color_sets: Vec<(String, u32)>,
+    /// The name and texture asset ID of the UV sets every primitive has; see
+    /// docs/spec/amesh.md#uv-sets.
+    pub uv_sets: Vec<(String, u64)>,
 }
 
 /// The `STRINGS` chunk being built: text back to back.
@@ -453,6 +458,8 @@ pub fn encode(
     let mut vertices: Vec<Vertex> = Vec::new();
     // Each color set's colors, parallel to `vertices`.
     let mut colors: Vec<Vec<[u8; 4]>> = vec![Vec::new(); extras.color_sets.len()];
+    // Each UV set's coordinates, parallel to `vertices`.
+    let mut uvs: Vec<Vec<[f32; 2]>> = vec![Vec::new(); extras.uv_sets.len()];
     let mut indices: Vec<u32> = Vec::new();
     let mut submeshes = Bytes::default();
     let mut meshlets = Bytes::default();
@@ -656,6 +663,12 @@ pub fn encode(
                 _ => set.extend(std::iter::repeat_n([255; 4], primitive.vertices.len())),
             }
         }
+        for (s, set) in uvs.iter_mut().enumerate() {
+            match primitive.uvs.get(s) {
+                Some(own) if own.len() == primitive.vertices.len() => set.extend_from_slice(own),
+                _ => set.extend(std::iter::repeat_n([0.0; 2], primitive.vertices.len())),
+            }
+        }
     }
 
     let wide = vertices.len() > 0xFFFF;
@@ -805,6 +818,22 @@ pub fn encode(
             .chunk("COLORSET", sets.take())
             .chunk("COLORS", data.take());
     }
+    if !uvs.is_empty() {
+        let mut sets = Bytes::default();
+        let mut data = Bytes::default();
+        for ((name, texture), set) in extras.uv_sets.iter().zip(&uvs) {
+            let (at, len) = strings.add(name);
+            sets.u64(crate::hash::fnv1a64(name.as_bytes()))
+                .u32(at)
+                .u32(len)
+                .u64(*texture)
+                .u64(0);
+            for uv in set {
+                data.f32s(uv);
+            }
+        }
+        writer.chunk("UVSET", sets.take()).chunk("UVS", data.take());
+    }
     let mut props = Bytes::default();
     put_properties(&mut props, &mut strings, &extras.properties);
     let (mut shapes, mut shape_points, mut shape_props) =
@@ -913,7 +942,8 @@ pub fn encode(
     let has_shapes = !extras.shapes.is_empty();
     let has_regions = !extras.regions.is_empty();
     let has_paths = !extras.paths.is_empty();
-    if !colors.is_empty() || has_props || has_shapes || has_regions || has_paths {
+    if !colors.is_empty() || !uvs.is_empty() || has_props || has_shapes || has_regions || has_paths
+    {
         writer.chunk("STRINGS", strings.0);
     }
     if has_props {
@@ -1357,6 +1387,23 @@ pub fn color_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
         .collect()
 }
 
+/// A mesh's UV sets' names, in order; see docs/spec/amesh.md#uv-sets.
+fn uv_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
+    let (Some(sets), strings) = (reader.chunk("UVSET"), reader.chunk("STRINGS")) else {
+        return Vec::new();
+    };
+    (0..sets.len() / 32)
+        .map(|s| {
+            let at = chunks::u32_at(sets, s, 32, 8).unwrap_or(0) as usize;
+            let len = chunks::u32_at(sets, s, 32, 12).unwrap_or(0) as usize;
+            strings
+                .and_then(|t| t.get(at..at + len))
+                .map(|t| String::from_utf8_lossy(t).into_owned())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 /// A mesh's color sets: name and `source`, in order.
 fn color_sets(reader: &chunks::Reader<'_>) -> Vec<(String, u32)> {
     let (Some(sets), strings) = (reader.chunk("COLORSET"), reader.chunk("STRINGS")) else {
@@ -1418,6 +1465,8 @@ pub fn describe(name: &str) -> &'static str {
         "SKIN" => "Skin weights",
         "COLORSET" => "Color sets",
         "COLORS" => "Vertex colors",
+        "UVSET" => "UV sets",
+        "UVS" => "UV coordinates",
         "SKELETON" => "Skeleton",
         "LOCATORS" => "Locators",
         "LOCNAMES" => "Locator names",
@@ -1514,6 +1563,16 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
         },
         "SKIN" => array(vec!["Joints", "Weights"], 24),
         "COLORSET" => array(vec!["Name", "Hash", "Format", "Source"], 32),
+        "UVSET" => array(vec!["Name", "Hash", "Texture"], 32),
+        // One row per vertex, one column per set.
+        "UVS" => {
+            let names = uv_set_names(&reader);
+            Table {
+                rows: payload.len() / 8 / names.len().max(1),
+                columns: names,
+                numbered: true,
+            }
+        }
         // One row per vertex, one column per set.
         "COLORS" => {
             let names = color_set_names(&reader);
@@ -1722,6 +1781,37 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
                     other => other.to_string(),
                 },
                 _ => source_name(u32_at(row, 32, 20)),
+            }
+        }
+        "UVSET" => {
+            let strings = reader.chunk("STRINGS").unwrap_or_default();
+            let u64_at = |offset: usize| {
+                p.get(row * 32 + offset..row * 32 + offset + 8)
+                    .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
+            };
+            match column {
+                0 => {
+                    let (at, len) = (u32_at(row, 32, 8) as usize, u32_at(row, 32, 12) as usize);
+                    strings
+                        .get(at..at + len)
+                        .map(|t| String::from_utf8_lossy(t).into_owned())
+                        .unwrap_or_default()
+                }
+                1 => format!("{:#018x}", u64_at(0)),
+                _ => format!("{:#018x}", u64_at(16)),
+            }
+        }
+        "UVS" => {
+            // Sets one after another, each `vertices` long.
+            let at = (column * table.rows + row) * 8;
+            let float = |o: usize| {
+                p.get(o..o + 4)
+                    .map_or(0.0, |b| f32::from_le_bytes(b.try_into().unwrap()))
+            };
+            if p.len() >= at + 8 {
+                format!("{:.4}, {:.4}", float(at), float(at + 4))
+            } else {
+                String::new()
             }
         }
         "COLORS" => {
@@ -1962,6 +2052,7 @@ mod tests {
             material: Some(0),
             regions: Vec::new(),
             colors: Vec::new(),
+            uvs: Vec::new(),
         }
     }
 
@@ -2211,6 +2302,33 @@ meshlet_max_triangles = 64
         );
         assert!(toml::from_str::<config::Meshes>("max = 1").is_err());
         assert!(toml::from_str::<config::Meshes>("[[overrides]]\nlod_prune = true").is_err());
+    }
+
+    #[test]
+    fn uv_sets_follow_their_vertices() {
+        let mut part = grid(2);
+        part.uvs = vec![part.vertices.iter().map(|v| [v.position[0], 0.5]).collect()];
+        let expected = part.uvs[0].clone();
+        let extras = Extras {
+            uv_sets: vec![("height".into(), 0xABCD)],
+            ..Extras::default()
+        };
+        let (bytes, _) = encode(&[part], &[], None, &extras, false, &MeshOptions::default());
+        let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
+        let sets = reader.require("UVSET").unwrap();
+        assert_eq!(sets.len(), 32);
+        assert_eq!(u64::from_le_bytes(sets[16..24].try_into().unwrap()), 0xABCD);
+        assert_eq!(uv_set_names(&reader), ["height"]);
+        let uvs = reader.require("UVS").unwrap();
+        let floats: Vec<f32> = uvs
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
+            .collect();
+        assert_eq!(floats.len(), expected.len() * 2);
+        assert_eq!(floats.as_chunks::<2>().0, expected.as_slice());
+        assert!(reader.chunk("COLORSET").is_none());
     }
 
     #[test]

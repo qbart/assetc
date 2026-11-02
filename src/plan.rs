@@ -135,6 +135,7 @@ fn model_assets(
     sidecar: crate::amod::Amod,
 ) {
     let p = strip_extension(source);
+    let colors = sidecar.colors.clone();
     let mut push = |kind: Kind, asset_path: String, job: Job| {
         plan.assets.push(Asset {
             id: fnv1a64(asset_path.as_bytes()),
@@ -167,6 +168,14 @@ fn model_assets(
     }
     for name in &outputs.orm {
         push(Kind::Texture, format!("{p}/{name}.orm"), part());
+    }
+    // Color sets exported as Texture + UV buffer; see docs/features/vertex-colors.md#export.
+    // Bases (sets others blend with) are not written.
+    let bases = crate::vertex_colors::bases(&colors);
+    for (set, base) in colors.iter().zip(bases) {
+        if crate::vertex_colors::textured(set) && base.is_none() {
+            push(Kind::Texture, format!("{p}/{}.colors", set.name), part());
+        }
     }
 }
 

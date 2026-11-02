@@ -510,6 +510,9 @@ pub struct Compiled {
     pub images: Vec<(String, image::RgbaImage, ColorSpace)>,
     /// By material name: `<P>/<name>.orm.ktx2`, linear.
     pub orm: Vec<(String, image::RgbaImage)>,
+    /// Color sets exported as Texture + UV buffer, by name: `<P>/<name>.colors.ktx2`, sRGB,
+    /// without mipmaps.
+    pub color_textures: Vec<(String, image::RgbaImage)>,
     /// For build output.
     pub detail: String,
 }
@@ -591,6 +594,7 @@ fn read_parts(
                     material: material.and_then(|i| slots.get(&i).copied()),
                     regions: Vec::new(),
                     colors: Vec::new(),
+                    uvs: Vec::new(),
                 },
                 mesh: mesh.index() as u32,
                 index: primitive.index() as u32,
@@ -883,12 +887,14 @@ pub fn compile(
         }
     }
     vertex_colors::check(&sets).map_err(sidecar_error)?;
-    let written: Vec<usize> = vertex_colors::bases(&sets)
+    // Written sets: as colors, or as a texture and UV set; see
+    // docs/features/vertex-colors.md#export.
+    let (textured, written): (Vec<usize>, Vec<usize>) = vertex_colors::bases(&sets)
         .iter()
         .enumerate()
         .filter(|(_, into)| into.is_none())
         .map(|(i, _)| i)
-        .collect();
+        .partition(|&i| vertex_colors::textured(&sets[i]));
     for part in &mut parts {
         let positions: Vec<Vec3> = part
             .primitive
@@ -900,7 +906,23 @@ pub fn compile(
             .iter()
             .map(|&i| vertex_colors::colors(&sets, i, &positions, &part.colors))
             .collect();
+        part.primitive.uvs = textured
+            .iter()
+            .map(|&i| vertex_colors::uvs(&sets[i], &positions))
+            .collect();
     }
+    let texture_name = |i: usize| format!("{}.colors", sets[i].name);
+    let uv_sets: Vec<(String, u64)> = textured
+        .iter()
+        .map(|&i| {
+            let id = fnv1a64(format!("{asset_path}/{}", texture_name(i)).as_bytes());
+            (sets[i].name.clone(), id)
+        })
+        .collect();
+    let color_textures: Vec<(String, image::RgbaImage)> = textured
+        .iter()
+        .map(|&i| (sets[i].name.clone(), vertex_colors::texture(&sets[i])))
+        .collect();
     let set_names: Vec<(String, u32)> = written
         .iter()
         .map(|&i| (sets[i].name.clone(), u32::from(sets[i].gltf.is_none())))
@@ -917,6 +939,7 @@ pub fn compile(
             .collect(),
         paths: resolve_paths(&sidecar.paths, skin_joints.as_deref()).map_err(sidecar_error)?,
         color_sets: set_names,
+        uv_sets,
     };
     let material_ids: Vec<u64> = outputs
         .materials
@@ -1059,13 +1082,18 @@ pub fn compile(
         detail.push(plural(clip_count, "clip", "clips"));
     }
     detail.push(plural(materials.len(), "material", "materials"));
-    detail.push(plural(images.len() + orm.len(), "texture", "textures"));
+    detail.push(plural(
+        images.len() + orm.len() + color_textures.len(),
+        "texture",
+        "textures",
+    ));
     Ok(Compiled {
         mesh,
         animation,
         materials,
         images,
         orm,
+        color_textures,
         detail: detail.join(", "),
     })
 }

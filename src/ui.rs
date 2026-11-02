@@ -8548,6 +8548,25 @@ fn color_set_fields(
         gradient_editor(ui, &mut gradient, card)
     });
     set.stops = gradient.stops;
+    // Export; a blending set stays a Color buffer, see docs/features/vertex-colors.md#export.
+    if set.blend.is_some() {
+        set.export = enrich::ColorExport::Colors;
+    }
+    ui.add_space(4.0);
+    prop_row(ui, "Export", |ui, width| {
+        ui.add_enabled_ui(set.blend.is_none(), |ui| {
+            egui::ComboBox::from_id_salt("color_export")
+                .width(width - 8.0)
+                .selected_text(set.export.name())
+                .show_ui(ui, |ui| {
+                    for export in enrich::ColorExport::ALL {
+                        ui.selectable_value(&mut set.export, export, export.name());
+                    }
+                })
+                .response
+                .on_disabled_hover_text("Texture + UV buffer needs a set that does not blend");
+        });
+    });
     clicked
 }
 

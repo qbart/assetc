@@ -773,6 +773,34 @@ impl ColorFill {
     }
 }
 
+/// How a written color set reaches the game; see docs/features/vertex-colors.md#export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorExport {
+    /// A color per vertex.
+    #[default]
+    Colors,
+    /// The gradient as a texture, and a UV set into it.
+    Texture,
+}
+
+impl ColorExport {
+    pub const ALL: [Self; 2] = [Self::Colors, Self::Texture];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Colors => "colors",
+            Self::Texture => "texture",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Colors => "Color buffer",
+            Self::Texture => "Texture + UV buffer",
+        }
+    }
+}
+
 /// How a color set is laid over the set it blends with; see
 /// docs/features/vertex-colors.md#blending.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -842,6 +870,8 @@ pub struct ColorSet {
     /// Linear and Radial: at least two, ordered by position.
     pub stops: Vec<Stop>,
     pub blend: Option<Blend>,
+    /// Linear and Radial: how the set is written.
+    pub export: ColorExport,
 }
 
 fn black_to_white() -> Vec<Stop> {
@@ -869,6 +899,7 @@ impl ColorSet {
             to,
             stops: black_to_white(),
             blend: None,
+            export: ColorExport::Colors,
         }
     }
 
@@ -940,6 +971,18 @@ pub fn parse_colors(value: toml::Value) -> Result<Vec<ColorSet>, String> {
                 .map(parse_blend)
                 .transpose()
                 .map_err(fail)?;
+            let export = match table.remove("export") {
+                Some(v) => {
+                    let key = text("export", &v).map_err(fail)?;
+                    ColorExport::ALL
+                        .into_iter()
+                        .find(|e| e.key() == key)
+                        .ok_or_else(|| {
+                            fail(format!("unknown export {key:?} (use colors or texture)"))
+                        })?
+                }
+                None => ColorExport::Colors,
+            };
             if let Some(key) = table.keys().next() {
                 return Err(fail(format!("unknown key {key:?}")));
             }
@@ -952,6 +995,7 @@ pub fn parse_colors(value: toml::Value) -> Result<Vec<ColorSet>, String> {
                 to,
                 stops,
                 blend,
+                export,
             })
         })
         .collect::<Result<_, String>>()?;
@@ -1015,6 +1059,9 @@ pub fn write_colors(sets: &[ColorSet], out: &mut String) {
             *out += &format!("from = {}\n", write_floats(&set.from));
             *out += &format!("to = {}\n", write_floats(&set.to));
             gradient::write_stops(&set.stops, out);
+            if set.export == ColorExport::Texture {
+                *out += "export = \"texture\"\n";
+            }
         }
         if let Some(blend) = &set.blend {
             *out += &format!(

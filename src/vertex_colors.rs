@@ -3,7 +3,7 @@
 
 use bevy::math::Vec3;
 
-use crate::enrich::{BlendMode, ColorFill, ColorSet};
+use crate::enrich::{BlendMode, ColorExport, ColorFill, ColorSet};
 use crate::gradient;
 
 /// An sRGB value 0–1 as a linear one.
@@ -48,6 +48,30 @@ fn position(set: &ColorSet, p: Vec3) -> f64 {
         ColorFill::Radial => (p - from).length() / length2.sqrt(),
     };
     f64::from(t.clamp(0.0, 1.0))
+}
+
+/// A set exported as Texture + UV buffer's coordinates of vertices at `positions`: `t`
+/// along the gradient, and the texture's middle row; see
+/// docs/features/vertex-colors.md#export.
+pub fn uvs(set: &ColorSet, positions: &[Vec3]) -> Vec<[f32; 2]> {
+    positions
+        .iter()
+        .map(|p| [position(set, *p) as f32, 0.5])
+        .collect()
+}
+
+/// The texture of a set exported as Texture + UV buffer: its gradient, 256 × 1, sRGB.
+pub fn texture(set: &ColorSet) -> image::RgbaImage {
+    const WIDTH: u32 = 256;
+    image::RgbaImage::from_fn(WIDTH, 1, |x, _| {
+        let at = (f64::from(x) + 0.5) / f64::from(WIDTH);
+        image::Rgba(gradient::color_at(&set.stops, at))
+    })
+}
+
+/// Whether a set is written as a texture and UV set rather than colors.
+pub fn textured(set: &ColorSet) -> bool {
+    set.export == ColorExport::Texture
 }
 
 /// The sRGB color an authored set gives a vertex at `p`.
@@ -120,6 +144,15 @@ pub fn check(sets: &[ColorSet]) -> Result<(), String> {
     for (i, set) in sets.iter().enumerate() {
         if sets[..i].iter().any(|s| s.name == set.name) {
             return Err(format!("color set {:?}: name used twice", set.name));
+        }
+    }
+    for set in sets {
+        let gradient = set.gltf.is_none() && set.fill != ColorFill::Solid;
+        if textured(set) && (!gradient || set.blend.is_some()) {
+            return Err(format!(
+                "color set {:?}: Texture + UV buffer needs an unblended Linear or Radial set",
+                set.name
+            ));
         }
     }
     for (i, set) in sets.iter().enumerate() {
@@ -309,5 +342,20 @@ mod tests {
         assert!(check(&sets).unwrap_err().contains("blends in a loop"));
         sets[0].blend = blend("d");
         assert!(check(&sets).unwrap_err().contains("blends with no set"));
+    }
+
+    #[test]
+    fn texture_exports_sample_their_gradient() {
+        let mut set = ColorSet::new("g".into(), [0.0; 3], [0.0, 2.0, 0.0]);
+        set.export = ColorExport::Texture;
+        assert!(check(std::slice::from_ref(&set)).is_ok());
+        let uv = uvs(&set, &[Vec3::new(0.0, 1.0, 0.0), Vec3::new(0.0, 3.0, 0.0)]);
+        assert_eq!(uv, [[0.5, 0.5], [1.0, 0.5]]);
+        let texture = texture(&set);
+        assert_eq!(texture.dimensions(), (256, 1));
+        assert_eq!(texture.get_pixel(0, 0).0, [0, 0, 0, 255]);
+        assert_eq!(texture.get_pixel(255, 0).0, [255; 4]);
+        set.fill = ColorFill::Solid;
+        assert!(check(&[set]).unwrap_err().contains("Texture + UV buffer"));
     }
 }

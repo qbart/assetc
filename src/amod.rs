@@ -482,6 +482,17 @@ stops = [
 blend = { with = "tint", mode = "multiply", amount = 0.5 }
 
 [[colors]]
+name = "ramp"
+fill = "radial"
+from = [0.0, 1.0, 0.0]
+to = [0.0, 2.0, 0.0]
+stops = [
+    { at = 0.0, color = "#000000" },
+    { at = 1.0, color = "#ffffff" },
+]
+export = "texture"
+
+[[colors]]
 name = "flat"
 fill = "solid"
 color = "#ff000080"
@@ -519,8 +530,9 @@ sound = "step_grass"
         let blend = amod.colors[1].blend.as_ref().unwrap();
         assert_eq!((blend.with.as_str(), blend.amount), ("tint", 0.5));
         assert_eq!(blend.mode, crate::enrich::BlendMode::Multiply);
-        assert_eq!(amod.colors[2].fill, crate::enrich::ColorFill::Solid);
-        assert_eq!(amod.colors[2].color, [255, 0, 0, 0x80]);
+        assert_eq!(amod.colors[2].export, crate::enrich::ColorExport::Texture);
+        assert_eq!(amod.colors[3].fill, crate::enrich::ColorFill::Solid);
+        assert_eq!(amod.colors[3].color, [255, 0, 0, 0x80]);
         assert_eq!(amod.events[0].time, 0.25);
         assert_eq!(
             amod.events[0].properties["sound"],
@@ -554,6 +566,7 @@ sound = "step_grass"
             "[[colors]]\nname = \"a\"\nblend = { with = \"b\", mode = \"burn\" }\n",
             "[[colors]]\nname = \"a\"\nblend = { with = \"b\", amount = 2.0 }\n",
             "[[colors]]\nname = \"a\"\nfill = \"conic\"\n",
+            "[[colors]]\nname = \"a\"\nexport = \"png\"\n",
             "[[colors]]\nname = \"a\"\ncolor = \"red\"\n",
             "[[colors]]\nname = \"a\"\nstops = [{ at = 0.0, color = \"#000000\" }]\n",
             "[[colors]]\nname = \"a\"\n\n[[colors]]\nname = \"a\"\n",
