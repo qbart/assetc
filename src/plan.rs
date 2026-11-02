@@ -286,12 +286,13 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 },
             });
         } else if let Some(kind) = data_kind(file) {
-            // Written to the same path; see docs/features/build.md#inputs.
+            // Compiled to a binary of its kind; see docs/features/build.md#inputs.
+            let asset_path = format!("{}.{}", strip_extension(&rel), kind.extension());
             plan.assets.push(Asset {
-                id: fnv1a64(rel.as_bytes()),
+                id: fnv1a64(asset_path.as_bytes()),
                 kind,
-                output: kind.output_path(&rel),
-                asset_path: rel.clone(),
+                output: kind.output_path(&asset_path),
+                asset_path,
                 job: Job::Data {
                     source: rel.clone(),
                     kind,

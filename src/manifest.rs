@@ -45,10 +45,10 @@ impl Kind {
             Self::Mesh => "amesh",
             Self::Animation => "aanim",
             Self::Font => "afont",
-            Self::Schema => "aschema",
-            Self::Data => "adata",
-            Self::Graph => "agraph",
-            Self::Tree => "atree",
+            Self::Schema => "atype",
+            Self::Data => "arec",
+            Self::Graph => "agph",
+            Self::Tree => "atre",
         }
     }
 

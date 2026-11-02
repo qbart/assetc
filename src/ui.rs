@@ -122,6 +122,8 @@ struct UiState {
     mesh_chunk: String,
     /// A compiled font shows its atlas, else its chunks.
     font_atlas: bool,
+    /// A compiled animation shows its chunks, else plays.
+    anim_chunks: bool,
     /// The Manifest view's filter.
     data_filter: String,
     /// The color vision the canvas simulates; `None` is normal vision.
@@ -498,6 +500,7 @@ impl Default for UiState {
             data_filter: String::new(),
             vision: None,
             mesh_chunk: "DESC".into(),
+            anim_chunks: false,
             locators: LocatorTools::default(),
             keep_model: false,
             licenses: false,
@@ -817,10 +820,13 @@ fn shell(
         Shown::Image => state.mode == ViewMode::ThreeD,
         Shown::Environment | Shown::Model => true,
         Shown::CompiledMesh => state.mesh_in_3d,
-        Shown::CompiledAnimation => state
-            .inspected
-            .as_ref()
-            .is_some_and(|i| i.compiled_mesh.is_some()),
+        Shown::CompiledAnimation => {
+            !state.anim_chunks
+                && state
+                    .inspected
+                    .as_ref()
+                    .is_some_and(|i| i.compiled_mesh.is_some())
+        }
         Shown::Lut => state.lut.view == LutView::Cube,
         Shown::Specimen
         | Shown::CompiledFont
@@ -828,6 +834,7 @@ fn shell(
         | Shown::Schema
         | Shown::Graph
         | Shown::Instances
+        | Shown::CompiledData
         | Shown::Other => false,
     };
     let fill = if show_3d {
@@ -868,7 +875,12 @@ fn shell(
                 | Shown::Schema
                 | Shown::Graph
                 | Shown::Instances
-                | Shown::CompiledAnimation => (&[], None, false),
+                | Shown::CompiledData => (&[], None, false),
+                Shown::CompiledAnimation => (
+                    &["Play", "Chunks"],
+                    Some(usize::from(state.anim_chunks)),
+                    true,
+                ),
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -876,6 +888,7 @@ fn shell(
                     Shown::Lut => state.lut.view = LutView::ALL[i],
                     Shown::CompiledMesh => state.mesh_in_3d = i == 0,
                     Shown::CompiledFont => state.font_atlas = i == 0,
+                    Shown::CompiledAnimation => state.anim_chunks = i == 1,
                     _ => state.mode = ViewMode::ALL[i],
                 }
             }
@@ -901,6 +914,17 @@ fn shell(
                 (Shown::CompiledMesh, _) | (Shown::CompiledFont, _)
                     if shown == Shown::CompiledMesh && !state.mesh_in_3d
                         || shown == Shown::CompiledFont && !state.font_atlas =>
+                {
+                    if let Some(bytes) = state
+                        .inspected
+                        .as_ref()
+                        .and_then(|i| i.compiled_bytes.as_deref())
+                    {
+                        chunks_view(ui, rect, bytes, &mut state.mesh_chunk);
+                    }
+                }
+                (Shown::CompiledData, _) | (Shown::CompiledAnimation, _)
+                    if shown == Shown::CompiledData || state.anim_chunks =>
                 {
                     if let Some(bytes) = state
                         .inspected
@@ -4702,6 +4726,8 @@ enum Shown {
     CompiledMesh,
     /// An `.aanim` from the Output tree, played on its companion mesh.
     CompiledAnimation,
+    /// A compiled schema, data file, graph or tree, as its chunks.
+    CompiledData,
     /// An `.afont` from the Output tree: its atlas (like a specimen) or its chunks.
     CompiledFont,
     Lut,
@@ -4722,6 +4748,7 @@ impl Shown {
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.model.is_some() => Self::Model,
             Some(i) if i.inspection.compiled_animation.is_some() => Self::CompiledAnimation,
+            Some(i) if i.inspection.compiled_data => Self::CompiledData,
             Some(i) if i.compiled_mesh.is_some() => Self::CompiledMesh,
             Some(i) if i.inspection.compiled_font => Self::CompiledFont,
             Some(i) if i.lut.is_some() => Self::Lut,
@@ -5544,6 +5571,15 @@ fn chunk_schema(bytes: &[u8]) -> Option<(&'static str, ChunkSchema)> {
                 describe: crate::amesh::describe,
                 table: crate::amesh::table,
                 cell: crate::amesh::cell,
+            },
+        ))
+    } else if let Some(format) = crate::compiled::format_of(bytes) {
+        Some((
+            format,
+            ChunkSchema {
+                describe: crate::compiled::describe,
+                table: crate::compiled::table,
+                cell: crate::compiled::cell,
             },
         ))
     } else if is(crate::font::FORMAT) {

@@ -469,9 +469,10 @@ fn first_problem(problems: &[String]) -> Result<(), String> {
     }
 }
 
-/// Writes a schema, data file (resolved), graph or tree to the same path; see
+/// Compiles a schema, data file (resolved), graph or tree to its binary; see
 /// docs/features/build.md#inputs.
 fn compile_data(source: &Path, dest: &Path, kind: Kind) -> Result<String, String> {
+    use crate::compiled;
     let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
     let (written, detail) = match kind {
         Kind::Schema => {
@@ -482,7 +483,8 @@ fn compile_data(source: &Path, dest: &Path, kind: Kind) -> Result<String, String
                 .map(|p| format!("{}: {}", p.path, p.message))
                 .collect();
             first_problem(&problems)?;
-            (schema.to_json(), format!("{} types", schema.types.len()))
+            let detail = format!("{} types", schema.types.len());
+            (compiled::encode_schema(&schema), detail)
         }
         Kind::Data => {
             let data = crate::adata::DataFile::parse(&text)?;
@@ -496,13 +498,16 @@ fn compile_data(source: &Path, dest: &Path, kind: Kind) -> Result<String, String
                 .collect();
             first_problem(&errors)?;
             let n = data.instances.len();
-            (data.resolved_json(&schema), format!("{n} instances"))
+            (
+                compiled::encode_data(&data, &schema),
+                format!("{n} instances"),
+            )
         }
         Kind::Graph => {
             let graph = crate::agraph::Graph::parse(&text)?;
             first_problem(&graph.check())?;
             let detail = format!("{} nodes, {} edges", graph.nodes.len(), graph.edges.len());
-            (graph.to_json(), detail)
+            (compiled::encode_graph(&graph), detail)
         }
         _ => {
             let tree = crate::atree::parse(&text)?;
@@ -512,10 +517,10 @@ fn compile_data(source: &Path, dest: &Path, kind: Kind) -> Result<String, String
                 tree.nodes.len(),
                 crate::atree::depth(&tree)
             );
-            (crate::atree::to_json(&tree), detail)
+            (compiled::encode_tree(&tree), detail)
         }
     };
-    write(dest, written.as_bytes())?;
+    write(dest, &written)?;
     Ok(detail)
 }
 

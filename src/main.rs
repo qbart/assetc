@@ -10,6 +10,7 @@ mod build;
 mod chart;
 mod chunks;
 mod color_picker;
+mod compiled;
 mod config;
 mod enrich;
 mod fileops;

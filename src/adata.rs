@@ -417,33 +417,6 @@ fn resolve_items(schema: &Schema, ty: &Ty, v: &Value) -> Value {
     )
 }
 
-impl DataFile {
-    /// The built form: every instance with every field resolved; see
-    /// docs/spec/adata.md#built-form.
-    pub fn resolved_json(&self, schema: &Schema) -> String {
-        let mut top = Map::new();
-        top.insert("$dialect".into(), DIALECT.into());
-        top.insert("$schema".into(), self.schema.clone().into());
-        let instances = self
-            .instances
-            .iter()
-            .map(|inst| {
-                let mut o = Map::new();
-                o.insert("$type".into(), inst.ty.clone().into());
-                o.insert("$id".into(), inst.id.clone().into());
-                if let Some(si) = struct_index(schema, &inst.ty) {
-                    o.extend(resolve(schema, si, &inst.values, None));
-                }
-                Value::Object(o)
-            })
-            .collect();
-        top.insert("instances".into(), Value::Array(instances));
-        let mut text = serde_json::to_string_pretty(&Value::Object(top)).unwrap_or_default();
-        text.push('\n');
-        text
-    }
-}
-
 /// Problems of a struct value: `(top-level field, message, warning)`.
 type Found = Vec<(Option<String>, String, bool)>;
 
@@ -667,31 +640,18 @@ mod tests {
 
     #[test]
     fn built_data_is_resolved() {
-        let text = r##"{
-          "$dialect": "a/1", "$schema": "game.aschema",
-          "instances": [
-            { "$type": "Weapon", "$id": "sword", "x_old": 1, "offset": { "y": 2 }, "notes": null }
-          ]
-        }"##;
-        let out = DataFile::parse(text).unwrap().resolved_json(&schema());
-        let back: Value = serde_json::from_str(&out).unwrap();
+        let schema = schema();
+        let values = serde_json::json!({ "x_old": 1, "offset": { "y": 2 }, "notes": null });
+        let resolved = resolve(&schema, 1, values.as_object().unwrap(), None);
         assert_eq!(
-            back["instances"][0],
+            Value::Object(resolved.clone()),
             serde_json::json!({
-                "$type": "Weapon", "$id": "sword", "name": "", "damage": 10,
-                "offset": { "x": 0.5, "y": 2 }, "tint": "#000000", "notes": null
+                "name": "", "damage": 10, "offset": { "x": 0.5, "y": 2 },
+                "tint": "#000000", "notes": null
             })
         );
-        let keys: Vec<&str> = back["instances"][0]
-            .as_object()
-            .unwrap()
-            .keys()
-            .map(String::as_str)
-            .collect();
-        assert_eq!(
-            keys,
-            ["$type", "$id", "name", "damage", "offset", "tint", "notes"]
-        );
+        let keys: Vec<&str> = resolved.keys().map(String::as_str).collect();
+        assert_eq!(keys, ["name", "damage", "offset", "tint", "notes"]);
     }
 
     #[test]

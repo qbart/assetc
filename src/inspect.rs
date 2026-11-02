@@ -51,6 +51,9 @@ pub struct Inspection {
     pub compiled_materials: Vec<Option<MaterialPreview>>,
     /// `compiled_bytes` is an `.afont`, and `preview` its atlas (if found).
     pub compiled_font: bool,
+    /// `compiled_bytes` is a compiled schema, data file, graph or tree, shown as its chunks;
+    /// see docs/features/inspector.md#compiled-data.
+    pub compiled_data: bool,
     /// A compiled animation read back, to play on its companion mesh (`compiled_mesh`), or
     /// why there is no mesh to play it on; see docs/features/models.md#compiled-animation-preview.
     pub compiled_animation: Option<(crate::aanim::Decoded, Option<String>)>,
@@ -114,6 +117,10 @@ enum Kind {
     CompiledMesh,
     CompiledAnimation,
     CompiledFont,
+    CompiledSchema,
+    CompiledData,
+    CompiledGraph,
+    CompiledTree,
     Manifest,
     Ignored,
     File,
@@ -140,6 +147,10 @@ impl Kind {
             Self::CompiledMesh => "Compiled mesh",
             Self::CompiledAnimation => "Compiled animation",
             Self::CompiledFont => "Compiled font",
+            Self::CompiledSchema => "Compiled schema",
+            Self::CompiledData => "Compiled data",
+            Self::CompiledGraph => "Compiled graph",
+            Self::CompiledTree => "Compiled tree",
             Self::Manifest => "Manifest",
             Self::Ignored => "Ignored",
             Self::File => "File",
@@ -211,6 +222,10 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             Kind::CompiledAnimation
         }
         Location::Output if has_ext(manifest::Kind::Font.extension()) => Kind::CompiledFont,
+        Location::Output if has_ext(manifest::Kind::Schema.extension()) => Kind::CompiledSchema,
+        Location::Output if has_ext(manifest::Kind::Data.extension()) => Kind::CompiledData,
+        Location::Output if has_ext(manifest::Kind::Graph.extension()) => Kind::CompiledGraph,
+        Location::Output if has_ext(manifest::Kind::Tree.extension()) => Kind::CompiledTree,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output => Kind::File,
     };
@@ -279,8 +294,20 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
                     out.compiled_mesh = Some(mesh);
                 }
                 out.compiled_animation = Some((decoded, missing));
+                out.compiled_bytes = fs::read(file).ok();
             }),
         Kind::CompiledFont => compiled_font(project, file, &rel, &mut out),
+        Kind::CompiledSchema | Kind::CompiledData | Kind::CompiledGraph | Kind::CompiledTree => {
+            fs::read(file)
+                .map_err(|e| e.to_string())
+                .and_then(|bytes| Ok((crate::compiled::rows(&bytes)?, bytes)))
+                .map(|(rows, bytes)| {
+                    out.rows.extend(rows);
+                    asset_rows(&rel, &mut out);
+                    out.compiled_data = true;
+                    out.compiled_bytes = Some(bytes);
+                })
+        }
         Kind::Manifest => manifest(file, &mut out),
         Kind::Ignored | Kind::File => Ok(()),
     };
