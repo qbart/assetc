@@ -103,6 +103,8 @@ struct UiState {
     locators: LocatorTools,
     /// A model's sidecar was saved: its next inspection keeps the 3D view's model loaded.
     keep_model: bool,
+    /// The Open source dialog is open.
+    licenses: bool,
 }
 
 /// The model preview's locator tools, for the session; see docs/features/locators.md#3d-view.
@@ -363,6 +365,7 @@ impl Default for UiState {
             mesh_chunk: "DESC".into(),
             locators: LocatorTools::default(),
             keep_model: false,
+            licenses: false,
         }
     }
 }
@@ -766,6 +769,9 @@ fn shell(
         });
 
     confirm_delete(&ctx, &mut state, &project);
+    if state.licenses {
+        state.licenses = licenses_dialog(&ctx);
+    }
 
     if std::mem::take(&mut state.start_build) {
         state.notice = None;
@@ -1243,8 +1249,57 @@ fn menu_bar(
                 None,
                 false,
             );
+            if menu_item(ui, "Licenses", None).clicked() {
+                state.licenses = true;
+            }
         });
     });
+}
+
+/// The Open source dialog; returns whether it stays open. See docs/features/gui.md#open-source.
+fn licenses_dialog(ctx: &egui::Context) -> bool {
+    let frame = Frame::window(&ctx.global_style())
+        .fill(BG_PANEL)
+        .stroke(Stroke::new(1.0, STROKE))
+        .corner_radius(8)
+        .inner_margin(24);
+    let mut open = true;
+    let modal = egui::Modal::new(egui::Id::new("licenses"))
+        .frame(frame)
+        .show(ctx, |ui| {
+            ui.label(RichText::new("Open source").size(20.0).color(TEXT));
+            ui.add_space(8.0);
+            ui.label(
+                RichText::new("assetc is built with these open source projects:")
+                    .size(14.0)
+                    .color(TEXT_WEAK),
+            );
+            ui.add_space(12.0);
+            egui::Grid::new("licenses_grid")
+                .spacing(vec2(24.0, 6.0))
+                .show(ui, |ui| {
+                    let text = |s: &str, color| RichText::new(s).size(14.0).color(color);
+                    for p in &crate::licenses::PROJECTS {
+                        ui.label(text(p.name, TEXT));
+                        ui.label(text(p.role, TEXT_WEAK));
+                        ui.label(text(p.license, TEXT_WEAK));
+                        ui.hyperlink_to(text(p.site, ACCENT), format!("https://{}", p.site));
+                        ui.end_row();
+                    }
+                });
+            ui.add_space(16.0);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let close = egui::Button::new(RichText::new("Close").size(14.0).color(TEXT))
+                    .fill(BG_HEADER)
+                    .stroke(Stroke::new(1.0, STROKE))
+                    .corner_radius(6)
+                    .min_size(vec2(96.0, 34.0));
+                if ui.add(close).clicked() {
+                    open = false;
+                }
+            });
+        });
+    open && !modal.should_close()
 }
 
 /// Full-width dropdown row; `check` is `Some` for toggles.
@@ -5134,7 +5189,11 @@ fn locator_fields(
         Quat::IDENTITY
     };
     let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
-    let mut degrees = [x, y, z].map(f32::to_degrees);
+    // Rounding noise would show as −0.0.
+    let mut degrees = [x, y, z].map(|a| {
+        let d = a.to_degrees();
+        if d.abs() < 1e-3 { 0.0 } else { d }
+    });
     let before = degrees;
     vec3_row(ui, "Rotation", &mut degrees, 0.5, 1, None);
     if degrees != before {
@@ -5155,7 +5214,8 @@ fn vec3_row(
 ) {
     prop_row(ui, label, |ui, width| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        let each = ((width - 8.0) / 3.0).max(20.0);
+        // Room for the spacing, so long values never widen the panel.
+        let each = ((width - 16.0) / 3.0).max(20.0);
         for value in values {
             let mut field = egui::DragValue::new(value)
                 .speed(speed)

@@ -15,6 +15,7 @@ mod hash;
 mod icons;
 mod inspect;
 mod ktx2;
+mod licenses;
 mod logo;
 mod lut;
 mod manifest;
