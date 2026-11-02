@@ -661,7 +661,10 @@ pub(super) fn canvas_graph(
     let size = 12.0 * zoom;
     if size >= 6.0 {
         for (k, (e, shape)) in graph.edges.iter().zip(&shapes).enumerate() {
-            let Some(shape) = shape else {
+            let Some(shape) = shape
+                .as_ref()
+                .filter(|_| detached.is_none_or(|(d, _)| d != k))
+            else {
                 continue;
             };
             let text = match (e.label.is_empty(), e.weight) {
