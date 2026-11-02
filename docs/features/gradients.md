@@ -57,6 +57,13 @@ The Inspector's **Gradients** tab (`palette`) lists the selected
   - **Name**: text field.
   - **Dither**: dropdown None / Crosshatch / Pixel.
   - The [gradient editor](#gradient-editor).
+  - **Modifiers** (13 px `TEXT_WEAK` label): this gradient's own modifier
+    cards and **Add modifier**, exactly as the
+    [Modifiers tab](noise.md#modifiers-tab) shows them (reorder, enable,
+    remove, parameters). They change the gradient's cell in the image (and
+    so the canvas and the build), on its color only: alpha is kept, see
+    [Modifiers](../spec/gradient.md#modifiers). The bar and the folded
+    preview show the stops without them.
 - Below the cards: an **Add gradient** button (`plus` icon and text) that
   appends `Gradient <n>` (black to white, no dithering). It is disabled when
   every cell is used, with the tooltip "No room: enlarge the image or shrink

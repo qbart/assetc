@@ -31,12 +31,19 @@ stops = [
     { at = 0.0, color = "#ffffffff" },
     { at = 1.0, color = "#ffffff00" },
 ]
+
+[[gradients.modifiers]]
+type = "levels"
+enabled = true
+gamma = 1.5
 ```
 
 assetc writes files exactly in this form: `width`, `height`, `cell_width`,
 `cell_height`, `layout`, a blank line, then one `[[gradients]]` table per gradient (separated by blank
 lines) with `name`, `dither` and `stops` (one inline table per line, sorted
-by `at`). Numbers are written in their shortest form that reads back to the
+by `at`), then its modifiers as `[[gradients.modifiers]]` tables (each after
+a blank line: `type`, `enabled`, then the parameters that differ from their
+defaults, as `.noise` files write them). Numbers are written in their shortest form that reads back to the
 same value (`0.0`, `0.25`, `0.333`).
 
 ## Top level
@@ -62,6 +69,7 @@ Any other key is an error (`unknown key <key>`).
 | `name`   | string | `""`     | label shown in the editor; not used by the image          |
 | `dither` | string | `"none"` | `none`, `crosshatch` or `pixel`, see [Dithering](#dithering) |
 | `stops`  | array of tables | — | at least two stops                                 |
+| `modifiers` | array of tables | none | this gradient's [modifiers](noise.md#modifiers), in order; see [Modifiers](#modifiers) |
 
 Any other key is an error (`gradient <n>: unknown key <key>`, counting from
 1).
@@ -102,6 +110,16 @@ column of a cell is the same gradient (apart from dithering).
 `t ≤ at[k + 1]`, or the last segment (`stops.len() − 2`) if none.
 `s = (t − at[k]) / (at[k + 1] − at[k])`, clamped to 0–1, and `0` when both
 stops are at the same position. `a` and `b` are stops `k` and `k + 1`.
+
+### Modifiers
+
+A gradient's enabled modifiers run on its own cell, after the cell is
+drawn (dithering included), in order, as [`.noise` modifiers](noise.md#modifiers)
+run on a noise image: on the cell's **R, G and B** (0–1), the cell's edges
+as the image's edges (so `blur` with `wrap` wraps within the cell, and
+`normalize` uses the cell's minimum and maximum). **Alpha is never
+changed**: every pixel keeps the alpha its stops give it. Other cells are
+not affected.
 
 ### Dithering
 
