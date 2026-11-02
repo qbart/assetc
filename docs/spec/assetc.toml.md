@@ -19,6 +19,7 @@ a valid config and uses the defaults below.
 | `output` | string | `"build"`  | Directory compiled assets are written to.       |
 | `textures` | table | empty     | Per-texture settings, see below.                |
 | `meshes` | table   | see below  | Mesh build settings, see below.                 |
+| `targets` | table  | empty      | Named build targets, see [`[targets]`](#targets). |
 
 ### `[textures]`
 
@@ -113,6 +114,44 @@ from = "characters/hero.glb"
 match = ["characters/**"]
 ```
 
+### `[targets]`
+
+A **build target** is a named variant of the settings, built with
+`assetc build --target <name>` (see [`cli.md`](../features/cli.md#assetc-build));
+`assetc build` and the GUI build the **default target**, the top-level
+settings. Each `[targets.<name>]` table (the name: letters, digits, `_` and
+`-`) holds settings that replace the top-level ones for that target:
+
+- Any top-level key but `input` and `targets` (every target shares the
+  input).
+- `output`: the target's output directory; without one,
+  `<top-level output>-<name>` (`build-mobile`), a sibling of the default
+  output, so each target's [stale outputs](../features/build.md#removing-stale-outputs)
+  are its own.
+- `textures`, `meshes` and `locators` are merged **key by key** into the
+  top-level tables: a key the target gives replaces the same key (a list
+  replaces the whole list, `meshes.overrides` too); keys it leaves out keep
+  their top-level values.
+- Every target is checked when the file is loaded, with the same rules as
+  the top level (unknown keys are errors); a broken target makes the file
+  unreadable, naming the target: `targets.mobile: unknown field ...`.
+
+```toml
+output = "build"
+
+[textures]
+no_mipmaps = ["ui/**"]
+
+[targets.mobile]
+# Writes to build-mobile; mipmaps for ui too, fewer levels of detail.
+textures = { no_mipmaps = [] }
+meshes = { lod_ratios = [0.5] }
+
+[targets.preview]
+output = "out/preview"
+meshes = { lod_ratios = [] }
+```
+
 ### Paths
 
 `input` and `output` are relative to the project root (the directory containing
@@ -120,7 +159,7 @@ match = ["characters/**"]
 when the config is loaded.
 
 Unknown keys (at the top level, inside `[textures]`, `[meshes]`,
-`[locators]`, an override or a preset) are rejected with a parse error, so typos are caught early
+`[locators]`, an override, a preset or a target) are rejected with a parse error, so typos are caught early
 instead of being silently ignored.
 
 ## File written by `assetc init`

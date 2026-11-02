@@ -5,7 +5,9 @@
 ```
 assetc            Open the GUI for the project containing the current directory
 assetc init       Create assetc.toml in the current directory
-assetc build      Compile input into output, see build.md
+assetc build      Compile input into output (the default target), see build.md
+assetc build --target <name>
+                  Compile input into the target's output with its settings
 assetc --help     Print usage
 assetc --version  Print version
 ```
@@ -19,6 +21,18 @@ assetc --version  Print version
 - Does not look at parent directories: running `init` inside an existing
   project creates a nested project, like `git init`.
 - Prints the path of the created file on success.
+
+### `assetc build`
+
+- Builds the **default target**: the top-level settings of `assetc.toml`,
+  into its `output` (see [`build.md`](build.md#cli)).
+- `--target <name>` builds the [target](../spec/assetc.toml.md#targets)
+  `[targets.<name>]` instead: the top-level settings with the target's
+  replacing them, into the target's output (`<output>-<name>` by default).
+  The last line names that output (`Built … into /path/build-mobile`).
+- An unknown target fails before building: `error: no target "tablet"
+  (targets: mobile, preview)`, or `(no targets)`.
+- The GUI's Build button and `Ctrl+B` build the default target.
 
 ### `assetc` (no subcommand)
 
