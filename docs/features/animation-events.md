@@ -52,6 +52,10 @@ Interactions:
   an animation plays it from its start.
 - **Press or drag on the ruler**: moves the playhead there (the pose
   follows) and pauses.
+- **`,`** / **`.`** (no text field focused, pointer anywhere): pauses and
+  steps the playhead back / forward to the previous / next multiple of
+  0.01 s (from 0.304 s: back to 0.30 s, forward to 0.31 s; from 0.30 s: to
+  0.29 s and 0.31 s), within 0 to the duration. Held, they repeat.
 - **Press a marker**: chooses that event; **drag it** sideways to change its
   time (clamped to the animation). Within 6 px of the pointer, the nearest
   marker wins.

@@ -347,8 +347,15 @@ both edges:
   without lines or letters.
 - Axes and dots are drawn back to front (farthest from the camera first), so
   nearer ones cover farther ones.
-- It follows the orbit camera, not the shape's auto-rotation, and does not
-  take the pointer: orbiting and dollying work over it.
+- It follows the orbit camera, not the shape's auto-rotation. Orbiting and
+  dollying work over it, except on the dots.
+- **Clicking a dot** (within 8 px of its center, positive or negative axis)
+  turns the camera to look along that axis toward the center, from that
+  side: `+X` from the right (yaw 90°, pitch 0°), `−X` yaw −90°, `+Z` yaw 0°,
+  `−Z` yaw 180°, `+Y` from above and `−Y` from below (pitch ±90°, yaw 0°,
+  so +X points right); the distance is kept. Hovering a dot draws a 1 px
+  `TEXT` ring around it, shows a pointing-hand cursor and the tooltip
+  `View from +X` (`−X`, …).
 
 ## Camera
 
@@ -356,7 +363,9 @@ An orbit camera looks at the shape's center.
 
 - Starts at yaw 30°, pitch 20° (looking slightly down), distance 3.5 units,
   45° vertical field of view.
-- Pitch is limited to −85°…85°, distance to 1.5…10.
+- Pitch is limited to −85°…85° while dragging (a view from straight above
+  or below, from the [orientation gizmo](#orientation-gizmo), is ±90° and
+  drags back within the limit), distance to 1.5…10.
 - The camera persists across selections and mode switches for the session;
   double-click resets it to the start position.
 
@@ -369,6 +378,7 @@ While the pointer is over the canvas (see also [`KEYS.md`](../../KEYS.md)):
 | Left or right drag            | orbit: horizontal → yaw, vertical → pitch, 0.3° per point  |
 | Scroll wheel, pinch           | dolly: distance ÷ 1.2 per notch toward the shape (× 1.2 away) |
 | Double-click (left)           | reset the camera                                           |
+| Click an orientation gizmo dot | look along that axis, see [Orientation gizmo](#orientation-gizmo) |
 
 ## Environment maps
 

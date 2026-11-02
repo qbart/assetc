@@ -47,6 +47,7 @@ Active while the pointer is over the canvas (see
 | Left or right drag                     | Orbit the camera                 |
 | Scroll wheel, pinch                    | Move the camera closer / farther |
 | Double-click                           | Reset the camera                 |
+| Left click on an orientation gizmo dot | Look along that axis (`+X`, `−X`, …) |
 
 On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)):
 
@@ -75,6 +76,7 @@ On the animation timeline (see [`docs/features/animation-events.md`](docs/featur
 | Input                                  | Action                                       |
 |----------------------------------------|----------------------------------------------|
 | `Space` (pointer over the timeline)    | Play / pause                                 |
+| `,` / `.`                              | Pause and step back / forward to the previous / next 0.01 s |
 | Left press / drag on the ruler         | Move the playhead there (pauses)             |
 | Left press on an event marker          | Choose that event                            |
 | Left drag on an event marker           | Move the event in time                       |

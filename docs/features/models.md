@@ -100,13 +100,14 @@ The toolbar's first group turns the drawing of each kind of
 | Shapes   | `shapes`      | the visible shapes' wireframes and the gizmo on the chosen shape |
 | Regions  | `paint-bucket`| the model in its visible regions' colors instead of its materials, and the chosen region's outline ([regions](regions.md#3d-view)) |
 | Paths    | `spline`      | the visible paths' curves and points, and the gizmo on the chosen point |
+| Grid     | `grid-3x3`    | the [ground grid](#ground-grid) |
 
-- Toggles, Locators, Shapes and Paths on and Regions off to start with, for the session and every model. *Visible*
+- Toggles, Locators, Shapes, Paths and Grid on and Regions off to start with, for the session and every model. *Visible*
   is each item's own **Visible** (eye) in its tab: a button that is on shows
   the items whose eye is on; off hides them all, whatever their eyes, and
   keeps the eyes as they are.
 - A button is disabled (and drawn off) when the model has none of its kind;
-  its tooltip adds `(none in this model)`.
+  its tooltip adds `(none in this model)`. Grid is always enabled.
 - A hidden locator cannot be clicked; a hidden locator or shape has no
   gizmo.
 - Turning a kind back on by using it: **Add** or **Place on surface** in the
@@ -115,6 +116,22 @@ The toolbar's first group turns the drawing of each kind of
   Paths on. Turning Regions off turns Paint off; turning Paths off turns
   Draw off.
 
+
+### Ground grid
+
+The model's preview draws a grid on its ground, the model-space plane
+`y = 0` (where a character standing at the origin has its feet), so the
+model's height above or below it shows:
+
+- Square cells of `10ⁿ` model units, the largest power of ten no more than
+  a quarter of the model's largest side (a 1.6-unit character gets 0.1,
+  a 155-unit one 10), out to the first whole cell at or past that side in
+  each direction from the origin (at most 50 cells each way).
+- 1 px lines in `TEXT_WEAK` at 35% opacity; the line along X through the
+  origin in `CHANNEL_R` and the one along Z in `CHANNEL_B`, at 80%.
+- Unlit, hidden behind the model where the model is in front (depth
+  tested), following the model's fit (not its animation).
+- The toolbar's Show **Grid** button turns it off.
 ## Parameters tab
 
 The Inspector's **Parameters** tab (`sliders-vertical`) is shown for a model
