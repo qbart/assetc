@@ -12,7 +12,7 @@ values a game reads without its schema's defaults. A
 |-------------|----------|---------|
 | `DESC`      | yes      | [`RecDesc`](#recdesc-16-bytes) |
 | `TYPES`     | yes      | [`TypeRef`](#typeref-16-bytes)`[type_count]`: the structs the instances are of, in order of first use |
-| `INSTANCES` | yes      | [`Instance`](#instance-32-bytes)`[instance_count]`, in the file's order |
+| `INSTANCE` | yes      | [`Instance`](#instance-32-bytes)`[instance_count]`, in the file's order |
 | `VALUES`    | yes      | [`Value`](#value-24-bytes)`[value_count]` |
 | `STRINGS`   | yes      | UTF-8 text back to back: type names, ids, text values |
 
