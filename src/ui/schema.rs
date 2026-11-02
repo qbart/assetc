@@ -618,14 +618,14 @@ fn field_rows(
                         type_cell(ui, field, snapshot, ty.is_some());
                         ui.checkbox(&mut field.optional, "Optional");
                         ui.add_space(6.0);
-                        let key = (ti, field.name.clone());
-                        let editors = DefaultEditors {
+                        let mut editors = ValueEditors {
                             picker: &mut edit.picker,
-                            curve: edit.curves.entry(key.clone()).or_default(),
+                            curves: &mut edit.curves,
                             curve_settings: &mut edit.curve_settings,
-                            gradient: edit.gradients.entry(key).or_default(),
+                            gradients: &mut edit.gradients,
+                            ti,
                         };
-                        default_cell(ui, editors, field, snapshot, ty.as_ref());
+                        default_cell(ui, &mut editors, field, snapshot, ty.as_ref());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if icon_button(ui, Icon::X, "Remove field", true).clicked() {
                                 delete = Some(fi);
@@ -640,6 +640,23 @@ fn field_rows(
                         background,
                         egui::Shape::rect_filled(rect.expand(2.0), 4, BG_HEADER),
                     );
+                }
+                // A struct default's fields, under the row.
+                if let Some((si, _)) = struct_of(snapshot, ty.as_ref())
+                    && let Body::Struct { fields, .. } = &mut edit.edit.types[ti].body
+                    && let Some(default) = fields[fi].default.as_mut().filter(|d| d.is_object())
+                {
+                    let mut editors = ValueEditors {
+                        picker: &mut edit.picker,
+                        curves: &mut edit.curves,
+                        curve_settings: &mut edit.curve_settings,
+                        gradients: &mut edit.gradients,
+                        ti,
+                    };
+                    ui.indent("default_fields", |ui| {
+                        let mut shown = vec![ti];
+                        struct_value(ui, &mut editors, default, snapshot, si, &name, &mut shown);
+                    });
                 }
                 if open {
                     ui.indent("details", |ui| {
@@ -786,12 +803,14 @@ fn check_known(schema: &Schema, ty: &Ty) -> bool {
     }
 }
 
-/// The editors a field's default may open, kept per field (curve, gradient) or shared.
-struct DefaultEditors<'a> {
+/// The editors a default may open: shared, or kept per type and field path (curves and
+/// gradients, `name` or `name/inner/…` for a nested struct's fields).
+struct ValueEditors<'a> {
     picker: &'a mut Picker,
-    curve: &'a mut CurveState,
+    curves: &'a mut HashMap<(usize, String), CurveState>,
     curve_settings: &'a mut CurveSettings,
-    gradient: &'a mut GradientCard,
+    gradients: &'a mut HashMap<(usize, String), GradientCard>,
+    ti: usize,
 }
 
 /// A popover under `response`, opened by double-clicking it, closed by clicking outside.
@@ -813,7 +832,7 @@ fn popover(response: &Response, width: f32, content: impl FnOnce(&mut Ui)) {
 /// docs/features/schemas.md#defaults.
 fn default_cell(
     ui: &mut Ui,
-    editors: DefaultEditors,
+    editors: &mut ValueEditors,
     field: &mut Field,
     schema: &Schema,
     ty: Option<&Ty>,
@@ -823,9 +842,34 @@ fn default_cell(
         field.default =
             has.then(|| ty.map_or(Value::Null, |ty| aschema::implicit_value(schema, ty)));
     }
-    let Some(default) = &mut field.default else {
-        return;
+    if let Some(default) = &mut field.default {
+        value_editor(ui, editors, default, schema, ty, &field.name);
+    }
+}
+
+/// The struct a type names, if it is one.
+fn struct_of<'s>(schema: &'s Schema, ty: Option<&Ty>) -> Option<(usize, &'s [Field])> {
+    let Some(Ty::Named(n)) = ty else {
+        return None;
     };
+    let si = schema.type_index(n)?;
+    match &schema.types[si].body {
+        Body::Struct { fields, .. } => Some((si, fields)),
+        Body::Enum { .. } => None,
+    }
+}
+
+/// A value's editor in its type's data encoding; `path` keys its curve and gradient
+/// editors. A struct shows how many of its fields are set; its rows are
+/// [`struct_value`]'s.
+fn value_editor(
+    ui: &mut Ui,
+    editors: &mut ValueEditors,
+    default: &mut Value,
+    schema: &Schema,
+    ty: Option<&Ty>,
+    path: &str,
+) {
     let enum_values = match ty {
         Some(Ty::Named(n)) => schema
             .type_index(n)
@@ -842,6 +886,15 @@ fn default_cell(
             *default = v;
         }
     };
+    if let (Some((_, fields)), Some(object)) = (struct_of(schema, ty), default.as_object()) {
+        let set = fields
+            .iter()
+            .filter(|f| object.contains_key(&f.name))
+            .count();
+        ui.label(RichText::new(format!("{set} of {} set", fields.len())).color(TEXT_WEAK));
+        return;
+    }
+    let key = (editors.ti, path.to_owned());
     match (ty, enum_values) {
         (_, Some(values)) => {
             let current = default.as_str().unwrap_or_default().to_owned();
@@ -913,19 +966,94 @@ fn default_cell(
             if *p == "curve" {
                 curve_preview(ui.painter(), rect, default);
                 popover(&response, curve::WIDTH, |ui| {
-                    curve::curve_editor(ui, default, editors.curve, editors.curve_settings);
+                    let state = editors.curves.entry(key).or_default();
+                    curve::curve_editor(ui, default, state, editors.curve_settings);
                 });
             } else {
                 gradient_preview(ui, rect, default);
                 ui.painter()
                     .rect_stroke(rect, 3, Stroke::new(1.0, STROKE), StrokeKind::Inside);
                 popover(&response, curve::WIDTH, |ui| {
-                    gradient_default(ui, default, editors.gradient);
+                    gradient_default(ui, default, editors.gradients.entry(key).or_default());
                 });
             }
         }
         _ => json(ui, default, "default"),
     }
+}
+
+/// The fields of struct `si` in a struct value: one row each with a Set checkbox and,
+/// ticked, the value's editor; nested structs under their rows. `shown` are the structs
+/// being shown around it. See docs/features/schemas.md#defaults.
+fn struct_value(
+    ui: &mut Ui,
+    editors: &mut ValueEditors,
+    value: &mut Value,
+    schema: &Schema,
+    si: usize,
+    path: &str,
+    shown: &mut Vec<usize>,
+) {
+    let Body::Struct { fields, .. } = &schema.types[si].body else {
+        return;
+    };
+    let Some(object) = value.as_object_mut() else {
+        return;
+    };
+    shown.push(si);
+    for f in fields {
+        let ty = parse_type(&f.ty).ok();
+        let path = format!("{path}/{}", f.name);
+        ui.push_id(&path, |ui| {
+            ui.horizontal(|ui| {
+                ui.set_min_height(28.0);
+                ui.spacing_mut().item_spacing.x = 6.0;
+                let cell = |ui: &mut Ui, text: &str, width: f32, color| {
+                    ui.allocate_ui_with_layout(
+                        vec2(width, 22.0),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            let text = RichText::new(text).monospace().color(color);
+                            ui.add(egui::Label::new(text).truncate());
+                        },
+                    );
+                };
+                cell(ui, &f.name, NAME_W, TEXT);
+                cell(ui, &f.ty, TYPE_W, TEXT_WEAK);
+                let mut set = object.contains_key(&f.name);
+                if ui.checkbox(&mut set, "Set").changed() {
+                    if set {
+                        let start = f.default.clone().unwrap_or_else(|| {
+                            ty.as_ref()
+                                .map_or(Value::Null, |ty| aschema::implicit_value(schema, ty))
+                        });
+                        object.insert(f.name.clone(), start);
+                    } else {
+                        object.shift_remove(&f.name);
+                    }
+                }
+                if let Some(v) = object.get_mut(&f.name) {
+                    match struct_of(schema, ty.as_ref()) {
+                        // A struct around this one again: an embedding loop, edited as text.
+                        Some((inner, _)) if shown.contains(&inner) => {
+                            value_editor(ui, editors, v, schema, None, &path);
+                        }
+                        _ => value_editor(ui, editors, v, schema, ty.as_ref(), &path),
+                    }
+                }
+            });
+            if let Some((inner, _)) = struct_of(schema, ty.as_ref())
+                && !shown.contains(&inner)
+                && let Some(v) = object.get_mut(&f.name)
+                && v.is_object()
+            {
+                ui.indent("fields", |ui| {
+                    struct_value(ui, editors, v, schema, inner, &path, shown);
+                });
+            }
+        });
+    }
+    shown.pop();
 }
 
 /// A gradient default in the gradient editor.
