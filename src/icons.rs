@@ -20,6 +20,7 @@ pub enum Icon {
     Cone,
     Crosshair,
     Cylinder,
+    Eraser,
     Eye,
     EyeOff,
     EyeOutline,
@@ -67,7 +68,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 59] = [
+const SVGS: [(&str, &str); 60] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -101,6 +102,7 @@ const SVGS: [(&str, &str); 59] = [
     ("cone", include_str!("../assets/icons/cone.svg")),
     ("crosshair", include_str!("../assets/icons/crosshair.svg")),
     ("cylinder", include_str!("../assets/icons/cylinder.svg")),
+    ("eraser", include_str!("../assets/icons/eraser.svg")),
     ("eye", include_str!("../assets/icons/eye.svg")),
     ("eye-off", include_str!("../assets/icons/eye-off.svg")),
     (

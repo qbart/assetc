@@ -131,10 +131,14 @@ struct LocatorTools {
     /// Clicks on the model add points to the chosen path; a click's ray waits for its hit.
     draw: bool,
     draw_awaiting: bool,
+    /// Where the stroke being drawn last asked for a point.
+    draw_last: Option<egui::Pos2>,
     /// The plane Mirror reflects across: 0 X, 1 Y, 2 Z.
     mirror_axis: usize,
-    /// The chosen region paints; a stroke's ray waits for its hit; it erases.
+    /// The chosen region paints (or, with `rubber`, erases); a stroke's ray waits for its
+    /// hit; this frame's stroke erases.
     paint: bool,
+    rubber: bool,
     paint_awaiting: bool,
     erase: bool,
     /// The paint brush's radius on screen, in points.
@@ -155,8 +159,10 @@ impl Default for LocatorTools {
             show: [true, true, false, true],
             draw: false,
             draw_awaiting: false,
+            draw_last: None,
             mirror_axis: 0,
             paint: false,
+            rubber: false,
             paint_awaiting: false,
             erase: false,
             brush: 12.0,
@@ -5094,7 +5100,11 @@ fn canvas_model(
     if locked || !paths_active {
         tools.draw = false;
     }
+    if tab != InspectorTab::Regions {
+        tools.paint = false;
+    }
     let painting = tools.paint && edit.as_ref().is_some_and(|e| e.region.is_some());
+    let drawing = tools.draw && edit.as_ref().is_some_and(|e| e.path.is_some());
     let camera = gizmo::ViewCamera::new(rect, &preview.orbit);
     let frames = preview.frames.clone();
 
@@ -5229,7 +5239,7 @@ fn canvas_model(
         chosen.and_then(|i| worlds[i])
     };
     let handles = match (target, tools.gizmo) {
-        (Some(world), Some(mode)) if !locked && !painting => {
+        (Some(world), Some(mode)) if !locked && !painting && !drawing => {
             gizmo::Gizmo::new(&camera, world, mode)
         }
         _ => None,
@@ -5254,7 +5264,7 @@ fn canvas_model(
         pressed = true;
     }
     let grabbing = tools.drag.is_some();
-    let response = view_3d(ui, rect, preview, !grabbing && !painting);
+    let response = view_3d(ui, rect, preview, !grabbing && !painting && !drawing);
     if let Some(drag) = &mut tools.drag {
         let (down, delta) = ui.input(|i| (i.pointer.primary_down(), i.pointer.delta()));
         // The press's frame moves nothing: its delta led the pointer to the handle.
@@ -5312,7 +5322,34 @@ fn canvas_model(
             brush: tools.brush * camera.world_per_point(Vec3::ZERO),
         });
         tools.paint_awaiting = true;
-        tools.erase = ui.input(|i| i.modifiers.shift);
+        tools.erase = tools.rubber != ui.input(|i| i.modifiers.shift);
+        ui.ctx().request_repaint();
+    }
+
+    // Drawing: a point where the press hits, then one every DRAW_STEP along the stroke; see
+    // docs/features/paths.md#drawing.
+    const DRAW_STEP: f32 = 24.0;
+    let down = ui.input(|i| i.pointer.primary_down());
+    if !down {
+        tools.draw_last = None;
+    }
+    if drawing
+        && !tools.draw_awaiting
+        && down
+        && response.is_pointer_button_down_on()
+        && let Some(p) = pointer.filter(|p| rect.contains(*p))
+        && tools
+            .draw_last
+            .is_none_or(|last| (p - last).length() >= DRAW_STEP)
+    {
+        let (origin, dir) = camera.ray(p);
+        preview.surface_ray = Some(preview3d::SurfaceRay {
+            origin,
+            dir,
+            brush: 0.0,
+        });
+        tools.draw_awaiting = true;
+        tools.draw_last = Some(p);
         ui.ctx().request_repaint();
     }
 
@@ -5346,6 +5383,7 @@ fn canvas_model(
     if response.clicked()
         && !grabbing
         && !painting
+        && !drawing
         && let Some(edit) = &mut edit
         && frames.is_some()
         && let Some(at) = response.interact_pointer_pos()
@@ -5370,15 +5408,6 @@ fn canvas_model(
             }
             (edit.path, edit.point) = (Some(p), Some(i));
             out.show_tab = Some(InspectorTab::Paths);
-        } else if tools.draw {
-            let (origin, dir) = camera.ray(at);
-            preview.surface_ray = Some(preview3d::SurfaceRay {
-                origin,
-                dir,
-                brush: 0.0,
-            });
-            tools.draw_awaiting = true;
-            ui.ctx().request_repaint();
         } else if tools.armed {
             let (origin, dir) = camera.ray(at);
             preview.surface_ray = Some(preview3d::SurfaceRay {
@@ -5569,6 +5598,20 @@ fn canvas_model(
                 painter.circle_filled(*dot, 5.0, color);
             }
         }
+    }
+
+    // The brush at the pointer; see docs/features/regions.md#painting.
+    if painting
+        && let Some(edit) = &edit
+        && let Some(region) = edit.region.and_then(|r| edit.edit.regions.get(r))
+        && let Some(p) = pointer.filter(|p| rect.contains(*p))
+    {
+        let color = if tools.rubber != ui.input(|i| i.modifiers.shift) {
+            TEXT
+        } else {
+            hex_color32(&region.color).unwrap_or(TEXT)
+        };
+        painter.circle_stroke(p, tools.brush, Stroke::new(1.0, color));
     }
 
     if let Some(edit) = &edit {
@@ -7019,6 +7062,7 @@ fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools)
     let LocatorTools {
         hidden_regions,
         paint,
+        rubber,
         brush,
         armed,
         ..
@@ -7078,7 +7122,9 @@ fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools)
                                     delete = open
                                         && icon_button(ui, Icon::Trash2, "Delete", true).clicked();
                                 },
-                                |ui| region_fields(ui, edit, i, &parts, paint, brush, armed),
+                                |ui| {
+                                    region_fields(ui, edit, i, &parts, paint, rubber, brush, armed)
+                                },
                             )
                         })
                         .inner;
@@ -7148,12 +7194,14 @@ impl RegionParts {
 }
 
 /// The body of region `i`'s card.
+#[allow(clippy::too_many_arguments)]
 fn region_fields(
     ui: &mut Ui,
     edit: &mut MeshEdit,
     i: usize,
     parts: &RegionParts,
     paint: &mut bool,
+    rubber: &mut bool,
     brush: &mut f32,
     armed: &mut bool,
 ) {
@@ -7212,16 +7260,25 @@ fn region_fields(
     prop_row(ui, "Painted", |ui, _| {
         ui.label(format!("{} triangles", region.triangles.len()));
     });
+    // Paint and Erase: at most one on; see docs/features/regions.md#regions-tab.
     ui.horizontal(|ui| {
-        let on = &mut *paint;
-        let mut button = egui::Button::image_and_text(Icon::Paintbrush.image(14.0, TEXT), "Paint");
-        if *on {
-            button = button.fill(ACCENT.gamma_multiply(0.25));
+        let tools = [
+            (Icon::Paintbrush, "Paint", false),
+            (Icon::Eraser, "Erase", true),
+        ];
+        for (icon, text, erases) in tools {
+            let on = *paint && *rubber == erases;
+            let mut button = egui::Button::image_and_text(icon.image(14.0, TEXT), text);
+            if on {
+                button = button.fill(ACCENT.gamma_multiply(0.25));
+            }
+            if ui.add(button).clicked() {
+                (*paint, *rubber) = (!on, erases);
+                *armed = false;
+            }
         }
-        if ui.add(button).clicked() {
-            *on = !*on;
-            *armed = false;
-        }
+    });
+    ui.horizontal(|ui| {
         ui.spacing_mut().slider_width = 60.0;
         ui.add(
             egui::Slider::new(brush, 2.0..=64.0)
@@ -7234,7 +7291,7 @@ fn region_fields(
             region.triangles.clear();
         }
     });
-    ui.weak("Paint: drag on the model. Shift + drag erases. Right drag orbits.");
+    ui.weak("Drag on the model to paint or erase. Shift + drag does the other. Right drag orbits.");
 }
 
 /// Three drag fields side by side.
