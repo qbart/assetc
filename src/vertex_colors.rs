@@ -69,9 +69,14 @@ pub fn texture(set: &ColorSet) -> image::RgbaImage {
     })
 }
 
-/// Whether a set is written as a texture and UV set rather than colors.
+/// Whether a set is written as a texture and UV set (Texture + UV buffer, or Both).
 pub fn textured(set: &ColorSet) -> bool {
-    set.export == ColorExport::Texture
+    set.export != ColorExport::Colors
+}
+
+/// Whether a set is written as colors (Color buffer, or Both).
+pub fn colored(set: &ColorSet) -> bool {
+    set.export != ColorExport::Texture
 }
 
 /// The sRGB color an authored set gives a vertex at `p`.
@@ -355,6 +360,9 @@ mod tests {
         assert_eq!(texture.dimensions(), (256, 1));
         assert_eq!(texture.get_pixel(0, 0).0, [0, 0, 0, 255]);
         assert_eq!(texture.get_pixel(255, 0).0, [255; 4]);
+        assert!(textured(&set) && !colored(&set));
+        set.export = ColorExport::Both;
+        assert!(textured(&set) && colored(&set) && check(std::slice::from_ref(&set)).is_ok());
         set.fill = ColorFill::Solid;
         assert!(check(&[set]).unwrap_err().contains("Texture + UV buffer"));
     }

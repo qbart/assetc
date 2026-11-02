@@ -781,15 +781,18 @@ pub enum ColorExport {
     Colors,
     /// The gradient as a texture, and a UV set into it.
     Texture,
+    /// Colors and the texture with its UV set.
+    Both,
 }
 
 impl ColorExport {
-    pub const ALL: [Self; 2] = [Self::Colors, Self::Texture];
+    pub const ALL: [Self; 3] = [Self::Colors, Self::Texture, Self::Both];
 
     pub fn key(self) -> &'static str {
         match self {
             Self::Colors => "colors",
             Self::Texture => "texture",
+            Self::Both => "both",
         }
     }
 
@@ -797,6 +800,7 @@ impl ColorExport {
         match self {
             Self::Colors => "Color buffer",
             Self::Texture => "Texture + UV buffer",
+            Self::Both => "Both",
         }
     }
 }
@@ -978,7 +982,9 @@ pub fn parse_colors(value: toml::Value) -> Result<Vec<ColorSet>, String> {
                         .into_iter()
                         .find(|e| e.key() == key)
                         .ok_or_else(|| {
-                            fail(format!("unknown export {key:?} (use colors or texture)"))
+                            fail(format!(
+                                "unknown export {key:?} (use colors, texture or both)"
+                            ))
                         })?
                 }
                 None => ColorExport::Colors,
@@ -1059,8 +1065,8 @@ pub fn write_colors(sets: &[ColorSet], out: &mut String) {
             *out += &format!("from = {}\n", write_floats(&set.from));
             *out += &format!("to = {}\n", write_floats(&set.to));
             gradient::write_stops(&set.stops, out);
-            if set.export == ColorExport::Texture {
-                *out += "export = \"texture\"\n";
+            if set.export != ColorExport::Colors {
+                *out += &format!("export = \"{}\"\n", set.export.key());
             }
         }
         if let Some(blend) = &set.blend {

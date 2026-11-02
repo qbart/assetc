@@ -25,7 +25,8 @@ pub fn apply(ctx: &egui::Context) {
     v.faint_bg_color = BG_HEADER;
     v.weak_text_color = Some(TEXT_WEAK);
     v.selection.bg_fill = ACCENT;
-    v.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+    // Dark text on the accent fill; see docs/features/gui.md#look.
+    v.selection.stroke = Stroke::new(1.0, BG_BAR);
 
     let w = &mut v.widgets;
     w.noninteractive.bg_fill = BG_PANEL;
@@ -39,6 +40,7 @@ pub fn apply(ctx: &egui::Context) {
     w.hovered.bg_stroke = Stroke::NONE;
     w.active.weak_bg_fill = ACCENT;
     w.active.bg_fill = ACCENT;
+    w.active.fg_stroke.color = BG_BAR;
     w.open.weak_bg_fill = STROKE;
 
     ctx.set_visuals(v);

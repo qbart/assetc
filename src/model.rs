@@ -889,12 +889,21 @@ pub fn compile(
     vertex_colors::check(&sets).map_err(sidecar_error)?;
     // Written sets: as colors, or as a texture and UV set; see
     // docs/features/vertex-colors.md#export.
-    let (textured, written): (Vec<usize>, Vec<usize>) = vertex_colors::bases(&sets)
+    let kept: Vec<usize> = vertex_colors::bases(&sets)
         .iter()
         .enumerate()
         .filter(|(_, into)| into.is_none())
         .map(|(i, _)| i)
-        .partition(|&i| vertex_colors::textured(&sets[i]));
+        .collect();
+    let written: Vec<usize> = kept
+        .iter()
+        .copied()
+        .filter(|&i| vertex_colors::colored(&sets[i]))
+        .collect();
+    let textured: Vec<usize> = kept
+        .into_iter()
+        .filter(|&i| vertex_colors::textured(&sets[i]))
+        .collect();
     for part in &mut parts {
         let positions: Vec<Vec3> = part
             .primitive
