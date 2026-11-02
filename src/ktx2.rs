@@ -7,6 +7,7 @@ const IDENTIFIER: [u8; 12] = [
 ];
 const VK_FORMAT_R8G8B8A8_UNORM: u32 = 37;
 const VK_FORMAT_R8G8B8A8_SRGB: u32 = 43;
+const VK_FORMAT_R16G16B16A16_SFLOAT: u32 = 97;
 const LEVEL_INDEX_OFFSET: usize = 80;
 const LEVEL_INDEX_ENTRY: usize = 24;
 const DFD_SIZE: u32 = 92;
@@ -106,6 +107,84 @@ fn write_dfd(out: &mut Vec<u8>, color: ColorSpace) {
     }
 }
 
+/// Encodes an HDR cubemap's levels (largest first) as half floats; see
+/// docs/spec/ktx2.md#cubemaps.
+pub fn encode_cubemap_rgba16f(levels: &[crate::hdr::Level]) -> Vec<u8> {
+    let size = levels[0].size as u32;
+    let data: Vec<Vec<u8>> = levels
+        .iter()
+        .map(|level| {
+            let mut bytes = Vec::with_capacity(6 * level.size * level.size * 8);
+            for face in &level.faces {
+                for texel in face {
+                    for c in texel {
+                        bytes.extend_from_slice(&half::f16::from_f32(*c).to_le_bytes());
+                    }
+                }
+            }
+            bytes
+        })
+        .collect();
+    let kvd = key_value_data();
+    let dfd_offset = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * data.len();
+    let kvd_offset = dfd_offset + DFD_SIZE as usize;
+    let data_offset = (kvd_offset + kvd.len()).next_multiple_of(8);
+    let mut offsets = vec![0; data.len()];
+    let mut offset = data_offset;
+    for (i, level) in data.iter().enumerate().rev() {
+        offsets[i] = offset;
+        offset += level.len();
+    }
+    let mut out = Vec::with_capacity(offset);
+    out.extend_from_slice(&IDENTIFIER);
+    for v in [
+        VK_FORMAT_R16G16B16A16_SFLOAT,
+        2,
+        size,
+        size,
+        0,
+        0,
+        6,
+        data.len() as u32,
+        0,
+    ] {
+        put_u32(&mut out, v);
+    }
+    put_u32(&mut out, dfd_offset as u32);
+    put_u32(&mut out, DFD_SIZE);
+    put_u32(&mut out, kvd_offset as u32);
+    put_u32(&mut out, kvd.len() as u32);
+    put_u64(&mut out, 0);
+    put_u64(&mut out, 0);
+    for (level, offset) in data.iter().zip(&offsets) {
+        put_u64(&mut out, *offset as u64);
+        put_u64(&mut out, level.len() as u64);
+        put_u64(&mut out, level.len() as u64);
+    }
+    // The data format descriptor: four signed float halves, linear.
+    put_u32(&mut out, DFD_SIZE);
+    put_u32(&mut out, 0);
+    put_u16(&mut out, 2);
+    put_u16(&mut out, 88);
+    out.extend_from_slice(&[1, 1, 1, 0]);
+    out.extend_from_slice(&[0; 4]);
+    out.extend_from_slice(&[8, 0, 0, 0, 0, 0, 0, 0]);
+    for (k, channel) in [0x00u8, 0x01, 0x02, 0x0F].into_iter().enumerate() {
+        put_u16(&mut out, k as u16 * 16);
+        out.push(15);
+        out.push(channel | 0x40 | 0x80);
+        out.extend_from_slice(&[0; 4]);
+        put_u32(&mut out, 0xBF80_0000);
+        put_u32(&mut out, 0x3F80_0000);
+    }
+    out.extend_from_slice(&kvd);
+    out.resize(data_offset, 0);
+    for level in data.iter().rev() {
+        out.extend_from_slice(level);
+    }
+    out
+}
+
 /// What the Inspector shows of a `.ktx2` file.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Info {
@@ -115,6 +194,8 @@ pub struct Info {
     /// 0 for 2D textures.
     pub depth: u32,
     pub levels: u32,
+    /// `6` for a cubemap.
+    pub faces: u32,
     /// Level 0, only for the subset assetc writes; a 3D texture's slices side by side.
     pub level0: Option<Image>,
     /// Levels 1 and up, decoded like level 0 (empty when level 0 is not).
@@ -126,6 +207,7 @@ impl Info {
         match self.vk_format {
             VK_FORMAT_R8G8B8A8_SRGB => "R8G8B8A8_SRGB".into(),
             VK_FORMAT_R8G8B8A8_UNORM => "R8G8B8A8_UNORM".into(),
+            VK_FORMAT_R16G16B16A16_SFLOAT => "R16G16B16A16_SFLOAT".into(),
             n => format!("vkFormat {n}"),
         }
     }
@@ -199,6 +281,7 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
         height,
         depth,
         levels: levels.max(1),
+        faces: faces.max(1),
         level0,
         mips,
     })

@@ -17,6 +17,7 @@ mod font;
 mod gizmo;
 mod gradient;
 mod hash;
+mod hdr;
 mod hull;
 mod icons;
 mod inspect;

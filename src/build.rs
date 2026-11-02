@@ -174,6 +174,7 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
             }
             Job::Font { source } => compile_font(input, source, output),
             Job::Data { source, kind } => compile_data(&input.join(source), &dest, *kind),
+            Job::Cubemap { source } => compile_cubemap(&input.join(source), &dest),
             Job::Lut { source, volume } => {
                 compile_lut(&input.join(source), &dest, *volume).map(|size| {
                     let layout = if *volume { "volume" } else { "strip" };
@@ -450,6 +451,15 @@ fn compile_model(
     Ok(model.detail)
 }
 
+/// Writes an HDR environment map as a half-float KTX2 cubemap; see docs/features/hdr.md.
+fn compile_cubemap(source: &Path, dest: &Path) -> Result<String, String> {
+    let hdr = crate::hdr::read(source)?;
+    let size = crate::hdr::face_size(hdr.height);
+    let levels = hdr.cubemap(size);
+    write(dest, &crate::ktx2::encode_cubemap_rgba16f(&levels))?;
+    Ok(format!("cubemap {size}², rgba16f, {} levels", levels.len()))
+}
+
 /// The first problem, and how many more there are.
 fn first_problem(problems: &[String]) -> Result<(), String> {
     match problems {
@@ -645,6 +655,27 @@ fn write(dest: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hdr_maps_become_half_float_cubemaps() {
+        let dir = tempfile::tempdir().unwrap();
+        let (source, dest) = (dir.path().join("sky.exr"), dir.path().join("sky.ktx2"));
+        exr::prelude::write_rgb_file(&source, 64, 32, |_, y| (4.0f32, y as f32 / 32.0, 0.5f32))
+            .unwrap();
+        let detail = compile_cubemap(&source, &dest).unwrap();
+        assert_eq!(detail, "cubemap 16², rgba16f, 5 levels");
+        let bytes = fs::read(&dest).unwrap();
+        let info = crate::ktx2::read(&bytes).unwrap();
+        assert_eq!(
+            (info.width, info.height, info.faces, info.levels),
+            (16, 16, 6, 5)
+        );
+        assert_eq!(info.format_name(), "R16G16B16A16_SFLOAT");
+        // Level 0 is the last data, six 16 × 16 faces of 8-byte texels; red stays 4.0.
+        let level0 = &bytes[bytes.len() - 6 * 16 * 16 * 8..];
+        let red = half::f16::from_le_bytes([level0[0], level0[1]]).to_f32();
+        assert_eq!(red, 4.0);
+    }
 
     #[test]
     fn summaries_count_every_kind() {

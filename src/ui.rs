@@ -2128,8 +2128,8 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         .unwrap_or_default()
         .to_ascii_lowercase();
     match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga" | "webp" | "tif" | "tiff" | "exr"
-        | "hdr" | "dds" | "ktx2" => Icon::Image,
+        "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga" | "webp" | "tif" | "tiff" | "hdr"
+        | "dds" | "ktx2" => Icon::Image,
         "ttf" | "otf" | "woff" | "woff2" => Icon::Type,
         "cube" => Icon::Aperture,
         "noise" => Icon::ImagePlay,
@@ -2142,6 +2142,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
+        "exr" => Icon::SunMedium,
         "afont" => Icon::Type,
         _ => Icon::File,
     }

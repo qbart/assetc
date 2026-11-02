@@ -104,6 +104,7 @@ enum Kind {
     Graph,
     Tree,
     Data,
+    Hdr,
     MaterialSource,
     ColorLut,
     Font,
@@ -129,6 +130,7 @@ impl Kind {
             Self::Graph => "Graph",
             Self::Tree => "Tree",
             Self::Data => "Data",
+            Self::Hdr => "HDR environment map",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
@@ -197,6 +199,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if crate::agraph::is_graph(file) => Kind::Graph,
         Location::Input if crate::atree::is_tree(file) => Kind::Tree,
         Location::Input if crate::adata::is_data(file) => Kind::Data,
+        Location::Input if crate::hdr::is_hdr(file) => Kind::Hdr,
         Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if model::is_model(file) => Kind::Model,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
@@ -226,7 +229,8 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::Schema => schema_rows(file, &mut out),
         Kind::Graph => graph_rows(file, &mut out),
         Kind::Tree => tree_rows(file, &mut out),
-        Kind::Data => data_rows(file, &mut out),
+        Kind::Data => data_rows(project, file, &rel, &mut out),
+        Kind::Hdr => hdr_rows(project, file, &rel, &mut out),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
         Kind::Font => font_rows(project, file, &rel, &mut out),
@@ -387,6 +391,9 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
         },
     ));
     out.rows.push(("Format", info.format_name()));
+    if info.faces == 6 {
+        out.rows.push(("Faces", "6".into()));
+    }
     out.rows.push(("Mip levels", info.levels.to_string()));
     asset_rows(strip_extension(rel), out);
 
@@ -465,8 +472,49 @@ fn tree_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     Ok(())
 }
 
+/// See docs/features/hdr.md#preview-and-inspector.
+fn hdr_rows(project: &Project, file: &Path, rel: &str, out: &mut Inspection) -> Result<(), String> {
+    let hdr = crate::hdr::read(file)?;
+    let size = crate::hdr::face_size(hdr.height);
+    out.rows
+        .push(("Dimensions", format!("{} × {} px", hdr.width, hdr.height)));
+    out.rows.push(("Face size", format!("{size} px")));
+    out.rows
+        .push(("Mip levels", (size.trailing_zeros() + 1).to_string()));
+    let asset_path = strip_extension(rel);
+    asset_rows(asset_path, out);
+    output_row(project, &format!("{asset_path}.ktx2"), "", out);
+    // The preview's faces: at most 512 px, clamped to 0–1, sRGB.
+    let preview = hdr.cubemap(size.min(512));
+    let encode = |l: f32| {
+        let l = l.clamp(0.0, 1.0);
+        let s = if l <= 0.003_130_8 {
+            l * 12.92
+        } else {
+            1.055 * l.powf(1.0 / 2.4) - 0.055
+        };
+        (s * 255.0).round() as u8
+    };
+    let level = &preview[0];
+    out.cubemap = Some(
+        level
+            .faces
+            .iter()
+            .map(|face| Image {
+                width: level.size as u32,
+                height: level.size as u32,
+                pixels: face
+                    .iter()
+                    .flat_map(|t| [encode(t[0]), encode(t[1]), encode(t[2]), 255])
+                    .collect(),
+            })
+            .collect(),
+    );
+    Ok(())
+}
+
 /// See docs/features/instances.md#info-tab.
-fn data_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+fn data_rows(_: &Project, file: &Path, _: &str, out: &mut Inspection) -> Result<(), String> {
     use crate::adata::{DataFile, load_schema};
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
     let data = DataFile::parse(&text)?;

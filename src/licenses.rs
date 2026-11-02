@@ -22,7 +22,7 @@ const fn project(
     }
 }
 
-pub const PROJECTS: [Project; 23] = [
+pub const PROJECTS: [Project; 25] = [
     project("Lucide", "icons", "ISC", "lucide.dev"),
     project(
         "Ubuntu",
@@ -97,6 +97,18 @@ pub const PROJECTS: [Project; 23] = [
         "reading images",
         "MIT or Apache-2.0",
         "github.com/image-rs/image",
+    ),
+    project(
+        "exr",
+        "reading HDR images",
+        "BSD-3-Clause",
+        "github.com/johannesvollmer/exrs",
+    ),
+    project(
+        "half",
+        "half floats",
+        "MIT or Apache-2.0",
+        "github.com/starkat99/half-rs",
     ),
     project(
         "ttf-parser",

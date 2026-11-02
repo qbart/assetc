@@ -71,6 +71,9 @@ pub enum Job {
     Font { source: String },
     /// The atlas of a font, written by its [`Job::Font`].
     FontPart { source: String },
+    /// An HDR environment map (relative to `input`) as a half-float cubemap; see
+    /// docs/features/hdr.md#build.
+    Cubemap { source: String },
     /// A schema, data file, graph or tree (relative to `input`), written to the same path;
     /// see docs/features/build.md#inputs.
     Data { source: String, kind: Kind },
@@ -105,7 +108,8 @@ impl Asset {
             | Job::ModelPart { source }
             | Job::Font { source }
             | Job::FontPart { source }
-            | Job::Data { source, .. } => source.clone(),
+            | Job::Data { source, .. }
+            | Job::Cubemap { source } => source.clone(),
         }
     }
 }
@@ -270,6 +274,17 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                     message,
                 }),
             }
+        } else if crate::hdr::is_hdr(file) {
+            let asset_path = strip_extension(&rel).to_owned();
+            plan.assets.push(Asset {
+                id: fnv1a64(asset_path.as_bytes()),
+                kind: Kind::Texture,
+                output: Kind::Texture.output_path(&asset_path),
+                asset_path,
+                job: Job::Cubemap {
+                    source: rel.clone(),
+                },
+            });
         } else if let Some(kind) = data_kind(file) {
             // Written to the same path; see docs/features/build.md#inputs.
             plan.assets.push(Asset {
