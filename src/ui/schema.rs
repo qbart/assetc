@@ -1214,7 +1214,7 @@ fn gradient_default(ui: &mut Ui, value: &mut Value, card: &mut GradientCard) {
     }
 }
 
-fn gradient_preview(ui: &Ui, rect: Rect, value: &Value) {
+pub(super) fn gradient_preview(ui: &Ui, rect: Rect, value: &Value) {
     color_picker::checker(ui, rect, 3);
     let Ok(stops) = aschema::gradient_stops(value) else {
         return;

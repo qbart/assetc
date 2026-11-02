@@ -6,7 +6,7 @@ use std::cell::Cell;
 use serde_json::{Map, Value};
 
 use super::curve::{CurveSettings, CurveState};
-use super::schema::{ValueEditors, commit_field, nested_value, struct_of, value_editor};
+use super::schema::{ValueEditors, commit_field, gradient_preview, struct_of, value_editor};
 use super::*;
 use crate::adata::{self, DataFile, DataProblem, Instance, inherited, same};
 use crate::aschema::{Field, Ty, parse_type};
@@ -660,18 +660,9 @@ fn field_row(
             if Some(&nested) != stored.as_ref() && (stored.is_some() || !nested.is_empty()) {
                 nested_write = Some(nested);
             }
-        } else if matches!(ty, Some(Ty::List(_))) && value.is_array() {
+        } else if let (Some(Ty::List(item)), Value::Array(items)) = (&ty, &mut value) {
             ui.add_enabled_ui(!f.readonly, |ui| {
-                let mut shown = Vec::new();
-                nested_value(
-                    ui,
-                    &mut cx.editors,
-                    &mut value,
-                    cx.schema,
-                    ty.as_ref(),
-                    &path,
-                    &mut shown,
-                );
+                list_items(ui, cx, f, item, items, &path);
             });
         }
     });
@@ -792,5 +783,141 @@ fn data_value(ui: &mut Ui, cx: &mut Cx, f: &Field, ty: Option<&Ty>, value: &mut 
                 });
         }
         _ => value_editor(ui, &mut cx.editors, value, cx.schema, ty, path),
+    }
+}
+
+/// A list value's items under its row: handle, index, the item (a struct folded to its name
+/// and colors), Remove; then Add item. See docs/features/instances.md#editors.
+fn list_items(ui: &mut Ui, cx: &mut Cx, f: &Field, item: &Ty, items: &mut Vec<Value>, path: &str) {
+    let inner = struct_of(cx.schema, Some(item)).map(|(si, _)| si);
+    let dragging = Cell::new(None);
+    let dropped = Cell::new(None);
+    let mut remove = None;
+    let mut rects = Vec::new();
+    ui.indent("items", |ui| {
+        for (i, value) in items.iter_mut().enumerate() {
+            let path = format!("{path}/[{i}]");
+            let key = (cx.instance, path.clone());
+            let open = cx.open.contains(&key);
+            let row = ui.push_id(&path, |ui| {
+                let row = ui
+                    .horizontal(|ui| {
+                        ui.set_min_height(28.0);
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let grip = drag_handle(ui);
+                        if grip.dragged() {
+                            dragging.set(Some(i));
+                        }
+                        if grip.drag_stopped() {
+                            dropped.set(Some(i));
+                        }
+                        if inner.is_some() {
+                            let icon = if open {
+                                Icon::ChevronDown
+                            } else {
+                                Icon::ChevronRight
+                            };
+                            let tip = if open { "Fold" } else { "Unfold" };
+                            if icon_button(ui, icon, tip, true).clicked() {
+                                if open {
+                                    cx.open.remove(&key);
+                                } else {
+                                    cx.open.insert(key.clone());
+                                }
+                            }
+                        }
+                        let index = RichText::new(format!("[{i}]")).monospace().color(TEXT);
+                        ui.label(index);
+                        match inner {
+                            Some(si) => {
+                                let name =
+                                    RichText::new(&cx.schema.types[si].name).color(TEXT_WEAK);
+                                ui.label(name);
+                                item_colors(ui, cx, si, value);
+                            }
+                            None => {
+                                ui.allocate_ui_with_layout(
+                                    vec2(VALUE_W, 22.0),
+                                    Layout::left_to_right(Align::Center),
+                                    |ui| {
+                                        ui.set_min_width(VALUE_W);
+                                        data_value(ui, cx, f, Some(item), value, &path);
+                                    },
+                                );
+                            }
+                        }
+                        if icon_button(ui, Icon::X, "Remove item", true).clicked() {
+                            remove = Some(i);
+                        }
+                    })
+                    .response
+                    .rect;
+                // A struct item's fields, unfolded; a list item's items.
+                match (inner, value) {
+                    (Some(si), Value::Object(object)) if open => {
+                        let mut nested = object.clone();
+                        ui.indent("fields", |ui| {
+                            fields(ui, cx, si, &mut nested, None, &path, None);
+                        });
+                        *object = nested;
+                    }
+                    (None, Value::Array(inner_items)) => {
+                        if let Ty::List(inner_item) = item {
+                            list_items(ui, cx, f, inner_item, inner_items, &path);
+                        }
+                    }
+                    _ => {}
+                }
+                row
+            });
+            rects.push(row.inner);
+        }
+        if let Some((from, to)) = card_reorder(ui, &rects, dragging.get(), dropped.get()) {
+            let moved = items.remove(from);
+            items.insert(to, moved);
+        }
+        if let Some(i) = remove {
+            items.remove(i);
+        }
+        let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add item");
+        if ui.add(add).clicked() {
+            items.push(aschema::implicit_value(cx.schema, item));
+        }
+    });
+}
+
+/// A struct item's first two colors as swatches, or without colors its first gradient.
+fn item_colors(ui: &mut Ui, cx: &Cx, si: usize, value: &Value) {
+    let Body::Struct { fields, .. } = &cx.schema.types[si].body else {
+        return;
+    };
+    let object = value.as_object();
+    let resolved = |f: &Field| {
+        object
+            .and_then(|o| o.get(&f.name))
+            .cloned()
+            .unwrap_or_else(|| inherited(cx.schema, f, None))
+    };
+    let colors: Vec<[u8; 4]> = fields
+        .iter()
+        .filter(|f| matches!(parse_type(&f.ty), Ok(Ty::Prim("rgb" | "rgba"))))
+        .filter_map(|f| resolved(f).as_str().and_then(gradient::parse_color))
+        .take(2)
+        .collect();
+    if colors.is_empty() {
+        let gradient = fields
+            .iter()
+            .find(|f| matches!(parse_type(&f.ty), Ok(Ty::Prim("gradient"))));
+        if let Some(f) = gradient {
+            let (rect, _) = ui.allocate_exact_size(vec2(48.0, 14.0), Sense::hover());
+            gradient_preview(ui, rect, &resolved(f));
+        }
+        return;
+    }
+    for c in colors {
+        let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
+        color_picker::checker(ui, rect, 3);
+        ui.painter()
+            .rect_filled(rect, 3, color_picker::to_color32(c));
     }
 }
