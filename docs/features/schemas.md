@@ -107,10 +107,10 @@ details when unfolded:
 | Row part | Editor |
 |----------|--------|
 | (grip)   | drag handle: moves the field within its group |
-| (fold)   | `chevron-right` / `chevron-down`: folds or unfolds the details |
+| (details) | `settings` (16 px icon button, `ACCENT` while open, else `TEXT_WEAK`): shows or hides the field's details, where its visibility and dependency logic lives |
 | Name     | text, monospace, 140 px; an invalid or taken name reverts when it loses focus |
 | Type     | text, monospace, 150 px, `CHANNEL_R` while it does not parse or names an unknown type; its `chevron-down` button lists the primitives, the file's types, and `list<…>`, `optional<…>`, `ref<…>` around the current type |
-| Default  | a **Default** checkbox, then, ticked, the default's value editor (see [Defaults](#defaults)); unticked, the implicit default in `TEXT_WEAK` (`0`, `""`, `linear`, …) |
+| Default  | a **Default** checkbox, then, ticked, the default's value editor (see [Defaults](#defaults)); unticked, nothing |
 | (problems) | the [problem icon](#problems), right-aligned, when the field has problems |
 | (remove) | `x`: removes the field |
 
@@ -128,10 +128,6 @@ use:
 - **Order** (number, empty for none), **Readonly** (checkbox), **Show if**
   and **Hide if** (text, see
   [conditions](../aschema.md#24-conditions-show_if--hide_if)), every field.
-- **Curve** and **gradient** fields with a default: the default's editor,
-  the [curve editor](#curve-editor) or the
-  [gradient editor](gradients.md#gradient-editor), as wide as the details
-  (at most 560 px).
 
 **Add field** (`plus` and text, in each section) appends `field` (`field2`,
 …) of type `string`, without a default, to that section.
@@ -159,8 +155,11 @@ in the type's data encoding:
   hex text (`#c8c8c8`). **Double-clicking the swatch** opens a color picker
   under it (the [gradients' picker](gradients.md#selected-stop), 240 px
   wide; alpha is kept opaque for `rgb`); clicking outside closes it.
-- `curve`, `gradient`: a 60 × 18 px preview; clicking it unfolds the
-  field's details, which hold the editor.
+- `curve`, `gradient`: a 60 × 18 px preview (with a 1 px `STROKE` frame).
+  **Double-clicking it** opens a popover under it, as the colour picker
+  does: the [curve editor](curves.md#curve-editor) (320 px wide) or the
+  [gradient editor](gradients.md#gradient-editor) (320 px wide); clicking
+  outside or `Escape` closes it.
 - Anything else (structs, lists, optionals, refs): JSON text.
 
 A default that does not encode as the type is kept as typed and reported as
@@ -168,26 +167,9 @@ a problem.
 
 ### Curve editor
 
-A curve is points `[x, y, in, out]` over `x` 0..1 with slopes as tangents,
-evaluated as [matma](https://crates.io/crates/matma)'s cubic **Hermite**
-between neighbouring points (each segment's tangents are the slopes times
-its width), flat before the first point and after the last:
-
-- An area as wide as the row and 140 px tall, `BG_PANEL`, with a 1 px
-  `STROKE` frame and lines at `x` = 0.25, 0.5, 0.75; `y` spans the curve's
-  range (at least 0..1) plus 10%.
-- The curve as a 2 px `ACCENT` line; each point a 8 px square in `TEXT`, the
-  chosen one in `ACCENT` with its tangent handles: 1 px lines to 6 px dots
-  40 px away along the in and out slopes.
-- **Press a point**: chooses it; **drag** moves it (`x` clamped between its
-  neighbours and to 0..1). **Drag a handle**: sets that slope; the other
-  follows unless the point's tangents are broken (`Shift` while dragging
-  breaks them; a point whose two slopes differ starts broken). Whether
-  tangents are joined is not saved.
-- **Double-click** the area: adds a point on the curve there; double-click a
-  point: removes it (a curve keeps at least one point).
-- Under the area: the chosen point's **X**, **Y**, **In**, **Out** (number
-  fields, three decimals).
+See [`curves.md`](curves.md): the curve model, its evaluation (matma's
+cubic Hermite), and the popover editor with presets, a square plot, split
+tangents and a playhead.
 
 ## Problems
 

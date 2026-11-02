@@ -70,4 +70,7 @@ last build result) until the next operation or build.
 ## Keybindings
 
 F2 (rename), Delete (delete), Enter / Escape while renaming; see
-[`KEYS.md`](../../KEYS.md). The keys only act when no text field has focus.
+[`KEYS.md`](../../KEYS.md). The keys only act when no text field has focus
+and the left sidebar has the keys: the last mouse press landed in it (not
+in the canvas or the Inspector). So `Delete` after clicking a graph's node
+in the canvas removes the node, not the file.

@@ -49,36 +49,54 @@ choices), on `BG_CENTER`:
 - **Nodes**: circles 1 unit across (0.5 unit radius), filled `BG_HEADER`
   with a 1 px `STROKE` border, the label (or id) centered in `TEXT`, 13 px
   at 64 px per unit (scaled, at least 8 px). The chosen node has a 2 px
-  `ACCENT` border. Nodes have no ports: the **rim**, the outer 8 px of the
-  circle (the outer half while the radius is under 16 px), is where edges
-  are dragged from; hovering it draws a 2 px `ACCENT` ring at the border
-  and shows the crosshair cursor.
-- **Edges**: smooth curves (quadratic Béziers) from their From node's
-  border to their To node's border, ending in a 10 px arrowhead along the
-  curve; 1.5 px `TEXT_WEAK`, the chosen edge `ACCENT`, 2.5 px. Every edge
-  bends to the right of its direction, its middle 0.25 unit off the
-  straight line, and each further edge with the same From and To 0.25
-  unit more; so edges both ways between two nodes, and repeated edges,
-  never overlap. An edge from a node to itself is a loop over the node,
-  each further loop of that node larger.
+  `ACCENT` border. Nodes have no ports. A node has two areas:
+  - the **body**, the inner 60% of the radius: pressing it chooses and
+    moves the node;
+  - the **rim**, from 60% of the radius to 8 px outside the circle: edges
+    are dragged from it. Hovering it shows the band (`ACCENT` at 15%), a
+    2 px `ACCENT` ring at the border and the crosshair cursor.
+- **Edges**: S-shaped cubic Béziers, as Blender's node links, 1.5 px
+  `TEXT_WEAK` (the chosen edge `ACCENT`, 2.5 px), ending in a 10 px
+  arrowhead along the curve:
+  - An edge runs along the **axis** (horizontal or vertical) on which its
+    nodes' centers are farther apart. It leaves its From node's border
+    heading toward the To node along that axis and enters the To node's
+    border along it too; the two inner control points sit half the ends'
+    distance on that axis (at least 0.25 unit) out from the ends.
+  - Edges between the same two nodes are **spread across the axis**, 0.2
+    unit apart (closer when needed to stay within 0.4 unit of the centers'
+    line). When edges run both ways, every edge keeps to the right of its
+    direction: the k-th edge (from 0) of a direction is (k + 0.5) × spacing
+    off. When they all run one way, they are centered: (k − (n − 1) / 2) ×
+    spacing for n edges. So edges both ways, and repeated edges, never
+    overlap.
+  - An edge from a node to itself is a **loop** over the node, each further
+    loop of that node larger.
 - **Edge labels**: an edge with a label or a weight other than 1 shows
   them at the middle of its curve (`label`, `label · 3`, or `3`), 12 px
   `TEXT_WEAK` (`ACCENT` when chosen) at 64 px per unit (scaled, at least
   8 px, hidden under 6 px), on a `BG_CENTER` backdrop.
 - A weak hint in the bottom-left corner: `Double-click to add a node ·
   double-click a node to rename · drag a node's rim onto a node to connect ·
-  Shift snaps to 0.25`.
+  Delete or X removes · Shift snaps to 0.25`.
 
 Interactions (left button unless said):
 
-- **Press a node** (inside its rim) chooses it; **dragging** it moves it
+- **Press a node's body** chooses it; **dragging** it moves it
   (positions keep 3 decimals). Holding **`Shift`** snaps its center to
   multiples of 0.25.
-- **Press a node's rim** and **drag** onto a node: a new edge from the
-  first node to that one, chosen. A rubber line follows the pointer from
-  the node's border. Released on the node it started from, it adds a loop,
-  but only once the pointer has left that node; released elsewhere, nothing
-  is added.
+- **Press a node's rim** and **drag** onto a node (its body or rim): a new
+  edge from the first node to that one, chosen. While dragging:
+  - the start node keeps its rim ring;
+  - with no node under the pointer, a rubber line (`ACCENT` at 60%, 1.5 px)
+    runs from the start node's border to the pointer, with an arrowhead
+    there;
+  - over a node, that node is the **target**: it is tinted (`ACCENT` at
+    15%) with a 2 px `ACCENT` ring, and the rubber edge is drawn as the
+    edge to it will be (its curve and arrow, `ACCENT`, 2.5 px).
+  Released on the node it started from, it adds a loop, but only once the
+  pointer has left that node (before that, the start node is no target);
+  released elsewhere, nothing is added.
 - **Click an edge** (within 7 px of its curve) chooses it.
 - **Click empty grid** chooses nothing.
 - **Double-click empty grid** adds a node `node` (`node_2`, …, label empty)
@@ -87,8 +105,10 @@ Interactions (left button unless said):
   field (at least 120 px wide, the node's width when wider) over the node,
   focused, holding the label. **`Enter`** or clicking elsewhere keeps the
   text, **`Escape`** drops it.
-- Nodes and edges are removed in the Inspector (no Delete key, which acts
-  on the file tree).
+- **`Delete`** or **`X`** removes the chosen node (with its edges) or edge,
+  while the canvas has the keys (the last mouse press landed in it, see
+  [file operations](file-operations.md#keybindings)) and no text field is
+  focused. **Delete** in the Inspector does the same.
 
 ## Inspector
 

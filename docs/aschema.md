@@ -236,9 +236,10 @@ A curve is an array of points. Each point is `[x, y, in_tangent, out_tangent]`,
 with tangents given as slopes (Unity's keyframe).
 
 - A point may be shortened to `[x, y]`; missing tangents are `0`.
+- A curve has at least two points.
 - `x` must be in `0..1`.
-- Points must be sorted by `x`.
-- Breaking either rule is an error.
+- Points must be sorted by `x`; two points may share an `x` (a step).
+- Breaking any of these rules is an error.
 - Writers always emit all four numbers.
 - Whether the two tangents are "joined" is editor state and is never stored.
 
@@ -343,7 +344,7 @@ loading or saving.
 | `show_if`/`hide_if` naming no sibling, or ordering op with non-number; `widget` on a type it doesn't fit; unknown `widget` value | schema | error |
 | `$type` not a struct of the schema; `$id` missing or not an identifier | data | error |
 | Duplicate `($type, $id)` across the project | data | error |
-| Value not encodable as its type (string in `i32`, `300` in `u8`, `12.5` in `i32`, unknown enum value, `"red"` in `rgb`, curve point out of `0..1` or unsorted, gradient with < 2 stops) | data | error |
+| Value not encodable as its type (string in `i32`, `300` in `u8`, `12.5` in `i32`, unknown enum value, `"red"` in `rgb`, curve with < 2 points or a point out of `0..1` or unsorted, gradient with < 2 stops) | data | error |
 | Number outside `min`/`max` | data | warning |
 | Ref to an id that does not exist for that type (dangling) | data | warning |
 | Required ref absent or `""` | data | warning |

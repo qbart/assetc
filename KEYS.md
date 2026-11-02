@@ -1,7 +1,9 @@
 # Keys
 
 Keyboard and mouse bindings in the assetc GUI. Keys only act when no text
-field has focus, except the global ones.
+field has focus, except the global ones. The file browser's keys act only
+after the last mouse press landed in the left sidebar; a graph's keys only
+after it landed in the canvas.
 
 ## Global
 
@@ -20,8 +22,8 @@ See [`docs/features/file-operations.md`](docs/features/file-operations.md).
 | Input           | Action                                     |
 |-----------------|--------------------------------------------|
 | Right click     | File operations menu                       |
-| `F2`            | Rename the selected entry                  |
-| `Delete`        | Delete the selected entry (asks first)     |
+| `F2`            | Rename the selected entry (after a press in the sidebar) |
+| `Delete`        | Delete the selected entry, asks first (after a press in the sidebar) |
 | `Enter`         | While renaming: commit                     |
 | `Escape`        | While renaming: cancel                     |
 
@@ -90,18 +92,31 @@ In a schema's editor (see [`docs/features/schemas.md`](docs/features/schemas.md#
 | Input                                  | Action                                       |
 |----------------------------------------|----------------------------------------------|
 | Double-click on a colour default's swatch | Open the color picker                     |
+| Double-click on a curve default's preview | Open the curve editor                     |
+| Double-click on a gradient default's preview | Open the gradient editor               |
 | Left drag on a group's handle          | Move the group (fields fold meanwhile)       |
 | Left drag on a field's handle          | Move the field within its group              |
 
-In a schema's curve editor (see [`docs/features/schemas.md`](docs/features/schemas.md#curve-editor)):
+In a curve editor (see [`docs/features/curves.md`](docs/features/curves.md#editing)); keys
+act while the pointer is over the editor:
 
 | Input                                  | Action                                       |
 |----------------------------------------|----------------------------------------------|
 | Left press / drag on a point           | Choose it / move it                          |
-| Left drag on a tangent handle          | Set its slope (the other follows)            |
-| `Shift` + drag on a tangent handle     | Break the tangents: set this slope only      |
-| Double-click on the curve area         | Add a point on the curve there               |
-| Double-click on a point                | Remove it                                    |
+| Left press on empty plot               | Choose none                                  |
+| Left drag on a tangent handle          | Rotate that slope (joined: both)             |
+| `Shift` + drag on a tangent handle     | Split the slopes, then rotate this one       |
+| Double-click on empty plot             | Add a point on the curve there               |
+| Double-click on a point                | Delete it (not the first, last, or one of two) |
+| `[` / `]`                              | Previous / next point (wrapping); in rotation mode on a split point, switch the active slope first |
+| `Home` / `End`                         | First / last point                           |
+| Arrow keys                             | Move the point by the x / y step; in rotation mode, turn the active slope by the angle step (`↑` / `←` counter-clockwise) |
+| `R`                                    | Rotation mode on / off                       |
+| `S`                                    | Split / join the chosen point's slopes       |
+| `A`                                    | Add a point after the chosen one             |
+| `Delete` / `X`                         | Delete the chosen point                      |
+| `Space`                                | Pause / resume the playhead                  |
+| `Escape`, click outside                | Close the editor                             |
 
 On a directed graph (see [`docs/features/graphs.md`](docs/features/graphs.md#canvas)):
 
@@ -110,9 +125,10 @@ On a directed graph (see [`docs/features/graphs.md`](docs/features/graphs.md#can
 | Scroll wheel                           | Zoom around the pointer                      |
 | Right or middle drag                   | Pan                                          |
 | Right double-click                     | Fit the graph                                |
-| Left press / drag on a node            | Choose it / move it                          |
+| Left press / drag on a node's body     | Choose it / move it                          |
 | `Shift` while moving or adding a node  | Snap its center to 0.25                      |
 | Left drag from a node's rim onto a node | Add an edge (onto the same node: a loop)    |
+| `Delete` / `X`                         | Remove the chosen node (with its edges) or edge |
 | Double-click on a node                 | Edit its label in place                      |
 | `Enter` / `Escape` while editing a label | Keep / drop the new label                  |
 | Left click on an edge                  | Choose it                                    |

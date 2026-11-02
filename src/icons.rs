@@ -58,7 +58,9 @@ pub enum Icon {
     Plus,
     RefreshCw,
     Rotate3d,
+    RotateCw,
     Scan,
+    Settings,
     Settings2,
     Shapes,
     SlidersVertical,
@@ -69,12 +71,13 @@ pub enum Icon {
     Torus,
     Trash2,
     Type,
+    Unlink2,
     Wrench,
     X,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 66] = [
+const SVGS: [(&str, &str); 69] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -167,7 +170,9 @@ const SVGS: [(&str, &str); 66] = [
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("rotate-3d", include_str!("../assets/icons/rotate-3d.svg")),
+    ("rotate-cw", include_str!("../assets/icons/rotate-cw.svg")),
     ("scan", include_str!("../assets/icons/scan.svg")),
+    ("settings", include_str!("../assets/icons/settings.svg")),
     ("settings-2", include_str!("../assets/icons/settings-2.svg")),
     ("shapes", include_str!("../assets/icons/shapes.svg")),
     (
@@ -187,6 +192,7 @@ const SVGS: [(&str, &str); 66] = [
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
     ("type", include_str!("../assets/icons/type.svg")),
+    ("unlink-2", include_str!("../assets/icons/unlink-2.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
     ("x", include_str!("../assets/icons/x.svg")),
 ];
