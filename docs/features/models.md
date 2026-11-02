@@ -409,7 +409,7 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 | `P/<material>.amat`         | material   | `P/<material>.amat` | per material a submesh uses ([spec](../spec/amat.md)) |
 | `P/<image>.ktx2`            | texture    | `P/<image>`       | per image used as base color, normal or emissive texture |
 | `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
-| `P/<set>.colors.ktx2`       | texture    | `P/<set>.colors`  | per color set exported as Texture + UV buffer, see [`vertex-colors.md`](vertex-colors.md#export) |
+| `P/<set>.colors.ktx2`       | texture    | `P/<set>.colors`  | per color set exported as Texture + UV buffer or Both, see [`vertex-colors.md`](vertex-colors.md#export) |
 | `P.aanim`                   | animation  | `P.aanim`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.md)) |
 
 The `.amesh` also carries the model's [properties](properties.md),
