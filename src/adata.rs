@@ -311,6 +311,7 @@ pub fn normalise(
             Ty::Named(n) => struct_index(schema, n),
             _ => None,
         };
+        let v = &sparse_items(schema, &ty, v);
         match (inner, v) {
             (Some(inner), Value::Object(o)) => {
                 let kept = normalise(schema, inner, o, from.as_object());
@@ -333,6 +334,27 @@ pub fn normalise(
         }
     }
     out
+}
+
+/// A list of struct items, each written as a struct value against its struct's defaults
+/// (an item with no keys stays `{}`); nested lists likewise; anything else as it is.
+fn sparse_items(schema: &Schema, ty: &Ty, v: &Value) -> Value {
+    let (Ty::List(item), Value::Array(items)) = (ty, v) else {
+        return v.clone();
+    };
+    let inner = match &**item {
+        Ty::Named(n) => struct_index(schema, n),
+        _ => None,
+    };
+    Value::Array(
+        items
+            .iter()
+            .map(|v| match (inner, v) {
+                (Some(si), Value::Object(o)) => Value::Object(normalise(schema, si, o, None)),
+                _ => sparse_items(schema, item, v),
+            })
+            .collect(),
+    )
 }
 
 /// Problems of a struct value: `(top-level field, message, warning)`.
@@ -540,6 +562,20 @@ mod tests {
         let stick = back["instances"][1].as_object().unwrap();
         assert_eq!(stick.len(), 2);
         assert!(out.ends_with("}\n"));
+        // Struct list items: field order, defaults left out, empty ones kept.
+        let enemy = r##"{ "$dialect": "a/1", "$schema": "g.aschema", "instances": [
+            { "$type": "Squad", "$id": "s", "members": [ { "tint": "#000000", "name": "A" }, {} ] } ] }"##;
+        let schema = Schema::parse(r##"{ "$dialect": "a/1", "types": {
+            "Weapon": { "kind": "struct", "fields": [
+              { "name": "name", "type": "string" }, { "name": "tint", "type": "rgb" } ] },
+            "Squad": { "kind": "struct", "fields": [ { "name": "members", "type": "list<Weapon>" } ] }
+          } }"##).unwrap();
+        let out = DataFile::parse(enemy).unwrap().to_json(Some(&schema));
+        let back: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            back["instances"][0]["members"],
+            serde_json::json!([{ "name": "A" }, {}])
+        );
     }
 
     #[test]
