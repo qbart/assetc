@@ -187,6 +187,40 @@ fn joint_index(name: Option<&str>, joints: Option<&[Option<&str>]>) -> Result<i3
     }
 }
 
+/// The sidecar's paths with joints as skeleton indices, measured and sampled; see
+/// docs/features/paths.md#build.
+fn resolve_paths(
+    paths: &[crate::enrich::Path],
+    joints: Option<&[Option<&str>]>,
+) -> Result<Vec<amesh::CompiledPath>, String> {
+    paths
+        .iter()
+        .map(|p| {
+            let fail = |problem: String| format!("path {:?}: {problem}", p.name);
+            let joint = joint_index(p.joint.as_deref(), joints).map_err(fail)?;
+            let curve = crate::path::Curve::new(&p.points, p.closed, p.tension, p.alpha)
+                .ok_or_else(|| {
+                    fail(format!(
+                        "needs at least {} points",
+                        crate::path::min_points(p.closed)
+                    ))
+                })?;
+            Ok(amesh::CompiledPath {
+                name: p.name.clone(),
+                kind: p.kind.clone(),
+                joint,
+                closed: p.closed,
+                tension: p.tension,
+                alpha: p.alpha,
+                length: curve.length(),
+                points: p.points.clone(),
+                samples: curve.samples(),
+                properties: p.properties.clone(),
+            })
+        })
+        .collect()
+}
+
 /// The sidecar's shapes with joints as skeleton indices and hulls computed; see
 /// docs/features/shapes.md#build.
 fn resolve_shapes(
@@ -715,6 +749,7 @@ pub fn compile(
             .iter()
             .map(|r| (r.name.clone(), r.tags.clone()))
             .collect(),
+        paths: resolve_paths(&sidecar.paths, skin_joints.as_deref()).map_err(sidecar_error)?,
     };
     let material_ids: Vec<u64> = outputs
         .materials
@@ -1392,6 +1427,33 @@ submeshes = [[0, 0], [3, 1]]
         assert_eq!(
             err.as_deref(),
             Some(r#"Fox.glb.amod: shape "x": no joint "nope""#)
+        );
+    }
+
+    #[test]
+    fn paths_on_the_fox() {
+        let amod = crate::amod::Amod::parse(
+            "[[paths]]\nname = \"tail\"\njoint = \"b_Tail01_012\"\n\
+             points = [[0.0, 0.0, 0.0], [0.0, 10.0, 0.0], [5.0, 20.0, 0.0]]\n",
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Fox.glb");
+        std::fs::write(&file, FOX).unwrap();
+        let compiled = compile(&file, "Fox", &amesh::MeshOptions::default(), &amod).unwrap();
+        let mesh = &compiled.mesh;
+        assert_eq!(amesh::cell(mesh, "PATHS", 0, 1), "tail");
+        assert_ne!(amesh::cell(mesh, "PATHS", 0, 3), "—");
+        assert_eq!(amesh::cell(mesh, "PATHS", 0, 9), "33");
+
+        let short = crate::amod::Amod::parse(
+            "[[paths]]\nname = \"loop\"\nclosed = true\npoints = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]\n",
+        )
+        .unwrap();
+        let err = compile(&file, "Fox", &amesh::MeshOptions::default(), &short).err();
+        assert_eq!(
+            err.as_deref(),
+            Some(r#"Fox.glb.amod: path "loop": needs at least 3 points"#)
         );
     }
 

@@ -124,9 +124,13 @@ struct LocatorTools {
     hidden: HashMap<PathBuf, HashSet<String>>,
     hidden_shapes: HashMap<PathBuf, HashSet<String>>,
     hidden_regions: HashMap<PathBuf, HashSet<String>>,
-    /// The toolbar's Show group: locators, shapes and regions drawn at all; see
+    hidden_paths: HashMap<PathBuf, HashSet<String>>,
+    /// The toolbar's Show group: locators, shapes, regions and paths drawn at all; see
     /// docs/features/models.md#show.
-    show: [bool; 3],
+    show: [bool; 4],
+    /// Clicks on the model add points to the chosen path; a click's ray waits for its hit.
+    draw: bool,
+    draw_awaiting: bool,
     /// The plane Mirror reflects across: 0 X, 1 Y, 2 Z.
     mirror_axis: usize,
     /// The chosen region paints; a stroke's ray waits for its hit; it erases.
@@ -147,7 +151,10 @@ impl Default for LocatorTools {
             hidden: HashMap::new(),
             hidden_shapes: HashMap::new(),
             hidden_regions: HashMap::new(),
-            show: [true, true, false],
+            hidden_paths: HashMap::new(),
+            show: [true, true, false, true],
+            draw: false,
+            draw_awaiting: false,
             mirror_axis: 0,
             paint: false,
             paint_awaiting: false,
@@ -443,6 +450,7 @@ enum InspectorTab {
     Locators,
     Shapes,
     Regions,
+    Paths,
     Properties,
     Modifiers,
     Gradients,
@@ -454,12 +462,13 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 14] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
         Self::Shapes,
         Self::Regions,
+        Self::Paths,
         Self::Properties,
         Self::Modifiers,
         Self::Gradients,
@@ -477,6 +486,7 @@ impl InspectorTab {
             Self::Locators => Icon::MapPin,
             Self::Shapes => Icon::Shapes,
             Self::Regions => Icon::PaintBucket,
+            Self::Paths => Icon::Spline,
             Self::Properties => Icon::List,
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
@@ -494,6 +504,7 @@ impl InspectorTab {
             Self::Locators => "Locators",
             Self::Shapes => "Shapes",
             Self::Regions => "Regions",
+            Self::Paths => "Paths",
             Self::Properties => "Properties",
             Self::Modifiers => "Modifiers",
             Self::Gradients => "Gradients",
@@ -523,10 +534,11 @@ impl InspectorTab {
                         || model::is_model(&s.path))
                     && s.path.is_file()
             }),
-            Self::Locators | Self::Shapes | Self::Regions | Self::Properties => selection
-                .is_some_and(|s| {
+            Self::Locators | Self::Shapes | Self::Regions | Self::Paths | Self::Properties => {
+                selection.is_some_and(|s| {
                     s.location == Location::Input && model::is_model(&s.path) && s.path.is_file()
-                }),
+                })
+            }
             Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input
                     && (build::is_noise(&s.path) || build::is_image(&s.path))
@@ -772,10 +784,10 @@ fn shell(
                         &mut preview3d,
                         &mut state.vision,
                         &mut state.locators,
-                        state.inspector_tab == InspectorTab::Shapes,
+                        state.inspector_tab,
                     );
-                    if out.show_tab {
-                        state.inspector_tab = InspectorTab::Locators;
+                    if let Some(tab) = out.show_tab {
+                        state.inspector_tab = tab;
                     }
                     if let (Some(amod), Some(inspected)) = (out.save, &state.inspected) {
                         match amod::write(&inspected.path, &amod) {
@@ -1113,6 +1125,8 @@ fn inspected(
                 locator: None,
                 shape: None,
                 region: None,
+                path: None,
+                point: None,
                 inherited,
             },
         })
@@ -2136,6 +2150,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                     tab @ (InspectorTab::Locators
                     | InspectorTab::Shapes
                     | InspectorTab::Regions
+                    | InspectorTab::Paths
                     | InspectorTab::Properties),
                     Some(inspected),
                     Some(_),
@@ -2150,6 +2165,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                     let save = match tab {
                         InspectorTab::Shapes => shapes_tab(ui, inspected, tools, animating),
                         InspectorTab::Regions => regions_tab(ui, inspected, tools),
+                        InspectorTab::Paths => paths_tab(ui, inspected, tools, animating),
                         InspectorTab::Properties => properties_tab(ui, inspected),
                         _ => locators_tab(ui, inspected, frames, tools, animating),
                     };
@@ -2561,6 +2577,9 @@ struct MeshEdit {
     locator: Option<usize>,
     shape: Option<usize>,
     region: Option<usize>,
+    /// The chosen path and its chosen point.
+    path: Option<usize>,
+    point: Option<usize>,
     /// The locators the model has without its sidecar; `edit` and `saved` hold every locator,
     /// and only what differs from these is written.
     inherited: Vec<Inherited>,
@@ -2869,7 +2888,8 @@ fn mesh_commit(ui: &Ui, edit: &mut MeshEdit) -> Option<Amod> {
     }
     let named = unique(edit.edit.locators.iter().map(|l| &l.name))
         && unique(edit.edit.shapes.iter().map(|s| &s.name))
-        && unique(edit.edit.regions.iter().map(|r| &r.name));
+        && unique(edit.edit.regions.iter().map(|r| &r.name))
+        && unique(edit.edit.paths.iter().map(|p| &p.name));
     (!busy && named && edit.edit != edit.saved).then(|| {
         edit.saved = edit.edit.clone();
         Amod {
@@ -5005,8 +5025,8 @@ fn chunk_table(
 struct ModelCanvas {
     /// The sidecar to write.
     save: Option<Amod>,
-    /// Switch the Inspector to the Locators tab.
-    show_tab: bool,
+    /// Switch the Inspector to this tab.
+    show_tab: Option<InspectorTab>,
 }
 
 /// A model in 3D with its locators; see docs/features/models.md#preview and
@@ -5018,8 +5038,10 @@ fn canvas_model(
     preview: &mut Preview3d,
     vision: &mut Option<Vision>,
     tools: &mut LocatorTools,
-    shapes_active: bool,
+    tab: InspectorTab,
 ) -> ModelCanvas {
+    let shapes_active = tab == InspectorTab::Shapes;
+    let paths_active = tab == InspectorTab::Paths;
     use bevy::math::{Affine3A, Quat, Vec3};
     let mut out = ModelCanvas::default();
     let Some(inspected) = inspected else {
@@ -5038,7 +5060,10 @@ fn canvas_model(
     if tools.paint {
         tools.show[2] = true;
     }
-    let [show_locators, show_shapes, show_regions] = tools.show;
+    if tools.draw {
+        tools.show[3] = true;
+    }
+    let [show_locators, show_shapes, show_regions, show_paths] = tools.show;
     let hidden = tools.hidden.get(&inspected.path).unwrap_or(&empty).clone();
     let hidden_shapes = tools
         .hidden_shapes
@@ -5047,6 +5072,11 @@ fn canvas_model(
         .clone();
     let hidden_regions = tools
         .hidden_regions
+        .get(&inspected.path)
+        .unwrap_or(&empty)
+        .clone();
+    let hidden_paths = tools
+        .hidden_paths
         .get(&inspected.path)
         .unwrap_or(&empty)
         .clone();
@@ -5061,6 +5091,9 @@ fn canvas_model(
     if locked {
         tools.armed = false;
     }
+    if locked || !paths_active {
+        tools.draw = false;
+    }
     let painting = tools.paint && edit.as_ref().is_some_and(|e| e.region.is_some());
     let camera = gizmo::ViewCamera::new(rect, &preview.orbit);
     let frames = preview.frames.clone();
@@ -5070,7 +5103,23 @@ fn canvas_model(
     if let Some(hit) = preview.surface_hit.take() {
         let paint = std::mem::take(&mut tools.paint_awaiting);
         let place = std::mem::take(&mut tools.awaiting);
-        if paint
+        let draw = std::mem::take(&mut tools.draw_awaiting);
+        if draw {
+            // A point where the click hit, after the chosen one; see
+            // docs/features/paths.md#paths-tab.
+            if let (Some(hit), Some(edit), Some(frames)) = (&hit, &mut edit, &frames)
+                && let Some(p) = edit.path
+                && let Some(path) = edit.edit.paths.get_mut(p)
+                && let Some(parent) = frames.parent(path.joint.as_deref())
+            {
+                let at = edit
+                    .point
+                    .map_or(path.points.len(), |i| (i + 1).min(path.points.len()));
+                let local = parent.inverse().transform_point3(hit.point);
+                path.points.insert(at, local.to_array());
+                edit.point = Some(at);
+            }
+        } else if paint
             && let (Some(hit), Some(edit)) = (&hit, &mut edit)
             && let Some(region) = edit.region.and_then(|r| edit.edit.regions.get_mut(r))
         {
@@ -5093,7 +5142,7 @@ fn canvas_model(
                 gizmo::place(locator, parent, hit.point, hit.normal);
             }
             tools.armed = false;
-            out.show_tab = true;
+            out.show_tab = Some(InspectorTab::Locators);
         }
     }
 
@@ -5138,6 +5187,25 @@ fn canvas_model(
             .collect(),
         _ => Vec::new(),
     };
+    // Each visible path's parent; see docs/features/paths.md#3d-view.
+    let path_parents: Vec<Option<Affine3A>> = match (&edit, &frames) {
+        (Some(edit), Some(frames)) => edit
+            .edit
+            .paths
+            .iter()
+            .map(|p| {
+                let parent = frames.parent(p.joint.as_deref())?;
+                (show_paths && !hidden_paths.contains(&p.name)).then_some(parent)
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let chosen_point = edit.as_ref().and_then(|e| {
+        let p = e.path?;
+        let parent = path_parents.get(p).copied().flatten()?;
+        let point = e.edit.paths[p].points.get(e.point?)?;
+        Some(parent * Affine3A::from_translation(Vec3::from(*point)))
+    });
     let chosen = edit
         .as_ref()
         .and_then(|e| e.locator)
@@ -5148,7 +5216,9 @@ fn canvas_model(
         .filter(|&i| shape_worlds.get(i).copied().flatten().is_some());
     // The gizmo acts on the chosen shape while the Shapes tab shows; see
     // docs/features/shapes.md#3d-view.
-    let target = if shapes_active {
+    let target = if paths_active {
+        chosen_point.filter(|_| tools.gizmo == Some(gizmo::Mode::Move))
+    } else if shapes_active {
         chosen_shape
             .filter(|&i| {
                 edit.as_ref()
@@ -5188,7 +5258,20 @@ fn canvas_model(
         if !down {
             tools.drag = None;
         } else if let (Some(edit), Some(frames), Some(p)) = (&mut edit, &frames, pointer) {
-            if shapes_active {
+            if paths_active {
+                if let (Some(k), Some(i)) = (edit.path, edit.point)
+                    && let Some(path) = edit.edit.paths.get_mut(k)
+                    && let Some(parent) = frames.parent(path.joint.as_deref())
+                    && let Some(point) = path.points.get_mut(i)
+                {
+                    let mut moved = amod::Locator {
+                        translation: *point,
+                        ..amod::Locator::new(String::new())
+                    };
+                    drag.apply(&mut moved, parent, &camera, p, delta);
+                    *point = moved.translation;
+                }
+            } else if shapes_active {
                 if let Some(shape) = chosen_shape.map(|i| &mut edit.edit.shapes[i])
                     && let Some(parent) = frames.parent(shape.joint.as_deref())
                 {
@@ -5235,6 +5318,27 @@ fn canvas_model(
         .enumerate()
         .filter_map(|(i, world)| Some((i, gizmo::marker(&camera, (*world)?)?)))
         .collect();
+    // Visible paths' points on screen: path, point, position.
+    let path_dots: Vec<(usize, usize, egui::Pos2)> = match &edit {
+        Some(edit) => edit
+            .edit
+            .paths
+            .iter()
+            .enumerate()
+            .filter_map(|(p, path)| Some((p, path, path_parents.get(p).copied().flatten()?)))
+            .flat_map(|(p, path, parent)| {
+                let camera = &camera;
+                path.points.iter().enumerate().filter_map(move |(i, q)| {
+                    Some((
+                        p,
+                        i,
+                        camera.project(parent.transform_point3(Vec3::from(*q)))?,
+                    ))
+                })
+            })
+            .collect(),
+        None => Vec::new(),
+    };
     if response.clicked()
         && !grabbing
         && !painting
@@ -5248,9 +5352,29 @@ fn canvas_model(
             .filter(|(_, d)| *d <= gizmo::PICK)
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(i, _)| i);
+        let picked_point = path_dots
+            .iter()
+            .map(|(p, i, dot)| (*p, *i, (*dot - at).length()))
+            .filter(|(.., d)| *d <= gizmo::PICK)
+            .min_by(|a, b| a.2.total_cmp(&b.2));
         if picked.is_some() {
             edit.locator = picked;
-            out.show_tab = true;
+            out.show_tab = Some(InspectorTab::Locators);
+        } else if let Some((p, i, _)) = picked_point {
+            if edit.path != Some(p) {
+                tools.draw = false;
+            }
+            (edit.path, edit.point) = (Some(p), Some(i));
+            out.show_tab = Some(InspectorTab::Paths);
+        } else if tools.draw {
+            let (origin, dir) = camera.ray(at);
+            preview.surface_ray = Some(preview3d::SurfaceRay {
+                origin,
+                dir,
+                brush: 0.0,
+            });
+            tools.draw_awaiting = true;
+            ui.ctx().request_repaint();
         } else if tools.armed {
             let (origin, dir) = camera.ray(at);
             preview.surface_ray = Some(preview3d::SurfaceRay {
@@ -5270,10 +5394,11 @@ fn canvas_model(
                 tools.gizmo = None;
                 tools.armed = false;
                 tools.paint = false;
+                tools.draw = false;
             } else if locked {
             } else if i.key_pressed(egui::Key::W) {
                 tools.toggle_gizmo(gizmo::Mode::Move);
-            } else if i.key_pressed(egui::Key::E) {
+            } else if i.key_pressed(egui::Key::E) && !paths_active {
                 tools.toggle_gizmo(gizmo::Mode::Rotate);
             } else if i.key_pressed(egui::Key::S) {
                 tools.armed = true;
@@ -5400,6 +5525,48 @@ fn canvas_model(
         }
     }
 
+    // Paths: curves and points; see docs/features/paths.md#3d-view.
+    if let Some(edit) = &edit {
+        for (p, path) in edit.edit.paths.iter().enumerate() {
+            let Some(parent) = path_parents.get(p).copied().flatten() else {
+                continue;
+            };
+            let color = locator_color32_of(path.color.as_deref()).unwrap_or(TEXT_WEAK);
+            let chosen_path = edit.path == Some(p);
+            let (width, color) = if chosen_path {
+                (2.0, color.lerp_to_gamma(egui::Color32::WHITE, 0.5))
+            } else {
+                (1.0, color)
+            };
+            if let Some(curve) =
+                crate::path::Curve::new(&path.points, path.closed, path.tension, path.alpha)
+            {
+                let line: Vec<Option<egui::Pos2>> = curve
+                    .polyline(16)
+                    .into_iter()
+                    .map(|q| camera.project(parent.transform_point3(Vec3::from(q))))
+                    .collect();
+                for pair in line.windows(2) {
+                    if let [Some(a), Some(b)] = pair {
+                        painter.line_segment([*a, *b], Stroke::new(width, color));
+                    }
+                }
+            }
+        }
+        for (p, i, dot) in &path_dots {
+            let path = &edit.edit.paths[*p];
+            let color = locator_color32_of(path.color.as_deref()).unwrap_or(TEXT_WEAK);
+            if edit.path == Some(*p) && edit.point == Some(*i) {
+                painter.circle_filled(*dot, 7.0, color.lerp_to_gamma(egui::Color32::WHITE, 0.5));
+                painter.circle_stroke(*dot, 7.0, Stroke::new(2.0, ACCENT));
+            } else if edit.path == Some(*p) {
+                painter.circle_filled(*dot, 5.0, color.lerp_to_gamma(egui::Color32::WHITE, 0.5));
+            } else {
+                painter.circle_filled(*dot, 5.0, color);
+            }
+        }
+    }
+
     if let Some(edit) = &edit {
         for (i, (dot, ends)) in &markers {
             let locator = &edit.edit.locators[*i];
@@ -5452,17 +5619,19 @@ fn canvas_model(
         }
     }
 
-    let counts = edit.as_ref().map_or([0; 3], |e| {
+    let counts = edit.as_ref().map_or([0; 4], |e| {
         [
             e.edit.locators.len(),
             e.edit.shapes.len(),
             e.edit.regions.len(),
+            e.edit.paths.len(),
         ]
     });
     let show: Vec<Tool> = [
         (Icon::MapPin, "Locators"),
         (Icon::Shapes, "Shapes"),
         (Icon::PaintBucket, "Regions"),
+        (Icon::Spline, "Paths"),
     ]
     .into_iter()
     .enumerate()
@@ -5483,6 +5652,9 @@ fn canvas_model(
             tools.show[button] = !tools.show[button];
             if !tools.show[2] {
                 tools.paint = false;
+            }
+            if !tools.show[3] {
+                tools.draw = false;
             }
             ui.ctx().request_repaint();
         }
@@ -6542,6 +6714,291 @@ fn shape_fields(
     ui.label(RichText::new("Properties").size(13.0).color(TEXT_WEAK));
     properties_editor(ui, &mut shape.properties);
     clicked
+}
+
+/// The Paths tab; see docs/features/paths.md#paths-tab.
+fn paths_tab(
+    ui: &mut Ui,
+    inspected: &mut Inspected,
+    tools: &mut LocatorTools,
+    animating: bool,
+) -> Option<Amod> {
+    let joints = &inspected.inspection.joints;
+    let extent = inspected.geometry.as_ref().map_or(1.0, |g| g.extent);
+    let LocatorTools {
+        hidden_paths,
+        gizmo,
+        show,
+        draw,
+        armed,
+        ..
+    } = tools;
+    let hidden = hidden_paths.entry(inspected.path.clone()).or_default();
+    let Some(Ok(edit)) = &mut inspected.mesh else {
+        placeholder(ui, "No paths");
+        return None;
+    };
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add path");
+                if ui.add(add).clicked() {
+                    let paths = &mut edit.edit.paths;
+                    let name = enrich::free_name("path", |n| paths.iter().any(|p| p.name == n));
+                    paths.push(enrich::Path::new(name, extent));
+                    (edit.path, edit.point) = (Some(paths.len() - 1), None);
+                    *draw = false;
+                    show[3] = true;
+                }
+                ui.add_space(8.0);
+                if edit.edit.paths.is_empty() {
+                    ui.weak("No paths");
+                }
+                let mut event = None;
+                for i in 0..edit.edit.paths.len() {
+                    let open = edit.path == Some(i);
+                    let name = edit.edit.paths[i].name.clone();
+                    let dot = locator_color32_of(edit.edit.paths[i].color.as_deref())
+                        .unwrap_or(TEXT_WEAK);
+                    let mut visible = !hidden.contains(&name);
+                    let mode = gizmo.filter(|_| open);
+                    let movable = !animating && visible;
+                    let mut gizmo_click = None;
+                    let mut delete = false;
+                    let (_, folded) = ui
+                        .push_id(("path", i), |ui| {
+                            card(
+                                ui,
+                                Some(open),
+                                RichText::new(&name),
+                                |ui| eye_and_dot(ui, &mut visible, dot),
+                                |ui, open| {
+                                    delete = open
+                                        && icon_button(ui, Icon::Trash2, "Delete", true).clicked();
+                                },
+                                |ui| {
+                                    gizmo_click = path_fields(
+                                        ui, edit, i, joints, mode, movable, animating, draw, armed,
+                                        show,
+                                    );
+                                },
+                            )
+                        })
+                        .inner;
+                    if folded {
+                        event = Some(CardEvent::Fold(i));
+                    }
+                    if let Some(mode) = gizmo_click {
+                        event = Some(CardEvent::Gizmo(i, mode));
+                    }
+                    if delete {
+                        event = Some(CardEvent::Delete(i));
+                    }
+                    if visible == hidden.contains(&name) {
+                        set_visible(hidden, name, visible);
+                    }
+                }
+                match event {
+                    Some(CardEvent::Fold(i)) => {
+                        edit.path = (edit.path != Some(i)).then_some(i);
+                        edit.point = None;
+                        *draw = false;
+                    }
+                    Some(CardEvent::Gizmo(i, mode)) => {
+                        if edit.path == Some(i) && *gizmo == Some(mode) {
+                            *gizmo = None;
+                        } else {
+                            if edit.path != Some(i) {
+                                (edit.path, edit.point) = (Some(i), None);
+                                *draw = false;
+                            }
+                            *gizmo = Some(mode);
+                        }
+                    }
+                    Some(CardEvent::Delete(i)) => {
+                        edit.edit.paths.remove(i);
+                        (edit.path, edit.point) = (None, None);
+                        *draw = false;
+                    }
+                    Some(CardEvent::Revert(_)) | None => {}
+                }
+            });
+        });
+    mesh_commit(ui, edit)
+}
+
+/// The body of path `i`'s card; returns the gizmo button clicked.
+#[allow(clippy::too_many_arguments)]
+fn path_fields(
+    ui: &mut Ui,
+    edit: &mut MeshEdit,
+    i: usize,
+    joints: &[String],
+    gizmo: Option<gizmo::Mode>,
+    movable: bool,
+    animating: bool,
+    draw: &mut bool,
+    armed: &mut bool,
+    show: &mut [bool; 4],
+) -> Option<gizmo::Mode> {
+    let saved = edit.saved.paths.get(i).map(|p| p.name.clone());
+    let others: Vec<String> = edit
+        .edit
+        .paths
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| *k != i)
+        .map(|(_, p)| p.name.clone())
+        .collect();
+    let others: Vec<&str> = others.iter().map(String::as_str).collect();
+    let chosen = &mut edit.point;
+    let path = &mut edit.edit.paths[i];
+    let mut clicked = None;
+    prop_row(ui, "Gizmo", |ui, _| {
+        let buttons = [(Icon::Move3d, "Move (W)", gizmo == Some(gizmo::Mode::Move))];
+        clicked =
+            button_group(ui, &buttons, movable && chosen.is_some()).map(|_| gizmo::Mode::Move);
+    });
+    name_row(ui, &mut path.name, saved.as_deref(), &others, "path");
+    prop_row(ui, "Kind", |ui, width| {
+        let field = egui::TextEdit::singleline(&mut path.kind).hint_text("rope");
+        ui.add_sized(vec2(width, 22.0), field);
+    });
+    color_row(ui, &mut path.color, true);
+    ui.add_enabled_ui(!animating, |ui| {
+        let mut joint = path.joint.clone();
+        prop_row(ui, "Joint", |ui, width| {
+            egui::ComboBox::from_id_salt("path_joint")
+                .width(width - 8.0)
+                .selected_text(joint.as_deref().unwrap_or("None (model space)"))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut joint, None, "None (model space)");
+                    for name in joints {
+                        ui.selectable_value(&mut joint, Some(name.clone()), name);
+                    }
+                });
+        });
+        path.joint = joint;
+    });
+    prop_row(ui, "Closed", |ui, _| {
+        ui.checkbox(&mut path.closed, "");
+    });
+    prop_row(ui, "Tension", |ui, _| {
+        ui.add(egui::Slider::new(&mut path.tension, 0.0..=1.0).fixed_decimals(2));
+    });
+    prop_row(ui, "Alpha", |ui, _| {
+        ui.add(egui::Slider::new(&mut path.alpha, 0.0..=1.0).fixed_decimals(2))
+            .on_hover_text("0 uniform, 0.5 centripetal, 1 chordal");
+    });
+    match crate::path::Curve::new(&path.points, path.closed, path.tension, path.alpha) {
+        Some(curve) => ui.weak(format!(
+            "{} {}, length {:.3}",
+            curve.segment_count(),
+            if curve.segment_count() == 1 {
+                "segment"
+            } else {
+                "segments"
+            },
+            curve.length()
+        )),
+        None => ui.weak(format!(
+            "No curve: needs at least {} points",
+            crate::path::min_points(path.closed)
+        )),
+    };
+    ui.add_space(6.0);
+    ui.label(RichText::new("Points").size(13.0).color(TEXT_WEAK));
+    let mut remove = None;
+    ui.add_enabled_ui(!animating, |ui| {
+        let removable = path.points.len() > 2;
+        for (k, point) in path.points.iter_mut().enumerate() {
+            ui.push_id(("point", k), |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let color = if *chosen == Some(k) {
+                        ACCENT
+                    } else {
+                        TEXT_WEAK
+                    };
+                    let number = egui::Label::new(RichText::new(format!("{}", k + 1)).color(color))
+                        .sense(Sense::click());
+                    let response = ui.add_sized(vec2(22.0, 22.0), number);
+                    if response.clicked() {
+                        *chosen = Some(k);
+                    }
+                    let each = ((ui.available_width() - 34.0) / 3.0).max(20.0);
+                    for value in point.iter_mut() {
+                        let field = egui::DragValue::new(value).speed(0.001).fixed_decimals(3);
+                        if ui.add_sized(vec2(each, 22.0), field).gained_focus() {
+                            *chosen = Some(k);
+                        }
+                    }
+                    if icon_button(ui, Icon::X, "Remove point", removable).clicked() {
+                        remove = Some(k);
+                    }
+                });
+            });
+        }
+    });
+    if let Some(k) = remove {
+        path.points.remove(k);
+        *chosen = chosen
+            .filter(|c| *c != k)
+            .map(|c| if c > k { c - 1 } else { c });
+    }
+    ui.add_enabled_ui(!animating, |ui| {
+        ui.horizontal(|ui| {
+            let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add point");
+            if ui.add(add).clicked() {
+                let at = chosen
+                    .map_or(path.points.len(), |c| c + 1)
+                    .min(path.points.len());
+                path.points
+                    .insert(at, new_point(&path.points, at, path.closed));
+                *chosen = Some(at);
+                show[3] = true;
+            }
+            let mut button = egui::Button::image_and_text(Icon::PenLine.image(14.0, TEXT), "Draw");
+            if *draw {
+                button = button.fill(ACCENT.gamma_multiply(0.25));
+            }
+            let response = ui
+                .add(button)
+                .on_hover_text("Click the model to add points there");
+            if response.clicked() {
+                *draw = !*draw;
+                *armed = false;
+                show[3] = true;
+            }
+        });
+    });
+    if animating {
+        ui.weak("Points are locked while an animation plays. Choose Rest pose to edit them.");
+    }
+    ui.add_space(6.0);
+    ui.label(RichText::new("Properties").size(13.0).color(TEXT_WEAK));
+    properties_editor(ui, &mut path.properties);
+    clicked
+}
+
+/// A new point to insert at `at`: halfway to the next point, or past the end by the last
+/// segment's offset; see docs/features/paths.md#paths-tab.
+fn new_point(points: &[[f32; 3]], at: usize, closed: bool) -> [f32; 3] {
+    use bevy::math::Vec3;
+    let get = |i: usize| points.get(i).copied().map(Vec3::from);
+    let point = match (at.checked_sub(1).and_then(get), get(at)) {
+        (Some(before), Some(after)) => (before + after) / 2.0,
+        (Some(last), None) if closed && !points.is_empty() => (last + Vec3::from(points[0])) / 2.0,
+        (Some(last), None) => {
+            let previous = at.checked_sub(2).and_then(get);
+            last + previous.map_or(Vec3::X * 0.1, |p| last - p)
+        }
+        (None, Some(first)) => first,
+        (None, None) => Vec3::ZERO,
+    };
+    point.to_array()
 }
 
 /// The Regions tab; see docs/features/regions.md#regions-tab.

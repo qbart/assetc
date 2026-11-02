@@ -47,6 +47,7 @@ pub enum Icon {
     PaintBucket,
     Paintbrush,
     Palette,
+    PenLine,
     Plus,
     RefreshCw,
     Rotate3d,
@@ -54,6 +55,7 @@ pub enum Icon {
     Settings2,
     Shapes,
     SlidersVertical,
+    Spline,
     SquaresUnite,
     SunMedium,
     SwatchBook,
@@ -61,10 +63,11 @@ pub enum Icon {
     Trash2,
     Type,
     Wrench,
+    X,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 56] = [
+const SVGS: [(&str, &str); 59] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -146,6 +149,7 @@ const SVGS: [(&str, &str); 56] = [
     ),
     ("paintbrush", include_str!("../assets/icons/paintbrush.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
+    ("pen-line", include_str!("../assets/icons/pen-line.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("rotate-3d", include_str!("../assets/icons/rotate-3d.svg")),
@@ -156,6 +160,7 @@ const SVGS: [(&str, &str); 56] = [
         "sliders-vertical",
         include_str!("../assets/icons/sliders-vertical.svg"),
     ),
+    ("spline", include_str!("../assets/icons/spline.svg")),
     (
         "squares-unite",
         include_str!("../assets/icons/squares-unite.svg"),
@@ -169,6 +174,7 @@ const SVGS: [(&str, &str); 56] = [
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
     ("type", include_str!("../assets/icons/type.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
+    ("x", include_str!("../assets/icons/x.svg")),
 ];
 
 // Rendered white so `Image::tint` can color them.
@@ -201,6 +207,7 @@ mod tests {
         assert_eq!(names[Icon::Image as usize], "image");
         assert_eq!(names[Icon::Type as usize], "type");
         assert_eq!(names[Icon::Wrench as usize], "wrench");
+        assert_eq!(names[Icon::X as usize], "x");
         for (name, svg) in SVGS {
             assert!(svg.contains(&format!("lucide-{name}\"")), "{name}");
         }

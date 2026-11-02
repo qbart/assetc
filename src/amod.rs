@@ -22,6 +22,8 @@ pub struct Amod {
     pub shapes: Vec<Shape>,
     /// `[[regions]]`: a glTF model's regions, see docs/features/regions.md.
     pub regions: Vec<Region>,
+    /// `[[paths]]`: a glTF model's paths, see docs/features/paths.md.
+    pub paths: Vec<enrich::Path>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
     pub modifiers: Vec<Modifier>,
 }
@@ -120,6 +122,7 @@ impl Amod {
             && self.locators.is_empty()
             && self.shapes.is_empty()
             && self.regions.is_empty()
+            && self.paths.is_empty()
             && self.modifiers.is_empty()
     }
 
@@ -144,6 +147,11 @@ impl Amod {
         let regions = table
             .remove("regions")
             .map(enrich::parse_regions)
+            .transpose()?
+            .unwrap_or_default();
+        let paths = table
+            .remove("paths")
+            .map(enrich::parse_paths)
             .transpose()?
             .unwrap_or_default();
         let Tables { mesh, locators } = toml::Value::Table(table)
@@ -179,6 +187,7 @@ impl Amod {
             locators,
             shapes,
             regions,
+            paths,
             modifiers,
         })
     }
@@ -221,6 +230,7 @@ impl Amod {
         }
         enrich::write_shapes(&self.shapes, &mut out);
         enrich::write_regions(&self.regions, &mut out);
+        enrich::write_paths(&self.paths, &mut out);
         noise::write_modifiers(&self.modifiers, &mut out);
         // Each table after a blank line, but not the first.
         out.trim_start_matches('\n').to_owned()
@@ -411,6 +421,29 @@ color = "#3b82f6"
 materials = ["Steel"]
 submeshes = [[0, 2], [1, 0]]
 triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
+
+[[paths]]
+name = "tail"
+kind = "rope"
+joint = "Spine"
+points = [
+    [0.0, 0.0, 0.0],
+    [0.0, 0.1, -0.2],
+]
+closed = false
+tension = 0.0
+alpha = 0.5
+
+[paths.properties]
+stiffness = 0.8
+
+[[paths]]
+name = "patrol"
+points = []
+closed = true
+tension = 0.25
+alpha = 1.0
+color = "#22c55e"
 "##;
         let amod = Amod::parse(text).unwrap();
         assert_eq!(amod.properties["lives"], PropValue::Int(3));
@@ -429,6 +462,9 @@ triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
         assert_eq!(amod.shapes[1].shape, ShapeType::Hull);
         assert_eq!(amod.regions[0].triangles.len(), 52);
         assert!(amod.regions[0].submeshes.contains(&(1, 0)));
+        assert_eq!(amod.paths[0].points[1], [0.0, 0.1, -0.2]);
+        assert_eq!(amod.paths[0].properties["stiffness"], PropValue::Float(0.8));
+        assert!(amod.paths[1].closed);
         assert_eq!(amod.to_toml(), text);
         assert_eq!(Amod::parse(&amod.to_toml()).unwrap(), amod);
 
@@ -443,6 +479,9 @@ triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
             "[[regions]]\nname = \"a\"\n",
             "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\ntriangles = [[0, 0, 1, 0]]\n",
             "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\nsubmeshes = [[0]]\n",
+            "[[paths]]\nname = \"a\"\ntension = 2.0\n",
+            "[[paths]]\nname = \"a\"\npoints = [[0.0, 1.0]]\n",
+            "[[paths]]\nname = \"a\"\nclosed = 1\n",
             "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\nsubmeshes = [[0, 1], [0, 1]]\n",
         ] {
             assert!(Amod::parse(bad).is_err(), "{bad}");

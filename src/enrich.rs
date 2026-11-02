@@ -609,6 +609,139 @@ pub fn write_regions(regions: &[Region], out: &mut String) {
     }
 }
 
+/// A curve on a model; see docs/features/paths.md.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Path {
+    pub name: String,
+    pub kind: String,
+    pub joint: Option<String>,
+    pub points: Vec<[f32; 3]>,
+    pub closed: bool,
+    pub tension: f32,
+    pub alpha: f32,
+    pub color: Option<String>,
+    pub properties: Properties,
+}
+
+impl Path {
+    /// Two points in model space: the origin and `extent / 10` along X.
+    pub fn new(name: String, extent: f32) -> Self {
+        Self {
+            name,
+            kind: String::new(),
+            joint: None,
+            points: vec![[0.0; 3], [extent / 10.0, 0.0, 0.0]],
+            closed: false,
+            tension: 0.0,
+            alpha: 0.5,
+            color: None,
+            properties: Properties::new(),
+        }
+    }
+}
+
+pub fn parse_paths(value: toml::Value) -> Result<Vec<Path>, String> {
+    named_tables(value, "path")?
+        .into_iter()
+        .map(|(name, mut table)| {
+            let fail = |e: String| format!("path {name:?}: {e}");
+            let unit = |key: &str, v: &toml::Value| {
+                let f = float(key, v)?;
+                if (0.0..=1.0).contains(&f) {
+                    Ok(f)
+                } else {
+                    Err(format!("{key} is not between 0 and 1"))
+                }
+            };
+            let text_key = |table: &mut toml::Table, key: &str| {
+                table.remove(key).map(|v| text(key, &v)).transpose()
+            };
+            let kind = text_key(&mut table, "kind").map_err(fail)?;
+            let joint = text_key(&mut table, "joint").map_err(fail)?;
+            let points = match table.remove("points") {
+                Some(v) => v
+                    .as_array()
+                    .ok_or_else(|| fail("points is not an array of points".into()))?
+                    .iter()
+                    .map(|p| floats::<3>("a point", p))
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(fail)?,
+                None => Vec::new(),
+            };
+            let closed = match table.remove("closed") {
+                Some(v) => v
+                    .as_bool()
+                    .ok_or_else(|| fail("closed is not true or false".into()))?,
+                None => false,
+            };
+            let tension = table
+                .remove("tension")
+                .map(|v| unit("tension", &v))
+                .transpose()
+                .map_err(fail)?;
+            let alpha = table
+                .remove("alpha")
+                .map(|v| unit("alpha", &v))
+                .transpose()
+                .map_err(fail)?;
+            let color = table
+                .remove("color")
+                .map(|v| color(&v))
+                .transpose()
+                .map_err(fail)?;
+            let properties = table
+                .remove("properties")
+                .map(parse_properties)
+                .transpose()
+                .map_err(fail)?;
+            if let Some(key) = table.keys().next() {
+                return Err(fail(format!("unknown key {key:?}")));
+            }
+            Ok(Path {
+                name: name.clone(),
+                kind: kind.unwrap_or_default(),
+                joint,
+                points,
+                closed,
+                tension: tension.unwrap_or(0.0),
+                alpha: alpha.unwrap_or(0.5),
+                color,
+                properties: properties.unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+pub fn write_paths(paths: &[Path], out: &mut String) {
+    for path in paths {
+        let string = |s: &str| toml::Value::from(s).to_string();
+        *out += "\n[[paths]]\n";
+        *out += &format!("name = {}\n", string(&path.name));
+        if !path.kind.is_empty() {
+            *out += &format!("kind = {}\n", string(&path.kind));
+        }
+        if let Some(joint) = &path.joint {
+            *out += &format!("joint = {}\n", string(joint));
+        }
+        if path.points.is_empty() {
+            *out += "points = []\n";
+        } else {
+            *out += "points = [\n";
+            for point in &path.points {
+                *out += &format!("    {},\n", write_floats(point));
+            }
+            *out += "]\n";
+        }
+        *out += &format!("closed = {}\n", path.closed);
+        *out += &format!("tension = {:?}\n", path.tension);
+        *out += &format!("alpha = {:?}\n", path.alpha);
+        if let Some(color) = &path.color {
+            *out += &format!("color = {}\n", string(color));
+        }
+        write_properties("paths.properties", &path.properties, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

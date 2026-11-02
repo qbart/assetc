@@ -550,11 +550,12 @@ fn model_rows(
                 }
             },
         ));
-        // See docs/features/properties.md#inspector-info and the shapes' and regions'.
+        // See docs/features/properties.md#inspector-info and the shapes', regions' and paths'.
         let count = |n: usize| if n > 0 { n.to_string() } else { "none".into() };
         out.rows.push(("Properties", count(amod.properties.len())));
         out.rows.push(("Shapes", count(amod.shapes.len())));
         out.rows.push(("Regions", count(amod.regions.len())));
+        out.rows.push(("Paths", count(amod.paths.len())));
     }
     let mesh = format!("{}.amesh", strip_extension(rel));
     out.rows.push(("Asset path", mesh.clone()));

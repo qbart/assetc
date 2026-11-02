@@ -332,6 +332,7 @@ dependencies = [
  "globset",
  "image",
  "ktx2",
+ "matma",
  "meshopt-pure",
  "serde",
  "tempfile",
@@ -3947,6 +3948,12 @@ checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
 ]
+
+[[package]]
+name = "matma"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c4cd8477fafcddda72a576fcefb3f1172a79c628fff09d40bad3feec3716c0a"
 
 [[package]]
 name = "memchr"

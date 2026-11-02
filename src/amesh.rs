@@ -233,7 +233,23 @@ pub struct CompiledShape {
     pub properties: crate::enrich::Properties,
 }
 
-/// What a model carries besides its geometry: locators, properties, shapes and regions
+/// A path ready to write; see docs/spec/amesh.md#paths.
+pub struct CompiledPath {
+    pub name: String,
+    pub kind: String,
+    /// Index into the skeleton; `-1` is mesh space.
+    pub joint: i32,
+    pub closed: bool,
+    pub tension: f32,
+    pub alpha: f32,
+    pub length: f32,
+    /// In the parent's space.
+    pub points: Vec<[f32; 3]>,
+    pub samples: Vec<crate::path::Sample>,
+    pub properties: crate::enrich::Properties,
+}
+
+/// What a model carries besides its geometry: locators, properties, shapes, regions, paths
 /// (name and tags; their triangles are in [`Primitive::regions`]).
 #[derive(Default)]
 pub struct Extras {
@@ -241,6 +257,7 @@ pub struct Extras {
     pub properties: crate::enrich::Properties,
     pub shapes: Vec<CompiledShape>,
     pub regions: Vec<(String, Vec<String>)>,
+    pub paths: Vec<CompiledPath>,
 }
 
 /// The `STRINGS` chunk being built: text back to back.
@@ -810,10 +827,57 @@ pub fn encode(
         put_tags(&mut region_tags, &mut strings, tags);
         tag_count += tags.len() as u16;
     }
+    let (mut paths, mut path_points, mut path_samples, mut path_props) = (
+        Bytes::default(),
+        Bytes::default(),
+        Bytes::default(),
+        Bytes::default(),
+    );
+    let (mut path_point_count, mut path_sample_count, mut path_property_count) = (0u32, 0u32, 0u32);
+    for path in &extras.paths {
+        let (name_at, name_len) = strings.add(&path.name);
+        let (kind_at, kind_len) = strings.add(&path.kind);
+        paths
+            .u64(crate::hash::fnv1a64(path.name.as_bytes()))
+            .u32(name_at)
+            .u32(name_len)
+            .u64(crate::hash::fnv1a64(path.kind.as_bytes()))
+            .u32(kind_at)
+            .u32(kind_len)
+            .i32(path.joint)
+            .u32(u32::from(path.closed))
+            .f32s(&[path.tension, path.alpha, path.length])
+            .u32(path_point_count)
+            .u32(path.points.len() as u32)
+            .u32(path_sample_count)
+            .u32(path.samples.len() as u32)
+            .u32(if path.properties.is_empty() {
+                0
+            } else {
+                path_property_count
+            })
+            .u32(path.properties.len() as u32)
+            .u32(0);
+        for point in &path.points {
+            path_points.f32s(point);
+        }
+        for sample in &path.samples {
+            path_samples
+                .f32s(&sample.position)
+                .f32s(&[sample.distance])
+                .f32s(&sample.tangent)
+                .f32s(&[sample.u]);
+        }
+        put_properties(&mut path_props, &mut strings, &path.properties);
+        path_point_count += path.points.len() as u32;
+        path_sample_count += path.samples.len() as u32;
+        path_property_count += path.properties.len() as u32;
+    }
     let has_props = !extras.properties.is_empty();
     let has_shapes = !extras.shapes.is_empty();
     let has_regions = !extras.regions.is_empty();
-    if has_props || has_shapes || has_regions {
+    let has_paths = !extras.paths.is_empty();
+    if has_props || has_shapes || has_regions || has_paths {
         writer.chunk("STRINGS", strings.0);
     }
     if has_props {
@@ -838,6 +902,14 @@ pub fn encode(
             masks.u32(*mask);
         }
         writer.chunk("TRIREGN", masks.take());
+    }
+    if has_paths {
+        writer.chunk("PATHS", paths.take());
+        writer.chunk("PATHPTS", path_points.take());
+        writer.chunk("PATHSMP", path_samples.take());
+        if path_property_count > 0 {
+            writer.chunk("PATHPRP", path_props.take());
+        }
     }
     let summary = Summary {
         vertices: vertices.len(),
@@ -1136,10 +1208,11 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             0 => "none".to_owned(),
             n => n.to_string(),
         };
-    let (properties, shapes, regions) = (
+    let (properties, shapes, regions, paths) = (
         count("PROPS", 32),
         count("SHAPES", 96),
         count("REGIONS", 32),
+        count("PATHS", 80),
     );
     let lods = reader
         .chunk("LODTABLE")
@@ -1194,6 +1267,7 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
         ("Properties", properties),
         ("Shapes", shapes),
         ("Regions", regions),
+        ("Paths", paths),
         (
             "Bounds",
             format!(
@@ -1253,6 +1327,10 @@ pub fn describe(name: &str) -> &'static str {
         "REGIONS" => "Regions",
         "REGTAGS" => "Region tags",
         "TRIREGN" => "Triangle regions",
+        "PATHS" => "Paths",
+        "PATHPTS" => "Path points",
+        "PATHSMP" => "Path samples",
+        "PATHPRP" => "Path properties",
         _ => "Unknown chunk",
     }
 }
@@ -1344,7 +1422,23 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
             64,
         ),
         "LOCTAGS" | "REGTAGS" => array(vec!["Name", "Hash"], 16),
-        "PROPS" | "SHAPEPRP" => array(vec!["Key", "Type", "Value"], 32),
+        "PROPS" | "SHAPEPRP" | "PATHPRP" => array(vec!["Key", "Type", "Value"], 32),
+        "PATHS" => array(
+            vec![
+                "Name",
+                "Kind",
+                "Joint",
+                "Closed",
+                "Tension",
+                "Alpha",
+                "Length",
+                "Points",
+                "Samples",
+                "Properties",
+            ],
+            80,
+        ),
+        "PATHSMP" => array(vec!["Position", "Distance", "Tangent", "U"], 32),
         "SHAPES" => array(
             vec![
                 "Name",
@@ -1359,7 +1453,7 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
             ],
             96,
         ),
-        "SHAPEPTS" => array(vec!["Point"], 12),
+        "SHAPEPTS" | "PATHPTS" => array(vec!["Point"], 12),
         "REGIONS" => array(vec!["Name", "Tags", "Triangles"], 32),
         "TRIREGN" => array(vec!["Regions"], 4),
         _ => Table {
@@ -1502,7 +1596,8 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
             2 => vector(&floats(row, 112, 76, 4)),
             _ => vector(&floats(row, 112, 92, 3)),
         },
-        "PROPS" | "SHAPEPRP" | "SHAPES" | "SHAPEPTS" | "REGIONS" | "REGTAGS" | "TRIREGN" => {
+        "PROPS" | "SHAPEPRP" | "SHAPES" | "SHAPEPTS" | "REGIONS" | "REGTAGS" | "TRIREGN"
+        | "PATHS" | "PATHPTS" | "PATHSMP" | "PATHPRP" => {
             enrichment_cell(&reader, p, name, row, column)
         }
         "LOCATORS" | "LOCTAGS" => {
@@ -1561,7 +1656,7 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
     }
 }
 
-/// A cell of the properties, shapes and regions chunks; see docs/features/models.md#chunks-view.
+/// A cell of the properties, shapes, regions and paths chunks; see docs/features/models.md#chunks-view.
 fn enrichment_cell(
     reader: &chunks::Reader<'_>,
     p: &[u8],
@@ -1590,21 +1685,22 @@ fn enrichment_cell(
             u32_at(chunk, stride, row, 12),
         )
     };
-    let floats = |at: usize, n: usize| -> Vec<f32> {
+    let floats_of = |stride: usize, at: usize, n: usize| -> Vec<f32> {
         (0..n)
-            .map(|k| chunks::f32_at(p, row, 96, at + k * 4).unwrap_or(0.0))
+            .map(|k| chunks::f32_at(p, row, stride, at + k * 4).unwrap_or(0.0))
             .collect()
     };
+    let floats = |at: usize, n: usize| floats_of(96, at, n);
     match (name, column) {
         ("REGTAGS", 0) => named(p, 16, row),
         ("REGTAGS", _) => format!("{:#018x}", hash(16)),
-        ("PROPS" | "SHAPEPRP", 0) => named(p, 32, row),
-        ("PROPS" | "SHAPEPRP", 1) => crate::enrich::PropValue::TYPES
+        ("PROPS" | "SHAPEPRP" | "PATHPRP", 0) => named(p, 32, row),
+        ("PROPS" | "SHAPEPRP" | "PATHPRP", 1) => crate::enrich::PropValue::TYPES
             .get(u32_at(p, 32, row, 16))
             .copied()
             .unwrap_or("?")
             .to_owned(),
-        ("PROPS" | "SHAPEPRP", _) => {
+        ("PROPS" | "SHAPEPRP" | "PATHPRP", _) => {
             let raw = p
                 .get(row * 32 + 24..row * 32 + 32)
                 .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()));
@@ -1631,7 +1727,29 @@ fn enrichment_cell(
         ("SHAPES", 6) => vector(&floats(68, 3)),
         ("SHAPES", 7) => u32_at(p, 96, row, 84).to_string(),
         ("SHAPES", _) => u32_at(p, 96, row, 92).to_string(),
-        ("SHAPEPTS", _) => vector(
+        ("PATHS", 0) => named(p, 80, row),
+        ("PATHS", 1) => text(u32_at(p, 80, row, 24), u32_at(p, 80, row, 28)),
+        ("PATHS", 2) => match u32_at(p, 80, row, 32) as i32 {
+            -1 => "—".into(),
+            joint => joint.to_string(),
+        },
+        ("PATHS", 3) => if u32_at(p, 80, row, 36) & 1 != 0 {
+            "yes"
+        } else {
+            "no"
+        }
+        .into(),
+        ("PATHS", 4) => vector(&floats_of(80, 40, 1)),
+        ("PATHS", 5) => vector(&floats_of(80, 44, 1)),
+        ("PATHS", 6) => vector(&floats_of(80, 48, 1)),
+        ("PATHS", 7) => u32_at(p, 80, row, 56).to_string(),
+        ("PATHS", 8) => u32_at(p, 80, row, 64).to_string(),
+        ("PATHS", _) => u32_at(p, 80, row, 72).to_string(),
+        ("PATHSMP", 0) => vector(&floats_of(32, 0, 3)),
+        ("PATHSMP", 1) => vector(&floats_of(32, 12, 1)),
+        ("PATHSMP", 2) => vector(&floats_of(32, 16, 3)),
+        ("PATHSMP", _) => vector(&floats_of(32, 28, 1)),
+        ("SHAPEPTS" | "PATHPTS", _) => vector(
             &(0..3)
                 .map(|k| chunks::f32_at(p, row, 12, k * 4).unwrap_or(0.0))
                 .collect::<Vec<_>>(),
@@ -1995,6 +2113,27 @@ meshlet_max_triangles = 64
                 ("metal".into(), vec!["surface".into()]),
                 ("breakable".into(), Vec::new()),
             ],
+            paths: {
+                let square = vec![
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [1.0, 0.0, 1.0],
+                    [0.0, 0.0, 1.0],
+                ];
+                let curve = crate::path::Curve::new(&square, true, 1.0, 0.5).unwrap();
+                vec![CompiledPath {
+                    name: "patrol".into(),
+                    kind: "route".into(),
+                    joint: -1,
+                    closed: true,
+                    tension: 1.0,
+                    alpha: 0.5,
+                    length: curve.length(),
+                    points: square,
+                    samples: curve.samples(),
+                    properties: [("speed".to_owned(), PropValue::Float(2.0))].into(),
+                }]
+            },
             ..Default::default()
         };
         let (bytes, _) = encode(&[part], &[0], None, &extras, true, &MeshOptions::default());
@@ -2011,6 +2150,18 @@ meshlet_max_triangles = 64
         assert_eq!(cell(&bytes, "REGIONS", 0, 2), "surface");
         assert_eq!(cell(&bytes, "REGIONS", 0, 3), "2");
         assert!(rows(&bytes).unwrap().contains(&("Regions", "2".into())));
+        assert!(rows(&bytes).unwrap().contains(&("Paths", "1".into())));
+        assert_eq!(cell(&bytes, "PATHS", 0, 1), "patrol");
+        assert_eq!(cell(&bytes, "PATHS", 0, 2), "route");
+        assert_eq!(cell(&bytes, "PATHS", 0, 4), "yes");
+        assert_eq!(cell(&bytes, "PATHS", 0, 7), "4.000");
+        assert_eq!(cell(&bytes, "PATHS", 0, 8), "4");
+        assert_eq!(cell(&bytes, "PATHS", 0, 9), "65");
+        assert_eq!(cell(&bytes, "PATHPTS", 2, 1), "1.000, 0.000, 1.000");
+        // Halfway round the square: the opposite corner.
+        assert_eq!(cell(&bytes, "PATHSMP", 32, 1), "1.000, 0.000, 1.000");
+        assert_eq!(cell(&bytes, "PATHSMP", 32, 2), "2.000");
+        assert_eq!(cell(&bytes, "PATHPRP", 0, 1), "speed");
         // Each written triangle keeps its source triangle's regions, wherever it moved.
         let masks = reader.require("TRIREGN").unwrap();
         let indices = reader.require("INDICES").unwrap();

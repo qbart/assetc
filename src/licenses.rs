@@ -22,7 +22,7 @@ const fn project(
     }
 }
 
-pub const PROJECTS: [Project; 22] = [
+pub const PROJECTS: [Project; 23] = [
     project("Lucide", "icons", "ISC", "lucide.dev"),
     project(
         "Ubuntu",
@@ -91,6 +91,7 @@ pub const PROJECTS: [Project; 22] = [
         "MIT",
         "github.com/qbart/meshopt-pure",
     ),
+    project("matma", "path curves", "MIT", "github.com/qbart/matma"),
     project(
         "image",
         "reading images",

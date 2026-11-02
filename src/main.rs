@@ -25,6 +25,7 @@ mod material;
 mod model;
 mod noise;
 mod palette;
+mod path;
 mod plan;
 mod presets;
 mod preview3d;
