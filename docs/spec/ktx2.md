@@ -105,7 +105,8 @@ instead:
 | `faceCount`   | `6` |
 | `levelCount`  | `log2(size) + 1` (full chain to 1 × 1) |
 
-Each level image holds the six faces back to back in the order +X, −X, +Y,
+The level images start at a multiple of 8 bytes (the texel size), so the
+padding after the key/value data is to a multiple of 8. Each level image holds the six faces back to back in the order +X, −X, +Y,
 −Y, +Z, −Z, each face its rows top to bottom, each texel `R G B A` as IEEE
 half floats: `byteLength` = `6 × w_n × h_n × 8`.
 
