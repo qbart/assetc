@@ -1675,7 +1675,8 @@ fn status_bar(
     notice: Option<&str>,
 ) {
     ui.horizontal(|ui| {
-        if busy_since.is_some_and(|since| since.elapsed() >= LOADER_DELAY) {
+        let busy = busy_since.is_some_and(|since| since.elapsed() >= LOADER_DELAY);
+        if busy {
             // One turn per second.
             let angle = (ui.input(|i| i.time) % 1.0) as f32 * std::f32::consts::TAU;
             let (rect, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
@@ -1688,6 +1689,7 @@ fn status_bar(
         match build {
             _ if let Some(notice) = notice => ui.label(notice),
             BuildStatus::Running(..) => ui.label("Building…"),
+            _ if busy => ui.label("Processing…"),
             BuildStatus::Finished(message) => ui.label(message),
             BuildStatus::Idle if project.root.is_some() => ui.label("Ready"),
             BuildStatus::Idle => ui.label("No assetc.toml found (run assetc init)"),
