@@ -7337,6 +7337,7 @@ fn timeline(
     let inner = rect.shrink2(vec2(8.0, 0.0));
     let mut ui = ui.new_child(
         UiBuilder::new()
+            .id_salt("timeline")
             .max_rect(inner)
             .layout(Layout::top_down(Align::Min)),
     );
@@ -7413,8 +7414,8 @@ fn timeline(
     // Ruler: press or drag moves the playhead and pauses.
     let (ruler, ruler_response) =
         ui.allocate_exact_size(vec2(inner.width(), 20.0), Sense::click_and_drag());
-    if ruler_response.is_pointer_button_down_on()
-        && let Some(p) = pointer
+    if (ruler_response.is_pointer_button_down_on() || ruler_response.clicked())
+        && let Some(p) = ruler_response.interact_pointer_pos().or(pointer)
     {
         now = time_of(p.x);
         preview.animation_seek = Some(now);
