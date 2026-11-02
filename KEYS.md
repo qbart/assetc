@@ -70,6 +70,17 @@ While a region paints (see [`docs/features/regions.md`](docs/features/regions.md
 | `Shift` + left drag / click            | The other one: erase while painting, paint while erasing |
 | Right drag                             | Orbit the camera                             |
 
+On the animation timeline (see [`docs/features/animation-events.md`](docs/features/animation-events.md#timeline)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| `Space` (pointer over the timeline)    | Play / pause                                 |
+| Left press / drag on the ruler         | Move the playhead there (pauses)             |
+| Left press on an event marker          | Choose that event                            |
+| Left drag on an event marker           | Move the event in time                       |
+| Double-click on the track              | Add an event there                           |
+| Double-click on an event marker        | Delete the event                             |
+
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
 
 | Input                                  | Action                                       |

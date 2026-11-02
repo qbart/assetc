@@ -16,6 +16,8 @@ follows assetc-cpp's `.hanim` v1, laid out as plain arrays.
 | `TIMES`    | yes      | `f32[key_count]`: key times in seconds, all channels        |
 | `VALUES`   | yes      | `f32[value_count]`: key values, `components` per key        |
 | `NAMES`    | yes      | UTF-8 clip names, back to back (not terminated)             |
+| `EVENTS`   | no       | [`Event`](#event-24-bytes)`[event_count]`, see [Events](#events) |
+| `EVNAMES`  | no       | UTF-8 event names, back to back (not terminated)            |
 
 ## AnimDesc (32 bytes)
 
@@ -58,6 +60,25 @@ Clips are in glTF file order.
 
 Key times increase within a channel. A joint's channels replace its bind-pose
 translation, rotation or scale; the others keep the bind pose.
+
+## Events
+
+Named moments of the clips, see
+[`docs/features/animation-events.md`](../features/animation-events.md).
+`EVENTS` and `EVNAMES` come together, when the model has events;
+`event_count` is `EVENTS`' size / 24. Events are sorted by `clip`, then
+`time`, so a clip's events are one run (find it by binary search on
+`clip`).
+
+### Event (24 bytes)
+
+| Offset | Size | Field         | Notes                                           |
+|-------:|-----:|---------------|-------------------------------------------------|
+|      0 |    4 | `clip`        | u32, index into `CLIPS`                         |
+|      4 |    4 | `time`        | f32, seconds from the clip's start, 0 to its `duration` |
+|      8 |    8 | `name_hash`   | u64, FNV-1a-64 of the name                      |
+|     16 |    4 | `name_offset` | u32, into `EVNAMES`                             |
+|     20 |    4 | `name_size`   | u32, bytes                                      |
 
 ## What is kept
 

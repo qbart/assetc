@@ -340,6 +340,9 @@ plays.
   when the model is reloaded.
 - The model is fitted once, in its rest pose; animations can move it out of
   that box.
+- While the tab is shown, a [timeline](animation-events.md#timeline) under
+  the 3D view plays, pauses and scrubs the chosen animation and places its
+  [events](animation-events.md).
 
 ## Build
 

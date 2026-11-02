@@ -63,12 +63,3 @@ Open:
   cells.
 - Whether modifiers apply to alpha, and how blur treats cell edges (clamp
   inside the cell).
-
-## More enrichments
-
-[Locators](docs/features/locators.md) are the first kind of data authored on
-top of a model. Others share their storage (`.amod` tables), joint
-attachment by name, `.amesh` chunks and 3D editing:
-
-- **Animation events**: named times on a clip (footsteps, hit frames,
-  sounds), in a new `.aanim` chunk, with a clip timeline to place them.
