@@ -40,7 +40,6 @@ pub fn apply(ctx: &egui::Context) {
     w.hovered.bg_stroke = Stroke::NONE;
     w.active.weak_bg_fill = ACCENT;
     w.active.bg_fill = ACCENT;
-    w.active.fg_stroke.color = BG_BAR;
     w.open.weak_bg_fill = STROKE;
 
     ctx.set_visuals(v);

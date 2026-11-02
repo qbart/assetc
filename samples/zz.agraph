@@ -1,0 +1,2 @@
+{ "$dialect": "agraph/1", "nodes": [ { "id": "a", "label": "A", "color": "#ef4444", "x": 0, "y": 0, "data": { "cost": 2 } }, { "id": "b", "x": 2, "y": 0 } ],
+  "edges": [ { "from": "a", "to": "b", "label": "go", "weight": 3 } ] }
