@@ -59,24 +59,31 @@ impl Outcome {
                 format!("Build failed: {first} ({n} errors)")
             }
         } else {
-            let count = |kind| self.built.iter().filter(|b| b.kind == kind).count();
-            let noun = |n, one: &str| match n {
-                1 => format!("1 {one}"),
-                n => format!("{n} {one}s"),
-            };
-            let materials = match count(Kind::Material) {
-                0 => String::new(),
-                n => format!(", {}", noun(n, "material")),
+            // See docs/features/build.md#summary.
+            let counts: Vec<String> = Kind::ALL
+                .into_iter()
+                .filter_map(|kind| {
+                    let n = self.built.iter().filter(|b| b.kind == kind).count();
+                    let (one, many) = match kind {
+                        Kind::Texture => ("texture", "textures"),
+                        Kind::Material => ("material", "materials"),
+                        Kind::Mesh => ("mesh", "meshes"),
+                        Kind::Animation => ("animation", "animations"),
+                        Kind::Font => ("font", "fonts"),
+                    };
+                    (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
+                })
+                .collect();
+            let counts = if counts.is_empty() {
+                "nothing".to_owned()
+            } else {
+                counts.join(", ")
             };
             let removed = match self.removed.len() {
                 0 => String::new(),
                 k => format!(", {k} removed"),
             };
-            format!(
-                "Built {}{materials} ({} skipped{removed})",
-                noun(count(Kind::Texture), "texture"),
-                self.skipped
-            )
+            format!("Built {counts} ({} skipped{removed})", self.skipped)
         }
     }
 }
@@ -556,6 +563,30 @@ fn write(dest: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn summaries_count_every_kind() {
+        let built = |kind| Built {
+            source: String::new(),
+            output: String::new(),
+            kind,
+            detail: String::new(),
+        };
+        let mut outcome = Outcome {
+            skipped: 1,
+            ..Default::default()
+        };
+        assert_eq!(outcome.summary(), "Built nothing (1 skipped)");
+        outcome.built = [Kind::Font, Kind::Mesh, Kind::Texture, Kind::Texture]
+            .into_iter()
+            .chain([Kind::Animation, Kind::Material, Kind::Mesh])
+            .map(built)
+            .collect();
+        assert_eq!(
+            outcome.summary(),
+            "Built 2 textures, 1 material, 2 meshes, 1 animation, 1 font (1 skipped)"
+        );
+    }
 
     fn with_textures(textures: &config::Textures) -> config::Config {
         config::Config {
@@ -1186,10 +1217,7 @@ mod tests {
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(outcome.built[0].source, "gold.mat.toml");
         assert_eq!(outcome.built[0].detail, "material: no textures");
-        assert_eq!(
-            outcome.summary(),
-            "Built 0 textures, 1 material (0 skipped)"
-        );
+        assert_eq!(outcome.summary(), "Built 1 material (0 skipped)");
         let m = material::decode(&fs::read(output.join("gold.amat")).unwrap()).unwrap();
         assert_eq!((m.metallic, m.roughness), (1.0, 0.3));
         assert_eq!(m.textures, material::TextureIds::default());
