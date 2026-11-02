@@ -3,6 +3,9 @@
 The application window is an egui shell drawn over Bevy. It provides the
 frame that later features plug into; it has no asset functionality of its own.
 
+The window is titled `assetc` and opens **maximized**; restoring it gives
+the platform's default size.
+
 ## Layout
 
 ```
