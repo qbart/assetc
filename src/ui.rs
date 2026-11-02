@@ -7563,12 +7563,23 @@ fn timeline(
     // paused; `E` toggles an event at the playhead.
     let mut toggle = false;
     if !ui.ctx().egui_wants_keyboard_input() {
+        // Shift as it was when the key went down.
         let (back, forward, fine) = ui.input(|i| {
-            (
-                i.key_pressed(egui::Key::Comma),
-                i.key_pressed(egui::Key::Period),
-                i.modifiers.shift,
-            )
+            let mut out = (false, false, false);
+            for event in &i.events {
+                if let egui::Event::Key {
+                    key: key @ (egui::Key::Comma | egui::Key::Period),
+                    pressed: true,
+                    modifiers,
+                    ..
+                } = event
+                {
+                    out.0 |= *key == egui::Key::Comma;
+                    out.1 |= *key == egui::Key::Period;
+                    out.2 |= modifiers.shift;
+                }
+            }
+            out
         });
         if back || forward {
             let step = if fine { 0.001 } else { 0.01 };
