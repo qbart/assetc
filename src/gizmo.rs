@@ -25,8 +25,6 @@ pub enum Mode {
     #[default]
     Move,
     Rotate,
-    /// Clicking the model places the chosen locator; no gizmo.
-    Place,
 }
 
 /// A part of the gizmo that can be dragged.
@@ -213,9 +211,6 @@ impl Gizmo {
     /// The gizmo of a locator whose world transform is `world`; `None` when it is behind
     /// the camera.
     pub fn new(camera: &ViewCamera, world: Affine3A, mode: Mode) -> Option<Self> {
-        if mode == Mode::Place {
-            return None;
-        }
         let origin = Vec3::from(world.translation);
         let center = camera.project(origin)?;
         let scale = camera.world_per_point(origin);
@@ -247,7 +242,6 @@ impl Gizmo {
                     runs.retain(|run| run.len() > 1);
                     gizmo.rings[i] = runs;
                 }
-                Mode::Place => {}
             }
         }
         Some(gizmo)

@@ -109,27 +109,26 @@ struct UiState {
 }
 
 /// The model preview's locator tools, for the session; see docs/features/locators.md#3d-view.
+#[derive(Default)]
 struct LocatorTools {
-    mode: gizmo::Mode,
-    /// Markers and the gizmo are drawn.
-    shown: bool,
+    /// The gizmo on the chosen locator, when on.
+    gizmo: Option<gizmo::Mode>,
     /// A gizmo handle being dragged.
     drag: Option<gizmo::Drag>,
-    /// A Place click waiting for its surface hit: the locator to place, `None` to add one.
-    placing: Option<Option<usize>>,
+    /// Place on surface is armed: the next click on the model adds a locator there.
+    armed: bool,
+    /// A Place click waits for its surface hit.
+    awaiting: bool,
+    /// Locators hidden in the 3D view, by model path and name.
+    hidden: HashMap<PathBuf, HashSet<String>>,
     /// The plane Mirror reflects across: 0 X, 1 Y, 2 Z.
     mirror_axis: usize,
 }
 
-impl Default for LocatorTools {
-    fn default() -> Self {
-        Self {
-            mode: gizmo::Mode::default(),
-            shown: true,
-            drag: None,
-            placing: None,
-            mirror_axis: 0,
-        }
+impl LocatorTools {
+    /// Turns the gizmo on in `mode`, or off when it already is.
+    fn toggle_gizmo(&mut self, mode: gizmo::Mode) {
+        self.gizmo = (self.gizmo != Some(mode)).then_some(mode);
     }
 }
 
@@ -2240,8 +2239,28 @@ fn prop_section(
     body: impl FnOnce(&mut Ui),
 ) -> Rect {
     let id = ui.make_persistent_id(id);
-    let collapsible = fold != Fold::Never;
-    let open = !collapsible || ui.data(|d| d.get_temp::<bool>(id).unwrap_or(fold == Fold::Open));
+    let open = (fold != Fold::Never)
+        .then(|| ui.data(|d| d.get_temp::<bool>(id).unwrap_or(fold == Fold::Open)));
+    let (rect, toggled) = card(ui, open, title, leading, trailing, body);
+    if toggled && let Some(open) = open {
+        ui.data_mut(|d| d.insert_temp(id, !open));
+    }
+    rect
+}
+
+/// A section card whose fold state the caller keeps: `open` is `None` for one that does not
+/// fold. Returns its rectangle and whether the chevron or title was clicked.
+fn card(
+    ui: &mut Ui,
+    open: Option<bool>,
+    title: RichText,
+    leading: impl FnOnce(&mut Ui),
+    trailing: impl FnOnce(&mut Ui, bool),
+    body: impl FnOnce(&mut Ui),
+) -> (Rect, bool) {
+    let collapsible = open.is_some();
+    let open = open.unwrap_or(true);
+    let mut toggled = false;
     let card = Frame::new()
         .fill(BG_HEADER)
         .corner_radius(6)
@@ -2272,11 +2291,8 @@ fn prop_section(
                     } else {
                         title
                     });
-                    let toggled =
+                    toggled =
                         chevron.is_some_and(|c| c.clicked()) || (collapsible && title.clicked());
-                    if toggled {
-                        ui.data_mut(|d| d.insert_temp(id, !open));
-                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
                         ui.add_space(4.0);
@@ -2299,7 +2315,7 @@ fn prop_section(
             }
         });
     ui.add_space(8.0);
-    card.response.rect
+    (card.response.rect, toggled)
 }
 
 /// A row: `label` right-aligned in the label column, then `control` given the rest of the width.
@@ -4591,7 +4607,7 @@ fn canvas_compiled_mesh(
         let painter = ui.painter_at(rect);
         for (name, transform) in &mesh.locators {
             if let Some((dot, ends)) = gizmo::marker(&camera, fit * *transform) {
-                paint_marker(&painter, dot, &ends, name, false);
+                paint_marker(&painter, dot, &ends, name, false, TEXT);
             }
         }
     }
@@ -4933,51 +4949,51 @@ fn canvas_model(
     };
     preview.model = Some(model);
     let joints = &inspected.inspection.joints;
+    let hidden = tools
+        .hidden
+        .get(&inspected.path)
+        .cloned()
+        .unwrap_or_default();
     let mut edit = match &mut inspected.mesh {
         Some(Ok(edit)) => Some(edit),
         _ => None,
     };
     // Transforms are relative to joints at rest; see docs/features/locators.md#animations.
     let locked = preview.animation.is_some();
+    if locked {
+        tools.armed = false;
+    }
     let camera = gizmo::ViewCamera::new(rect, &preview.orbit);
-    let frames = preview.frames.clone().filter(|_| tools.shown);
+    let frames = preview.frames.clone();
 
-    // The answer to a Place click; see docs/features/locators.md#place-on-surface.
+    // The answer to a Place click: a new locator there; see
+    // docs/features/locators.md#place-on-surface.
     if let Some(hit) = preview.surface_hit.take()
-        && let Some(target) = tools.placing.take()
+        && std::mem::take(&mut tools.awaiting)
         && let (Some(hit), Some(edit), Some(frames)) = (hit, &mut edit, &frames)
         && !locked
     {
-        let i = match target.filter(|&i| i < edit.edit.locators.len()) {
-            Some(i) => i,
-            None => {
-                add_locator(edit);
-                edit.edit.locators.len() - 1
-            }
-        };
-        edit.locator = Some(i);
+        add_locator(edit);
+        let i = edit.edit.locators.len() - 1;
         let locator = &mut edit.edit.locators[i];
-        if locator.joint.is_none()
-            && let Some(joint) = hit.joint.filter(|j| joints.contains(j))
-        {
-            locator.joint = Some(joint);
-        }
+        locator.joint = hit.joint.filter(|j| joints.contains(j));
         if let Some(parent) = frames.parent(locator.joint.as_deref()) {
             gizmo::place(locator, parent, hit.point, hit.normal);
         }
+        tools.armed = false;
         out.show_tab = true;
     }
 
-    // Each locator's world transform in the pose shown; `None` when its joint is not found.
+    // Each visible locator's world transform in the pose shown; `None` when hidden or its joint
+    // is not found.
     let worlds: Vec<Option<bevy::math::Affine3A>> = match (&edit, &frames) {
         (Some(edit), Some(frames)) => edit
             .edit
             .locators
             .iter()
             .map(|l| {
-                frames
-                    .parent(l.joint.as_deref())
-                    .map(|p| p * gizmo::local(l))
+                let parent = frames.parent(l.joint.as_deref())?;
+                (!hidden.contains(&l.name)).then(|| parent * gizmo::local(l))
             })
             .collect(),
         _ => Vec::new(),
@@ -4986,9 +5002,12 @@ fn canvas_model(
         .as_ref()
         .and_then(|e| e.locator)
         .filter(|&i| worlds.get(i).copied().flatten().is_some());
-    let handles = chosen
-        .filter(|_| !locked)
-        .and_then(|i| gizmo::Gizmo::new(&camera, worlds[i]?, tools.mode));
+    let handles = match (chosen, tools.gizmo) {
+        (Some(i), Some(mode)) if !locked => {
+            worlds[i].and_then(|world| gizmo::Gizmo::new(&camera, world, mode))
+        }
+        _ => None,
+    };
     if handles.is_none() {
         tools.drag = None;
     }
@@ -5044,34 +5063,36 @@ fn canvas_model(
         if picked.is_some() {
             edit.locator = picked;
             out.show_tab = true;
-        } else if tools.mode == gizmo::Mode::Place {
-            if !locked {
-                preview.surface_ray = Some(camera.ray(at));
-                tools.placing = Some(edit.locator);
-                ui.ctx().request_repaint();
-            }
+        } else if tools.armed {
+            preview.surface_ray = Some(camera.ray(at));
+            tools.awaiting = true;
+            ui.ctx().request_repaint();
         } else {
             edit.locator = None;
         }
     }
-    if !locked && ui.rect_contains_pointer(rect) && ui.memory(|m| m.focused().is_none()) {
+    if ui.rect_contains_pointer(rect) && ui.memory(|m| m.focused().is_none()) {
         ui.input(|i| {
-            if i.key_pressed(egui::Key::W) {
-                tools.mode = gizmo::Mode::Move;
+            if i.key_pressed(egui::Key::Escape) {
+                tools.gizmo = None;
+                tools.armed = false;
+            } else if locked {
+            } else if i.key_pressed(egui::Key::W) {
+                tools.toggle_gizmo(gizmo::Mode::Move);
             } else if i.key_pressed(egui::Key::E) {
-                tools.mode = gizmo::Mode::Rotate;
+                tools.toggle_gizmo(gizmo::Mode::Rotate);
             } else if i.key_pressed(egui::Key::S) {
-                tools.mode = gizmo::Mode::Place;
+                tools.armed = true;
             }
         });
     }
 
-    // Models shown at locators; see docs/features/locators.md#attachment-preview.
-    if let Some(edit) = &edit
-        && tools.shown
-    {
+    // Models shown at visible locators; see docs/features/locators.md#attachment-preview.
+    if let Some(edit) = &edit {
         for l in &edit.edit.locators {
-            if let Some(path) = &l.preview {
+            if let Some(path) = &l.preview
+                && !hidden.contains(&l.name)
+            {
                 preview.attachments.push(preview3d::Attachment {
                     path: path.into(),
                     joint: l.joint.clone(),
@@ -5084,11 +5105,19 @@ fn canvas_model(
     let painter = ui.painter_at(rect);
     if let Some(edit) = &edit {
         for (i, (dot, ends)) in &markers {
-            let name = &edit.edit.locators[*i].name;
-            paint_marker(&painter, *dot, ends, name, chosen == Some(*i));
+            let locator = &edit.edit.locators[*i];
+            let color = locator_color32(locator).unwrap_or(TEXT);
+            paint_marker(
+                &painter,
+                *dot,
+                ends,
+                &locator.name,
+                chosen == Some(*i),
+                color,
+            );
         }
     }
-    if let Some(handles) = &handles {
+    if let (Some(handles), Some(mode)) = (&handles, tools.gizmo) {
         let style = |handle: gizmo::Handle, color: egui::Color32| {
             if hovered == Some(handle) {
                 (3.0, color.lerp_to_gamma(egui::Color32::WHITE, 0.5))
@@ -5097,7 +5126,7 @@ fn canvas_model(
             }
         };
         for (i, color) in MARKER_AXES.into_iter().enumerate() {
-            match tools.mode {
+            match mode {
                 gizmo::Mode::Move => {
                     if let Some(tip) = handles.arrows[i] {
                         let (width, color) = style(gizmo::Handle::Arrow(i), color);
@@ -5118,49 +5147,18 @@ fn canvas_model(
                         painter.add(egui::Shape::line(run.clone(), Stroke::new(width, color)));
                     }
                 }
-                gizmo::Mode::Place => {}
             }
         }
-        if tools.mode == gizmo::Mode::Move {
+        if mode == gizmo::Mode::Move {
             let (_, fill) = style(gizmo::Handle::Center, ACCENT);
             painter.circle_filled(handles.center, 7.0, fill);
         }
     }
 
-    let tool = |icon, name: &str, on| Tool {
-        glyph: Glyph::Icon(icon),
-        name: name.into(),
-        on,
-        enabled: true,
-    };
-    let mode = |icon, name: &str, mode| Tool {
-        enabled: !locked,
-        ..tool(icon, name, !locked && tools.mode == mode)
-    };
-    let locator_tools = [
-        mode(Icon::Move3d, "Move (W)", gizmo::Mode::Move),
-        mode(Icon::Rotate3d, "Rotate (E)", gizmo::Mode::Rotate),
-        mode(Icon::Crosshair, "Place on surface (S)", gizmo::Mode::Place),
-        tool(Icon::MapPin, "Locators", tools.shown),
-        Tool {
-            enabled: edit.is_some(),
-            ..tool(Icon::Plus, "Add locator", false)
-        },
-    ];
     let seen = vision_tools(*vision);
-    match toolbar(ui, rect, &[&locator_tools, &seen]) {
-        Some((0, 0)) => tools.mode = gizmo::Mode::Move,
-        Some((0, 1)) => tools.mode = gizmo::Mode::Rotate,
-        Some((0, 2)) => tools.mode = gizmo::Mode::Place,
-        Some((0, 3)) => tools.shown = !tools.shown,
-        Some((0, _)) => {
-            if let Some(edit) = &mut edit {
-                add_locator(edit);
-                out.show_tab = true;
-            }
-        }
-        Some((_, button)) => toggle_vision(vision, button),
-        None => {}
+    if let Some((_, button)) = toolbar(ui, rect, &[&seen]) {
+        toggle_vision(vision, button);
+        ui.ctx().request_repaint();
     }
     if let ModelStatus::Failed(error) = &preview.model_status {
         ui.painter().text(
@@ -5178,6 +5176,20 @@ fn canvas_model(
 /// Colors of a locator's X, Y and Z axes.
 const MARKER_AXES: [egui::Color32; 3] = [CHANNEL_R, CHANNEL_G, CHANNEL_B];
 
+/// Marker colors offered for locators; see docs/features/locators.md#locators-tab.
+const LOCATOR_COLORS: [&str; 8] = [
+    "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#a855f7", "#ec4899",
+];
+
+fn hex_color32(text: &str) -> Option<egui::Color32> {
+    amod::locator_color(text).map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+}
+
+/// A locator's marker color, when it has one.
+fn locator_color32(locator: &amod::Locator) -> Option<egui::Color32> {
+    hex_color32(locator.color.as_deref()?)
+}
+
 /// A locator's dot, axis lines and name; see docs/features/locators.md#3d-view.
 fn paint_marker(
     painter: &egui::Painter,
@@ -5185,14 +5197,19 @@ fn paint_marker(
     ends: &[Option<egui::Pos2>; 3],
     name: &str,
     chosen: bool,
+    color: egui::Color32,
 ) {
-    for (end, color) in ends.iter().zip(MARKER_AXES) {
+    for (end, axis) in ends.iter().zip(MARKER_AXES) {
         if let Some(end) = end {
-            painter.line_segment([dot, *end], Stroke::new(1.5, color));
+            painter.line_segment([dot, *end], Stroke::new(1.5, axis));
         }
     }
-    let (radius, fill) = if chosen { (7.0, ACCENT) } else { (5.0, TEXT) };
-    painter.circle_filled(dot, radius, fill);
+    if chosen {
+        painter.circle_filled(dot, 7.0, color);
+        painter.circle_stroke(dot, 7.0, Stroke::new(2.0, ACCENT));
+    } else {
+        painter.circle_filled(dot, 5.0, color);
+    }
     let galley = painter.layout_no_wrap(name.to_owned(), FontId::proportional(12.0), TEXT);
     let at = pos2(dot.x + 12.0, dot.y - galley.size().y / 2.0);
     painter.rect_filled(
@@ -5255,6 +5272,37 @@ fn mirror_locator(
     edit.locator = Some(k);
 }
 
+/// What a locator card's header asks for.
+#[derive(Clone, Copy)]
+enum CardEvent {
+    Fold(usize),
+    Gizmo(usize, gizmo::Mode),
+    Delete(usize),
+    Revert(usize),
+}
+
+/// A 24 px icon button filled with `ACCENT` while `on`.
+fn icon_toggle(ui: &mut Ui, icon: Icon, tooltip: &str, on: bool, enabled: bool) -> Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), sense);
+    let color = match (enabled, on, response.hovered()) {
+        (false, _, _) => TEXT_WEAK.gamma_multiply(0.5),
+        (true, true, _) => BG_BAR,
+        (true, false, true) => TEXT,
+        (true, false, false) => TEXT_WEAK,
+    };
+    if on && enabled {
+        ui.painter().rect_filled(rect, 4, ACCENT);
+    }
+    icon.image(16.0, color)
+        .paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+    response.on_hover_text(tooltip)
+}
+
 /// The Locators tab; returns the sidecar to write. See docs/features/locators.md#locators-tab.
 fn locators_tab(
     ui: &mut Ui,
@@ -5265,6 +5313,7 @@ fn locators_tab(
 ) -> Option<Amod> {
     let joints = &inspected.inspection.joints;
     let models = &inspected.inspection.models;
+    let hidden = tools.hidden.entry(inspected.path.clone()).or_default();
     let edit = match &mut inspected.mesh {
         Some(Ok(edit)) => edit,
         Some(Err(e)) => {
@@ -5281,87 +5330,133 @@ fn locators_tab(
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
-                let rows: Vec<_> = (0..edit.edit.locators.len())
-                    .map(|i| {
-                        let l = &edit.edit.locators[i];
-                        let parent = l.joint.as_deref().unwrap_or("model");
-                        let detail = match edit.inherited(i) {
-                            None => parent.to_owned(),
-                            Some((from, false)) => format!("{parent} · {}", from.source.label()),
-                            Some((from, true)) => {
-                                format!("{parent} · {}, changed", from.source.label())
-                            }
-                        };
-                        (l.name.clone(), detail)
-                    })
-                    .collect();
-                if rows.is_empty() {
-                    ui.weak("No locators");
-                } else if let Some(i) = choice_rows(ui, &rows, edit.locator) {
-                    edit.locator = Some(i);
-                }
                 ui.horizontal(|ui| {
-                    if icon_button(ui, Icon::Plus, "Add", true).clicked() {
+                    let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add");
+                    if ui.add(add).clicked() {
                         add_locator(edit);
                     }
-                    let chosen = edit.locator.filter(|&i| i < edit.edit.locators.len());
-                    // Inherited locators revert instead; see
-                    // docs/features/locators.md#editing-inherited-locators.
-                    match chosen.and_then(|i| edit.inherited(i).map(|f| (i, f))) {
-                        Some((i, (from, true))) => {
-                            let original = from.locator.clone();
-                            let label = format!("Revert to {}", from.source.label());
-                            if icon_button(ui, Icon::RefreshCw, &label, true).clicked() {
-                                edit.edit.locators[i] = original;
-                            }
-                        }
-                        Some((_, (from, false))) => {
-                            let label = format!("From {}; remove it there", from.source.label());
-                            icon_button(ui, Icon::Trash2, &label, false);
-                        }
-                        None => {
-                            if icon_button(ui, Icon::Trash2, "Delete", chosen.is_some()).clicked()
-                                && let Some(i) = chosen
-                            {
-                                edit.edit.locators.remove(i);
-                                let left = edit.edit.locators.len();
-                                edit.locator = (left > 0).then(|| i.min(left - 1));
-                            }
-                        }
+                    let mut place = egui::Button::image_and_text(
+                        Icon::Crosshair.image(14.0, TEXT),
+                        "Place on surface",
+                    );
+                    if tools.armed {
+                        place = place.fill(ACCENT.gamma_multiply(0.25));
+                    }
+                    let place = ui
+                        .add_enabled(!animating, place)
+                        .on_hover_text("Click the model to add a locator there (S)");
+                    if place.clicked() {
+                        tools.armed = !tools.armed;
                     }
                 });
-                if let Some(i) = edit.locator.filter(|&i| i < edit.edit.locators.len()) {
-                    ui.add_space(4.0);
-                    prop_section(
-                        ui,
-                        "locator",
-                        Fold::Never,
-                        RichText::new("Locator"),
-                        |_| {},
-                        |_, _| {},
-                        |ui| {
-                            let fields = LocatorFields {
-                                joints,
-                                models,
-                                frames,
-                                animating,
-                            };
-                            locator_fields(ui, edit, i, &fields, &mut tools.mirror_axis);
-                        },
-                    );
-                    if animating {
-                        ui.add_space(4.0);
-                        ui.weak(
-                            "Transforms are locked while an animation plays. Choose Rest pose \
-                             to edit them.",
-                        );
+                ui.add_space(8.0);
+                if edit.edit.locators.is_empty() {
+                    ui.weak("No locators");
+                }
+                let mut event = None;
+                for i in 0..edit.edit.locators.len() {
+                    let open = edit.locator == Some(i);
+                    let name = edit.edit.locators[i].name.clone();
+                    let dot = locator_color32(&edit.edit.locators[i]).unwrap_or(TEXT);
+                    let from = edit
+                        .inherited(i)
+                        .map(|(f, changed)| (f.source.label().to_owned(), changed));
+                    let mut visible = !hidden.contains(&name);
+                    let gizmo = tools.gizmo.filter(|_| open);
+                    let movable = !animating && visible;
+                    let (_, folded) = ui
+                        .push_id(("locator", i), |ui| {
+                            card(
+                                ui,
+                                Some(open),
+                                RichText::new(&name),
+                                |ui| {
+                                    let (rect, _) =
+                                        ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+                                    ui.painter().circle_filled(rect.center(), 5.0, dot);
+                                },
+                                |ui, open| {
+                                    if open {
+                                        match &from {
+                                            Some((label, true)) => {
+                                                let tip = format!("Revert to {label}");
+                                                if icon_button(ui, Icon::RefreshCw, &tip, true)
+                                                    .clicked()
+                                                {
+                                                    event = Some(CardEvent::Revert(i));
+                                                }
+                                            }
+                                            Some((label, false)) => {
+                                                let tip = format!("From {label}; remove it there");
+                                                icon_button(ui, Icon::Trash2, &tip, false);
+                                            }
+                                            None => {
+                                                if icon_button(ui, Icon::Trash2, "Delete", true)
+                                                    .clicked()
+                                                {
+                                                    event = Some(CardEvent::Delete(i));
+                                                }
+                                            }
+                                        }
+                                    }
+                                    for (icon, tip, mode) in [
+                                        (Icon::Rotate3d, "Rotate (E)", gizmo::Mode::Rotate),
+                                        (Icon::Move3d, "Move (W)", gizmo::Mode::Move),
+                                    ] {
+                                        let on = gizmo == Some(mode);
+                                        if icon_toggle(ui, icon, tip, on, movable).clicked() {
+                                            event = Some(CardEvent::Gizmo(i, mode));
+                                        }
+                                    }
+                                    ui.checkbox(&mut visible, "").on_hover_text("Visible");
+                                },
+                                |ui| {
+                                    let fields = LocatorFields {
+                                        joints,
+                                        models,
+                                        frames,
+                                        animating,
+                                    };
+                                    locator_fields(ui, edit, i, &fields, &mut tools.mirror_axis);
+                                },
+                            )
+                        })
+                        .inner;
+                    if folded {
+                        event = Some(CardEvent::Fold(i));
+                    }
+                    if visible == hidden.contains(&name) {
+                        if visible {
+                            hidden.remove(&name);
+                        } else {
+                            hidden.insert(name);
+                        }
                     }
                 }
-                ui.add_space(8.0);
-                ui.weak(
-                    "Click a locator in the view to choose it. Drag its gizmo to move (W) or \
-                     rotate (E) it, or click the model to place it (S).",
-                );
+                match event {
+                    Some(CardEvent::Fold(i)) => {
+                        edit.locator = (edit.locator != Some(i)).then_some(i);
+                    }
+                    Some(CardEvent::Gizmo(i, mode)) => {
+                        if edit.locator == Some(i) && tools.gizmo == Some(mode) {
+                            tools.gizmo = None;
+                        } else {
+                            edit.locator = Some(i);
+                            tools.gizmo = Some(mode);
+                        }
+                    }
+                    Some(CardEvent::Delete(i)) => {
+                        edit.edit.locators.remove(i);
+                        edit.locator = None;
+                    }
+                    Some(CardEvent::Revert(i)) => {
+                        if let Some((from, _)) = edit.inherited(i) {
+                            edit.edit.locators[i] = from.locator.clone();
+                        }
+                    }
+                    None => {}
+                }
+                ui.weak("Click a locator in the view to choose it.");
             });
         });
     mesh_commit(ui, edit)
@@ -5376,7 +5471,8 @@ struct LocatorFields<'a> {
     animating: bool,
 }
 
-/// Name, joint, transform, preview and mirroring of locator `i`.
+/// The body of locator `i`'s card: where it comes from, name, color, joint, transform,
+/// preview and mirroring.
 fn locator_fields(
     ui: &mut Ui,
     edit: &mut MeshEdit,
@@ -5393,13 +5489,25 @@ fn locator_fields(
     } = *fields;
     let saved_name = edit.saved.locators.get(i).map(|l| l.name.clone());
     // An inherited locator is found by its name.
-    let inherited = edit.inherited(i).is_some();
+    let inherited = edit
+        .inherited(i)
+        .map(|(f, changed)| (f.source.clone(), changed));
+    if let Some((source, changed)) = &inherited {
+        let from = match source {
+            presets::Source::File => "From the file".to_owned(),
+            source => format!("From {}", source.label()),
+        };
+        let changed = if *changed { ", changed here" } else { "" };
+        ui.weak(format!("{from}{changed}"));
+    }
     let locators = &mut edit.edit.locators;
     let mut renamed = false;
     prop_row(ui, "Name", |ui, width| {
         let field = egui::TextEdit::singleline(&mut locators[i].name);
         renamed = ui
-            .add_enabled_ui(!inherited, |ui| ui.add_sized(vec2(width, 22.0), field))
+            .add_enabled_ui(inherited.is_none(), |ui| {
+                ui.add_sized(vec2(width, 22.0), field)
+            })
             .inner
             .lost_focus();
     });
@@ -5412,6 +5520,7 @@ fn locator_fields(
     }
 
     let locator = &mut locators[i];
+    color_row(ui, &mut locator.color);
     ui.add_enabled_ui(!animating, |ui| {
         let mut joint = locator.joint.clone();
         prop_row(ui, "Joint", |ui, width| {
@@ -5426,16 +5535,10 @@ fn locator_fields(
                 });
         });
         if joint != locator.joint {
-            // Kept in place in the view, at the pose shown.
-            if let Some(frames) = frames
-                && let (Some(from), Some(to)) = (
-                    frames.parent(locator.joint.as_deref()),
-                    frames.parent(joint.as_deref()),
-                )
-            {
-                gizmo::set_local(locator, to.inverse() * from * gizmo::local(locator));
-            }
+            // Onto the new parent; see docs/features/locators.md#locators-tab.
             locator.joint = joint;
+            locator.translation = [0.0; 3];
+            locator.rotation = [0.0, 0.0, 0.0, 1.0];
         }
 
         vec3_row(ui, "Position", &mut locator.translation, 0.001, 3, None);
@@ -5491,9 +5594,55 @@ fn locator_fields(
                 });
         });
     });
+    if animating {
+        ui.add_space(4.0);
+        ui.weak("Transforms are locked while an animation plays. Choose Rest pose to edit them.");
+    }
     if mirror && let Some(frames) = frames {
         mirror_locator(edit, i, joints, frames, *mirror_axis);
     }
+}
+
+/// The marker color swatches: none, the offered colors, and a color set by hand.
+fn color_row(ui: &mut Ui, color: &mut Option<String>) {
+    prop_row(ui, "Color", |ui, width| {
+        ui.spacing_mut().item_spacing.x = 3.0;
+        let mut options: Vec<Option<String>> = std::iter::once(None)
+            .chain(LOCATOR_COLORS.map(|c| Some(c.to_owned())))
+            .collect();
+        if let Some(own) = color
+            .as_ref()
+            .filter(|c| !LOCATOR_COLORS.contains(&c.as_str()))
+        {
+            options.push(Some(own.clone()));
+        }
+        let gaps = 3.0 * (options.len() - 1) as f32;
+        let size = ((width - gaps) / options.len() as f32).clamp(8.0, 18.0);
+        for option in options {
+            let (rect, response) = ui.allocate_exact_size(vec2(size, size), Sense::click());
+            let painter = ui.painter();
+            match option.as_deref().and_then(hex_color32) {
+                Some(fill) => {
+                    painter.rect_filled(rect, 4, fill);
+                }
+                None => {
+                    let rect = rect.shrink(0.5);
+                    painter.rect_stroke(rect, 4, Stroke::new(1.0, TEXT_WEAK), StrokeKind::Inside);
+                    painter.line_segment(
+                        [rect.left_bottom(), rect.right_top()],
+                        Stroke::new(1.0, TEXT_WEAK),
+                    );
+                }
+            }
+            if *color == option {
+                painter.rect_stroke(rect, 4, Stroke::new(2.0, TEXT), StrokeKind::Inside);
+            }
+            let tip = option.clone().unwrap_or_else(|| "None".into());
+            if response.on_hover_text(tip).clicked() {
+                *color = option;
+            }
+        }
+    });
 }
 
 /// Three drag fields side by side.

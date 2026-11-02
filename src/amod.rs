@@ -36,6 +36,9 @@ pub struct Locator {
     /// An input-relative glTF model the 3D view shows at the locator; not compiled.
     #[serde(default)]
     pub preview: Option<String>,
+    /// `#rrggbb`, the marker's color in the 3D view; not compiled.
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 fn identity() -> [f32; 4] {
@@ -56,8 +59,19 @@ impl Locator {
             rotation: identity(),
             scale: unit(),
             preview: None,
+            color: None,
         }
     }
+}
+
+/// The RGB of a locator's `#rrggbb` color.
+pub fn locator_color(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#')?;
+    if hex.len() != 6 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
 /// `locator`, or `locator_<n>` with the smallest free `n` from 2.
@@ -100,6 +114,14 @@ impl Amod {
             if locators[..i].iter().any(|l| l.name == locator.name) {
                 return Err(format!("locator {:?}: name used twice", locator.name));
             }
+            if let Some(color) = &locator.color
+                && locator_color(color).is_none()
+            {
+                return Err(format!(
+                    "locator {:?}: color {color:?} is not #rrggbb",
+                    locator.name
+                ));
+            }
         }
         Ok(Self {
             mesh,
@@ -130,6 +152,9 @@ impl Amod {
             out += &format!("scale = {}\n", floats(&locator.scale));
             if let Some(preview) = &locator.preview {
                 out += &format!("preview = {}\n", toml::Value::from(preview.as_str()));
+            }
+            if let Some(color) = &locator.color {
+                out += &format!("color = {}\n", toml::Value::from(color.as_str()));
             }
         }
         noise::write_modifiers(&self.modifiers, &mut out);
@@ -257,6 +282,13 @@ mod tests {
         assert!(Amod::parse("[[locators]]\nname = \"a\"\n[[locators]]\nname = \"a\"\n").is_err());
         assert!(Amod::parse("[[locators]]\nname = \"a\"\nscale = [1.0]\n").is_err());
         assert!(Amod::parse("[[locators]]\nname = \"a\"\nkind = \"x\"\n").is_err());
+        let colored = Amod::parse("[[locators]]\nname = \"a\"\ncolor = \"#22c55e\"\n").unwrap();
+        assert_eq!(
+            locator_color(colored.locators[0].color.as_deref().unwrap()),
+            Some([0x22, 0xc5, 0x5e])
+        );
+        assert!(colored.to_toml().ends_with("color = \"#22c55e\"\n"));
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\ncolor = \"red\"\n").is_err());
     }
 
     #[test]
