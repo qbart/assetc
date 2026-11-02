@@ -145,9 +145,24 @@ rules:
   fields as rows under the row, indented, with the same rules (sorted by
   `order`, conditions, optional, readonly, Reset), without group headers.
   With `"widget": "inline"` it is always unfolded, without a fold button.
-- A list: `n items` and, under the row, its items as the
-  [list defaults](schemas.md#defaults) show them (drag handle, index, the
-  item's editor, Remove, Add item); editing any item sets the whole list.
+- A list: `n items` and, under the row (indented), one 28 px row per item:
+  a **drag handle** (moves the item within the list), the index (`[0]`,
+  monospace), the item, and **Remove** (`x`); then **Add item** (`plus`
+  and text), appending the item type's implicit default. Editing any item
+  sets the whole list.
+  - An item of a plain type (number, text, color, enum, …): its editor in
+    the row, with the field's rules (range, step, toggle).
+  - A **struct** item: a fold button (`chevron-right` / `chevron-down`;
+    items start **folded**, the fold state kept per item for the session),
+    the struct's name (`TEXT_WEAK`) and, to tell items apart at a glance,
+    the item's first two **colors**: 14 px swatches (over a checkerboard) of
+    its first two `rgb` / `rgba` fields in field order, resolved; or, with
+    no color fields, a 48 × 14 px preview of its first `gradient` field.
+    Unfolded, its fields as rows under it, with the same rules as the
+    instance's own fields (each showing its resolved value, Reset, no Set
+    checkboxes); what an item does not set falls back to its struct's
+    defaults.
+  - A list item: `n items` and its own items under it.
 - `ref<S>`: a dropdown of `—` (`""`) and the ids of this file's instances of
   `S`, in file order; a stored id that is none of them stays shown.
 
