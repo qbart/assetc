@@ -109,7 +109,7 @@ details when unfolded:
 | (grip)   | drag handle: moves the field within its group |
 | (details) | `settings` (16 px icon button, `ACCENT` while open, else `TEXT_WEAK`): shows or hides the field's details, where its visibility and dependency logic lives |
 | Name     | text, monospace, 140 px; an invalid or taken name reverts when it loses focus |
-| Type     | text, monospace, 150 px, `CHANNEL_R` while it does not parse or names an unknown type; its `chevron-down` button lists the primitives, the file's types, and `list<…>`, `optional<…>`, `ref<…>` around the current type |
+| Type     | text, monospace, 150 px, `CHANNEL_R` while it does not parse or names an unknown type; its `chevron-down` button (24 × 22 px, framed while hovered or open, the whole area clickable) lists the primitives, the file's types, and `list<…>`, `optional<…>`, `ref<…>` around the current type |
 | Default  | a **Default** checkbox, then, ticked, the default's value editor (see [Defaults](#defaults)); unticked, nothing |
 | (problems) | the [problem icon](#problems), right-aligned, when the field has problems |
 | (remove) | `x`: removes the field |
