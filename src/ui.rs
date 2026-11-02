@@ -95,6 +95,8 @@ struct UiState {
     /// The color set each compiled mesh shows, by path; see
     /// docs/features/vertex-colors.md#compiled-meshes.
     mesh_colors: HashMap<PathBuf, Option<usize>>,
+    /// The animation timeline under a model; see docs/features/animation-events.md#timeline.
+    timeline: Timeline,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
     mesh_in_3d: bool,
     /// The chosen chunk of the Chunks view, of a compiled mesh or font.
@@ -428,6 +430,7 @@ impl Default for UiState {
             mesh_view: MeshView::default(),
             lod_levels: HashMap::new(),
             mesh_colors: HashMap::new(),
+            timeline: Timeline::default(),
             mesh_in_3d: true,
             font_atlas: true,
             data_filter: String::new(),
@@ -814,6 +817,36 @@ fn shell(
                         .and_then(|i| state.animations.get(&i.path).copied())
                         .flatten();
                     preview3d.animation = animation;
+                    // The timeline under the 3D view; see
+                    // docs/features/animation-events.md#timeline.
+                    let has_animations = inspected
+                        .is_some_and(|i| i.model.is_some() && !i.inspection.animations.is_empty());
+                    let mut rect = rect;
+                    if state.inspector_tab == InspectorTab::Animations && has_animations {
+                        let split = rect.bottom() - TIMELINE_HEIGHT;
+                        let below = Rect::from_min_max(pos2(rect.left(), split), rect.max);
+                        rect.max.y = split;
+                        if let Some(inspected) = state.inspected.as_mut()
+                            && let Some(amod) = timeline(
+                                ui,
+                                below,
+                                inspected,
+                                &mut preview3d,
+                                &mut state.timeline,
+                                animation,
+                            )
+                        {
+                            match amod::write(&inspected.path, &amod) {
+                                Ok(()) => {
+                                    state.reinspect = true;
+                                    state.rescan = true;
+                                    state.keep_model = true;
+                                }
+                                Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                            }
+                        }
+                    }
+                    preview3d.animation_paused = state.timeline.paused;
                     let out = canvas_model(
                         ui,
                         rect,
@@ -1164,6 +1197,7 @@ fn inspected(
                 region: None,
                 path: None,
                 point: None,
+                event: None,
                 color: None,
                 color_end: 0,
                 color_cards: Vec::new(),
@@ -2644,6 +2678,8 @@ struct MeshEdit {
     /// The chosen path and its chosen point.
     path: Option<usize>,
     point: Option<usize>,
+    /// The chosen animation event, by index in the sidecar's.
+    event: Option<usize>,
     /// The chosen color set, its chosen gradient end (0 From, 1 To) and each authored set's
     /// gradient editor; see docs/features/vertex-colors.md#vertex-colors-tab.
     color: Option<usize>,
@@ -7258,6 +7294,320 @@ fn new_point(points: &[[f32; 3]], at: usize, closed: bool) -> [f32; 3] {
         (None, None) => Vec3::ZERO,
     };
     point.to_array()
+}
+
+/// Height of the animation timeline; see docs/features/animation-events.md#timeline.
+const TIMELINE_HEIGHT: f32 = 132.0;
+
+/// The animation timeline's state.
+#[derive(Default)]
+struct Timeline {
+    /// The model and animation shown; another one starts afresh.
+    shown: Option<(PathBuf, usize)>,
+    paused: bool,
+    /// The event being dragged, by index in the sidecar's.
+    drag: Option<usize>,
+    /// The playhead last frame, and when each event (by index) was last passed.
+    last_time: Option<f32>,
+    flashes: HashMap<usize, Instant>,
+}
+
+/// `0.5 s`, `1 s`, `0.25 s`: seconds without trailing zeros.
+fn seconds_label(t: f32) -> String {
+    let text = format!("{t:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{text} s")
+}
+
+/// The timeline under a model's 3D view: playback and the chosen animation's events; returns
+/// the sidecar to write. See docs/features/animation-events.md#timeline.
+fn timeline(
+    ui: &mut Ui,
+    rect: Rect,
+    inspected: &mut Inspected,
+    preview: &mut Preview3d,
+    state: &mut Timeline,
+    animation: Option<usize>,
+) -> Option<Amod> {
+    const MARKER_REACH: f32 = 6.0;
+    const FLASH: f32 = 0.25;
+    ui.painter().rect_filled(rect, 0, BG_PANEL);
+    ui.painter()
+        .hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, STROKE));
+    let inner = rect.shrink2(vec2(8.0, 0.0));
+    let mut ui = ui.new_child(
+        UiBuilder::new()
+            .max_rect(inner)
+            .layout(Layout::top_down(Align::Min)),
+    );
+    let ui = &mut ui;
+    ui.spacing_mut().item_spacing.y = 2.0;
+    let Some((index, (name, duration))) = animation.and_then(|i| {
+        let (name, duration) = inspected.inspection.animations.get(i)?;
+        Some((i, (name.clone(), duration.max(f32::EPSILON))))
+    }) else {
+        state.shown = None;
+        ui.allocate_ui_with_layout(
+            vec2(inner.width(), 28.0),
+            Layout::left_to_right(Align::Center),
+            |ui| ui.weak("Choose an animation to edit its events"),
+        );
+        return None;
+    };
+    let Some(Ok(edit)) = &mut inspected.mesh else {
+        return None;
+    };
+    // Another model or animation: play it from its start, nothing chosen.
+    let key = (inspected.path.clone(), index);
+    if state.shown.as_ref() != Some(&key) {
+        *state = Timeline {
+            shown: Some(key),
+            ..Timeline::default()
+        };
+        edit.event = None;
+    }
+    let mut now = preview.animation_time.unwrap_or(0.0).min(duration);
+    // Space plays and pauses.
+    if ui.rect_contains_pointer(rect)
+        && !ui.ctx().egui_wants_keyboard_input()
+        && ui.input(|i| i.key_pressed(egui::Key::Space))
+    {
+        state.paused = !state.paused;
+    }
+
+    // Header.
+    let mut add = false;
+    ui.allocate_ui_with_layout(
+        vec2(inner.width(), 28.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let (icon, tip) = if state.paused {
+                (Icon::Play, "Play (Space)")
+            } else {
+                (Icon::Pause, "Pause (Space)")
+            };
+            if icon_button(ui, icon, tip, true).clicked() {
+                state.paused = !state.paused;
+            }
+            ui.label(
+                RichText::new(format!("{now:.2} / {duration:.2} s"))
+                    .monospace()
+                    .color(TEXT),
+            );
+            ui.label(RichText::new(&name).color(TEXT_WEAK));
+            let button = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add event");
+            add = ui.add(button).clicked();
+        },
+    );
+
+    let x0 = inner.left() + MARKER_REACH;
+    let x1 = inner.right() - MARKER_REACH;
+    let x_of = |t: f32| x0 + t / duration * (x1 - x0);
+    let time_of = |x: f32| {
+        let t = ((x - x0) / (x1 - x0)).clamp(0.0, 1.0) * duration;
+        (t * 1000.0).round() / 1000.0
+    };
+    let pointer = ui.input(|i| i.pointer.latest_pos());
+
+    // Ruler: press or drag moves the playhead and pauses.
+    let (ruler, ruler_response) =
+        ui.allocate_exact_size(vec2(inner.width(), 20.0), Sense::click_and_drag());
+    if ruler_response.is_pointer_button_down_on()
+        && let Some(p) = pointer
+    {
+        now = time_of(p.x);
+        preview.animation_seek = Some(now);
+        state.paused = true;
+    }
+    let per_second = (x1 - x0) / duration;
+    let step = [0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+        .into_iter()
+        .find(|s| s * per_second >= 60.0)
+        .unwrap_or(30.0);
+    let painter = ui.painter().clone();
+    let mut k = 0;
+    while k as f32 * step <= duration + 1e-4 {
+        let t = k as f32 * step;
+        let x = x_of(t);
+        painter.vline(
+            x,
+            (ruler.bottom() - 6.0)..=ruler.bottom(),
+            Stroke::new(1.0, TEXT_WEAK),
+        );
+        painter.text(
+            pos2(x + 3.0, ruler.top() + 2.0),
+            Align2::LEFT_TOP,
+            seconds_label(t),
+            FontId::proportional(11.0),
+            TEXT_WEAK,
+        );
+        k += 1;
+    }
+
+    // Track: markers to choose, drag, add and delete.
+    let (track, track_response) =
+        ui.allocate_exact_size(vec2(inner.width(), 32.0), Sense::click_and_drag());
+    painter.rect_filled(track, 4, BG_HEADER);
+    let mine: Vec<usize> = (0..edit.edit.events.len())
+        .filter(|&i| edit.edit.events[i].animation == name)
+        .collect();
+    let marker_at = |events: &[enrich::Event], x: f32| {
+        mine.iter()
+            .map(|&i| (i, (x_of(events[i].time) - x).abs()))
+            .filter(|(_, d)| *d <= MARKER_REACH)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i)
+    };
+    if track_response.double_clicked()
+        && let Some(p) = pointer
+    {
+        match marker_at(&edit.edit.events, p.x) {
+            Some(i) => {
+                edit.edit.events.remove(i);
+                edit.event = None;
+            }
+            None => {
+                edit.edit.events.push(enrich::Event {
+                    animation: name.clone(),
+                    name: "event".into(),
+                    time: time_of(p.x),
+                });
+                edit.event = Some(edit.edit.events.len() - 1);
+            }
+        }
+        state.drag = None;
+    } else if ui.input(|i| i.pointer.primary_pressed())
+        && track_response.hovered()
+        && let Some(p) = pointer
+    {
+        state.drag = marker_at(&edit.edit.events, p.x);
+        if state.drag.is_some() {
+            edit.event = state.drag;
+        }
+    }
+    if let Some(i) = state.drag {
+        match (ui.input(|i| i.pointer.primary_down()), pointer) {
+            (true, Some(p)) if i < edit.edit.events.len() => {
+                if track_response.dragged() {
+                    edit.edit.events[i].time = time_of(p.x);
+                }
+            }
+            _ => state.drag = None,
+        }
+    }
+    if add {
+        edit.edit.events.push(enrich::Event {
+            animation: name.clone(),
+            name: "event".into(),
+            time: (now * 1000.0).round() / 1000.0,
+        });
+        edit.event = Some(edit.edit.events.len() - 1);
+    }
+
+    // Events the playhead passed since last frame flash.
+    if let Some(last) = state.last_time
+        && !state.paused
+    {
+        for (i, event) in edit.edit.events.iter().enumerate() {
+            let t = event.time;
+            let passed = if now >= last {
+                last < t && t <= now
+            } else {
+                t > last || t <= now
+            };
+            if passed && event.animation == name {
+                state.flashes.insert(i, Instant::now());
+            }
+        }
+    }
+    state.last_time = Some(now);
+    state
+        .flashes
+        .retain(|_, at| at.elapsed().as_secs_f32() < FLASH);
+    for (i, event) in edit.edit.events.iter().enumerate() {
+        if event.animation != name {
+            continue;
+        }
+        let center = pos2(x_of(event.time.min(duration)), track.center().y);
+        let lit = edit.event == Some(i) || state.flashes.contains_key(&i);
+        let color = if lit { ACCENT } else { TEXT };
+        let r = 5.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                center + vec2(0.0, -r),
+                center + vec2(r, 0.0),
+                center + vec2(0.0, r),
+                center + vec2(-r, 0.0),
+            ],
+            color,
+            Stroke::NONE,
+        ));
+        painter.text(
+            center + vec2(r + 3.0, 0.0),
+            Align2::LEFT_CENTER,
+            &event.name,
+            FontId::proportional(11.0),
+            TEXT_WEAK,
+        );
+    }
+    if !state.flashes.is_empty() {
+        ui.ctx().request_repaint();
+    }
+
+    // Playhead.
+    let x = x_of(now);
+    painter.vline(x, ruler.top()..=track.bottom(), Stroke::new(1.0, ACCENT));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            pos2(x - 4.0, ruler.top()),
+            pos2(x + 4.0, ruler.top()),
+            pos2(x, ruler.top() + 6.0),
+        ],
+        ACCENT,
+        Stroke::NONE,
+    ));
+
+    // The chosen event's fields.
+    ui.add_space(4.0);
+    let chosen = edit
+        .event
+        .filter(|&i| edit.edit.events.get(i).is_some_and(|e| e.animation == name));
+    ui.allocate_ui_with_layout(
+        vec2(inner.width(), 24.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let Some(i) = chosen else {
+                ui.weak("Double-click the track to add an event");
+                return;
+            };
+            let mut delete = false;
+            let event = &mut edit.edit.events[i];
+            ui.label(RichText::new("Name").color(TEXT_WEAK));
+            ui.add_sized(
+                vec2(160.0, 22.0),
+                egui::TextEdit::singleline(&mut event.name),
+            );
+            ui.label(RichText::new("Time").color(TEXT_WEAK));
+            ui.add_sized(
+                vec2(80.0, 22.0),
+                egui::DragValue::new(&mut event.time)
+                    .range(0.0..=duration)
+                    .speed(0.01)
+                    .fixed_decimals(3)
+                    .suffix(" s"),
+            );
+            if icon_button(ui, Icon::Trash2, "Delete", true).clicked() {
+                delete = true;
+            }
+            if delete {
+                edit.edit.events.remove(i);
+                edit.event = None;
+            }
+        },
+    );
+    mesh_commit(ui, edit)
 }
 
 /// The Vertex colors tab; see docs/features/vertex-colors.md#vertex-colors-tab.

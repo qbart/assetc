@@ -26,6 +26,8 @@ pub struct Amod {
     pub paths: Vec<enrich::Path>,
     /// `[[colors]]`: a glTF model's color sets, see docs/features/vertex-colors.md.
     pub colors: Vec<enrich::ColorSet>,
+    /// `[[events]]`: a glTF model's animation events, see docs/features/animation-events.md.
+    pub events: Vec<enrich::Event>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
     pub modifiers: Vec<Modifier>,
 }
@@ -126,6 +128,7 @@ impl Amod {
             && self.regions.is_empty()
             && self.paths.is_empty()
             && self.colors.is_empty()
+            && self.events.is_empty()
             && self.modifiers.is_empty()
     }
 
@@ -160,6 +163,11 @@ impl Amod {
         let colors = table
             .remove("colors")
             .map(enrich::parse_colors)
+            .transpose()?
+            .unwrap_or_default();
+        let events = table
+            .remove("events")
+            .map(enrich::parse_events)
             .transpose()?
             .unwrap_or_default();
         let Tables { mesh, locators } = toml::Value::Table(table)
@@ -197,6 +205,7 @@ impl Amod {
             regions,
             paths,
             colors,
+            events,
             modifiers,
         })
     }
@@ -241,6 +250,7 @@ impl Amod {
         enrich::write_regions(&self.regions, &mut out);
         enrich::write_paths(&self.paths, &mut out);
         enrich::write_colors(&self.colors, &mut out);
+        enrich::write_events(&self.events, &mut out);
         noise::write_modifiers(&self.modifiers, &mut out);
         // Each table after a blank line, but not the first.
         out.trim_start_matches('\n').to_owned()
@@ -475,6 +485,11 @@ blend = { with = "tint", mode = "multiply", amount = 0.5 }
 name = "flat"
 fill = "solid"
 color = "#ff000080"
+
+[[events]]
+animation = "Walk"
+name = "footstep"
+time = 0.25
 "##;
         let amod = Amod::parse(text).unwrap();
         assert_eq!(amod.properties["lives"], PropValue::Int(3));
@@ -503,6 +518,7 @@ color = "#ff000080"
         assert_eq!(blend.mode, crate::enrich::BlendMode::Multiply);
         assert_eq!(amod.colors[2].fill, crate::enrich::ColorFill::Solid);
         assert_eq!(amod.colors[2].color, [255, 0, 0, 0x80]);
+        assert_eq!(amod.events[0].time, 0.25);
         assert_eq!(amod.to_toml(), text);
         assert_eq!(Amod::parse(&amod.to_toml()).unwrap(), amod);
 
@@ -525,6 +541,9 @@ color = "#ff000080"
             "[[colors]]\nname = \"a\"\ngltf = \"COLOR_0\"\nfill = \"solid\"\n",
             "[[colors]]\nname = \"a\"\ngltf = \"COLOR_0\"\n\n[[colors]]\nname = \"b\"\ngltf = \"COLOR_0\"\n",
             "[[colors]]\nname = \"a\"\nblend = { mode = \"mix\" }\n",
+            "[[events]]\nanimation = \"a\"\nname = \"\"\ntime = 0.0\n",
+            "[[events]]\nanimation = \"a\"\nname = \"b\"\ntime = -1.0\n",
+            "[[events]]\nanimation = \"a\"\nname = \"b\"\n",
             "[[colors]]\nname = \"a\"\nblend = { with = \"b\", mode = \"burn\" }\n",
             "[[colors]]\nname = \"a\"\nblend = { with = \"b\", amount = 2.0 }\n",
             "[[colors]]\nname = \"a\"\nfill = \"conic\"\n",

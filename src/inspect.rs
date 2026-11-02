@@ -556,6 +556,7 @@ fn model_rows(
         out.rows.push(("Shapes", count(amod.shapes.len())));
         out.rows.push(("Regions", count(amod.regions.len())));
         out.rows.push(("Paths", count(amod.paths.len())));
+        out.rows.push(("Events", count(amod.events.len())));
     }
     let mesh = format!("{}.amesh", strip_extension(rel));
     out.rows.push(("Asset path", mesh.clone()));

@@ -22,6 +22,15 @@ pub struct Channel {
     pub values: Vec<f32>,
 }
 
+/// A named moment of a clip; see docs/spec/aanim.md#events.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Event {
+    /// Index into the clips.
+    pub clip: u32,
+    pub time: f32,
+    pub name: String,
+}
+
 impl Clip {
     pub fn duration(&self) -> f32 {
         self.channels
@@ -31,8 +40,9 @@ impl Clip {
     }
 }
 
-/// Encodes the clips for a skeleton of `joint_count` joints in mesh `mesh` (its asset ID).
-pub fn encode(clips: &[Clip], joint_count: u32, mesh: u64) -> Vec<u8> {
+/// Encodes the clips and their events for a skeleton of `joint_count` joints in mesh `mesh`
+/// (its asset ID).
+pub fn encode(clips: &[Clip], events: &[Event], joint_count: u32, mesh: u64) -> Vec<u8> {
     let (mut table, mut channels, mut times, mut values, mut names) = (
         Bytes::default(),
         Bytes::default(),
@@ -76,14 +86,33 @@ pub fn encode(clips: &[Clip], joint_count: u32, mesh: u64) -> Vec<u8> {
         .u32(names.len() as u32)
         .u32(joint_count)
         .u64(mesh);
-    Writer::new(FORMAT, VERSION)
+    let mut writer = Writer::new(FORMAT, VERSION);
+    writer
         .chunk("DESC", desc.take())
         .chunk("CLIPS", table.take())
         .chunk("CHANNELS", channels.take())
         .chunk("TIMES", times.take())
         .chunk("VALUES", values.take())
-        .chunk("NAMES", names)
-        .finish()
+        .chunk("NAMES", names);
+    if !events.is_empty() {
+        // By clip, then time; ties keep their order.
+        let mut sorted: Vec<&Event> = events.iter().collect();
+        sorted.sort_by(|a, b| a.clip.cmp(&b.clip).then(a.time.total_cmp(&b.time)));
+        let (mut records, mut names) = (Bytes::default(), Vec::new());
+        for event in sorted {
+            records
+                .u32(event.clip)
+                .f32s(&[event.time])
+                .u64(crate::hash::fnv1a64(event.name.as_bytes()))
+                .u32(names.len() as u32)
+                .u32(event.name.len() as u32);
+            names.extend_from_slice(event.name.as_bytes());
+        }
+        writer
+            .chunk("EVENTS", records.take())
+            .chunk("EVNAMES", names);
+    }
+    writer.finish()
 }
 
 /// Inspector rows of an `.aanim` file; see docs/features/models.md#inspector.
@@ -107,10 +136,19 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             format!("{name} ({duration:.2} s)")
         })
         .collect();
+    let events = reader.chunk("EVENTS").map_or(0, |e| e.len() / 24);
     Ok(vec![
         ("Clips", listed.join(", ")),
         ("Channels", field(4)?.to_string()),
         ("Keys", field(8)?.to_string()),
+        (
+            "Events",
+            if events > 0 {
+                events.to_string()
+            } else {
+                "none".into()
+            },
+        ),
     ])
 }
 
@@ -141,7 +179,17 @@ mod tests {
                 },
             ],
         };
-        let bytes = encode(&[clip("Walk", 0.75), clip("Run", 1.25)], 2, 7);
+        let event = |clip, time, name: &str| Event {
+            clip,
+            time,
+            name: name.into(),
+        };
+        let events = [
+            event(1, 1.0, "hit"),
+            event(0, 0.5, "step"),
+            event(0, 0.25, "step"),
+        ];
+        let bytes = encode(&[clip("Walk", 0.75), clip("Run", 1.25)], &events, 2, 7);
         let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
         let desc = reader.require("DESC").unwrap();
         assert_eq!(chunks::u32_at(desc, 0, 32, 4), Some(4));
@@ -156,7 +204,20 @@ mod tests {
         assert_eq!(reader.require("TIMES").unwrap().len(), 6 * 4);
         assert_eq!(reader.require("NAMES").unwrap(), b"WalkRun");
 
+        // Events by clip, then time.
+        let records = reader.require("EVENTS").unwrap();
+        assert_eq!(records.len(), 3 * 24);
+        assert_eq!(chunks::f32_at(records, 0, 24, 4), Some(0.25));
+        assert_eq!(chunks::u32_at(records, 2, 24, 0), Some(1));
+        assert_eq!(chunks::u32_at(records, 2, 24, 16), Some(8));
+        assert_eq!(records[8..16], crate::hash::fnv1a64(b"step").to_le_bytes());
+        assert_eq!(reader.require("EVNAMES").unwrap(), b"stepstephit");
+
         let rows = rows(&bytes).unwrap();
         assert_eq!(rows[0], ("Clips", "Walk (0.75 s), Run (1.25 s)".into()));
+        assert_eq!(rows[3], ("Events", "3".into()));
+        let plain = encode(&[clip("Walk", 0.75)], &[], 2, 7);
+        let reader = chunks::Reader::parse(&plain, FORMAT).unwrap();
+        assert!(reader.chunk("EVENTS").is_none());
     }
 }

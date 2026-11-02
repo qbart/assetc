@@ -49,7 +49,9 @@ pub enum Icon {
     PaintBucket,
     Paintbrush,
     Palette,
+    Pause,
     PenLine,
+    Play,
     Plus,
     RefreshCw,
     Rotate3d,
@@ -69,7 +71,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 61] = [
+const SVGS: [(&str, &str); 63] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -153,7 +155,9 @@ const SVGS: [(&str, &str); 61] = [
     ),
     ("paintbrush", include_str!("../assets/icons/paintbrush.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
+    ("pause", include_str!("../assets/icons/pause.svg")),
     ("pen-line", include_str!("../assets/icons/pen-line.svg")),
+    ("play", include_str!("../assets/icons/play.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("rotate-3d", include_str!("../assets/icons/rotate-3d.svg")),

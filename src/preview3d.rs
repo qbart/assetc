@@ -51,7 +51,7 @@ impl Plugin for Preview3dPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    (sync_compiled, sync, sync_model, sync_vision)
+                    (sync_compiled, sync, sync_model, sync_playback, sync_vision)
                         .chain()
                         .before(TransformSystems::Propagate),
                     (sync_attachments, sync_region_view)
@@ -171,6 +171,12 @@ pub struct Preview3d {
     pub model_status: ModelStatus,
     /// The model's animation to play, by index in the file; `None` is the rest pose.
     pub animation: Option<usize>,
+    /// Hold the playing animation where it is; see docs/features/animation-events.md#timeline.
+    pub animation_paused: bool,
+    /// A time (seconds) to move the playing animation to, taken by [`sync_playback`].
+    pub animation_seek: Option<f32>,
+    /// The playing animation's time, written by [`sync_playback`]; `None` while none plays.
+    pub animation_time: Option<f32>,
     /// A compiled mesh to show instead of the shape, taken by [`sync_compiled`].
     pub compiled: Option<CompiledUpload>,
     /// Show the last compiled mesh uploaded.
@@ -1442,6 +1448,45 @@ fn sync_model(
     {
         *visibility = Visibility::Inherited;
         preview.model_status = ModelStatus::Ready;
+    }
+}
+
+/// Pauses, resumes and seeks the shown model's animation, and reports its time; see
+/// docs/features/animation-events.md#timeline.
+fn sync_playback(
+    mut preview: ResMut<Preview3d>,
+    loaded: Res<LoadedModel>,
+    children: Query<&Children>,
+    mut players: Query<&mut AnimationPlayer>,
+) {
+    let seek = preview.animation_seek.take();
+    let mut time = None;
+    if let Some(model) = &loaded.0
+        && let (Some(index), Some((_, nodes))) = (model.playing, &model.graph)
+        && let Some(&node) = nodes.get(index)
+    {
+        for entity in children.iter_descendants(model.fit) {
+            let Ok(mut player) = players.get_mut(entity) else {
+                continue;
+            };
+            let Some(active) = player.animation_mut(node) else {
+                continue;
+            };
+            if active.is_paused() != preview.animation_paused {
+                if preview.animation_paused {
+                    active.pause();
+                } else {
+                    active.resume();
+                }
+            }
+            if let Some(t) = seek {
+                active.set_seek_time(t.max(0.0));
+            }
+            time.get_or_insert(active.seek_time());
+        }
+    }
+    if preview.animation_time != time {
+        preview.animation_time = time;
     }
 }
 

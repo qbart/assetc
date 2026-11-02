@@ -1035,6 +1035,61 @@ pub fn color_attribute(name: &str) -> Option<u32> {
         .flatten()
 }
 
+/// A named moment of an animation; see docs/features/animation-events.md.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Event {
+    /// The animation, by name.
+    pub animation: String,
+    pub name: String,
+    /// Seconds from the animation's start.
+    pub time: f32,
+}
+
+pub fn parse_events(value: toml::Value) -> Result<Vec<Event>, String> {
+    let toml::Value::Array(items) = value else {
+        return Err("events is not an array of tables".into());
+    };
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let fail = |e: String| format!("event {}: {e}", i + 1);
+            let toml::Value::Table(mut table) = item else {
+                return Err(fail("is not a table".into()));
+            };
+            let mut required =
+                |key: &str| table.remove(key).ok_or_else(|| fail(format!("no {key}")));
+            let animation = text("animation", &required("animation")?).map_err(fail)?;
+            let name = text("name", &required("name")?).map_err(fail)?;
+            let time = float("time", &required("time")?).map_err(fail)?;
+            if name.is_empty() {
+                return Err(fail("empty name".into()));
+            }
+            if time < 0.0 || time.is_nan() {
+                return Err(fail("time is below 0".into()));
+            }
+            if let Some(key) = table.keys().next() {
+                return Err(fail(format!("unknown key {key:?}")));
+            }
+            Ok(Event {
+                animation,
+                name,
+                time,
+            })
+        })
+        .collect()
+}
+
+pub fn write_events(events: &[Event], out: &mut String) {
+    for event in events {
+        let string = |s: &str| toml::Value::from(s).to_string();
+        *out += "\n[[events]]\n";
+        *out += &format!("animation = {}\n", string(&event.animation));
+        *out += &format!("name = {}\n", string(&event.name));
+        *out += &format!("time = {:?}\n", event.time);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

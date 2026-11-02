@@ -216,6 +216,34 @@ fn joint_index(name: Option<&str>, joints: Option<&[Option<&str>]>) -> Result<i3
 
 /// The sidecar's paths with joints as skeleton indices, measured and sampled; see
 /// docs/features/paths.md#build.
+/// Events by clip index; see docs/features/animation-events.md#build.
+fn resolve_events(
+    events: &[crate::enrich::Event],
+    clips: &[aanim::Clip],
+) -> Result<Vec<aanim::Event>, String> {
+    events
+        .iter()
+        .map(|e| {
+            let clip = clips
+                .iter()
+                .position(|c| c.name == e.animation)
+                .ok_or_else(|| format!("event {:?}: no animation {:?}", e.name, e.animation))?;
+            let duration = clips[clip].duration();
+            if e.time > duration + 1e-4 {
+                return Err(format!(
+                    "event {:?}: time {} is past the end of {:?} ({duration} s)",
+                    e.name, e.time, e.animation
+                ));
+            }
+            Ok(aanim::Event {
+                clip: clip as u32,
+                time: e.time.min(duration),
+                name: e.name.clone(),
+            })
+        })
+        .collect()
+}
+
 fn resolve_paths(
     paths: &[crate::enrich::Path],
     joints: Option<&[Option<&str>]>,
@@ -903,14 +931,19 @@ pub fn compile(
         options,
     );
 
-    // Animations, for the skeleton.
+    // Animations, for the skeleton, with their events; see
+    // docs/features/animation-events.md#build.
     let mut clip_count = 0;
     let animation = match (&skeleton, outputs.animation) {
         (Some(joints), true) => {
             let clips = clips(document, &read)?;
             clip_count = clips.len();
+            let events = resolve_events(&sidecar.events, &clips).map_err(sidecar_error)?;
             let mesh_id = fnv1a64(format!("{asset_path}.amesh").as_bytes());
-            Some(aanim::encode(&clips, joints.len() as u32, mesh_id))
+            Some(aanim::encode(&clips, &events, joints.len() as u32, mesh_id))
+        }
+        _ if !sidecar.events.is_empty() => {
+            return Err(sidecar_error("events need a skinned model".into()));
         }
         _ => None,
     };
@@ -1759,6 +1792,43 @@ submeshes = [[0, 0], [3, 1]]
             err.as_deref(),
             Some(r#"Fox.glb.amod: path "loop": needs at least 3 points"#)
         );
+    }
+
+    #[test]
+    fn events_on_the_fox() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Fox.glb");
+        std::fs::write(&file, FOX).unwrap();
+        let names: Vec<String> = animations(FOX).unwrap().into_iter().map(|a| a.0).collect();
+        let event = |animation: &str, name: &str, time: f32| crate::enrich::Event {
+            animation: animation.into(),
+            name: name.into(),
+            time,
+        };
+        let mut amod = crate::amod::Amod {
+            events: vec![event(&names[1], "step", 0.5), event(&names[0], "look", 0.1)],
+            ..Default::default()
+        };
+        let options = amesh::MeshOptions::default();
+        let compiled = compile(&file, "Fox", &options, &amod).unwrap();
+        let anim = compiled.animation.unwrap();
+        let reader = crate::chunks::Reader::parse(&anim, aanim::FORMAT).unwrap();
+        let records = reader.require("EVENTS").unwrap();
+        // Sorted by clip: the first animation's event first.
+        assert_eq!(crate::chunks::u32_at(records, 0, 24, 0), Some(0));
+        assert_eq!(crate::chunks::u32_at(records, 1, 24, 0), Some(1));
+        assert_eq!(reader.require("EVNAMES").unwrap(), b"lookstep");
+
+        amod.events = vec![event("Dance", "x", 0.0)];
+        let err = compile(&file, "Fox", &options, &amod).err().unwrap();
+        assert!(err.contains(r#"event "x": no animation "Dance""#), "{err}");
+        amod.events = vec![event(&names[0], "x", 99.0)];
+        let err = compile(&file, "Fox", &options, &amod).err().unwrap();
+        assert!(err.contains("is past the end of"), "{err}");
+        // A model without a skin has no .aanim for them.
+        std::fs::write(&file, static_triangle()).unwrap();
+        let err = compile(&file, "Fox", &options, &amod).err().unwrap();
+        assert!(err.contains("events need a skinned model"), "{err}");
     }
 
     #[test]
