@@ -153,6 +153,7 @@ One table per event:
 | `animation` | string | (required) | the animation's name (`Animation <n>` for an unnamed one) |
 | `name`      | string | (required) | non-empty; may repeat |
 | `time`      | float  | (required) | seconds from the animation's start, at least 0 |
+| `properties` | table | (none)     | as [`[properties]`](#properties), written as an `[events.properties]` table after the event's keys |
 
 ## `[[modifiers]]`
 
@@ -183,7 +184,8 @@ as a `[[colors]]` table (`name`, then `gltf` for a glTF set; for an
 authored one `fill`, then `color` for a solid set or `from`, `to` and
 `stops`, one stop per line, ordered by `at`, for a gradient, then `blend`
 when set, with all three keys), then each event as an `[[events]]` table
-(`animation`, `name`, `time`), then each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
+(`animation`, `name`, `time`, then its `[events.properties]` when it has
+any), then each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
 parameter, as `.noise` files write them), each table preceded by a blank line
 except the first:
 
@@ -259,6 +261,9 @@ blend = { with = "tint", mode = "multiply", amount = 1.0 }
 animation = "Walk"
 name = "footstep"
 time = 0.25
+
+[events.properties]
+sound = "step_grass"
 
 [[modifiers]]
 type = "levels"

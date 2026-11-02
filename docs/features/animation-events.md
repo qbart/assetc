@@ -5,9 +5,29 @@ footstep, the frame a sword hits, where a sound starts. assetc does not know
 what an event means; its name tells the game.
 
 Events are an *enrichment* like [locators](locators.md): kept in the model's
-[`.amod`](../spec/amod.md#events) sidecar, placed on a
-[timeline](#timeline) under the 3D view, and compiled into the model's
+[`.amod`](../spec/amod.md#events) sidecar, listed in each animation's card
+of the [Animations tab](#event-list), placed on a [timeline](#timeline)
+under the 3D view, and compiled into the model's
 [`.aanim`](../spec/aanim.md#events).
+
+## Event list
+
+The unfolded card of the [Animations tab](models.md#animations-tab) lists
+its animation's events:
+
+- **Add event** (`plus` and text): an event named `event` at the playhead,
+  chosen.
+- One row per event, by time (ties in sidecar order), 26 px: its time
+  (`0.334 s`, monospace, `TEXT_WEAK`, 64 px wide) and name. Hovering fills
+  the row with `BG_HEADER`; the chosen event's row is filled with `ACCENT` at
+  25% opacity. Clicking a row chooses the event (and clicking the chosen
+  one chooses none); the timeline shows the same choice.
+- Under the chosen event's row, its fields: **Name** (text), **Time** (drag
+  field, seconds, three decimals, 0 to the duration), **Properties** (the
+  [property editor](properties.md#properties-tab)) and **Delete event**
+  (`trash-2` and text).
+- Without events, a weak `No events`.
+- Edits are saved like the locators'.
 
 ## Event
 
@@ -16,6 +36,7 @@ Events are an *enrichment* like [locators](locators.md): kept in the model's
 | Animation | The animation it belongs to, by name: the glTF name, or `Animation <n>` (from 1) without one, as the [Animations tab](models.md#animations-tab) lists it. |
 | Name      | Non-empty free text (`footstep`, `hit`, `sound.whoosh`); names may repeat, also within one animation. |
 | Time      | Seconds from the animation's start, 0 to its duration. |
+| Properties | Key / value pairs carried to the game (a sound's name and volume, a hit's damage), as the [model's](properties.md#property). |
 
 ## Timeline
 
@@ -27,7 +48,7 @@ of the canvas (the 3D view above it shrinks; the panel is `BG_PANEL` with a
 1. **Header** (28 px): a **Play** / **Pause** icon button (`play` /
    `pause`), the time `0.42 / 1.25 s` (two decimals), the animation's name,
    and an **Add event** button (`plus` and text) that adds an event at the
-   playhead. With **Rest pose** chosen, the header only has a weak
+   playhead. In the rest pose (every card folded), the header only has a weak
    `Choose an animation to edit its events`, and nothing below.
 2. **Ruler** (20 px): the animation from 0 (left) to its duration (right),
    with a tick every step and a label (`0.5 s`, 11 px, `TEXT_WEAK`) on
@@ -85,7 +106,7 @@ events), sorted by animation (file order), then time:
 
 ## Not yet
 
-- Properties on events, and event kinds or tags.
+- Event kinds or tags.
 - Events from the glTF (no standard), copying events between animations,
   snapping to keyframes.
 - Scrubbing faster than real time, playback speed, frame stepping.

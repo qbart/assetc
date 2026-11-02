@@ -336,30 +336,30 @@ compiled mesh (`*.amesh` in the Output tree) with reduced levels (a
 
 The Inspector's **Animations** tab (`film`) is shown for a model with at
 least one animation. It switches which animation the [preview](#preview)
-plays.
+plays and lists each one's [events](animation-events.md).
 
-- A list of full-width rows, 28 px tall, inside 8 px margins: first
-  **Rest pose**, then the file's animations in file order. Each row shows the
-  animation's name (14 px, `TEXT`; `Animation <n>` counting from 1 when it
-  has none) and, right-aligned, its duration (13 px, `TEXT_WEAK`, two
-  decimals, e.g. `1.25 s`).
+- One card per animation, in file order, like the
+  [Gradients tab](gradients.md#gradients-tab)'s cards but never deleted or
+  reordered: an accordion, one unfolded at a time. Header: the chevron, the
+  animation's name (`Animation <n>` counting from 1 when it has none) and,
+  right-aligned and weak, `<n> events · <duration>` (`1 event`; only the
+  duration without events; two decimals, e.g. `1.25 s`).
 - The duration is the largest `max` of the animation's sampler input
   accessors (glTF requires them), read with the other
   [Info rows](#inspector).
-- Hovering a row fills it with `BG_HEADER`; the chosen row is filled with
-  `ACCENT` at 25% opacity, like the file tree's selection. Clicking a row
-  chooses it.
-- **Rest pose** (the default) shows the model as loaded, without animation.
-  Choosing an animation plays it from its start, looping, at normal speed;
-  the orbit camera keeps working. Switching to another
-  animation or back to Rest pose first returns the model to its rest pose.
+- **Unfolding** a card chooses its animation: it plays from its start,
+  looping, at normal speed; the orbit camera keeps working. **Folding** it
+  (all cards folded, the default) is the **rest pose**: the model as
+  loaded, without animation. Switching to another animation or back to the
+  rest pose first returns the model to its rest pose.
+- The unfolded card's body is its [event list](animation-events.md#event-list).
 - The choice is remembered per model (by path) for the session, and kept
   when the model is reloaded.
 - The model is fitted once, in its rest pose; animations can move it out of
   that box.
 - While the tab is shown, a [timeline](animation-events.md#timeline) under
   the 3D view plays, pauses and scrubs the chosen animation and places its
-  [events](animation-events.md).
+  events.
 
 ## Build
 
