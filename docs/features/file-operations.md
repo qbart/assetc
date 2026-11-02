@@ -18,6 +18,7 @@ Right-clicking an Input row, or the empty area below the last row (the
 | New Gradient         | as New Folder, see [`gradients.md`](gradients.md#creating) | always |
 | New Palette          | as New Folder, see [`palettes.md`](palettes.md#creating) | always |
 | New data ▸ Schema    | as New Folder, see [`schemas.md`](schemas.md#creating) | always |
+| New data ▸ Directed Graph | as New Folder, see [`graphs.md`](graphs.md#creating) | always |
 | Rename               | the row                                   | rows               |
 | Delete               | the row                                   | rows               |
 

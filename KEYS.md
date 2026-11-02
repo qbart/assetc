@@ -95,6 +95,20 @@ In a schema's curve editor (see [`docs/features/schemas.md`](docs/features/schem
 | Double-click on the curve area         | Add a point on the curve there               |
 | Double-click on a point                | Remove it                                    |
 
+On a directed graph (see [`docs/features/graphs.md`](docs/features/graphs.md#canvas)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Scroll wheel                           | Zoom around the pointer                      |
+| Right or middle drag                   | Pan                                          |
+| Right double-click                     | Fit the graph                                |
+| Left press / drag on a node            | Choose it / move it                          |
+| `Shift` while moving or adding a node  | Snap its center to 0.25                      |
+| Left drag from a port onto a node      | Add an edge                                  |
+| Left click on an edge                  | Choose it                                    |
+| Left click on empty grid               | Choose nothing                               |
+| Double-click on empty grid             | Add a node there                             |
+
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
 
 | Input                                  | Action                                       |

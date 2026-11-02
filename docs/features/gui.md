@@ -159,6 +159,7 @@ The icon follows the entry's type, by extension (any case):
 | noise / pattern: `noise`                      | `image-play`              |
 | gradient: `gradient`                          | `swatch-book`             |
 | schema: `aschema`                             | `braces`                  |
+| directed graph: `agraph`                      | `workflow`                |
 | palette: `palette`                            | `palette`                 |
 | mesh: `gltf`, `glb`, `obj`, `amesh`          | `torus`                   |
 | animation: `aanim`                            | `film`                    |
@@ -198,7 +199,7 @@ gizmo modes), `crosshair` (placing locators on the surface),
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
 `paint-bucket` (Inspector Regions tab), `paintbrush`, `eraser` (painting and erasing regions),
 `spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
-points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `play`, `pause` (animation timeline),
+points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `workflow` (`.agraph` files, Inspector Graph tab), `play`, `pause` (animation timeline),
 `database` (Inspector Properties tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after, locator visibility),

@@ -19,7 +19,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Sixteen icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Seventeen icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient`, `.palette` and model files,
 **Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
 (`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`swatch-book`) and
@@ -33,11 +33,12 @@ shown for compiled meshes with color sets (see
 **Modifiers** (`wrench`) for `.noise` files and images (`.png`, `.jpg`,
 `.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and
 **Colors** (`palette`) for `.palette` files, **Types** (`braces`) for
-`.aschema` files, all five only in the Input tree
+`.aschema` files, **Graph** (`workflow`) for `.agraph` files, all six only
+in the Input tree
 (see [`noise.md`](noise.md#parameters-tab),
 [`gradients.md`](gradients.md#parameters-tab),
 [`palettes.md`](palettes.md#colors-tab),
-[`schemas.md`](schemas.md#types-tab)),
+[`schemas.md`](schemas.md#types-tab), [`graphs.md`](graphs.md#graph-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
 compiled textures with more than one mip level (see
