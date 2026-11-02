@@ -175,6 +175,26 @@ pub fn mirror_name(name: &str) -> Option<String> {
     (out != name).then_some(out)
 }
 
+/// The counterpart of `joint` among `joints`: its mirrored name, or the first joint matching
+/// it with trailing numbers left out of both; see docs/features/locators.md#mirroring.
+pub fn mirror_joint(joint: &str, joints: &[String]) -> Option<String> {
+    fn unnumbered(name: &str) -> &str {
+        let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit());
+        if trimmed.len() == name.len() {
+            return name;
+        }
+        trimmed.strip_suffix(['_', '.', '-']).unwrap_or(trimmed)
+    }
+    let mirrored = mirror_name(joint)?;
+    if joints.contains(&mirrored) {
+        return Some(mirrored);
+    }
+    joints
+        .iter()
+        .find(|j| unnumbered(j) == unnumbered(&mirrored))
+        .cloned()
+}
+
 /// Direction of a transform's axis `i` in world space.
 fn axis(world: Affine3A, i: usize) -> Vec3 {
     world.matrix3.col(i).normalize_or_zero().into()
@@ -485,6 +505,19 @@ mod tests {
         // Letters inside words are not tokens.
         assert_eq!(m("muzzle"), None);
         assert_eq!(m("hr_l2"), None);
+    }
+
+    #[test]
+    fn joints_mirror_numbered_apart() {
+        let joints: Vec<String> = ["b_LeftForeArm_010", "b_RightForeArm_07", "hand_l", "hand_r"]
+            .map(String::from)
+            .into();
+        let m = |j: &str| mirror_joint(j, &joints);
+        assert_eq!(m("b_LeftForeArm_010").as_deref(), Some("b_RightForeArm_07"));
+        assert_eq!(m("b_RightForeArm_07").as_deref(), Some("b_LeftForeArm_010"));
+        assert_eq!(m("hand_l").as_deref(), Some("hand_r"));
+        assert_eq!(m("spine"), None);
+        assert_eq!(m("foot_l"), None);
     }
 
     #[test]

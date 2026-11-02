@@ -5186,11 +5186,10 @@ fn mirror_locator(
     let Some(name) = gizmo::mirror_name(&source.name) else {
         return;
     };
-    let joint = source.joint.as_ref().map(|j| {
-        gizmo::mirror_name(j)
-            .filter(|m| joints.contains(m))
-            .unwrap_or_else(|| j.clone())
-    });
+    let joint = source
+        .joint
+        .as_ref()
+        .map(|j| gizmo::mirror_joint(j, joints).unwrap_or_else(|| j.clone()));
     let (Some(from), Some(to)) = (
         frames.parent(source.joint.as_deref()),
         frames.parent(joint.as_deref()),
