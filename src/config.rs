@@ -41,6 +41,25 @@ pub struct Config {
     pub output: PathBuf,
     pub textures: Textures,
     pub meshes: Meshes,
+    pub locators: Locators,
+}
+
+/// Locators shared between models, see docs/spec/assetc.toml.md#locators.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Locators {
+    pub presets: Vec<LocatorPreset>,
+}
+
+/// One `[[locators.presets]]` entry.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LocatorPreset {
+    /// Input-relative path of the model whose locators are shared.
+    pub from: String,
+    /// Globs of the models it applies to; `None` is every model.
+    #[serde(rename = "match", default)]
+    pub patterns: Option<Vec<String>>,
 }
 
 /// Per-texture settings, see docs/features/textures.md.
@@ -115,6 +134,7 @@ impl Default for Config {
             output: "build".into(),
             textures: Textures::default(),
             meshes: Meshes::default(),
+            locators: Locators::default(),
         }
     }
 }

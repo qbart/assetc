@@ -223,8 +223,11 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                     .map_err(|e| format!("{}.amod: {e}", split_dir(&rel).1))?;
                 Ok((options, amod.map(|a| a.locators).unwrap_or_default()))
             });
-            match options.and_then(|(options, locators)| {
+            match options.and_then(|(options, sidecar)| {
                 let data = fs::read(file).map_err(|e| e.to_string())?;
+                // See docs/features/locators.md#inherited-locators.
+                let inherited = crate::presets::inherited(&config.locators, input, &rel, &data)?;
+                let locators = crate::presets::merged(&inherited, &sidecar);
                 Ok((model::outputs(&data)?, options, locators))
             }) {
                 Ok((outputs, options, locators)) => {

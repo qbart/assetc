@@ -30,6 +30,7 @@ use crate::manifest::Kind;
 use crate::model;
 use crate::noise::{GeneratorKind, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Value};
 use crate::palette::{self, Palette, Swatch};
+use crate::presets::{self, Inherited};
 use crate::preview3d::{
     CompiledUpload, CubemapUpload, MeshDisplay, MeshOverlay, ModelFrames, ModelStatus, Orbit,
     Preview3d, Shape, Upload,
@@ -808,6 +809,9 @@ struct Inspector {
     waiting: Option<Selection>,
 }
 
+/// A model's sidecar, project mesh settings and inherited locators, see [`Prepared::mesh`].
+type PreparedMesh = (Amod, MeshOptions, Vec<Inherited>);
+
 /// The part of an [`Inspected`] made off the UI thread.
 struct Prepared {
     inspection: Inspection,
@@ -818,8 +822,9 @@ struct Prepared {
     noise: Option<Result<Noise, String>>,
     gradient: Option<Result<Gradients, String>>,
     palette: Option<Result<Palette, String>>,
-    /// A model's sidecar and the meshlet limits the project gives it.
-    mesh: Option<Result<(Amod, MeshOptions), String>>,
+    /// A model's sidecar (with every locator the model has), the meshlet limits the project
+    /// gives it, and the locators it inherits.
+    mesh: Option<Result<PreparedMesh, String>>,
     sidecar: Option<Result<Amod, String>>,
     model: Option<(PathBuf, u64)>,
     compiled_mesh: Option<crate::amesh::Preview>,
@@ -902,8 +907,17 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
                 .input_dir()
                 .and_then(|dir| build::relative(&dir, &selection.path).ok())
                 .unwrap_or_default();
-            let amod = amod::read(&selection.path)?.unwrap_or_default();
-            Ok((amod, settings.options(&rel)))
+            let mut amod = amod::read(&selection.path)?.unwrap_or_default();
+            // See docs/features/locators.md#inherited-locators.
+            let inherited = match project.input_dir() {
+                Some(input) => {
+                    let data = std::fs::read(&selection.path).map_err(|e| e.to_string())?;
+                    presets::inherited(&project.config.locators, &input, &rel, &data)?
+                }
+                None => Vec::new(),
+            };
+            amod.locators = presets::merged(&inherited, &amod.locators);
+            Ok((amod, settings.options(&rel), inherited))
         });
     // Images carry modifiers in their sidecar; see docs/features/textures.md#modifiers.
     let sidecar = (selection.location == Location::Input && build::is_image(&selection.path))
@@ -1032,13 +1046,18 @@ fn inspected(
         })
     });
     let mesh = prepared.mesh.map(|parsed| {
-        parsed.map(|(amod, project)| match kept_mesh {
-            Some(edit) if edit.saved == amod => MeshEdit { project, ..edit },
+        parsed.map(|(amod, project, inherited)| match kept_mesh {
+            Some(edit) if edit.saved == amod => MeshEdit {
+                project,
+                inherited,
+                ..edit
+            },
             _ => MeshEdit {
                 edit: amod.clone(),
                 saved: amod,
                 project,
                 locator: None,
+                inherited,
             },
         })
     });
@@ -2452,6 +2471,21 @@ struct MeshEdit {
     project: MeshOptions,
     /// The chosen locator, by index; see docs/features/locators.md#locators-tab.
     locator: Option<usize>,
+    /// The locators the model has without its sidecar; `edit` and `saved` hold every locator,
+    /// and only what differs from these is written.
+    inherited: Vec<Inherited>,
+}
+
+impl MeshEdit {
+    /// Where locator `i` comes from, when it is inherited; and whether the sidecar changes it.
+    fn inherited(&self, i: usize) -> Option<(&Inherited, bool)> {
+        let locator = self.edit.locators.get(i)?;
+        let from = self
+            .inherited
+            .iter()
+            .find(|f| f.locator.name == locator.name)?;
+        Some((from, from.locator != *locator))
+    }
 }
 
 /// Label color of a mesh setting: `ACCENT` when the sidecar sets it.
@@ -2743,7 +2777,10 @@ fn mesh_commit(ui: &Ui, edit: &mut MeshEdit) -> Option<Amod> {
         .all(|(i, l)| !l.name.is_empty() && locators[..i].iter().all(|other| other.name != l.name));
     (!busy && named && edit.edit != edit.saved).then(|| {
         edit.saved = edit.edit.clone();
-        edit.edit.clone()
+        Amod {
+            locators: presets::sidecar_part(&edit.edit.locators, &edit.inherited),
+            ..edit.edit.clone()
+        }
     })
 }
 
@@ -5244,13 +5281,18 @@ fn locators_tab(
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
-                let rows: Vec<_> = edit
-                    .edit
-                    .locators
-                    .iter()
-                    .map(|l| {
-                        let parent = l.joint.clone().unwrap_or_else(|| "model".into());
-                        (l.name.clone(), parent)
+                let rows: Vec<_> = (0..edit.edit.locators.len())
+                    .map(|i| {
+                        let l = &edit.edit.locators[i];
+                        let parent = l.joint.as_deref().unwrap_or("model");
+                        let detail = match edit.inherited(i) {
+                            None => parent.to_owned(),
+                            Some((from, false)) => format!("{parent} · {}", from.source.label()),
+                            Some((from, true)) => {
+                                format!("{parent} · {}, changed", from.source.label())
+                            }
+                        };
+                        (l.name.clone(), detail)
                     })
                     .collect();
                 if rows.is_empty() {
@@ -5263,12 +5305,29 @@ fn locators_tab(
                         add_locator(edit);
                     }
                     let chosen = edit.locator.filter(|&i| i < edit.edit.locators.len());
-                    if icon_button(ui, Icon::Trash2, "Delete", chosen.is_some()).clicked()
-                        && let Some(i) = chosen
-                    {
-                        edit.edit.locators.remove(i);
-                        let left = edit.edit.locators.len();
-                        edit.locator = (left > 0).then(|| i.min(left - 1));
+                    // Inherited locators revert instead; see
+                    // docs/features/locators.md#editing-inherited-locators.
+                    match chosen.and_then(|i| edit.inherited(i).map(|f| (i, f))) {
+                        Some((i, (from, true))) => {
+                            let original = from.locator.clone();
+                            let label = format!("Revert to {}", from.source.label());
+                            if icon_button(ui, Icon::RefreshCw, &label, true).clicked() {
+                                edit.edit.locators[i] = original;
+                            }
+                        }
+                        Some((_, (from, false))) => {
+                            let label = format!("From {}; remove it there", from.source.label());
+                            icon_button(ui, Icon::Trash2, &label, false);
+                        }
+                        None => {
+                            if icon_button(ui, Icon::Trash2, "Delete", chosen.is_some()).clicked()
+                                && let Some(i) = chosen
+                            {
+                                edit.edit.locators.remove(i);
+                                let left = edit.edit.locators.len();
+                                edit.locator = (left > 0).then(|| i.min(left - 1));
+                            }
+                        }
                     }
                 });
                 if let Some(i) = edit.locator.filter(|&i| i < edit.edit.locators.len()) {
@@ -5333,11 +5392,16 @@ fn locator_fields(
         animating,
     } = *fields;
     let saved_name = edit.saved.locators.get(i).map(|l| l.name.clone());
+    // An inherited locator is found by its name.
+    let inherited = edit.inherited(i).is_some();
     let locators = &mut edit.edit.locators;
     let mut renamed = false;
     prop_row(ui, "Name", |ui, width| {
         let field = egui::TextEdit::singleline(&mut locators[i].name);
-        renamed = ui.add_sized(vec2(width, 22.0), field).lost_focus();
+        renamed = ui
+            .add_enabled_ui(!inherited, |ui| ui.add_sized(vec2(width, 22.0), field))
+            .inner
+            .lost_focus();
     });
     // An empty or taken name gets the old one back.
     let name = &locators[i].name;

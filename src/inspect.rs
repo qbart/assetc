@@ -526,13 +526,27 @@ fn model_rows(
     }
     // See docs/features/locators.md#inspector-info; a bad sidecar shows as Mesh settings.
     if let Ok(amod) = crate::amod::read(file) {
-        let count = amod.map_or(0, |a| a.locators.len());
+        let sidecar = amod.map(|a| a.locators).unwrap_or_default();
+        let inherited = project.input_dir().map_or(Ok(Vec::new()), |input| {
+            crate::presets::inherited(&project.config.locators, &input, rel, &data)
+        });
         out.rows.push((
             "Locators",
-            if count > 0 {
-                count.to_string()
-            } else {
-                "none".into()
+            match inherited {
+                Err(e) => e,
+                Ok(inherited) => {
+                    let merged = crate::presets::merged(&inherited, &sidecar);
+                    let count = merged.len();
+                    let from = merged
+                        .iter()
+                        .filter(|l| inherited.iter().any(|i| i.locator.name == l.name))
+                        .count();
+                    match (count, from) {
+                        (0, _) => "none".into(),
+                        (n, 0) => n.to_string(),
+                        (n, m) => format!("{n} ({m} inherited)"),
+                    }
+                }
             },
         ));
     }

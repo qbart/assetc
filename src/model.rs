@@ -102,6 +102,78 @@ pub fn joint_names(data: &[u8]) -> Result<Vec<String>, String> {
         .unwrap_or_default())
 }
 
+/// The locator a node stands for: `SOCKET_<name>`, or `extras.locator` (`true` for the
+/// node's name, or a name); see docs/features/locators.md#from-the-file.
+fn node_locator_name(node: &Node<'_>) -> Option<String> {
+    let name = node.name().filter(|n| !n.is_empty());
+    if let Some(rest) = name.and_then(|n| n.strip_prefix("SOCKET_")) {
+        return (!rest.is_empty()).then(|| rest.to_owned());
+    }
+    let extras = node.extras().as_ref()?;
+    let value: gltf::json::Value = gltf::json::deserialize::from_str(extras.get()).ok()?;
+    match value.get("locator")? {
+        gltf::json::Value::Bool(true) => name.map(str::to_owned),
+        gltf::json::Value::String(s) if !s.is_empty() => Some(s.clone()),
+        _ => None,
+    }
+}
+
+/// The locators placed in the glTF itself, in scene order; see
+/// docs/features/locators.md#from-the-file.
+pub fn file_locators(data: &[u8]) -> Result<Vec<crate::amod::Locator>, String> {
+    let gltf = parse(data)?;
+    let document = &gltf.document;
+    let joints: Vec<(usize, &str)> = document
+        .skins()
+        .next()
+        .map(|skin| {
+            skin.joints()
+                .filter_map(|j| Some((j.index(), j.name().filter(|n| !n.is_empty())?)))
+                .collect()
+        })
+        .unwrap_or_default();
+    /// `to_parent`: the node's parent's transform in the space of `joint` (or the root).
+    fn visit(
+        node: Node<'_>,
+        joint: Option<&str>,
+        to_parent: Mat4,
+        joints: &[(usize, &str)],
+        out: &mut Vec<crate::amod::Locator>,
+    ) {
+        let transform = to_parent * Mat4::from_cols_array_2d(&node.transform().matrix());
+        if let Some(name) = node_locator_name(&node)
+            && out.iter().all(|l| l.name != name)
+        {
+            let (scale, rotation, translation) = transform.to_scale_rotation_translation();
+            out.push(crate::amod::Locator {
+                joint: joint.map(str::to_owned),
+                translation: translation.to_array(),
+                rotation: rotation.normalize().to_array(),
+                scale: scale.to_array(),
+                ..crate::amod::Locator::new(name)
+            });
+        }
+        // Below a named joint, children hang on it.
+        let (joint, to_parent) = match joints.iter().find(|(i, _)| *i == node.index()) {
+            Some((_, name)) => (Some(*name), Mat4::IDENTITY),
+            None => (joint, transform),
+        };
+        for child in node.children() {
+            visit(child, joint, to_parent, joints, out);
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(scene) = document
+        .default_scene()
+        .or_else(|| document.scenes().next())
+    {
+        for node in scene.nodes() {
+            visit(node, None, Mat4::IDENTITY, &joints, &mut out);
+        }
+    }
+    Ok(out)
+}
+
 /// The sidecar's locators with their joints as skeleton indices; see
 /// docs/features/locators.md#build. `joints` are the skeleton's node names, if it has one.
 fn resolve_locators(

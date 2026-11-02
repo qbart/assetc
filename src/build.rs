@@ -831,6 +831,57 @@ mod tests {
     }
 
     #[test]
+    fn presets_share_locators() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(input.join("chars")).unwrap();
+        let fox = concat!(env!("CARGO_MANIFEST_DIR"), "/samples/Fox.glb");
+        for name in ["hero", "villain"] {
+            fs::copy(fox, input.join(format!("chars/{name}.glb"))).unwrap();
+        }
+        fs::write(
+            input.join("chars/hero.glb.amod"),
+            "[[locators]]\nname = \"mouth\"\njoint = \"b_Head_05\"\n",
+        )
+        .unwrap();
+        // The villain changes it and adds its own.
+        fs::write(
+            input.join("chars/villain.glb.amod"),
+            "[[locators]]\nname = \"tail\"\n\n[[locators]]\nname = \"mouth\"\njoint = \"b_Neck_04\"\n",
+        )
+        .unwrap();
+        let mut config = config::Config::default();
+        config.locators.presets.push(config::LocatorPreset {
+            from: "chars/hero.glb".into(),
+            patterns: Some(vec!["chars/*.glb".into()]),
+        });
+        let outcome = run(&input, &output, &config).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        let names = |file: &str| -> Vec<String> {
+            let mesh = fs::read(output.join(file)).unwrap();
+            (0..2)
+                .map(|row| crate::amesh::cell(&mesh, "LOCATORS", row, 1))
+                .filter(|name| !name.is_empty())
+                .collect()
+        };
+        assert_eq!(names("chars/hero.amesh"), ["mouth"]);
+        // Inherited first, replaced in place by the sidecar; then its own.
+        assert_eq!(names("chars/villain.amesh"), ["mouth", "tail"]);
+        let villain = fs::read(output.join("chars/villain.amesh")).unwrap();
+        // `b_Neck_04`, after `_rootJoint` in skin order.
+        assert_eq!(crate::amesh::cell(&villain, "LOCATORS", 0, 3), "5");
+
+        config.locators.presets[0].from = "chars/missing.glb".into();
+        let outcome = run(&input, &output, &config).unwrap();
+        assert_eq!(outcome.failures.len(), 2);
+        assert!(
+            outcome.failures[0]
+                .message
+                .starts_with("assetc.toml [[locators.presets]] 1:")
+        );
+    }
+
+    #[test]
     fn builds_gltf_models() {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
