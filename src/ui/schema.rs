@@ -5,6 +5,7 @@ use std::cell::Cell;
 
 use serde_json::{Number, Value};
 
+use super::curve::{self, CurveSettings, CurveState, curve_preview};
 use super::*;
 use crate::aschema::{Field, Group, Problem, Ty, TypeDef, parse_type};
 use crate::theme::CHANNEL_R;
@@ -22,6 +23,7 @@ pub(super) struct SchemaEdit {
     gradients: HashMap<(usize, String), GradientCard>,
     /// The color picker of a colour default.
     picker: Picker,
+    curve_settings: CurveSettings,
     /// Whether a group was being dragged last frame: groups then show their headers only.
     group_drag: bool,
 }
@@ -602,12 +604,7 @@ fn field_rows(
                         if grip.drag_stopped() {
                             dropped.set(Some(row));
                         }
-                        let chevron = if open {
-                            Icon::ChevronDown
-                        } else {
-                            Icon::ChevronRight
-                        };
-                        toggle |= icon_button(ui, chevron, "Details", true).clicked();
+                        toggle |= icon_toggle(ui, Icon::Settings, "Details", open).clicked();
                         let Body::Struct { fields, .. } = &mut edit.edit.types[ti].body else {
                             return;
                         };
@@ -620,7 +617,14 @@ fn field_rows(
                         }
                         type_cell(ui, field, snapshot, ty.is_some());
                         ui.add_space(6.0);
-                        toggle |= default_cell(ui, &mut edit.picker, field, snapshot, ty.as_ref());
+                        let key = (ti, field.name.clone());
+                        let editors = DefaultEditors {
+                            picker: &mut edit.picker,
+                            curve: edit.curves.entry(key.clone()).or_default(),
+                            curve_settings: &mut edit.curve_settings,
+                            gradient: edit.gradients.entry(key).or_default(),
+                        };
+                        default_cell(ui, editors, field, snapshot, ty.as_ref());
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             if icon_button(ui, Icon::X, "Remove field", true).clicked() {
                                 delete = Some(fi);
@@ -734,33 +738,45 @@ fn check_known(schema: &Schema, ty: &Ty) -> bool {
     }
 }
 
-/// A field's Default: the checkbox, then the default's editor or the implicit default;
-/// returns whether it asks to unfold the row. See docs/features/schemas.md#defaults.
+/// The editors a field's default may open, kept per field (curve, gradient) or shared.
+struct DefaultEditors<'a> {
+    picker: &'a mut Picker,
+    curve: &'a mut CurveState,
+    curve_settings: &'a mut CurveSettings,
+    gradient: &'a mut GradientCard,
+}
+
+/// A popover under `response`, opened by double-clicking it, closed by clicking outside.
+fn popover(response: &Response, width: f32, content: impl FnOnce(&mut Ui)) {
+    let open = response
+        .double_clicked()
+        .then_some(egui::SetOpenCommand::Bool(true));
+    egui::Popup::from_response(response)
+        .open_memory(open)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .width(width)
+        .show(|ui| {
+            ui.set_width(width);
+            content(ui);
+        });
+}
+
+/// A field's Default: the checkbox, then, ticked, the default's editor. See
+/// docs/features/schemas.md#defaults.
 fn default_cell(
     ui: &mut Ui,
-    picker: &mut Picker,
+    editors: DefaultEditors,
     field: &mut Field,
     schema: &Schema,
     ty: Option<&Ty>,
-) -> bool {
+) {
     let mut has = field.default.is_some();
     if ui.checkbox(&mut has, "Default").changed() {
         field.default =
             has.then(|| ty.map_or(Value::Null, |ty| aschema::implicit_value(schema, ty)));
     }
     let Some(default) = &mut field.default else {
-        let hint = ty
-            .map(|t| aschema::implicit_default(schema, t))
-            .unwrap_or_default();
-        ui.allocate_ui_with_layout(
-            vec2(DEFAULT_W, 22.0),
-            Layout::left_to_right(Align::Center),
-            |ui| {
-                let hint = RichText::new(hint).monospace().color(TEXT_WEAK);
-                ui.add(egui::Label::new(hint).truncate());
-            },
-        );
-        return false;
+        return;
     };
     let enum_values = match ty {
         Some(Ty::Named(n)) => schema
@@ -822,17 +838,12 @@ fn default_cell(
                 ui.painter()
                     .rect_filled(swatch, 3, color_picker::to_color32(c));
             }
-            let open = response
-                .double_clicked()
-                .then_some(egui::SetOpenCommand::Bool(true));
-            egui::Popup::from_response(&response.on_hover_text("Double-click to pick"))
-                .open_memory(open)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .width(240.0)
-                .show(|ui| {
-                    ui.set_width(240.0);
+            popover(
+                &response.on_hover_text("Double-click to pick"),
+                240.0,
+                |ui| {
                     let mut c = color.unwrap_or([0, 0, 0, 255]);
-                    if picker.show(ui, &mut c) {
+                    if editors.picker.show(ui, &mut c) {
                         let [r, g, b, a] = c;
                         *default = if alpha {
                             format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
@@ -841,7 +852,8 @@ fn default_cell(
                         }
                         .into();
                     }
-                });
+                },
+            );
             let current = default.as_str().unwrap_or_default().to_owned();
             if let Some(new) = commit_field(ui, "default", &current, DEFAULT_W - 22.0, "") {
                 *default = Value::String(new.trim().to_owned());
@@ -849,42 +861,61 @@ fn default_cell(
         }
         (Some(Ty::Prim(p @ ("curve" | "gradient"))), _) => {
             let (rect, response) = ui.allocate_exact_size(vec2(60.0, 18.0), Sense::click());
+            let response = response.on_hover_text("Double-click to edit");
             if *p == "curve" {
                 curve_preview(ui.painter(), rect, default);
+                popover(&response, curve::WIDTH, |ui| {
+                    curve::curve_editor(ui, default, editors.curve, editors.curve_settings);
+                });
             } else {
                 gradient_preview(ui, rect, default);
+                ui.painter()
+                    .rect_stroke(rect, 3, Stroke::new(1.0, STROKE), StrokeKind::Inside);
+                popover(&response, curve::WIDTH, |ui| {
+                    gradient_default(ui, default, editors.gradient);
+                });
             }
-            return response
-                .on_hover_text("Edit in the field's details")
-                .clicked();
         }
         _ => json(ui, default, "default"),
     }
-    false
 }
 
-fn curve_preview(painter: &egui::Painter, rect: Rect, value: &Value) {
-    painter.rect_filled(rect, 3, BG_PANEL);
-    painter.rect_stroke(rect, 3, Stroke::new(1.0, STROKE), StrokeKind::Inside);
-    let Ok(points) = aschema::curve_points(value) else {
-        return;
+/// A gradient default in the gradient editor.
+fn gradient_default(ui: &mut Ui, value: &mut Value, card: &mut GradientCard) {
+    let stops = match aschema::gradient_stops(value) {
+        Ok(stops) => stops,
+        Err(e) => {
+            ui.label(RichText::new(e).color(CHANNEL_R));
+            if ui.button("Reset").clicked() {
+                *value = aschema::default_gradient();
+            }
+            return;
+        }
     };
-    let samples: Vec<f32> = (0..=30)
-        .map(|i| aschema::evaluate_curve(&points, i as f32 / 30.0))
-        .collect();
-    let lo = samples.iter().copied().fold(0.0f32, f32::min);
-    let hi = samples.iter().copied().fold(1.0f32, f32::max);
-    let line: Vec<egui::Pos2> = samples
-        .iter()
-        .enumerate()
-        .map(|(i, y)| {
-            pos2(
-                rect.left() + 2.0 + i as f32 / 30.0 * (rect.width() - 4.0),
-                rect.bottom() - 2.0 - (y - lo) / (hi - lo).max(1e-6) * (rect.height() - 4.0),
-            )
-        })
-        .collect();
-    painter.add(egui::Shape::line(line, Stroke::new(1.5, ACCENT)));
+    let mut g = Gradient {
+        name: String::new(),
+        dither: Dither::None,
+        stops: stops
+            .into_iter()
+            .map(|(at, color)| Stop { at, color })
+            .collect(),
+    };
+    let before = g.stops.clone();
+    ui.push_id("gradient_default", |ui| gradient_editor(ui, &mut g, card));
+    if g.stops != before {
+        *value = Value::Array(
+            g.stops
+                .iter()
+                .map(|s| {
+                    let [r, gr, b, a] = s.color;
+                    Value::Array(vec![
+                        aschema::json_number(s.at),
+                        format!("#{r:02x}{gr:02x}{b:02x}{a:02x}").into(),
+                    ])
+                })
+                .collect(),
+        );
+    }
 }
 
 fn gradient_preview(ui: &Ui, rect: Rect, value: &Value) {
@@ -922,7 +953,6 @@ fn field_details(
         return false;
     };
     let field = &mut fields[fi];
-    let key = (ti, field.name.clone());
     let mut regroup = false;
     ui.set_max_width(560.0);
     let text = |ui: &mut Ui, label: &str, value: &mut String, mono: bool| {
@@ -1016,265 +1046,7 @@ fn field_details(
     });
     text(ui, "Show if", &mut field.show_if, true);
     text(ui, "Hide if", &mut field.hide_if, true);
-    let kind = match ty {
-        Some(Ty::Prim(p @ ("curve" | "gradient"))) => *p,
-        _ => return regroup,
-    };
-    let Some(value) = &mut field.default else {
-        return regroup;
-    };
-    ui.add_space(4.0);
-    if kind == "curve" {
-        curve_editor(ui, value, edit.curves.entry(key).or_default());
-    } else {
-        let card = edit.gradients.entry(key).or_default();
-        match aschema::gradient_stops(value) {
-            Ok(stops) => {
-                let mut g = Gradient {
-                    name: String::new(),
-                    dither: Dither::None,
-                    stops: stops
-                        .into_iter()
-                        .map(|(at, color)| Stop { at, color })
-                        .collect(),
-                };
-                let before = g.stops.clone();
-                ui.push_id("gradient_default", |ui| gradient_editor(ui, &mut g, card));
-                if g.stops != before {
-                    *value = Value::Array(
-                        g.stops
-                            .iter()
-                            .map(|s| {
-                                let [r, gr, b, a] = s.color;
-                                Value::Array(vec![
-                                    aschema::json_number(s.at),
-                                    format!("#{r:02x}{gr:02x}{b:02x}{a:02x}").into(),
-                                ])
-                            })
-                            .collect(),
-                    );
-                }
-            }
-            Err(e) => {
-                ui.label(RichText::new(e).color(CHANNEL_R));
-                if ui.button("Reset").clicked() {
-                    *value = aschema::default_gradient();
-                }
-            }
-        }
-    }
     regroup
-}
-
-/// The curve editor's state.
-#[derive(Default)]
-struct CurveState {
-    point: Option<usize>,
-    drag: Option<CurveDrag>,
-}
-
-#[derive(Clone, Copy)]
-enum CurveDrag {
-    Point(usize),
-    /// A tangent handle of a point: out (true) or in, and whether the tangents are broken.
-    Handle(usize, bool, bool),
-}
-
-/// Points, tangent handles and the chosen point's fields; see
-/// docs/features/schemas.md#curve-editor.
-fn curve_editor(ui: &mut Ui, value: &mut Value, state: &mut CurveState) {
-    const REACH: f32 = 6.0;
-    const HANDLE: f32 = 40.0;
-    let mut points = match aschema::curve_points(value) {
-        Ok(points) if !points.is_empty() => points,
-        Ok(_) => vec![[0.0, 0.0, 0.0, 0.0]],
-        Err(e) => {
-            ui.label(RichText::new(e).color(CHANNEL_R));
-            if ui.button("Reset").clicked() {
-                *value = aschema::linear_curve();
-            }
-            return;
-        }
-    };
-    let before = points.clone();
-    state.point = state.point.filter(|&k| k < points.len());
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), 140.0), Sense::click_and_drag());
-    let inner = rect.shrink(8.0);
-    // The vertical range: the curve's, at least 0..1, plus 10%.
-    let samples: Vec<f32> = (0..=64)
-        .map(|i| aschema::evaluate_curve(&points, i as f32 / 64.0))
-        .chain(points.iter().map(|p| p[1]))
-        .collect();
-    let mut lo = samples.iter().copied().fold(0.0f32, f32::min);
-    let mut hi = samples.iter().copied().fold(1.0f32, f32::max);
-    let pad = (hi - lo) * 0.1;
-    (lo, hi) = (lo - pad, hi + pad);
-    let to_screen = |x: f32, y: f32| {
-        pos2(
-            inner.left() + x * inner.width(),
-            inner.bottom() - (y - lo) / (hi - lo) * inner.height(),
-        )
-    };
-    let from_screen = |p: egui::Pos2| {
-        (
-            (p.x - inner.left()) / inner.width(),
-            lo + (inner.bottom() - p.y) / inner.height() * (hi - lo),
-        )
-    };
-    let (sx, sy) = (inner.width(), inner.height() / (hi - lo));
-    // A handle's end for slope `m`, to the right (out) or left (in) of the point.
-    let handle_end = |p: [f32; 4], out: bool| {
-        let m = if out { p[3] } else { p[2] };
-        let dir = vec2(sx, -m * sy).normalized() * HANDLE;
-        to_screen(p[0], p[1]) + if out { dir } else { -dir }
-    };
-    let pointer = ui.input(|i| i.pointer.interact_pos());
-    let near_point = |points: &[[f32; 4]], at: egui::Pos2| {
-        points
-            .iter()
-            .enumerate()
-            .map(|(k, p)| (k, (to_screen(p[0], p[1]) - at).length()))
-            .filter(|(_, d)| *d <= REACH)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(k, _)| k)
-    };
-    if response.double_clicked()
-        && let Some(at) = pointer
-    {
-        match near_point(&points, at) {
-            Some(k) if points.len() > 1 => {
-                points.remove(k);
-                state.point = None;
-            }
-            Some(_) => {}
-            None => {
-                let x = from_screen(at).0.clamp(0.0, 1.0);
-                let y = aschema::evaluate_curve(&points, x);
-                let h = 1e-3;
-                let slope = (aschema::evaluate_curve(&points, (x + h).min(1.0))
-                    - aschema::evaluate_curve(&points, (x - h).max(0.0)))
-                    / (2.0 * h);
-                let k = points.partition_point(|p| p[0] <= x);
-                points.insert(k, [x, y, slope, slope]);
-                state.point = Some(k);
-            }
-        }
-        state.drag = None;
-    } else if ui.input(|i| i.pointer.primary_pressed())
-        && response.hovered()
-        && let Some(at) = pointer
-    {
-        let shift = ui.input(|i| i.modifiers.shift);
-        let handle = state.point.and_then(|k| {
-            [true, false]
-                .into_iter()
-                .find(|&out| (handle_end(points[k], out) - at).length() <= REACH)
-                .map(|out| {
-                    let broken = shift || (points[k][2] - points[k][3]).abs() > 1e-4;
-                    CurveDrag::Handle(k, out, broken)
-                })
-        });
-        state.drag = handle.or_else(|| near_point(&points, at).map(CurveDrag::Point));
-        if let Some(CurveDrag::Point(k)) = state.drag {
-            state.point = Some(k);
-        }
-    }
-    match (state.drag, ui.input(|i| i.pointer.primary_down()), pointer) {
-        (Some(CurveDrag::Point(k)), true, Some(at)) if k < points.len() => {
-            let (x, y) = from_screen(at);
-            let left = if k > 0 { points[k - 1][0] } else { 0.0 };
-            let right = points.get(k + 1).map_or(1.0, |p| p[0]);
-            points[k][0] = x.clamp(left, right).clamp(0.0, 1.0);
-            points[k][1] = y;
-        }
-        (Some(CurveDrag::Handle(k, out, broken)), true, Some(at)) if k < points.len() => {
-            let center = to_screen(points[k][0], points[k][1]);
-            let dx = (at.x - center.x) / sx;
-            let dy = -(at.y - center.y) / sy;
-            // Toward its own side; straight up or down is steep, not infinite.
-            let dx = if out { dx.max(1e-3) } else { dx.min(-1e-3) };
-            let slope = (dy / dx).clamp(-1e3, 1e3);
-            let slot = if out { 3 } else { 2 };
-            points[k][slot] = slope;
-            if !broken {
-                points[k][5 - slot] = slope;
-            }
-        }
-        _ => state.drag = None,
-    }
-
-    // Drawing.
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 4, BG_PANEL);
-    painter.rect_stroke(rect, 4, Stroke::new(1.0, STROKE), StrokeKind::Inside);
-    for x in [0.25, 0.5, 0.75] {
-        painter.vline(
-            to_screen(x, 0.0).x,
-            inner.y_range(),
-            Stroke::new(1.0, STROKE),
-        );
-    }
-    for y in [0.0, 1.0] {
-        painter.hline(
-            inner.x_range(),
-            to_screen(0.0, y).y,
-            Stroke::new(1.0, STROKE),
-        );
-    }
-    let line: Vec<egui::Pos2> = (0..=128)
-        .map(|i| {
-            let x = i as f32 / 128.0;
-            to_screen(x, aschema::evaluate_curve(&points, x))
-        })
-        .collect();
-    painter.add(egui::Shape::line(line, Stroke::new(2.0, ACCENT)));
-    for (k, p) in points.iter().enumerate() {
-        let at = to_screen(p[0], p[1]);
-        let chosen = state.point == Some(k);
-        if chosen {
-            for out in [false, true] {
-                let end = handle_end(*p, out);
-                painter.line_segment([at, end], Stroke::new(1.0, TEXT_WEAK));
-                painter.circle_filled(end, 3.0, TEXT);
-            }
-        }
-        let color = if chosen { ACCENT } else { TEXT };
-        painter.rect_filled(Rect::from_center_size(at, vec2(8.0, 8.0)), 1, color);
-    }
-
-    // The chosen point's numbers.
-    if let Some(k) = state.point {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let left = if k > 0 { points[k - 1][0] } else { 0.0 };
-            let right = points.get(k + 1).map_or(1.0, |p| p[0]);
-            for (i, label) in ["X", "Y", "In", "Out"].into_iter().enumerate() {
-                ui.label(RichText::new(label).color(TEXT_WEAK));
-                let mut field = egui::DragValue::new(&mut points[k][i])
-                    .speed(0.01)
-                    .fixed_decimals(3);
-                if i == 0 {
-                    field = field.range(left..=right);
-                }
-                ui.add_sized(vec2(64.0, 22.0), field);
-            }
-        });
-    }
-    if points != before {
-        *value = Value::Array(
-            points
-                .iter()
-                .map(|p| {
-                    Value::Array(
-                        p.iter()
-                            .map(|&n| aschema::json_f32((n * 1e4).round() / 1e4))
-                            .collect(),
-                    )
-                })
-                .collect(),
-        );
-    }
 }
 
 /// Values of enum `ti`: reorder, rename, add and remove; see docs/features/schemas.md#enum.

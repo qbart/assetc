@@ -520,7 +520,7 @@ fn is_color(text: &str, alpha: bool) -> bool {
 }
 
 /// Curve points `[x, y, in, out]` of a curve value (shortened points get 0 tangents); errors
-/// for points out of 0..1 or unsorted.
+/// for fewer than two points, points out of 0..1 or unsorted.
 pub fn curve_points(value: &Value) -> Result<Vec<[f32; 4]>, String> {
     let items = value.as_array().ok_or("a curve is an array of points")?;
     let mut points = Vec::with_capacity(items.len());
@@ -540,12 +540,30 @@ pub fn curve_points(value: &Value) -> Result<Vec<[f32; 4]>, String> {
         }
         points.push(point);
     }
+    if points.len() < 2 {
+        return Err("a curve needs at least 2 points".into());
+    }
     Ok(points)
+}
+
+/// The segment around `x` (its points and width, and `x` within it), if `x` is inside the
+/// points and the segment has a width.
+fn curve_segment(points: &[[f32; 4]], x: f32) -> Option<([f32; 4], [f32; 4], f32, f32)> {
+    let (first, last) = (points.first()?, points.last()?);
+    if x <= first[0] || x >= last[0] {
+        return None;
+    }
+    let i = points
+        .partition_point(|p| p[0] <= x)
+        .clamp(1, points.len() - 1);
+    let (a, b) = (points[i - 1], points[i]);
+    let width = b[0] - a[0];
+    (width > f32::EPSILON).then(|| (a, b, width, (x - a[0]) / width))
 }
 
 /// The curve's value at `x`: matma's cubic Hermite between neighbouring points, each
 /// segment's tangents its slopes times its width; flat outside the points. See
-/// docs/features/schemas.md#curve-editor.
+/// docs/features/curves.md#evaluating.
 pub fn evaluate_curve(points: &[[f32; 4]], x: f32) -> f32 {
     let (Some(first), Some(last)) = (points.first(), points.last()) else {
         return 0.0;
@@ -556,15 +574,19 @@ pub fn evaluate_curve(points: &[[f32; 4]], x: f32) -> f32 {
     if x >= last[0] {
         return last[1];
     }
-    let i = points
-        .partition_point(|p| p[0] <= x)
-        .clamp(1, points.len() - 1);
-    let (a, b) = (points[i - 1], points[i]);
-    let width = b[0] - a[0];
-    if width <= f32::EPSILON {
-        return b[1];
+    match curve_segment(points, x) {
+        Some((a, b, width, t)) => matma::hermite(a[1], a[3] * width, b[1], b[2] * width, t),
+        // A zero-width segment: a step to the later point.
+        None => points[points.partition_point(|p| p[0] <= x).min(points.len() - 1)][1],
     }
-    matma::hermite(a[1], a[3] * width, b[1], b[2] * width, (x - a[0]) / width)
+}
+
+/// The curve's slope (dy/dx) at `x`: matma's Hermite derivative over the segment's width;
+/// 0 outside the points.
+pub fn curve_slope(points: &[[f32; 4]], x: f32) -> f32 {
+    curve_segment(points, x).map_or(0.0, |(a, b, width, t)| {
+        matma::hermite_derivative(a[1], a[3] * width, b[1], b[2] * width, t) / width
+    })
 }
 
 /// The linear curve, the implicit default.
@@ -910,27 +932,6 @@ fn check_condition(text: &str, fields: &[Field]) -> Result<(), String> {
     Ok(())
 }
 
-/// The implicit default of a type, as shown in hints.
-pub fn implicit_default(schema: &Schema, ty: &Ty) -> String {
-    match ty {
-        Ty::Prim("bool") => "false".into(),
-        Ty::Prim("string") => "\"\"".into(),
-        Ty::Prim("rgb") => "#000000".into(),
-        Ty::Prim("rgba") => "#000000ff".into(),
-        Ty::Prim("curve") => "linear".into(),
-        Ty::Prim("gradient") => "black to white".into(),
-        Ty::Prim(_) => "0".into(),
-        Ty::List(_) => "[]".into(),
-        Ty::Optional(_) => "null".into(),
-        Ty::Ref(_) => "required".into(),
-        Ty::Named(n) => match schema.type_index(n).map(|i| &schema.types[i].body) {
-            Some(Body::Enum { values }) => values.first().cloned().unwrap_or_default(),
-            Some(Body::Struct { .. }) => format!("{n} defaults"),
-            None => String::new(),
-        },
-    }
-}
-
 /// The value a field of type `ty` holds without a default, to start an explicit one from;
 /// see docs/features/schemas.md#defaults.
 pub fn implicit_value(schema: &Schema, ty: &Ty) -> Value {
@@ -1103,5 +1104,22 @@ mod tests {
         assert!(evaluate_curve(&points, 0.25) < 0.25);
         assert_eq!(evaluate_curve(&points, -1.0), 0.0);
         assert_eq!(evaluate_curve(&points, 2.0), 1.0);
+    }
+
+    #[test]
+    fn curve_slopes_and_steps() {
+        let points = curve_points(&linear_curve()).unwrap();
+        assert!((curve_slope(&points, 0.3) - 1.0).abs() < 1e-5);
+        assert_eq!(curve_slope(&points, 1.5), 0.0);
+        // y = x² from flat to slope 2.
+        let points = [[0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 2.0, 2.0]];
+        assert!((evaluate_curve(&points, 0.5) - 0.25).abs() < 1e-5);
+        assert!((curve_slope(&points, 0.5) - 1.0).abs() < 1e-5);
+        // Two points at one x: a step.
+        let step = serde_json::json!([[0, 0], [0.5, 0], [0.5, 1], [1, 1]]);
+        let points = curve_points(&step).unwrap();
+        assert_eq!(evaluate_curve(&points, 0.25), 0.0);
+        assert_eq!(evaluate_curve(&points, 0.75), 1.0);
+        assert!(curve_points(&serde_json::json!([[0, 0]])).is_err());
     }
 }

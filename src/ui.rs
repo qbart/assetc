@@ -45,6 +45,7 @@ use crate::theme::{
 use crate::tree::{FileTrees, Listing, Node};
 use crate::vertex_colors;
 
+mod curve;
 mod graph;
 mod schema;
 use crate::agraph::Graph;
@@ -124,6 +125,38 @@ struct UiState {
     keep_model: bool,
     /// The Open source dialog is open.
     licenses: bool,
+    /// Where the last mouse press landed: that area's keys act.
+    keys: KeyArea,
+}
+
+/// The areas keys belong to; see KEYS.md.
+#[derive(Clone, Copy, PartialEq, Default)]
+enum KeyArea {
+    #[default]
+    Tree,
+    Canvas,
+    Inspector,
+}
+
+/// Gives `area` (the panel `ui` fills) the keys when a mouse press lands in it, not on a
+/// popup over it.
+fn claim_keys(ui: &Ui, keys: &mut KeyArea, area: KeyArea) {
+    let rect = ui.max_rect();
+    let pressed = ui.input(|i| {
+        i.pointer
+            .any_pressed()
+            .then(|| i.pointer.interact_pos())
+            .flatten()
+    });
+    if let Some(p) = pressed
+        && rect.contains(p)
+        && ui
+            .ctx()
+            .layer_id_at(p)
+            .is_none_or(|l| l.order == egui::Order::Background)
+    {
+        *keys = area;
+    }
 }
 
 /// The model preview's locator, shape and region tools, for the session; see
@@ -456,6 +489,7 @@ impl Default for UiState {
             locators: LocatorTools::default(),
             keep_model: false,
             licenses: false,
+            keys: KeyArea::default(),
         }
     }
 }
@@ -774,6 +808,7 @@ fn shell(
         .frame(Frame::new().fill(fill))
         .show(&mut root, |ui| {
             let state = &mut *state;
+            claim_keys(ui, &mut state.keys, KeyArea::Canvas);
             let full = ui.max_rect();
             let bar = Rect::from_min_size(full.min, vec2(full.width(), 32.0));
             let modes = ViewMode::ALL.map(ViewMode::name);
@@ -941,8 +976,13 @@ fn shell(
                 }
                 (Shown::Graph, _) => {
                     if let Some(inspected) = state.inspected.as_mut()
-                        && let Some(graph) =
-                            canvas_graph(ui, rect, inspected, &mut state.graph_views)
+                        && let Some(graph) = canvas_graph(
+                            ui,
+                            rect,
+                            inspected,
+                            &mut state.graph_views,
+                            state.keys == KeyArea::Canvas,
+                        )
                     {
                         match std::fs::write(&inspected.path, graph.to_json()) {
                             Ok(()) => state.reinspect = true,
@@ -1659,6 +1699,7 @@ fn status_bar(
 }
 
 fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &FileTrees) {
+    claim_keys(ui, &mut state.keys, KeyArea::Tree);
     let strip = tab_strip(ui, vec2(ui.available_width(), 32.0));
     let mut tabs = ui.new_child(
         UiBuilder::new()
@@ -1731,8 +1772,9 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                 Some(TreeAction::Op(op)) => apply_file_op(state, project, op),
                 None => {}
             }
-            // F2 / Delete act on the selected Input entry.
-            let keys_free = editable && !ui.ctx().egui_wants_keyboard_input();
+            // F2 / Delete act on the selected Input entry, once the sidebar has the keys.
+            let keys_free =
+                editable && state.keys == KeyArea::Tree && !ui.ctx().egui_wants_keyboard_input();
             if let Some(selection) = state
                 .selection
                 .clone()
@@ -1822,6 +1864,19 @@ fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, enabled: bool) -> Respons
         (false, _) => TEXT_WEAK.gamma_multiply(0.5),
         (true, true) => TEXT,
         (true, false) => TEXT_WEAK,
+    };
+    icon.image(16.0, color)
+        .paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+    response.on_hover_text(tooltip)
+}
+
+/// An icon button that is on (`ACCENT`) or off.
+fn icon_toggle(ui: &mut Ui, icon: Icon, tooltip: &str, on: bool) -> Response {
+    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::click());
+    let color = match (on, response.hovered()) {
+        (true, _) => ACCENT,
+        (false, true) => TEXT,
+        (false, false) => TEXT_WEAK,
     };
     icon.image(16.0, color)
         .paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
@@ -2311,6 +2366,7 @@ fn right_sidebar(
     frames: Option<&ModelFrames>,
     playhead: Option<f32>,
 ) {
+    claim_keys(ui, &mut state.keys, KeyArea::Inspector);
     section_header(ui, "Inspector");
     // Only applicable tabs are shown; fall back to Info when the active one does not apply to
     // the inspected file (a selection still loading keeps it).

@@ -16,10 +16,14 @@ const SCALE_RANGE: std::ops::RangeInclusive<f32> = 8.0..=512.0;
 const SNAP: f64 = 0.25;
 /// How near the pointer must be to an edge, in points.
 const REACH: f32 = 7.0;
-/// The rim edges are dragged from, in points.
+/// The body, pressed to move a node, as a share of the radius; the rim, edges are dragged
+/// from, is the rest of the circle and this many points outside it.
+const BODY: f32 = 0.6;
 const RIM: f32 = 8.0;
-/// How far an edge's middle bends off the straight line, per edge with the same ends, in units.
-const BEND: f32 = 0.25;
+/// Edges between the same two nodes: their spacing across the axis and their farthest
+/// offset, in units.
+const SPREAD: f32 = 0.2;
+const SPREAD_MAX: f32 = 0.4;
 const ARROW: f32 = 10.0;
 
 /// What is chosen in a graph.
@@ -119,51 +123,66 @@ struct EdgeShape {
     middle: egui::Pos2,
 }
 
-/// The shape of an edge between circles at `a` and `b` (radius `r` points), the `slot`th
-/// with the same ends; `bend` is [`BEND`] in points. See docs/features/graphs.md#canvas.
-fn edge_shape(a: egui::Pos2, b: egui::Pos2, r: f32, slot: usize, bend: f32) -> EdgeShape {
-    let n = slot as f32;
-    let (curve, t0, t1) = if (b - a).length() < 1e-3 {
-        // A loop over the node, larger for each further one.
-        let at = |deg: f32, d: f32| a + vec2(deg.to_radians().cos(), deg.to_radians().sin()) * d;
-        let h = r * (1.8 + 0.9 * n);
-        let curve = [
-            at(-115.0, r),
-            at(-125.0, r + h),
-            at(-55.0, r + h),
-            at(-65.0, r),
-        ];
-        (curve, 0.0, 1.0)
-    } else {
-        // A quadratic bending to the right of its direction, raised to a cubic.
-        let d = (b - a).normalized();
-        let control = a + (b - a) / 2.0 + vec2(-d.y, d.x) * 2.0 * bend * (n + 1.0);
-        let curve = [
-            a,
-            a + (control - a) * (2.0 / 3.0),
-            b + (control - b) * (2.0 / 3.0),
-            b,
-        ];
-        // Where it leaves `a`'s circle and enters `b`'s.
-        let crossing = |from: f32, to: f32, center: egui::Pos2| {
-            let (mut inside, mut outside) = (from, to);
-            for _ in 0..20 {
-                let mid = (inside + outside) / 2.0;
-                if (bezier(&curve, mid) - center).length() < r {
-                    inside = mid;
-                } else {
-                    outside = mid;
-                }
-            }
-            outside
+/// How an edge leaves its node: a loop (the how-manyth of that node), or toward another node
+/// this many units right of its direction.
+#[derive(Clone, Copy)]
+enum Link {
+    Loop(usize),
+    Across(f32),
+}
+
+/// The `k`th edge's offset across the axis, in units, of `f` edges one way between two nodes
+/// with `g` edges the other way. See docs/features/graphs.md#canvas.
+fn spread(k: usize, f: usize, g: usize) -> f32 {
+    let (k, f, g) = (k as f32, f as f32, g as f32);
+    if g == 0.0 {
+        let step = if f > 1.0 {
+            SPREAD.min(2.0 * SPREAD_MAX / (f - 1.0))
+        } else {
+            SPREAD
         };
-        (curve, crossing(0.0, 0.5, a), crossing(1.0, 0.5, b))
+        (k - (f - 1.0) / 2.0) * step
+    } else {
+        (k + 0.5) * SPREAD.min(SPREAD_MAX / (f.max(g) - 0.5))
+    }
+}
+
+/// The shape of an edge between circles at `a` and `b` (radius `r` points), `unit` points per
+/// unit: an S-shaped link along the axis the nodes are farther apart on, or a loop. See
+/// docs/features/graphs.md#canvas.
+fn edge_shape(a: egui::Pos2, b: egui::Pos2, r: f32, link: Link, unit: f32) -> EdgeShape {
+    let curve = match link {
+        Link::Loop(n) => {
+            // A loop over the node, larger for each further one.
+            let at =
+                |deg: f32, d: f32| a + vec2(deg.to_radians().cos(), deg.to_radians().sin()) * d;
+            let h = r * (1.8 + 0.9 * n as f32);
+            [
+                at(-115.0, r),
+                at(-125.0, r + h),
+                at(-55.0, r + h),
+                at(-65.0, r),
+            ]
+        }
+        Link::Across(off) => {
+            let d = b - a;
+            let axis = if d.x.abs() >= d.y.abs() {
+                vec2(d.x.signum(), 0.0)
+            } else {
+                vec2(0.0, d.y.signum())
+            };
+            let right = vec2(-axis.y, axis.x);
+            let off = (off * unit).clamp(-0.8 * r, 0.8 * r);
+            let along = (r * r - off * off).sqrt();
+            let start = a + right * off + axis * along;
+            let end = b + right * off - axis * along;
+            let reach = ((end - start).dot(axis).abs() / 2.0).max(0.25 * unit);
+            [start, start + axis * reach, end - axis * reach, end]
+        }
     };
-    let tip = bezier(&curve, t1);
-    let dir = (tip - bezier(&curve, t1 - 0.02 * (t1 - t0).max(0.05))).normalized();
-    let mut line: Vec<egui::Pos2> = (0..=24)
-        .map(|i| bezier(&curve, t0 + (t1 - t0) * i as f32 / 24.0))
-        .collect();
+    let tip = curve[3];
+    let dir = (tip - bezier(&curve, 0.98)).normalized();
+    let mut line: Vec<egui::Pos2> = (0..=32).map(|i| bezier(&curve, i as f32 / 32.0)).collect();
     // Stop under the arrowhead, not through its point.
     if let Some(last) = line.last_mut() {
         *last = tip - dir * ARROW * 0.8;
@@ -172,8 +191,19 @@ fn edge_shape(a: egui::Pos2, b: egui::Pos2, r: f32, slot: usize, bend: f32) -> E
         line,
         tip,
         dir,
-        middle: bezier(&curve, (t0 + t1) / 2.0),
+        middle: bezier(&curve, 0.5),
     }
+}
+
+/// An arrowhead pointing along `dir` with its point at `tip`.
+fn arrowhead(painter: &egui::Painter, tip: egui::Pos2, dir: Vec2, color: egui::Color32) {
+    let side = vec2(-dir.y, dir.x) * ARROW / 2.0;
+    let base = tip - dir * ARROW;
+    painter.add(egui::Shape::convex_polygon(
+        vec![tip, base + side, base - side],
+        color,
+        Stroke::NONE,
+    ));
 }
 
 /// The graph on its grid; returns the graph to write. See docs/features/graphs.md#canvas.
@@ -182,6 +212,7 @@ pub(super) fn canvas_graph(
     rect: Rect,
     inspected: &mut Inspected,
     views: &mut HashMap<PathBuf, GraphView>,
+    keys: bool,
 ) -> Option<Graph> {
     let view = views.entry(inspected.path.clone()).or_default();
     let edit = match &mut inspected.graph {
@@ -239,7 +270,6 @@ pub(super) fn canvas_graph(
     let view = *view;
     let s = f64::from(view.scale);
     let r = (RADIUS * s) as f32;
-    let rim = if r < 2.0 * RIM { r / 2.0 } else { RIM };
     let to_screen = |x: f64, y: f64| {
         rect.center()
             + vec2(
@@ -255,31 +285,59 @@ pub(super) fn canvas_graph(
         )
     };
     let center = |n: &Node| to_screen(n.x, n.y);
-    // The topmost (last drawn) node under a point, and how far from its center.
+    // The node under a point (its circle, else its rim outside it; the topmost, else the
+    // nearest), and how far from its center.
     let node_at = |nodes: &[Node], p: egui::Pos2| {
+        let distance = |i: usize| (center(&nodes[i]) - p).length();
         nodes
             .iter()
             .rposition(|n| (center(n) - p).length() <= r)
-            .map(|i| (i, (center(&nodes[i]) - p).length()))
+            .or_else(|| {
+                (0..nodes.len())
+                    .filter(|&i| distance(i) <= r + RIM)
+                    .min_by(|&i, &j| distance(i).total_cmp(&distance(j)))
+            })
+            .map(|i| (i, distance(i)))
+    };
+    let unit = view.scale;
+    // Edges each way between every two nodes.
+    let counts = |graph: &Graph| {
+        let mut counts: HashMap<(String, String), usize> = HashMap::new();
+        for e in &graph.edges {
+            *counts.entry((e.from.clone(), e.to.clone())).or_default() += 1;
+        }
+        counts
     };
     let shapes = |graph: &Graph| -> Vec<Option<EdgeShape>> {
+        let counts = counts(graph);
+        let mut seen: HashMap<(&str, &str), usize> = HashMap::new();
         graph
             .edges
             .iter()
-            .enumerate()
-            .map(|(k, e)| {
+            .map(|e| {
+                let k = seen.entry((&e.from, &e.to)).or_default();
+                let slot = *k;
+                *k += 1;
                 let a = graph.nodes.iter().find(|n| n.id == e.from)?;
                 let b = graph.nodes.iter().find(|n| n.id == e.to)?;
-                let slot = graph.edges[..k]
-                    .iter()
-                    .filter(|o| o.from == e.from && o.to == e.to)
-                    .count();
-                Some(edge_shape(center(a), center(b), r, slot, BEND * view.scale))
+                let link = if e.from == e.to {
+                    Link::Loop(slot)
+                } else {
+                    let count = |f: &str, t: &str| {
+                        counts
+                            .get(&(f.to_owned(), t.to_owned()))
+                            .copied()
+                            .unwrap_or(0)
+                    };
+                    let (f, g) = (count(&e.from, &e.to), count(&e.to, &e.from));
+                    Link::Across(spread(slot, f, g))
+                };
+                Some(edge_shape(center(a), center(b), r, link, unit))
             })
             .collect()
     };
 
-    // Choose, move, connect, add and rename.
+    // Choose, move, connect, add, rename and remove.
     let graph = &mut edit.edit;
     if response.double_clicked()
         && let Some(p) = pointer
@@ -301,7 +359,7 @@ pub(super) fn canvas_graph(
         && let Some(p) = pointer
     {
         if let Some((i, d)) = node_at(&graph.nodes, p) {
-            edit.drag = Some(if d >= r - rim {
+            edit.drag = Some(if d >= BODY * r {
                 GraphDrag::Connect(i, false)
             } else {
                 let (x, y) = to_units(p);
@@ -328,6 +386,8 @@ pub(super) fn canvas_graph(
         }
     }
     let down = ui.input(|i| i.pointer.primary_down());
+    // The node a rubber edge would end on: any node, its start once the pointer has left it.
+    let mut target = None;
     match (edit.drag, pointer) {
         (Some(GraphDrag::Move(i, (ox, oy))), Some(p)) if down && i < graph.nodes.len() => {
             let (x, y) = to_units(p);
@@ -335,20 +395,20 @@ pub(super) fn canvas_graph(
             graph.nodes[i].y = place(y - oy, shift);
         }
         (Some(GraphDrag::Connect(i, left)), Some(p)) if i < graph.nodes.len() => {
-            let target = node_at(&graph.nodes, p).map(|(j, _)| j);
-            let left = left || target != Some(i);
+            let under = node_at(&graph.nodes, p).map(|(j, _)| j);
+            let left = left || under != Some(i);
+            target = under.filter(|&j| j != i || left);
             if down {
                 edit.drag = Some(GraphDrag::Connect(i, left));
             } else {
-                // Released on a node: a new edge to it (to itself once the pointer left it).
-                if let Some(j) = target
-                    && (j != i || left)
-                {
+                // Released on a target: a new edge to it.
+                if let Some(j) = target {
                     let (from, to) = (graph.nodes[i].id.clone(), graph.nodes[j].id.clone());
                     graph.edges.push(Edge::new(from, to));
                     edit.chosen = Some(Chosen::Edge(graph.edges.len() - 1));
                 }
                 edit.drag = None;
+                target = None;
             }
         }
         (Some(_), _) if !down => edit.drag = None,
@@ -356,6 +416,21 @@ pub(super) fn canvas_graph(
     }
     if edit.drag.is_some() {
         ui.ctx().request_repaint();
+    }
+    let typing = ui.ctx().egui_wants_keyboard_input();
+    if keys
+        && !typing
+        && edit.label.is_none()
+        && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::X))
+    {
+        match edit.chosen.take() {
+            Some(Chosen::Node(i)) if i < graph.nodes.len() => graph.remove_node(i),
+            Some(Chosen::Edge(k)) if k < graph.edges.len() => {
+                graph.edges.remove(k);
+            }
+            _ => {}
+        }
+        edit.drag = None;
     }
 
     // Grid: quarter lines while 8 px apart, unit lines, and the axes.
@@ -385,38 +460,63 @@ pub(super) fn canvas_graph(
     // Edges, then the rubber edge, then nodes over them, then edge labels.
     let zoom = view.scale / SCALE;
     let shapes = shapes(graph);
-    for (k, shape) in shapes.iter().enumerate() {
-        let Some(shape) = shape else {
-            continue;
-        };
-        let chosen = edit.chosen == Some(Chosen::Edge(k));
-        let (width, color) = if chosen {
-            (2.5, ACCENT)
-        } else {
-            (1.5, TEXT_WEAK)
-        };
+    let draw_edge = |shape: &EdgeShape, width: f32, color: egui::Color32| {
         painter.add(egui::Shape::line(
             shape.line.clone(),
             Stroke::new(width, color),
         ));
-        let side = vec2(-shape.dir.y, shape.dir.x) * ARROW / 2.0;
-        let base = shape.tip - shape.dir * ARROW;
-        painter.add(egui::Shape::convex_polygon(
-            vec![shape.tip, base + side, base - side],
-            color,
-            Stroke::NONE,
-        ));
+        arrowhead(&painter, shape.tip, shape.dir, color);
+    };
+    for (k, shape) in shapes.iter().enumerate() {
+        if let Some(shape) = shape {
+            if edit.chosen == Some(Chosen::Edge(k)) {
+                draw_edge(shape, 2.5, ACCENT);
+            } else {
+                draw_edge(shape, 1.5, TEXT_WEAK);
+            }
+        }
     }
     if let (Some(GraphDrag::Connect(i, _)), Some(p)) = (edit.drag, pointer)
         && let Some(n) = graph.nodes.get(i)
     {
         let c = center(n);
-        let start = c + (p - c).normalized() * r;
-        painter.line_segment([start, p], Stroke::new(1.5, ACCENT));
+        match target {
+            // The edge as it will be: the next of its ends.
+            Some(j) => {
+                let link = if j == i {
+                    let loops = graph
+                        .edges
+                        .iter()
+                        .filter(|e| e.from == n.id && e.to == n.id);
+                    Link::Loop(loops.count())
+                } else {
+                    let (from, to) = (n.id.clone(), graph.nodes[j].id.clone());
+                    let counts = counts(graph);
+                    let f = counts
+                        .get(&(from.clone(), to.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    let g = counts.get(&(to, from)).copied().unwrap_or(0);
+                    Link::Across(spread(f, f + 1, g))
+                };
+                let shape = edge_shape(c, center(&graph.nodes[j]), r, link, unit);
+                draw_edge(&shape, 2.5, ACCENT);
+            }
+            None if (p - c).length() > r => {
+                let dir = (p - c).normalized();
+                let color = ACCENT.gamma_multiply(0.6);
+                painter.line_segment(
+                    [c + dir * r, p - dir * ARROW * 0.8],
+                    Stroke::new(1.5, color),
+                );
+                arrowhead(&painter, p, dir, color);
+            }
+            None => {}
+        }
     }
     let hovered_rim = match (edit.drag, pointer) {
         (None, Some(p)) if response.hovered() => node_at(&graph.nodes, p)
-            .filter(|&(_, d)| d >= r - rim)
+            .filter(|&(_, d)| d >= BODY * r)
             .map(|(i, _)| i),
         (Some(GraphDrag::Connect(i, _)), _) => Some(i),
         _ => None,
@@ -427,13 +527,25 @@ pub(super) fn canvas_graph(
     for (i, n) in graph.nodes.iter().enumerate() {
         let c = center(n);
         painter.circle_filled(c, r, BG_HEADER);
+        if target == Some(i) {
+            painter.circle_filled(c, r, ACCENT.gamma_multiply(0.15));
+        }
         let stroke = if edit.chosen == Some(Chosen::Node(i)) {
             Stroke::new(2.0, ACCENT)
         } else {
             Stroke::new(1.0, STROKE)
         };
         painter.circle_stroke(c, r - stroke.width / 2.0, stroke);
-        if hovered_rim == Some(i) {
+        if hovered_rim == Some(i) && edit.drag.is_none() {
+            // The rim's band, from the body out to RIM past the border.
+            let (inner, outer) = (BODY * r, r + RIM);
+            painter.circle_stroke(
+                c,
+                (inner + outer) / 2.0,
+                Stroke::new(outer - inner, ACCENT.gamma_multiply(0.15)),
+            );
+        }
+        if hovered_rim == Some(i) || target == Some(i) {
             painter.circle_stroke(c, r, Stroke::new(2.0, ACCENT));
         }
         if edit.label.as_ref().is_none_or(|(j, _, _)| *j != i) {
@@ -473,7 +585,7 @@ pub(super) fn canvas_graph(
         rect.left_bottom() + vec2(8.0, -8.0),
         Align2::LEFT_BOTTOM,
         "Double-click to add a node · double-click a node to rename · \
-         drag a node's rim onto a node to connect · Shift snaps to 0.25",
+         drag a node's rim onto a node to connect · Delete or X removes · Shift snaps to 0.25",
         FontId::proportional(12.0),
         TEXT_WEAK,
     );
