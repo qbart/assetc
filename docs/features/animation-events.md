@@ -18,14 +18,14 @@ its animation's events:
 - **Add event** (`plus` and text): an event named `event` at the playhead,
   chosen.
 - One row per event, by time (ties in sidecar order), 26 px: its time
-  (`0.334 s`, monospace, `TEXT_WEAK`, 64 px wide) and name. Hovering fills
-  the row with `BG_HEADER`; the chosen event's row is filled with `ACCENT` at
-  25% opacity. Clicking a row chooses the event (and clicking the chosen
-  one chooses none); the timeline shows the same choice.
+  (`0.334 s`, monospace, `TEXT_WEAK`, 64 px wide), name and, at its right
+  end, **Delete** (`trash-2` icon button). Hovering fills the row with
+  `BG_HEADER`; the chosen event's row is filled with `ACCENT` at 25%
+  opacity. Clicking a row chooses the event (and clicking the chosen one
+  chooses none); the timeline shows the same choice.
 - Under the chosen event's row, its fields: **Name** (text), **Time** (drag
-  field, seconds, three decimals, 0 to the duration), **Properties** (the
-  [property editor](properties.md#properties-tab)) and **Delete event**
-  (`trash-2` and text).
+  field, seconds, three decimals, 0 to the duration) and **Properties** (the
+  [property editor](properties.md#properties-tab)).
 - Without events, a weak `No events`.
 - Edits are saved like the locators'.
 
@@ -46,7 +46,8 @@ of the canvas (the 3D view above it shrinks; the panel is `BG_PANEL` with a
 1 px `STROKE` line on top, 8 px side margins). It has, top to bottom:
 
 1. **Header** (28 px): a **Play** / **Pause** icon button (`play` /
-   `pause`), the time `0.42 / 1.25 s` (two decimals), the animation's name,
+   `pause`), the time `0.420 / 1.250 s` (three decimals, so `Shift` steps
+   show), the animation's name,
    and an **Add event** button (`plus` and text) that adds an event at the
    playhead. In the rest pose (every card folded), the header only has a weak
    `Choose an animation to edit its events`, and nothing below.

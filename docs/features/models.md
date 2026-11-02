@@ -343,7 +343,7 @@ plays and lists each one's [events](animation-events.md).
   reordered: an accordion, one unfolded at a time. Header: the chevron, the
   animation's name (`Animation <n>` counting from 1 when it has none) and,
   right-aligned and weak, `<n> events · <duration>` (`1 event`; only the
-  duration without events; two decimals, e.g. `1.25 s`).
+  duration without events; three decimals, e.g. `1.250 s`).
 - The duration is the largest `max` of the animation's sampler input
   accessors (glTF requires them), read with the other
   [Info rows](#inspector).
