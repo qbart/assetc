@@ -138,6 +138,7 @@ a place); any other is an authored set.
 | `from`  | array of 3 floats        | `[0, 0, 0]` | linear and radial: start (linear) or center (radial), model space |
 | `to`    | array of 3 floats        | `[0, 1, 0]` | linear and radial: end (linear) or a point on the edge (radial), model space |
 | `stops` | array of tables          | black at 0 to white at 1 | linear and radial: at least two `{ at = <0–1>, color = "#rrggbb[aa]" }`, as in [`.gradient` files](gradient.md) |
+| `export` | string                  | `"colors"` | linear and radial: `"colors"` (Color buffer) or `"texture"` (Texture + UV buffer), see [Export](../features/vertex-colors.md#export) |
 | `blend` | inline table             | (none)     | authored sets: `{ with = "<set name>", mode = "<mode>", amount = <0–1> }`, see [Blending](../features/vertex-colors.md#blending); `mode` is `"mix"` (the default), `"multiply"`, `"screen"`, `"overlay"` or `"add"`; `amount` defaults to `1.0` |
 
 Keys a fill does not use are ignored when read.
@@ -182,8 +183,8 @@ table (`name`, `tags` when there are any, `color`, `materials`,
 set, then its `[paths.properties]` when it has any), then each color set
 as a `[[colors]]` table (`name`, then `gltf` for a glTF set; for an
 authored one `fill`, then `color` for a solid set or `from`, `to` and
-`stops`, one stop per line, ordered by `at`, for a gradient, then `blend`
-when set, with all three keys), then each event as an `[[events]]` table
+`stops`, one stop per line, ordered by `at`, for a gradient, then `export`
+when `"texture"`, then `blend` when set, with all three keys), then each event as an `[[events]]` table
 (`animation`, `name`, `time`, then its `[events.properties]` when it has
 any), then each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
 parameter, as `.noise` files write them), each table preceded by a blank line

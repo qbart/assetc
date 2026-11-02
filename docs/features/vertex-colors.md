@@ -74,6 +74,7 @@ pose).
 | From   | Linear and Radial: a point in model space. Linear: where the gradient starts; Radial: its center. |
 | To     | Linear and Radial: a point in model space. Linear: where the gradient ends; Radial: a point on its edge, so the radius is the distance from From. |
 | Stops  | Linear and Radial: the gradient, as the [gradient editor](gradients.md#gradient-editor) edits it: at least two stops, each a position 0–1 and an sRGB color with alpha. |
+| Export | Linear and Radial: **Color buffer** (to start with) or **Texture + UV buffer**, see [Export](#export). |
 
 Each vertex at `p` gets position `t` along the gradient:
 
@@ -118,6 +119,28 @@ the base and `t` the set:
 
 A set that is not blended is stored exactly as before: a glTF set's values
 unchanged.
+
+## Export
+
+How a written set reaches the game:
+
+- **Color buffer** (every set to start with): a color per vertex in the
+  mesh's `COLORS` (see [`amesh.md`](../spec/amesh.md#color-sets)).
+- **Texture + UV buffer**: for an authored Linear or Radial set that does
+  not blend with another. Instead of colors:
+  - a **texture** `P/<set>.colors.ktx2` (asset path `P/<set>.colors`, `P`
+    the model's input-relative path without the extension): the set's
+    gradient as a 256 × 1 `R8G8B8A8_SRGB` image, texel `x` the gradient's
+    color at `(x + 0.5) / 256` as a `.gradient` without dithering computes
+    it, no mipmaps;
+  - a **UV set** in the mesh's `UVSET` / `UVS` (see
+    [`amesh.md`](../spec/amesh.md#uv-sets)), named as the set, naming the
+    texture's asset ID: per vertex `(t, 0.5)`, `t` the vertex's position
+    along the gradient (as [above](#authored-sets)), so sampling the
+    texture at the UV gives the set's color, smoothly between vertices.
+
+  A set exported this way and then blended with (another set's base) is
+  not written either way.
 
 
 
@@ -173,6 +196,10 @@ icon) is shown for a model in the Input tree:
     - **Swap** (button): From and To trade places.
     - The [gradient editor](gradients.md#gradient-editor) (bar, handles and
       the selected stop's color picker).
+    - **Export**: dropdown **Color buffer** / **Texture + UV buffer**
+      ([Export](#export)); disabled at Color buffer while the set blends
+      with another (hover: `Texture + UV buffer needs a set that does not
+      blend`).
 - Deleting a set clears the blends that used it.
 - Edits are saved like the locators'.
 
@@ -211,6 +238,10 @@ by several nodes (the build computes each instance's own).
 - Bases are not written; every other set is, in order.
 - Each set's `COLORSET` record says where it came from in `source`: `0`
   glTF (unblended), `1` assetc (authored, or blended).
+- A set exported as Texture + UV buffer that is Solid, a glTF set, or
+  blends with another fails it: `<file>.amod: color set "<name>": Texture
+  + UV buffer needs an unblended Linear or Radial set`. Its texture is
+  built with the model's other textures.
 
 ## Inspector Info
 

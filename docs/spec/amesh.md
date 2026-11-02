@@ -32,6 +32,8 @@ width are in `DESC`.
 | `LOCTAGS`  | no       | [`LocatorTag`](#locatortag-16-bytes)`[]` (payload size / 16), the locators' tags |
 | `COLORSET` | no       | [`ColorSet`](#colorset-32-bytes)`[set_count]`, see [Color sets](#color-sets) |
 | `COLORS`   | no       | `u8[4][set_count × vertex_count]`: every set's colors, set after set |
+| `UVSET`    | no       | [`UvSet`](#uvset-32-bytes)`[uv_set_count]`, see [UV sets](#uv-sets) |
+| `UVS`      | no       | `f32[2][uv_set_count × vertex_count]`: every UV set's coordinates, set after set |
 | `STRINGS`  | no       | `u8[]`: UTF-8 text of color sets, properties, shapes, regions and paths, back to back, see [Strings](#strings) |
 | `PROPS`    | no       | [`Property`](#property-32-bytes)`[]`: the model's properties, sorted by key |
 | `SHAPES`   | no       | [`Shape`](#shape-96-bytes)`[]`, see [Shapes](#shapes) |
@@ -49,7 +51,8 @@ assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
 together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
 `LOCATORS` and `LOCNAMES` (only for models with locators); `LOCTAGS`
 follows them when a locator has tags. `COLORSET` and `COLORS` come
-together, when the mesh has color sets. `STRINGS` comes when color sets,
+together, when the mesh has color sets; `UVSET` and `UVS` likewise, when it
+has UV sets. `STRINGS` comes when color sets, UV sets,
 properties, shapes, regions or paths do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
 and `SHAPEPRP` (with shapes; `SHAPEPTS` only with a hull, `SHAPEPRP` only
 when a shape has properties), `REGIONS`, `REGTAGS` (when a region has tags)
@@ -348,6 +351,25 @@ sets other sets blend with are not written.
 
 Readers skip sets whose `format` they do not know; every format's entries
 are 4 bytes in this version.
+
+## UV sets
+
+Extra texture coordinates, for [color sets exported as Texture + UV
+buffer](../features/vertex-colors.md#export). `UVSET` holds one record per
+set; `UVS` holds the sets' coordinates one set after another, each
+`vertex_count` entries long and parallel to `VERTICES`: vertex `v` of set
+`s` is the 8 bytes at `(s × vertex_count + v) × 8`. Sets are in the color
+sets' order.
+
+### UvSet (32 bytes)
+
+| Offset | Size | Field         | Notes                                                 |
+|-------:|-----:|---------------|-------------------------------------------------------|
+|      0 |    8 | `name_hash`   | u64, FNV-1a-64 of the name                            |
+|      8 |    4 | `name_offset` | u32, in `STRINGS`                                     |
+|     12 |    4 | `name_len`    | u32                                                   |
+|     16 |    8 | `texture`     | u64, asset ID of the texture the coordinates sample (`P/<set>.colors`) |
+|     24 |    8 | `reserved`    | `0`                                                   |
 
 ## Paths
 
