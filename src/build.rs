@@ -42,6 +42,9 @@ impl fmt::Display for Failure {
 #[derive(Debug, Default)]
 pub struct Outcome {
     pub built: Vec<Built>,
+    /// Kinds of the outputs written along with a built model or font, counted in the summary
+    /// but not listed.
+    pub parts: Vec<Kind>,
     pub skipped: usize,
     /// Stale outputs deleted after a successful build, relative to `output`.
     pub removed: Vec<String>,
@@ -63,7 +66,8 @@ impl Outcome {
             let counts: Vec<String> = Kind::ALL
                 .into_iter()
                 .filter_map(|kind| {
-                    let n = self.built.iter().filter(|b| b.kind == kind).count();
+                    let n = self.built.iter().filter(|b| b.kind == kind).count()
+                        + self.parts.iter().filter(|k| **k == kind).count();
                     let (one, many) = match kind {
                         Kind::Texture => ("texture", "textures"),
                         Kind::Material => ("material", "materials"),
@@ -141,6 +145,7 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
         ..Default::default()
     };
 
+    let mut parts = Vec::new();
     for asset in &plan.assets {
         let dest = output.join(&asset.output);
         let result = match &asset.job {
@@ -158,8 +163,11 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
                 options,
                 sidecar,
             } => compile_model(input, source, output, options, sidecar),
-            // Written with its model or font.
-            Job::ModelPart { .. } | Job::FontPart { .. } => continue,
+            // Written with its model or font; counted once that is built.
+            Job::ModelPart { source } | Job::FontPart { source } => {
+                parts.push((source, asset.kind));
+                continue;
+            }
             Job::Font { source } => compile_font(input, source, output),
             Job::Lut { source, volume } => {
                 compile_lut(&input.join(source), &dest, *volume).map(|size| {
@@ -184,6 +192,12 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
             }),
         }
     }
+
+    outcome.parts = parts
+        .into_iter()
+        .filter(|(source, _)| outcome.built.iter().any(|b| b.source == **source))
+        .map(|(_, kind)| kind)
+        .collect();
 
     if outcome.failures.is_empty() {
         let entries: Vec<_> = plan
@@ -933,6 +947,11 @@ mod tests {
         let built: Vec<_> = outcome.built.iter().map(|b| b.output.as_str()).collect();
         assert_eq!(built, ["models/Fox.amesh"]);
         assert!(outcome.built[0].detail.contains("24 joints, 3 clips"));
+        // Its animation, material and texture count too; see docs/features/build.md#summary.
+        assert_eq!(
+            outcome.summary(),
+            "Built 1 texture, 1 material, 1 mesh, 1 animation (0 skipped)"
+        );
 
         let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
         let rows = crate::amesh::rows(&mesh).unwrap();
