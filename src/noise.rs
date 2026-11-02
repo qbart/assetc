@@ -711,9 +711,14 @@ pub fn parse_modifiers(value: toml::Value) -> Result<Vec<Modifier>, String> {
 
 /// Appends `[[modifiers]]` tables, each after a blank line.
 pub fn write_modifiers(modifiers: &[Modifier], out: &mut String) {
+    write_modifier_tables(modifiers, "modifiers", out);
+}
+
+/// Appends `[[<table>]]` tables (`modifiers`, `gradients.modifiers`), each after a blank line.
+pub fn write_modifier_tables(modifiers: &[Modifier], table: &str, out: &mut String) {
     for m in modifiers {
         out.push_str(&format!(
-            "\n[[modifiers]]\ntype = {}\nenabled = {}\n",
+            "\n[[{table}]]\ntype = {}\nenabled = {}\n",
             toml::Value::String(m.kind.key().into()),
             m.enabled
         ));

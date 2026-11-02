@@ -3813,6 +3813,13 @@ fn gradients_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradients> {
                             ui.push_id(("gradient_editor", i), |ui| {
                                 gradient_editor(ui, gradient, card);
                             });
+                            // Its own modifiers; see docs/features/gradients.md#gradients-tab.
+                            ui.add_space(8.0);
+                            ui.label(RichText::new("Modifiers").size(13.0).color(TEXT_WEAK));
+                            ui.add_space(4.0);
+                            ui.push_id(("gradient_modifiers", i), |ui| {
+                                modifier_cards(ui, &mut gradient.modifiers);
+                            });
                         },
                     ));
                     card.mini = mini;
@@ -4102,6 +4109,7 @@ fn gradient_color_at(stops: &[Stop], at: f64) -> [u8; 4] {
         name: String::new(),
         dither: Dither::None,
         stops: stops.to_vec(),
+        modifiers: Vec::new(),
     }
     .color_at(at)
 }
@@ -4168,87 +4176,91 @@ fn image_modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
     })
 }
 
-/// The modifier cards and the Add button; see docs/features/noise.md#modifiers-tab.
+/// The modifier cards and the Add button in a scrolling pane; see
+/// docs/features/noise.md#modifiers-tab.
 fn modifier_list(ui: &mut Ui, modifiers: &mut Vec<Modifier>) {
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
-                // Set from the header closures, applied after the list is drawn.
-                let action = std::cell::Cell::new(None);
-                let dragging = std::cell::Cell::new(None);
-                let dropped = std::cell::Cell::new(None);
-                let mut cards = Vec::with_capacity(modifiers.len());
-                for (i, m) in modifiers.iter_mut().enumerate() {
-                    let enabled = m.enabled;
-                    let title =
-                        RichText::new(m.kind.name()).color(if enabled { TEXT } else { TEXT_WEAK });
-                    cards.push(prop_section(
-                        ui,
-                        ("modifier", i, m.kind.key()),
-                        Fold::Never,
-                        title,
-                        |ui| {
-                            let grip = drag_handle(ui);
-                            if grip.dragged() {
-                                dragging.set(Some(i));
-                            }
-                            if grip.drag_stopped() {
-                                dropped.set(Some(i));
-                            }
-                            let (icon, tip) = if enabled {
-                                (Icon::Eye, "Disable")
-                            } else {
-                                (Icon::EyeOff, "Enable")
-                            };
-                            if icon_button(ui, icon, tip, true).clicked() {
-                                action.set(Some(ModifierAction::Toggle(i)));
-                            }
-                        },
-                        |ui, _| {
-                            if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
-                                action.set(Some(ModifierAction::Remove(i)));
-                            }
-                        },
-                        |ui| {
-                            let specs = m.kind.specs();
-                            if specs.is_empty() {
-                                ui.weak("No parameters");
-                            }
-                            for (spec, value) in specs.iter().zip(&mut m.params.0) {
-                                param_row(ui, spec, value);
-                            }
-                        },
-                    ));
-                }
-                if let Some((from, to)) = card_reorder(ui, &cards, dragging.get(), dropped.get()) {
-                    let m = modifiers.remove(from);
-                    modifiers.insert(to, m);
-                }
-                match action.take() {
-                    Some(ModifierAction::Toggle(i)) => modifiers[i].enabled ^= true,
-                    Some(ModifierAction::Remove(i)) => {
-                        modifiers.remove(i);
-                    }
-                    None => {}
-                }
-                if modifiers.is_empty() {
-                    ui.weak("No modifiers");
-                    ui.add_space(6.0);
-                }
-                let button =
-                    egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add modifier");
-                egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-                    for kind in ModifierKind::ALL {
-                        if menu_item(ui, kind.name(), None).clicked() {
-                            modifiers.push(Modifier::new(kind));
-                            ui.close();
-                        }
-                    }
-                });
+                modifier_cards(ui, modifiers);
             });
         });
+}
+
+/// The modifier cards and the Add button.
+fn modifier_cards(ui: &mut Ui, modifiers: &mut Vec<Modifier>) {
+    // Set from the header closures, applied after the list is drawn.
+    let action = std::cell::Cell::new(None);
+    let dragging = std::cell::Cell::new(None);
+    let dropped = std::cell::Cell::new(None);
+    let mut cards = Vec::with_capacity(modifiers.len());
+    for (i, m) in modifiers.iter_mut().enumerate() {
+        let enabled = m.enabled;
+        let title = RichText::new(m.kind.name()).color(if enabled { TEXT } else { TEXT_WEAK });
+        cards.push(prop_section(
+            ui,
+            ("modifier", i, m.kind.key()),
+            Fold::Never,
+            title,
+            |ui| {
+                let grip = drag_handle(ui);
+                if grip.dragged() {
+                    dragging.set(Some(i));
+                }
+                if grip.drag_stopped() {
+                    dropped.set(Some(i));
+                }
+                let (icon, tip) = if enabled {
+                    (Icon::Eye, "Disable")
+                } else {
+                    (Icon::EyeOff, "Enable")
+                };
+                if icon_button(ui, icon, tip, true).clicked() {
+                    action.set(Some(ModifierAction::Toggle(i)));
+                }
+            },
+            |ui, _| {
+                if icon_button(ui, Icon::Trash2, "Remove", true).clicked() {
+                    action.set(Some(ModifierAction::Remove(i)));
+                }
+            },
+            |ui| {
+                let specs = m.kind.specs();
+                if specs.is_empty() {
+                    ui.weak("No parameters");
+                }
+                for (spec, value) in specs.iter().zip(&mut m.params.0) {
+                    param_row(ui, spec, value);
+                }
+            },
+        ));
+    }
+    if let Some((from, to)) = card_reorder(ui, &cards, dragging.get(), dropped.get()) {
+        let m = modifiers.remove(from);
+        modifiers.insert(to, m);
+    }
+    match action.take() {
+        Some(ModifierAction::Toggle(i)) => modifiers[i].enabled ^= true,
+        Some(ModifierAction::Remove(i)) => {
+            modifiers.remove(i);
+        }
+        None => {}
+    }
+    if modifiers.is_empty() {
+        ui.weak("No modifiers");
+        ui.add_space(6.0);
+    }
+    let button = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add modifier");
+    egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
+        for kind in ModifierKind::ALL {
+            if menu_item(ui, kind.name(), None).clicked() {
+                modifiers.push(Modifier::new(kind));
+                ui.close();
+            }
+        }
+    });
 }
 
 fn info(ui: &mut Ui, inspection: &Inspection) {
@@ -8470,6 +8482,7 @@ fn color_set_preview(
             name: String::new(),
             dither: Dither::None,
             stops: set.stops.clone(),
+            modifiers: Vec::new(),
         };
         let texture = gradient_texture(ui, mini, &gradient, rect.size());
         egui::Image::from_texture((texture.id(), rect.size()))
@@ -8598,6 +8611,7 @@ fn color_set_fields(
         name: String::new(),
         dither: Dither::None,
         stops: std::mem::take(&mut set.stops),
+        modifiers: Vec::new(),
     };
     ui.push_id("color_gradient", |ui| {
         gradient_editor(ui, &mut gradient, card)

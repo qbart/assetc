@@ -216,6 +216,8 @@ pub struct Gradient {
     pub dither: Dither,
     /// At least two, ordered by `at`.
     pub stops: Vec<Stop>,
+    /// Run on this gradient's cell, its color only; see docs/spec/gradient.md#modifiers.
+    pub modifiers: Vec<crate::noise::Modifier>,
 }
 
 impl Gradient {
@@ -234,6 +236,7 @@ impl Gradient {
                     color: [255, 255, 255, 255],
                 },
             ],
+            modifiers: Vec::new(),
         }
     }
 
@@ -254,6 +257,26 @@ impl Gradient {
             let t = position(height - 1 - y, height);
             for x in 0..width {
                 pixels.extend(shade(&self.stops, self.dither, t, x, y));
+            }
+        }
+        // Modifiers change the color, never the alpha.
+        if self.modifiers.iter().any(|m| m.enabled) {
+            let mut rgb: Vec<[f64; 3]> = pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|p| [0, 1, 2].map(|c| f64::from(p[c]) / 255.0))
+                .collect();
+            crate::noise::apply_modifiers(
+                &self.modifiers,
+                &mut rgb,
+                width as usize,
+                height as usize,
+            );
+            for (p, c) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(rgb) {
+                for k in 0..3 {
+                    p[k] = (c[k].clamp(0.0, 1.0) * 255.0).round() as u8;
+                }
             }
         }
         pixels
@@ -404,6 +427,11 @@ impl Gradients {
             out += &format!("name = {}\n", toml::Value::String(gradient.name.clone()));
             out += &format!("dither = \"{}\"\n", gradient.dither.key());
             write_stops(&gradient.stops, &mut out);
+            crate::noise::write_modifier_tables(
+                &gradient.modifiers,
+                "gradients.modifiers",
+                &mut out,
+            );
         }
         out
     }
@@ -455,6 +483,11 @@ fn parse_gradient(item: toml::Value) -> Result<Gradient, String> {
             .ok_or_else(|| format!("unknown dither {v} (use none, crosshatch or pixel)"))?,
     };
     let stops = parse_stops(table.remove("stops").ok_or("missing stops")?)?;
+    let modifiers = table
+        .remove("modifiers")
+        .map(crate::noise::parse_modifiers)
+        .transpose()?
+        .unwrap_or_default();
     if let Some(key) = table.keys().next() {
         return Err(format!("unknown key {key}"));
     }
@@ -462,6 +495,7 @@ fn parse_gradient(item: toml::Value) -> Result<Gradient, String> {
         name,
         dither,
         stops,
+        modifiers,
     };
     gradient.sort();
     Ok(gradient)
@@ -608,6 +642,26 @@ stops = [
             Gradients::parse(&Gradients::new().to_toml()).unwrap(),
             Gradients::new()
         );
+    }
+
+    #[test]
+    fn modifiers_change_their_cell_but_not_alpha() {
+        let text =
+            format!("{SAMPLE}\n[[gradients.modifiers]]\ntype = \"invert\"\nenabled = true\n");
+        let gradients = Gradients::parse(&text).unwrap();
+        assert_eq!(gradients.gradients[1].modifiers.len(), 1);
+        assert_eq!(gradients.to_toml(), text);
+        let plain = Gradients::parse(SAMPLE).unwrap().render().unwrap();
+        let image = gradients.render().unwrap();
+        // The first cell is untouched; the second inverted, its alpha kept.
+        assert_eq!(pixel(&image, 0, 31), pixel(&plain, 0, 31));
+        let (before, after) = (pixel(&plain, 16, 31), pixel(&image, 16, 31));
+        assert_eq!(
+            after,
+            [255 - before[0], 255 - before[1], 255 - before[2], before[3]]
+        );
+        let (before, after) = (pixel(&plain, 16, 0), pixel(&image, 16, 0));
+        assert_eq!(after[3], before[3]);
     }
 
     #[test]

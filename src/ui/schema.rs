@@ -1195,6 +1195,7 @@ fn gradient_default(ui: &mut Ui, value: &mut Value, card: &mut GradientCard) {
             .into_iter()
             .map(|(at, color)| Stop { at, color })
             .collect(),
+        modifiers: Vec::new(),
     };
     let before = g.stops.clone();
     ui.push_id("gradient_default", |ui| gradient_editor(ui, &mut g, card));
