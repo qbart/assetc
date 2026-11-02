@@ -59,7 +59,50 @@ frame that later features plug into; it has no asset functionality of its own.
 - `Edit` contains no items yet (button shown disabled).
 - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar (check
   shown when visible); the menu stays open after toggling.
-- `Help` shows the application name and version as a non-interactive weak row.
+- `Help` shows the application name and version as a non-interactive weak
+  row, then **Licenses**, which opens the [Open source](#open-source) dialog.
+
+### Open source
+
+A modal dialog listing the open source projects assetc is built with, in
+the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
+`STROKE` border, 8 px corners, 24 px margin):
+
+- Title `Open source` (20 px, `TEXT`), then `assetc is built with these open
+  source projects:` (14 px, `TEXT_WEAK`).
+- A four-column grid, one row per project, 14 px: the name (`TEXT`), what
+  assetc uses it for, the license (both `TEXT_WEAK`) and the project's site
+  as a link in `ACCENT` (opened in the default browser).
+- A **Close** button at the bottom right (the dialog's Cancel look); Escape
+  or a click outside the dialog closes it too.
+
+| Project              | Used for               | License                     | Site |
+|----------------------|------------------------|-----------------------------|------|
+| Lucide               | icons                  | ISC                         | lucide.dev |
+| Ubuntu               | typeface               | Ubuntu Font Licence 1.0     | design.ubuntu.com/font |
+| Hack                 | monospace typeface     | MIT                         | sourcefoundry.org/hack |
+| Noto Emoji           | emoji                  | SIL Open Font License 1.1   | fonts.google.com/noto |
+| Bevy                 | application framework  | MIT or Apache-2.0           | bevy.org |
+| wgpu                 | graphics               | MIT or Apache-2.0           | wgpu.rs |
+| winit                | windowing              | Apache-2.0                  | github.com/rust-windowing/winit |
+| egui                 | user interface         | MIT or Apache-2.0           | github.com/emilk/egui |
+| bevy_egui            | egui integration       | MIT                         | github.com/vladbat00/bevy_egui |
+| resvg                | drawing icons          | Apache-2.0 or MIT           | github.com/linebender/resvg |
+| gltf                 | reading models         | MIT or Apache-2.0           | github.com/gltf-rs/gltf |
+| meshoptimizer        | meshlets, levels of detail | MIT                     | meshoptimizer.org |
+| meshopt              | meshoptimizer bindings | MIT or Apache-2.0           | github.com/gwihlidal/meshopt-rs |
+| image                | reading images         | MIT or Apache-2.0           | github.com/image-rs/image |
+| ttf-parser           | reading fonts          | MIT or Apache-2.0           | github.com/harfbuzz/ttf-parser |
+| ab_glyph             | font atlases           | Apache-2.0                  | github.com/alexheretic/ab-glyph |
+| serde and toml       | settings files         | MIT or Apache-2.0           | serde.rs |
+| globset              | path patterns          | Unlicense or MIT            | github.com/BurntSushi/ripgrep |
+| clap                 | command line           | MIT or Apache-2.0           | github.com/clap-rs/clap |
+| base64               | embedded glTF data     | MIT or Apache-2.0           | github.com/marshallpierce/rust-base64 |
+| webbrowser           | opening links          | MIT or Apache-2.0           | github.com/amodm/webbrowser-rs |
+
+Links open `https://` + the site shown. The list names direct dependencies
+and the fonts and icons shipped in the binary; keep it in step with
+`Cargo.toml`.
 
 ## File browser
 
