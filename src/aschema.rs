@@ -54,6 +54,8 @@ pub struct Field {
     pub name: String,
     /// The type expression, as written.
     pub ty: String,
+    /// The field may hold `null`; see docs/aschema.md#optional-fields.
+    pub optional: bool,
     pub default: Option<Value>,
     pub min: Option<Number>,
     pub max: Option<Number>,
@@ -215,6 +217,9 @@ impl Schema {
         let mut o = Map::new();
         o.insert("name".into(), f.name.clone().into());
         o.insert("type".into(), f.ty.clone().into());
+        if f.optional {
+            o.insert("optional".into(), true.into());
+        }
         if let Some(default) = &f.default {
             let canonical = parse_type(&f.ty)
                 .map(|ty| canonical(&ty, default))
@@ -379,10 +384,16 @@ fn parse_field(value: Value) -> Result<Field, String> {
     let readonly = o
         .shift_remove("readonly")
         .is_some_and(|v| v.as_bool() == Some(true));
+    let optional = match o.shift_remove("optional") {
+        Some(Value::Bool(b)) => b,
+        None => false,
+        Some(_) => return Err(format!("field {name:?}: optional is not a boolean")),
+    };
     let default = o.shift_remove("default");
     Ok(Field {
         name,
         ty,
+        optional,
         default,
         min,
         max,
@@ -414,7 +425,7 @@ pub const PRIMITIVES: [&str; 15] = [
 ];
 /// The last primitive, kept apart so [`PRIMITIVES`] lists them in the type menu's order.
 pub const GRADIENT: &str = "gradient";
-pub const GENERICS: [&str; 3] = ["list", "optional", "ref"];
+pub const GENERICS: [&str; 2] = ["list", "ref"];
 
 /// Whether `name` is reserved: a primitive or a generic.
 pub fn is_reserved(name: &str) -> bool {
@@ -427,7 +438,6 @@ pub enum Ty {
     Prim(&'static str),
     Named(String),
     List(Box<Ty>),
-    Optional(Box<Ty>),
     Ref(Box<Ty>),
 }
 
@@ -445,7 +455,7 @@ pub fn parse_type(text: &str) -> Result<Ty, String> {
         let inner = Box::new(parse_type(inner)?);
         return match outer {
             "list" => Ok(Ty::List(inner)),
-            "optional" => Ok(Ty::Optional(inner)),
+            "optional" => Err("optional<…> is not a type: make the field optional".into()),
             "ref" => Ok(Ty::Ref(inner)),
             _ => Err(format!("unknown generic {outer:?}")),
         };
@@ -470,7 +480,6 @@ impl std::fmt::Display for Ty {
             Ty::Prim(p) => write!(f, "{p}"),
             Ty::Named(n) => write!(f, "{n}"),
             Ty::List(t) => write!(f, "list<{t}>"),
-            Ty::Optional(t) => write!(f, "optional<{t}>"),
             Ty::Ref(t) => write!(f, "ref<{t}>"),
         }
     }
@@ -484,7 +493,7 @@ impl Ty {
                 *n = to.to_owned();
                 true
             }
-            Ty::List(t) | Ty::Optional(t) | Ty::Ref(t) => t.rename(from, to),
+            Ty::List(t) | Ty::Ref(t) => t.rename(from, to),
             _ => false,
         }
     }
@@ -662,7 +671,6 @@ fn canonical(ty: &Ty, value: &Value) -> Value {
         (Ty::List(t), Value::Array(items)) => {
             Value::Array(items.iter().map(|v| canonical(t, v)).collect())
         }
-        (Ty::Optional(t), v) if !v.is_null() => canonical(t, v),
         _ => value.clone(),
     }
 }
@@ -726,11 +734,6 @@ impl Schema {
                 let items = value.as_array().ok_or_else(bad)?;
                 items.iter().try_for_each(|v| self.encodes(t, v))
             }
-            Ty::Optional(t) if value.is_null() => {
-                let _ = t;
-                Ok(())
-            }
-            Ty::Optional(t) => self.encodes(t, value),
             Ty::Ref(_) => value.as_str().map(|_| ()).ok_or_else(bad),
             Ty::Named(name) => match self.type_index(name).map(|i| &self.types[i].body) {
                 Some(Body::Enum { values }) => value
@@ -745,7 +748,9 @@ impl Schema {
                             .iter()
                             .find(|f| f.name == *key)
                             .ok_or_else(|| format!("{name} has no field {key:?}"))?;
-                        if let Ok(t) = parse_type(&field.ty) {
+                        if let Ok(t) = parse_type(&field.ty)
+                            && !(field.optional && v.is_null())
+                        {
                             self.encodes(&t, v)?;
                         }
                     }
@@ -765,10 +770,6 @@ impl Schema {
                 .map(|_| ())
                 .ok_or_else(|| format!("unknown type {n:?}")),
             Ty::List(t) => self.check_type(t),
-            Ty::Optional(t) if matches!(**t, Ty::Optional(_)) => {
-                Err("optional<optional<…>> is not allowed".into())
-            }
-            Ty::Optional(t) => self.check_type(t),
             Ty::Ref(t) => match &**t {
                 Ty::Named(n)
                     if matches!(
@@ -784,7 +785,8 @@ impl Schema {
         }
     }
 
-    /// Whether struct `start` contains itself through plain struct-typed fields.
+    /// Whether struct `start` contains itself through plain (not optional) struct-typed
+    /// fields.
     fn embeds_itself(&self, start: usize) -> bool {
         let mut stack = vec![start];
         let mut seen = vec![false; self.types.len()];
@@ -792,7 +794,7 @@ impl Schema {
             let Body::Struct { fields, .. } = &self.types[i].body else {
                 continue;
             };
-            for f in fields {
+            for f in fields.iter().filter(|f| !f.optional) {
                 if let Ok(Ty::Named(n)) = parse_type(&f.ty)
                     && let Some(j) = self.type_index(&n)
                 {
@@ -849,7 +851,7 @@ impl Schema {
                         add(
                             None,
                             t.name.clone(),
-                            "embeds itself; use ref, list or optional".into(),
+                            "embeds itself; use ref, list or an optional field".into(),
                         );
                     }
                     for (fi, f) in fields.iter().enumerate() {
@@ -873,6 +875,7 @@ impl Schema {
                             }
                         };
                         if let (Some(ty), Some(default)) = (&ty, &f.default)
+                            && !(f.optional && default.is_null())
                             && let Err(e) = self.encodes(ty, default)
                         {
                             field(format!("default: {e}"));
@@ -944,7 +947,6 @@ pub fn implicit_value(schema: &Schema, ty: &Ty) -> Value {
         Ty::Prim("gradient") => default_gradient(),
         Ty::Prim(_) => 0.into(),
         Ty::List(_) => Value::Array(Vec::new()),
-        Ty::Optional(_) => Value::Null,
         Ty::Ref(_) => "".into(),
         Ty::Named(n) => match schema.type_index(n).map(|i| &schema.types[i].body) {
             Some(Body::Enum { values }) => values.first().cloned().unwrap_or_default().into(),
@@ -983,7 +985,8 @@ mod tests {
         { "name": "trail", "type": "gradient" },
         { "name": "offset", "type": "Vec2", "default": { "x": 0.5 }, "widget": "inline" },
         { "name": "drops", "type": "list<ref<Weapon>>", "editor_note": "keep me" },
-        { "name": "notes", "type": "optional<string>", "readonly": true }
+        { "name": "notes", "type": "string", "optional": true, "readonly": true },
+        { "name": "next", "type": "Weapon", "optional": true, "default": null }
       ]
     }
   },
@@ -1041,7 +1044,7 @@ mod tests {
               "fields": [
                 { "name": "self_", "type": "S" },
                 { "name": "r", "type": "ref<E>" },
-                { "name": "o", "type": "optional<optional<i32>>" },
+                { "name": "o", "type": "optional<i32>" },
                 { "name": "small", "type": "u8", "default": 300 },
                 { "name": "frac", "type": "i32", "default": 12.5 },
                 { "name": "s", "type": "string", "min": 1 },
@@ -1051,7 +1054,7 @@ mod tests {
                 { "name": "u", "type": "Nope" },
                 { "name": "bad name", "type": "list<i32" },
                 { "name": "curve", "type": "curve", "default": [[0.5, 0], [0.2, 1]] },
-                { "name": "i32", "type": "list<optional<ref<S>>>" }
+                { "name": "i32", "type": "list<ref<S>>" }
               ]
             },
             "i32": { "kind": "enum", "values": ["x"] }
@@ -1067,7 +1070,7 @@ mod tests {
         assert!(has("E", "used twice"));
         assert!(has("S", "embeds itself"));
         assert!(has("S/r", "only structs"));
-        assert!(has("S/o", "optional<optional"));
+        assert!(has("S/o", "make the field optional"));
         assert!(has("S/small", "outside u8"));
         assert!(has("S/frac", "not an integer"));
         assert!(has("S/s", "only for numbers"));

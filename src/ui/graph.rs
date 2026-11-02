@@ -43,8 +43,9 @@ pub(super) struct GraphEdit {
     pub(super) saved: Graph,
     chosen: Option<Chosen>,
     drag: Option<GraphDrag>,
-    /// A node's label being edited on the canvas, and whether its field still needs focus.
-    label: Option<(usize, String, bool)>,
+    /// A node's or edge's label being edited on the canvas, and whether its field still
+    /// needs focus.
+    label: Option<(Chosen, String, bool)>,
 }
 
 impl GraphEdit {
@@ -379,14 +380,35 @@ pub(super) fn canvas_graph(
             .map(|(k, tip, _)| (k, tip))
     };
 
+    // The edge whose curve is nearest a point, within reach.
+    let edge_at = |shapes: &[Option<EdgeShape>], p: egui::Pos2| {
+        shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(k, shape)| {
+                let line = &shape.as_ref()?.line;
+                let d = line
+                    .windows(2)
+                    .map(|w| segment_distance(p, w[0], w[1]))
+                    .fold(f32::MAX, f32::min);
+                Some((k, d))
+            })
+            .filter(|(_, d)| *d <= REACH)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(k, _)| k)
+    };
+
     // Choose, move, connect, detach, add, rename and remove.
     let graph = &mut edit.edit;
     if response.double_clicked()
         && let Some(p) = pointer
     {
         if let Some((i, _)) = node_at(&graph.nodes, p) {
-            edit.label = Some((i, graph.nodes[i].label.clone(), true));
+            edit.label = Some((Chosen::Node(i), graph.nodes[i].label.clone(), true));
             edit.chosen = Some(Chosen::Node(i));
+        } else if let Some(k) = edge_at(&shapes(graph), p) {
+            edit.label = Some((Chosen::Edge(k), graph.edges[k].label.clone(), true));
+            edit.chosen = Some(Chosen::Edge(k));
         } else {
             let (x, y) = to_units(p);
             let id = graph.free_id("node");
@@ -413,20 +435,7 @@ pub(super) fn canvas_graph(
             });
             edit.chosen = Some(Chosen::Node(i));
         } else {
-            edit.chosen = shapes(graph)
-                .iter()
-                .enumerate()
-                .filter_map(|(k, shape)| {
-                    let line = &shape.as_ref()?.line;
-                    let d = line
-                        .windows(2)
-                        .map(|w| segment_distance(p, w[0], w[1]))
-                        .fold(f32::MAX, f32::min);
-                    Some((k, d))
-                })
-                .filter(|(_, d)| *d <= REACH)
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(k, _)| Chosen::Edge(k));
+            edit.chosen = edge_at(&shapes(graph), p).map(Chosen::Edge);
             edit.drag = None;
         }
     }
@@ -645,7 +654,11 @@ pub(super) fn canvas_graph(
         if hovered_rim == Some(i) || target == Some(i) {
             painter.circle_stroke(c, r, Stroke::new(2.0, ACCENT));
         }
-        if edit.label.as_ref().is_none_or(|(j, _, _)| *j != i) {
+        if edit
+            .label
+            .as_ref()
+            .is_none_or(|(c, _, _)| *c != Chosen::Node(i))
+        {
             painter.text(
                 c,
                 Align2::CENTER_CENTER,
@@ -661,9 +674,13 @@ pub(super) fn canvas_graph(
     let size = 12.0 * zoom;
     if size >= 6.0 {
         for (k, (e, shape)) in graph.edges.iter().zip(&shapes).enumerate() {
+            let editing = edit
+                .label
+                .as_ref()
+                .is_some_and(|(c, _, _)| *c == Chosen::Edge(k));
             let Some(shape) = shape
                 .as_ref()
-                .filter(|_| detached.is_none_or(|(d, _)| d != k))
+                .filter(|_| !editing && detached.is_none_or(|(d, _)| d != k))
             else {
                 continue;
             };
@@ -687,16 +704,25 @@ pub(super) fn canvas_graph(
     painter.text(
         rect.left_bottom() + vec2(8.0, -8.0),
         Align2::LEFT_BOTTOM,
-        "Double-click to add a node · double-click a node to rename · \
+        "Double-click to add a node · double-click a node or edge to rename · \
          drag a node's rim onto a node to connect · Delete or X removes · Shift snaps to 0.25",
         FontId::proportional(12.0),
         TEXT_WEAK,
     );
 
-    // The label being edited, over its node.
-    if let Some((i, text, focus)) = &mut edit.label {
-        if let Some(n) = graph.nodes.get_mut(*i) {
-            let at = Rect::from_center_size(center(n), vec2((2.0 * r).max(120.0), 24.0));
+    // The label being edited, over its node or the middle of its edge.
+    if let Some((chosen, text, focus)) = &mut edit.label {
+        let at = match *chosen {
+            Chosen::Node(i) => graph
+                .nodes
+                .get(i)
+                .map(|n| Rect::from_center_size(center(n), vec2((2.0 * r).max(120.0), 24.0))),
+            Chosen::Edge(k) => shapes
+                .get(k)
+                .and_then(Option::as_ref)
+                .map(|shape| Rect::from_center_size(shape.middle, vec2(120.0, 24.0))),
+        };
+        if let Some(at) = at {
             let field = egui::TextEdit::singleline(text)
                 .id(ui.id().with("graph_label"))
                 .horizontal_align(Align::Center);
@@ -706,7 +732,11 @@ pub(super) fn canvas_graph(
                 *focus = false;
             } else if !response.has_focus() {
                 if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    n.label = text.clone();
+                    let label = match *chosen {
+                        Chosen::Node(i) => &mut graph.nodes[i].label,
+                        Chosen::Edge(k) => &mut graph.edges[k].label,
+                    };
+                    *label = text.clone();
                 }
                 edit.label = None;
             }
@@ -890,6 +920,7 @@ fn edge_fields(ui: &mut Ui, edit: &mut GraphEdit, k: usize) {
     if pane_header(ui, "Edge", "Delete edge") {
         graph.edges.remove(k);
         edit.chosen = None;
+        edit.label = None;
         return;
     }
     let ids: Vec<String> = graph.nodes.iter().map(|n| n.id.clone()).collect();

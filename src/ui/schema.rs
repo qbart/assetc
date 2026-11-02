@@ -616,6 +616,7 @@ fn field_rows(
                             field.name = new;
                         }
                         type_cell(ui, field, snapshot, ty.is_some());
+                        ui.checkbox(&mut field.optional, "Optional");
                         ui.add_space(6.0);
                         let key = (ti, field.name.clone());
                         let editors = DefaultEditors {
@@ -705,30 +706,75 @@ fn type_cell(ui: &mut Ui, field: &mut Field, schema: &Schema, parses: bool) {
         .frame_when_inactive(false)
         .min_size(vec2(24.0, 22.0));
     egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
-        let current = field.ty.clone();
-        let mut pick = |ui: &mut Ui, text: String| {
-            if menu_item(ui, &text, None).clicked() {
-                field.ty = text;
-                ui.close();
-            }
-        };
-        for generic in aschema::GENERICS {
-            pick(ui, format!("{generic}<{current}>"));
-        }
-        ui.separator();
-        for p in aschema::PRIMITIVES
-            .into_iter()
-            .chain(std::iter::once(aschema::GRADIENT))
-        {
-            pick(ui, p.to_owned());
-        }
-        if !schema.types.is_empty() {
-            ui.separator();
-        }
-        for t in &schema.types {
-            pick(ui, t.name.clone());
+        let mut picked = None;
+        type_menu(ui, schema, &field.ty, false, &mut picked);
+        if let Some(ty) = picked {
+            field.ty = ty;
+            ui.close();
         }
     });
+}
+
+/// The type menu's submenus, by kind; inside List (`in_list`) its items are wrapped in
+/// `list<…>`. See docs/features/schemas.md#type-menu.
+fn type_menu(
+    ui: &mut Ui,
+    schema: &Schema,
+    current: &str,
+    in_list: bool,
+    picked: &mut Option<String>,
+) {
+    // Same size, color and text inset as `menu_row`.
+    ui.spacing_mut().button_padding = vec2(24.0, 7.0);
+    let named = |enums: bool| -> Vec<String> {
+        schema
+            .types
+            .iter()
+            .filter(|t| matches!(t.body, Body::Enum { .. }) == enums)
+            .map(|t| t.name.clone())
+            .collect()
+    };
+    let value: Vec<String> = aschema::PRIMITIVES
+        .into_iter()
+        .filter(|p| !matches!(*p, "rgb" | "rgba" | "curve"))
+        .map(str::to_owned)
+        .collect();
+    let groups = [
+        ("Value", value),
+        (
+            "Color",
+            ["rgb", "rgba", aschema::GRADIENT]
+                .map(str::to_owned)
+                .to_vec(),
+        ),
+        ("Curve", vec!["curve".to_owned()]),
+        ("Struct", named(false)),
+        ("Enum", named(true)),
+    ];
+    for (title, items) in groups {
+        ui.add_enabled_ui(!items.is_empty(), |ui| {
+            ui.menu_button(RichText::new(title).size(14.0).color(TEXT), |ui| {
+                for item in items {
+                    let ty = if in_list {
+                        format!("list<{item}>")
+                    } else {
+                        item.clone()
+                    };
+                    if menu_item(ui, &item, Some(ty == current)).clicked() {
+                        *picked = Some(ty);
+                    }
+                }
+            });
+        });
+    }
+    ui.add_enabled_ui(false, |ui| {
+        ui.menu_button(RichText::new("Reference").size(14.0).color(TEXT), |_| {});
+    });
+    if !in_list {
+        ui.menu_button(RichText::new("List").size(14.0).color(TEXT), |ui| {
+            type_menu(ui, schema, current, true, picked);
+        });
+    }
 }
 
 /// Whether every name in `ty` is a primitive or a type of the schema.
@@ -736,7 +782,7 @@ fn check_known(schema: &Schema, ty: &Ty) -> bool {
     match ty {
         Ty::Prim(_) => true,
         Ty::Named(n) => schema.type_index(n).is_some(),
-        Ty::List(t) | Ty::Optional(t) | Ty::Ref(t) => check_known(schema, t),
+        Ty::List(t) | Ty::Ref(t) => check_known(schema, t),
     }
 }
 
