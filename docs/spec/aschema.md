@@ -16,7 +16,7 @@ only states how assetc writes the files it edits (see
 - A struct: `kind`, `doc` when not empty, `groups` when it has any (each
   `collapsed` when true, `doc` when not empty, then other keys), `fields`,
   then other keys of the type.
-- A field: `name`, `type`, then when set `default`, `min`, `max`, `step`,
+- A field: `name`, `type`, `optional` (only `true`), then when set `default`, `min`, `max`, `step`,
   `doc`, `group`, `order`, `label`, `readonly` (only `true`), `show_if`,
   `hide_if`, `widget`, then other keys of the field, in their order.
 - An enum: `kind`, `doc` when not empty, `values`, then other keys.

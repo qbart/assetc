@@ -59,14 +59,14 @@ This covers type names, field names and `$id` values.
 
 **Type names:**
 - Unique within the file.
-- May not shadow a primitive (`bool`, `i32`, `string`, `rgb`, …) or a generic (`list`, `optional`, `ref`).
+- May not shadow a primitive (`bool`, `i32`, `string`, `rgb`, …) or a generic (`list`, `ref`).
 - PascalCase by convention.
 - May be referenced in any order.
 
 **Recursion:**
 - Allowed through `ref<T>` or `list<T>`.
 - Direct embedding is an error: a struct that contains itself, directly or through a chain of other structs, as plain struct-typed fields.
-- `optional<S>`, `list<S>` and `ref<S>` all break the chain, so `"next": "optional<Node>"` inside `Node` is fine.
+- `list<S>`, `ref<S>` and [optional fields](#optional-fields) all break the chain, so `{ "name": "next", "type": "Node", "optional": true }` inside `Node` is fine.
 
 ### 2.1 `struct`
 
@@ -85,6 +85,7 @@ Field object:
 |------------|----------|-------|
 | `name`     | yes | Identifier, unique within the struct, no `$`. It is the key used in data files. |
 | `type`     | yes | Type expression (§3) |
+| `optional` | no  | `true`: the field may hold `null`, no value (see [optional fields](#optional-fields)); `false` when missing |
 | `default`  | no  | Value in the type's data encoding. Replaces the implicit default. |
 | `min`, `max`, `step` | no | Numbers. Only allowed on integer and float fields. |
 | `doc`      | no  | One-line description |
@@ -175,7 +176,7 @@ A field's `type` is a string with no whitespace inside it:
 
 ```
 type      := primitive | name | generic
-generic   := ( "list" | "optional" | "ref" ) "<" type ">"
+generic   := ( "list" | "ref" ) "<" type ">"
 name      := identifier                 ; a key of `types`
 primitive := "bool"
            | "i8" | "i16" | "i32" | "i64"
@@ -202,13 +203,22 @@ name is a schema error.
 | `E` (enum) | one of `E.values` | string equal to a value | first value |
 | `S` (struct) | embedded value owned by the parent | object of `S`'s fields (sparse) | object of `S`'s defaults |
 | `list<T>` | ordered sequence | array of `T` encodings | `[]` |
-| `optional<T>` | value or absent | `null` or `T`'s encoding | `null` |
 | `ref<S>` | reference to an instance of struct `S` | string holding the target's `$id` | none: **required** |
 
 **Nesting rules:**
-- `ref<T>` requires `T` to be a struct. A primitive, enum, list or optional is an error.
-- `optional<optional<T>>` is an error.
-- Anything else composes: `list<ref<Weapon>>`, `optional<list<i32>>`, `list<list<f32>>`, `list<Vec2>`.
+- `ref<T>` requires `T` to be a struct. A primitive, enum or list is an error.
+- Anything else composes: `list<ref<Weapon>>`, `list<list<f32>>`, `list<Vec2>`.
+
+### Optional fields
+
+Whether a value may be missing is a property of the **field**, not of its
+type: `"optional": true` next to `"type"`. There is no `optional<T>` type,
+so every type expression maps onto plain JSON values that any language's
+loader can read, without a language's option type.
+
+- An optional field holds `null` or its type's encoding.
+- Its implicit default is `null`; a `default` replaces it as for any field.
+- `optional` on a field of any type is allowed, refs included.
 
 **Embed or ref?**
 - **Embed** (`S`) small, value-like data that each parent owns, such as `Vec2` or a stats block.
@@ -216,8 +226,8 @@ name is a schema error.
 
 **Required refs.** A `ref` field without a `default` is required. If an
 instance leaves it out, report a warning. An empty string `""` means "not
-set yet" and is also a warning. Use `optional<ref<S>>` when a missing ref
-is legitimate.
+set yet" and is also a warning. Make the field optional (`"optional":
+true`) when a missing ref is legitimate.
 
 **Struct defaults are partial.** A `default` on a struct-typed field may
 leave keys out; those keys fall back to the struct's own field defaults,
@@ -339,7 +349,7 @@ loading or saving.
 | Unknown `kind`; struct without `fields`; enum with empty or duplicate `values` | schema | error |
 | Field name not an identifier, duplicated, or `$`-prefixed | schema | error |
 | Type expression unparsable or names an unknown type | schema | error |
-| `ref<T>` with non-struct `T`; `optional<optional<T>>`; direct embed recursion | schema | error |
+| `ref<T>` with non-struct `T`; direct embed recursion; `optional` not a boolean | schema | error |
 | `default` not encodable as the field type; `min`/`max`/`step` on a non-numeric field | schema | error |
 | `show_if`/`hide_if` naming no sibling, or ordering op with non-number; `widget` on a type it doesn't fit; unknown `widget` value | schema | error |
 | `$type` not a struct of the schema; `$id` missing or not an identifier | data | error |
@@ -438,7 +448,7 @@ array order.
         { "name": "trail", "type": "gradient", "group": "Advanced" },
         { "name": "offset", "type": "Vec2", "default": { "x": 0.5 }, "group": "Advanced", "widget": "inline" },
         { "name": "id_hash", "type": "u32", "group": "Advanced", "readonly": true },
-        { "name": "notes", "type": "optional<string>", "group": "Advanced" }
+        { "name": "notes", "type": "string", "optional": true, "group": "Advanced" }
       ]
     },
     "Enemy": {
@@ -449,10 +459,10 @@ array order.
         { "name": "weapon", "type": "ref<Weapon>" },
         { "name": "drops", "type": "list<ref<Weapon>>" },
         { "name": "spawn", "type": "Vec2" },
-        { "name": "leader", "type": "optional<ref<Enemy>>" },
+        { "name": "leader", "type": "ref<Enemy>", "optional": true },
         { "name": "boss", "type": "bool", "default": false, "group": "Boss" },
         { "name": "boss_phases", "type": "u8", "default": 1, "min": 1, "max": 3, "group": "Boss", "show_if": "boss" },
-        { "name": "boss_music", "type": "optional<string>", "group": "Boss", "hide_if": "!boss" }
+        { "name": "boss_music", "type": "string", "optional": true, "group": "Boss", "hide_if": "!boss" }
       ]
     }
   }
@@ -540,7 +550,7 @@ array order.
    - Check the header.
    - Build the type table.
    - Parse type expressions into trees.
-   - Check names, nesting rules and embed recursion. To check recursion, do a depth-first walk over plain struct-typed fields only; `list`, `ref` and `optional` break the chain.
+   - Check names, nesting rules and embed recursion. To check recursion, do a depth-first walk over plain struct-typed fields only; `list`, `ref` and optional fields break the chain.
    - Check defaults, numeric attributes, conditions and widgets.
 3. **`resolve(type, value?)`.** Returns the fully defaulted value. Structs merge recursively; a missing value gives the field default, then the implicit default.
 4. **`check(type, value)`.** Produces the errors and warnings from §5, with a path for each, such as `goblin/stats/hp` or `drops/[1]`.

@@ -109,7 +109,8 @@ details when unfolded:
 | (grip)   | drag handle: moves the field within its group |
 | (details) | `settings` (16 px icon button, `ACCENT` while open, else `TEXT_WEAK`): shows or hides the field's details, where its visibility and dependency logic lives |
 | Name     | text, monospace, 140 px; an invalid or taken name reverts when it loses focus |
-| Type     | text, monospace, 150 px, `CHANNEL_R` while it does not parse or names an unknown type; its `chevron-down` button (24 × 22 px, framed while hovered or open, the whole area clickable) lists the primitives, the file's types, and `list<…>`, `optional<…>`, `ref<…>` around the current type |
+| Type     | text, monospace, 150 px, `CHANNEL_R` while it does not parse or names an unknown type; its `chevron-down` button (24 × 22 px, framed while hovered or open, the whole area clickable) opens the [type menu](#type-menu) |
+| Optional | an **Optional** checkbox (off to start with): the field may hold `null` ([optional fields](../aschema.md#optional-fields)) |
 | Default  | a **Default** checkbox, then, ticked, the default's value editor (see [Defaults](#defaults)); unticked, nothing |
 | (problems) | the [problem icon](#problems), right-aligned, when the field has problems |
 | (remove) | `x`: removes the field |
@@ -130,7 +131,24 @@ use:
   [conditions](../aschema.md#24-conditions-show_if--hide_if)), every field.
 
 **Add field** (`plus` and text, in each section) appends `field` (`field2`,
-…) of type `string`, without a default, to that section.
+…) of type `string`, not optional, without a default, to that section.
+
+#### Type menu
+
+The Type's `chevron-down` button opens a menu of submenus; picking an item
+sets the field's type (the text field stays editable for anything else):
+
+| Submenu   | Items |
+|-----------|-------|
+| Value     | `bool`, `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `f32`, `f64`, `string` |
+| Color     | `rgb`, `rgba`, `gradient` |
+| Curve     | `curve` |
+| Struct    | the file's structs, in the Types tab's order (disabled when there are none) |
+| Enum      | the file's enums, likewise |
+| Reference | disabled, empty: picking `ref<…>` types comes later |
+| List      | the Value, Color, Curve, Struct and Enum submenus again (and Reference, disabled); an item `T` there sets `list<T>` |
+
+The current type is marked with a `check` in its submenu.
 
 ### Enum
 
@@ -160,7 +178,7 @@ in the type's data encoding:
   does: the [curve editor](curves.md#curve-editor) (320 px wide) or the
   [gradient editor](gradients.md#gradient-editor) (320 px wide); clicking
   outside or `Escape` closes it.
-- Anything else (structs, lists, optionals, refs): JSON text.
+- Anything else (structs, lists, refs): JSON text.
 
 A default that does not encode as the type is kept as typed and reported as
 a problem.
@@ -176,7 +194,7 @@ tangents and a playhead.
 Every schema error of [§5](../aschema.md#5-validation) is checked whenever
 the file changes: names (identifiers, no `$`, no shadowing of primitives or
 generics, unique), enum `values` (non-empty, unique), type expressions (parse, known names, `ref<T>` only of structs, no
-`optional<optional<T>>`), direct embedding recursion, defaults that do not
+`optional<…>`), a non-boolean `optional`, direct embedding recursion, defaults that do not
 encode as their type, `min` / `max` / `step` on non-numeric fields,
 conditions naming no sibling or ordering against a non-number, and widgets
 on types they do not fit. Each problem has a path (`Weapon/damage`) and a

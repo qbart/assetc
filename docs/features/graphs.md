@@ -77,7 +77,7 @@ choices), on `BG_CENTER`:
   `TEXT_WEAK` (`ACCENT` when chosen) at 64 px per unit (scaled, at least
   8 px, hidden under 6 px), on a `BG_CENTER` backdrop.
 - A weak hint in the bottom-left corner: `Double-click to add a node ·
-  double-click a node to rename · drag a node's rim onto a node to connect ·
+  double-click a node or edge to rename · drag a node's rim onto a node to connect ·
   Delete or X removes · Shift snaps to 0.25`.
 
 Interactions (left button unless said):
@@ -116,6 +116,9 @@ Interactions (left button unless said):
   field (at least 120 px wide, the node's width when wider) over the node,
   focused, holding the label. **`Enter`** or clicking elsewhere keeps the
   text, **`Escape`** drops it.
+- **Double-click an edge** (within 7 px of its curve) chooses it and edits
+  its label the same way: a 120 px text field centered on the middle of
+  its curve.
 - **`Delete`** or **`X`** removes the chosen node (with its edges) or edge,
   while the canvas has the keys (the last mouse press landed in it, see
   [file operations](file-operations.md#keybindings)) and no text field is
