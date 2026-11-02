@@ -337,7 +337,19 @@ pub(super) fn curve_editor(
         .area
         .is_some_and(|area| ui.rect_contains_pointer(area));
     if hovered && !ui.ctx().egui_wants_keyboard_input() {
-        let pressed = |key: egui::Key| ui.input(|i| i.key_pressed(key));
+        // Presses this frame, repeats included; quick presses can share a frame.
+        let presses = |key: egui::Key| {
+            ui.input(|i| {
+                i.events
+                    .iter()
+                    .filter(|e| {
+                        matches!(e, egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                            if *k == key && modifiers.is_none())
+                    })
+                    .count()
+            })
+        };
+        let pressed = |key: egui::Key| presses(key) > 0;
         let n = points.len();
         if pressed(egui::Key::Space) {
             settings.playing = !settings.playing;
@@ -390,25 +402,24 @@ pub(super) fn curve_editor(
                         (egui::Key::ArrowDown, 0.0, -1.0),
                     ];
                     for (key, dx, dy) in arrows {
-                        if !pressed(key) {
-                            continue;
-                        }
-                        if settings.rotate {
-                            // Up / left: counter-clockwise.
-                            let turn = if dx < 0.0 || dy > 0.0 { 1.0 } else { -1.0 };
-                            let out = !(split && state.active_in);
-                            let p = points[k];
-                            let slope =
-                                rotate(p[if out { 3 } else { 2 }], turn * settings.angle_step);
-                            set_slope(&mut points[k], slope, out, split);
-                        } else {
-                            let p = points[k];
-                            move_point(
-                                &mut points,
-                                k,
-                                p[0] + dx * settings.x_step,
-                                p[1] + dy * settings.y_step,
-                            );
+                        for _ in 0..presses(key) {
+                            if settings.rotate {
+                                // Up / left: counter-clockwise.
+                                let turn = if dx < 0.0 || dy > 0.0 { 1.0 } else { -1.0 };
+                                let out = !(split && state.active_in);
+                                let p = points[k];
+                                let slope =
+                                    rotate(p[if out { 3 } else { 2 }], turn * settings.angle_step);
+                                set_slope(&mut points[k], slope, out, split);
+                            } else {
+                                let p = points[k];
+                                move_point(
+                                    &mut points,
+                                    k,
+                                    p[0] + dx * settings.x_step,
+                                    p[1] + dy * settings.y_step,
+                                );
+                            }
                         }
                     }
                 }
@@ -537,33 +548,31 @@ pub(super) fn curve_editor(
     if let Some(k) = state.point {
         let split = is_split(state, &points, k);
         let p = points[k];
-        let slope = |v: f32, active: bool| {
-            if rotating && active {
-                format!("[{v:.3}]")
-            } else {
-                format!("{v:.3}")
-            }
-        };
-        let both = !split;
-        let mut text = format!(
-            "point {} of {}  x {:.3}  y {:.3}  in {}  out {}",
-            k + 1,
-            points.len(),
-            p[0],
-            p[1],
-            slope(p[2], both || state.active_in),
-            slope(p[3], both || !state.active_in),
-        );
+        // The slopes rotating: both when joined, else the active one.
+        let active = |is_in: bool| rotating && (!split || state.active_in == is_in);
+        let mut text = format!("point {} of {}", k + 1, points.len());
         if split {
-            text.push_str("  split");
+            text.push_str(" · split");
         }
-        ui.label(RichText::new(text).monospace().size(12.0).color(TEXT_WEAK));
+        if rotating {
+            text.push_str(match (split, state.active_in) {
+                (false, _) => " · rotating both",
+                (true, true) => " · rotating in",
+                (true, false) => " · rotating out",
+            });
+        }
+        ui.label(RichText::new(text).size(12.0).color(TEXT_WEAK));
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
             let left = if k > 0 { points[k - 1][0] } else { 0.0 };
             let right = points.get(k + 1).map_or(1.0, |p| p[0]);
             for (i, label) in ["X", "Y", "In", "Out"].into_iter().enumerate() {
-                ui.label(RichText::new(label).color(TEXT_WEAK));
+                let color = if i >= 2 && active(i == 2) {
+                    ACCENT
+                } else {
+                    TEXT_WEAK
+                };
+                ui.label(RichText::new(label).color(color));
                 let mut field = egui::DragValue::new(&mut points[k][i])
                     .speed(0.01)
                     .fixed_decimals(3);
