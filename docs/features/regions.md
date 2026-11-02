@@ -77,7 +77,8 @@ Input tree. It works like the [Locators tab](locators.md#locators-tab):
 
 While the toolbar's [Show](models.md#show) **Regions** is on (and the
 model has regions), the model is drawn in its regions' colors instead of its
-materials, following the pose and animation:
+materials, following the pose and animation (except while a
+[vertex color set](vertex-colors.md#3d-view) is shown):
 
 - Each triangle is flat shaded (its own normal, lit like the model) in the
   color of the last visible region in the list that covers it, or gray

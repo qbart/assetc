@@ -53,11 +53,12 @@ On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)
 | Left click on a locator                | Choose it (unfolds its card)                 |
 | Left click elsewhere (no drag)         | Choose none; while placing, add a locator where the model is hit |
 | Left drag on a gizmo handle            | Move / rotate the chosen locator (not while an animation plays) |
-| `W`                                    | Gizmo: Move (again: off); with the Paths tab, on the chosen path point |
-| `E`                                    | Gizmo: Rotate (again: off); nothing with the Paths tab |
+| `W`                                    | Gizmo: Move (again: off); with the Paths tab, on the chosen path point; with the Vertex colors tab, on the chosen gradient end |
+| `E`                                    | Gizmo: Rotate (again: off); nothing with the Paths or Vertex colors tab |
 | `S`                                    | Arm Place on surface                         |
 | `Escape`                               | Gizmo off, disarm Place on surface, stop painting or erasing, stop drawing path points |
 | Left click on a path point             | Choose that path and point (unfolds its card) |
+| Left click on a gradient end           | Choose that end (From or To) of the chosen color set |
 
 While a region paints (see [`docs/features/regions.md`](docs/features/regions.md#painting)):
 

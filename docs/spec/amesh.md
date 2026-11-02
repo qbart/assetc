@@ -331,7 +331,8 @@ Per-vertex colors, see
 `COLORSET` holds one record per set; `COLORS` holds the sets' colors one
 set after another, each `vertex_count` entries long and parallel to
 `VERTICES`: the color of vertex `v` in set `s` is the 4 bytes at
-`(s × vertex_count + v) × 4`. Find a set by `name_hash`.
+`(s × vertex_count + v) × 4`. Find a set by `name_hash`. glTF sets come
+first (in order of `n`), then authored ones.
 
 ### ColorSet (32 bytes)
 
@@ -341,7 +342,7 @@ set after another, each `vertex_count` entries long and parallel to
 |      8 |    4 | `name_offset` | u32, in `STRINGS`                                     |
 |     12 |    4 | `name_len`    | u32                                                   |
 |     16 |    4 | `format`      | u32: `0` RGBA8 (4 × u8, unsigned normalized, linear; `R8G8B8A8_UNORM`) |
-|     20 |    4 | `source`      | u32: `0` the glTF's `COLOR_n` attribute               |
+|     20 |    4 | `source`      | u32: `0` the glTF's `COLOR_n` attribute, `1` authored in assetc (a solid color or gradient, see [Authored sets](../features/vertex-colors.md#authored-sets)) |
 |     24 |    8 | `reserved`    | `0`                                                   |
 
 Readers skip sets whose `format` they do not know; every format's entries

@@ -120,6 +120,35 @@ One table per path:
 Fewer than 2 points (3 when closed) are allowed in the sidecar while
 editing; the build fails for such a path.
 
+## `[color_names]`
+
+For glTF models; see
+[`docs/features/vertex-colors.md`](../features/vertex-colors.md#renaming).
+New names of the model's glTF color sets: each key is an attribute
+(`COLOR_0`, `COLOR_1`, …), its value (a non-empty string) the set's name.
+
+```toml
+[color_names]
+COLOR_0 = "tint"
+```
+
+## `[[colors]]`
+
+For glTF models; see
+[`docs/features/vertex-colors.md`](../features/vertex-colors.md#authored-sets).
+One table per authored color set:
+
+| Key     | Type                     | Default    | Meaning |
+|---------|--------------------------|------------|---------|
+| `name`  | string                   | (required) | non-empty, unique among the file's color sets |
+| `fill`  | string                   | `"linear"` | `"solid"`, `"linear"` or `"radial"` |
+| `color` | string                   | `"#ffffff"` | solid: `#rrggbb` or `#rrggbbaa`, sRGB |
+| `from`  | array of 3 floats        | `[0, 0, 0]` | linear and radial: start (linear) or center (radial), model space |
+| `to`    | array of 3 floats        | `[0, 1, 0]` | linear and radial: end (linear) or a point on the edge (radial), model space |
+| `stops` | array of tables          | black at 0 to white at 1 | linear and radial: at least two `{ at = <0–1>, color = "#rrggbb[aa]" }`, as in [`.gradient` files](gradient.md) |
+
+Keys a fill does not use are ignored when read.
+
 ## `[[modifiers]]`
 
 For images (`*.png`, `*.jpg`, `*.jpeg`, `*.tga`); see
@@ -144,7 +173,10 @@ table (`name`, `tags` when there are any, `color`, `materials`,
 `submeshes` and `triangles` when there are any), then each path as a
 `[[paths]]` table (`name`, `kind` when not empty, `joint` when set,
 `points`, one point per line, `closed`, `tension`, `alpha`, `color` when
-set, then its `[paths.properties]` when it has any), then
+set, then its `[paths.properties]` when it has any), then `[color_names]`
+(sorted by attribute) when there are any, then each authored color set as a
+`[[colors]]` table (`name`, `fill`, then `color` for a solid set or `from`,
+`to` and `stops`, one stop per line, ordered by `at`, for a gradient), then
 each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
 parameter, as `.noise` files write them), each table preceded by a blank line
 except the first:
@@ -201,6 +233,19 @@ alpha = 0.5
 
 [paths.properties]
 stiffness = 0.8
+
+[color_names]
+COLOR_0 = "tint"
+
+[[colors]]
+name = "height"
+fill = "linear"
+from = [0.0, 0.0, 0.0]
+to = [0.0, 1.8, 0.0]
+stops = [
+    { at = 0.0, color = "#1e3a8a" },
+    { at = 1.0, color = "#fde68a" },
+]
 
 [[modifiers]]
 type = "levels"
