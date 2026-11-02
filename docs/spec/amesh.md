@@ -355,7 +355,8 @@ are 4 bytes in this version.
 ## UV sets
 
 Extra texture coordinates, for [color sets exported as Texture + UV
-buffer](../features/vertex-colors.md#export). `UVSET` holds one record per
+buffer or Both](../features/vertex-colors.md#export) (a set exported as Both
+is in `COLORSET` too). `UVSET` holds one record per
 set; `UVS` holds the sets' coordinates one set after another, each
 `vertex_count` entries long and parallel to `VERTICES`: vertex `v` of set
 `s` is the 8 bytes at `(s × vertex_count + v) × 8`. Sets are in the color

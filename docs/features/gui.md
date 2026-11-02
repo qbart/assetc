@@ -276,7 +276,10 @@ share one look:
 Colors live as constants in `src/theme.rs`.
 
 Dark theme, flat panels separated by 1 px lines, single accent color for
-selection and active elements.
+selection and active elements. Text on an `ACCENT` fill (a selected item in
+a dropdown or list, selected text in a text field, a pressed button) is
+`BG_BAR`, dark, for contrast; a focused text field is marked by its caret
+(no outline).
 
 | Token          | Color     | Used for                              |
 |----------------|-----------|---------------------------------------|

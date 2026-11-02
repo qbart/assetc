@@ -74,7 +74,7 @@ pose).
 | From   | Linear and Radial: a point in model space. Linear: where the gradient starts; Radial: its center. |
 | To     | Linear and Radial: a point in model space. Linear: where the gradient ends; Radial: a point on its edge, so the radius is the distance from From. |
 | Stops  | Linear and Radial: the gradient, as the [gradient editor](gradients.md#gradient-editor) edits it: at least two stops, each a position 0–1 and an sRGB color with alpha. |
-| Export | Linear and Radial: **Color buffer** (to start with) or **Texture + UV buffer**, see [Export](#export). |
+| Export | Linear and Radial: **Color buffer** (to start with), **Texture + UV buffer** or **Both**, see [Export](#export). |
 
 Each vertex at `p` gets position `t` along the gradient:
 
@@ -141,6 +141,8 @@ How a written set reaches the game:
 
   A set exported this way and then blended with (another set's base) is
   not written either way.
+- **Both**: for the same sets as Texture + UV buffer, the colors **and**
+  the texture with its UV set, so a game can use either.
 
 
 
@@ -196,10 +198,10 @@ icon) is shown for a model in the Input tree:
     - **Swap** (button): From and To trade places.
     - The [gradient editor](gradients.md#gradient-editor) (bar, handles and
       the selected stop's color picker).
-    - **Export**: dropdown **Color buffer** / **Texture + UV buffer**
-      ([Export](#export)); disabled at Color buffer while the set blends
-      with another (hover: `Texture + UV buffer needs a set that does not
-      blend`).
+    - **Export**: dropdown **Color buffer** / **Texture + UV buffer** /
+      **Both** ([Export](#export)); disabled at Color buffer while the set
+      blends with another (hover: `Texture + UV buffer needs a set that does
+      not blend`).
 - Deleting a set clears the blends that used it.
 - Edits are saved like the locators'.
 
@@ -238,8 +240,8 @@ by several nodes (the build computes each instance's own).
 - Bases are not written; every other set is, in order.
 - Each set's `COLORSET` record says where it came from in `source`: `0`
   glTF (unblended), `1` assetc (authored, or blended).
-- A set exported as Texture + UV buffer that is Solid, a glTF set, or
-  blends with another fails it: `<file>.amod: color set "<name>": Texture
+- A set exported as Texture + UV buffer (or Both) that is Solid, a glTF
+  set, or blends with another fails it: `<file>.amod: color set "<name>": Texture
   + UV buffer needs an unblended Linear or Radial set`. Its texture is
   built with the model's other textures.
 
