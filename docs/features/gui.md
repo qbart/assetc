@@ -90,7 +90,7 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | resvg                | drawing icons          | Apache-2.0 or MIT           | github.com/linebender/resvg |
 | gltf                 | reading models         | MIT or Apache-2.0           | github.com/gltf-rs/gltf |
 | meshoptimizer        | meshlets, levels of detail | MIT                     | meshoptimizer.org |
-| meshopt              | meshoptimizer bindings | MIT or Apache-2.0           | github.com/gwihlidal/meshopt-rs |
+| meshopt-pure         | meshoptimizer in Rust  | MIT                         | github.com/qbart/meshopt-pure |
 | image                | reading images         | MIT or Apache-2.0           | github.com/image-rs/image |
 | ttf-parser           | reading fonts          | MIT or Apache-2.0           | github.com/harfbuzz/ttf-parser |
 | ab_glyph             | font atlases           | Apache-2.0                  | github.com/alexheretic/ab-glyph |
