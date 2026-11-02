@@ -194,7 +194,7 @@ in the type's data encoding:
   row (indented, in the same columns as a struct's fields) one 28 px row per
   item: a drag handle (moves the item within the list), the index (`[0]`,
   monospace, 140 px, under Name), `T` (monospace, `TEXT_WEAK`, 180 px), the
-  item's editor (as above: a struct item's fields and a list item's items
+  item's editor (200 px, so the Remove buttons line up; as above: a struct item's fields and a list item's items
   under its row) and **Remove** (`x`). Then **Add item** (`plus` and text),
   appending `T`'s implicit default.
 - Refs, and values that do not have their type's JSON shape (a list default
