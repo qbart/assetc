@@ -276,7 +276,7 @@ The **Chunks** view shows the data inside the `.amesh`
   | `LODIDX`   | LOD indices         | per triangle: i0, i1, i2                              |
   | `LODTABLE` | LOD table           | Submesh, Level, First index, Index count (the header's counts in the header line) |
   | `SKIN`     | Skin weights        | Joints, Weights                                       |
-  | `COLORSETS`| Color sets          | Name, Hash, Format (`RGBA8`), Source (`glTF`)          |
+  | `COLORSET`| Color sets          | Name, Hash, Format (`RGBA8`), Source (`glTF`)          |
   | `COLORS`   | Vertex colors       | per vertex: one column per set, `r, g, b, a` (0–255)   |
   | `SKELETON` | Skeleton            | Parent (or `—`), Translation, Rotation, Scale          |
   | `LOCATORS` | Locators            | Name, Hash (`0x` + 16 hex digits), Joint (or `—`), Translation, Rotation, Scale, Tags (joined with `, `) |

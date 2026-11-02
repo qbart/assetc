@@ -30,7 +30,7 @@ width are in `DESC`.
 | `LOCATORS` | no       | [`Locator`](#locator-64-bytes)`[]` (payload size / 64), see [Locators](#locators) |
 | `LOCNAMES` | no       | `u8[]`: the locators' names and tags, UTF-8, back to back         |
 | `LOCTAGS`  | no       | [`LocatorTag`](#locatortag-16-bytes)`[]` (payload size / 16), the locators' tags |
-| `COLORSETS`| no       | [`ColorSet`](#colorset-32-bytes)`[set_count]`, see [Color sets](#color-sets) |
+| `COLORSET` | no       | [`ColorSet`](#colorset-32-bytes)`[set_count]`, see [Color sets](#color-sets) |
 | `COLORS`   | no       | `u8[4][set_count × vertex_count]`: every set's colors, set after set |
 | `STRINGS`  | no       | `u8[]`: UTF-8 text of color sets, properties, shapes, regions and paths, back to back, see [Strings](#strings) |
 | `PROPS`    | no       | [`Property`](#property-32-bytes)`[]`: the model's properties, sorted by key |
@@ -48,7 +48,7 @@ width are in `DESC`.
 assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
 together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
 `LOCATORS` and `LOCNAMES` (only for models with locators); `LOCTAGS`
-follows them when a locator has tags. `COLORSETS` and `COLORS` come
+follows them when a locator has tags. `COLORSET` and `COLORS` come
 together, when the mesh has color sets. `STRINGS` comes when color sets,
 properties, shapes, regions or paths do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
 and `SHAPEPRP` (with shapes; `SHAPEPTS` only with a hull, `SHAPEPRP` only
@@ -328,7 +328,7 @@ regions.
 
 Per-vertex colors, see
 [`docs/features/vertex-colors.md`](../features/vertex-colors.md).
-`COLORSETS` holds one record per set; `COLORS` holds the sets' colors one
+`COLORSET` holds one record per set; `COLORS` holds the sets' colors one
 set after another, each `vertex_count` entries long and parallel to
 `VERTICES`: the color of vertex `v` in set `s` is the 4 bytes at
 `(s × vertex_count + v) × 4`. Find a set by `name_hash`.

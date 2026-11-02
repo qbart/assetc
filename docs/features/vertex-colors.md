@@ -35,7 +35,7 @@ the same chunks.
   or `none`.
 - A compiled mesh: a **Color sets** row after Skin: the set names, or
   `none`.
-- The [Chunks view](models.md#chunks-view) shows `COLORSETS` and `COLORS`.
+- The [Chunks view](models.md#chunks-view) shows `COLORSET` and `COLORS`.
 
 ## Previews
 
