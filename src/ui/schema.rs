@@ -642,9 +642,9 @@ fn field_rows(
                     );
                 }
                 // A struct default's fields, under the row.
-                if let Some((si, _)) = struct_of(snapshot, ty.as_ref())
-                    && let Body::Struct { fields, .. } = &mut edit.edit.types[ti].body
-                    && let Some(default) = fields[fi].default.as_mut().filter(|d| d.is_object())
+                // A struct default's fields or a list default's items, under the row.
+                if let Body::Struct { fields, .. } = &mut edit.edit.types[ti].body
+                    && let Some(default) = fields[fi].default.as_mut()
                 {
                     let mut editors = ValueEditors {
                         picker: &mut edit.picker,
@@ -653,10 +653,16 @@ fn field_rows(
                         gradients: &mut edit.gradients,
                         ti,
                     };
-                    ui.indent("default_fields", |ui| {
-                        let mut shown = vec![ti];
-                        struct_value(ui, &mut editors, default, snapshot, si, &name, &mut shown);
-                    });
+                    let mut shown = vec![ti];
+                    nested_value(
+                        ui,
+                        &mut editors,
+                        default,
+                        snapshot,
+                        ty.as_ref(),
+                        &name,
+                        &mut shown,
+                    );
                 }
                 if open {
                     ui.indent("details", |ui| {
@@ -894,6 +900,16 @@ fn value_editor(
         ui.label(RichText::new(format!("{set} of {} set", fields.len())).color(TEXT_WEAK));
         return;
     }
+    if let (Some(Ty::List(_)), Some(items)) = (ty, default.as_array()) {
+        let n = items.len();
+        let text = if n == 1 {
+            "1 item".into()
+        } else {
+            format!("{n} items")
+        };
+        ui.label(RichText::new(text).color(TEXT_WEAK));
+        return;
+    }
     let key = (editors.ti, path.to_owned());
     match (ty, enum_values) {
         (_, Some(values)) => {
@@ -1008,22 +1024,11 @@ fn struct_value(
             ui.horizontal(|ui| {
                 ui.set_min_height(28.0);
                 ui.spacing_mut().item_spacing.x = 6.0;
-                let cell = |ui: &mut Ui, text: &str, width: f32, color| {
-                    ui.allocate_ui_with_layout(
-                        vec2(width, 22.0),
-                        Layout::left_to_right(Align::Center),
-                        |ui| {
-                            ui.set_min_width(width);
-                            let text = RichText::new(text).monospace().color(color);
-                            ui.add(egui::Label::new(text).truncate());
-                        },
-                    );
-                };
                 // Under the field row's grip and settings icon, name and type (and its
                 // menu button).
                 ui.add_space(42.0);
-                cell(ui, &f.name, NAME_W, TEXT);
-                cell(ui, &f.ty, TYPE_W + 30.0, TEXT_WEAK);
+                text_cell(ui, &f.name, NAME_W, TEXT);
+                text_cell(ui, &f.ty, TYPE_W + 30.0, TEXT_WEAK);
                 let mut set = object.contains_key(&f.name);
                 if ui.checkbox(&mut set, "Set").changed() {
                     if set {
@@ -1046,18 +1051,121 @@ fn struct_value(
                     }
                 }
             });
-            if let Some((inner, _)) = struct_of(schema, ty.as_ref())
-                && !shown.contains(&inner)
-                && let Some(v) = object.get_mut(&f.name)
-                && v.is_object()
-            {
-                ui.indent("fields", |ui| {
-                    struct_value(ui, editors, v, schema, inner, &path, shown);
-                });
+            if let Some(v) = object.get_mut(&f.name) {
+                nested_value(ui, editors, v, schema, ty.as_ref(), &path, shown);
             }
         });
     }
     shown.pop();
+}
+
+/// Monospace text in a fixed-width cell, cut to fit.
+fn text_cell(ui: &mut Ui, text: &str, width: f32, color: egui::Color32) {
+    ui.allocate_ui_with_layout(
+        vec2(width, 22.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            let text = RichText::new(text).monospace().color(color);
+            ui.add(egui::Label::new(text).truncate());
+        },
+    );
+}
+
+/// What a value shows under its row, indented: a struct's fields (unless that struct is
+/// already shown around it) or a list's items.
+fn nested_value(
+    ui: &mut Ui,
+    editors: &mut ValueEditors,
+    value: &mut Value,
+    schema: &Schema,
+    ty: Option<&Ty>,
+    path: &str,
+    shown: &mut Vec<usize>,
+) {
+    match (ty, struct_of(schema, ty)) {
+        (_, Some((si, _))) if value.is_object() && !shown.contains(&si) => {
+            ui.indent("fields", |ui| {
+                struct_value(ui, editors, value, schema, si, path, shown);
+            });
+        }
+        (Some(Ty::List(item)), _) if value.is_array() => {
+            ui.indent("items", |ui| {
+                list_value(ui, editors, value, schema, item, path, shown);
+            });
+        }
+        _ => {}
+    }
+}
+
+/// The items of a list value: one row each (drag handle, index, item type, editor,
+/// remove), nested values under their rows, then Add item. See
+/// docs/features/schemas.md#defaults.
+fn list_value(
+    ui: &mut Ui,
+    editors: &mut ValueEditors,
+    value: &mut Value,
+    schema: &Schema,
+    item: &Ty,
+    path: &str,
+    shown: &mut Vec<usize>,
+) {
+    let Some(items) = value.as_array_mut() else {
+        return;
+    };
+    let item_text = item.to_string();
+    // A struct around this one again: an embedding loop, its items edited as text.
+    let looped = struct_of(schema, Some(item)).is_some_and(|(si, _)| shown.contains(&si));
+    let dragging = Cell::new(None);
+    let dropped = Cell::new(None);
+    let mut remove = None;
+    let mut rects = Vec::new();
+    for (i, v) in items.iter_mut().enumerate() {
+        let path = format!("{path}/{i}");
+        let row = ui.push_id(&path, |ui| {
+            let row = ui
+                .horizontal(|ui| {
+                    ui.set_min_height(28.0);
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.add_space(12.0);
+                    let grip = drag_handle(ui);
+                    if grip.dragged() {
+                        dragging.set(Some(i));
+                    }
+                    if grip.drag_stopped() {
+                        dropped.set(Some(i));
+                    }
+                    text_cell(ui, &format!("[{i}]"), NAME_W, TEXT);
+                    text_cell(ui, &item_text, TYPE_W + 30.0, TEXT_WEAK);
+                    let ty = (!looped).then_some(item);
+                    value_editor(ui, editors, v, schema, ty, &path);
+                    if icon_button(ui, Icon::X, "Remove item", true).clicked() {
+                        remove = Some(i);
+                    }
+                })
+                .response
+                .rect;
+            if !looped {
+                nested_value(ui, editors, v, schema, Some(item), &path, shown);
+            }
+            row
+        });
+        rects.push(row.inner);
+    }
+    if let Some((from, to)) = card_reorder(ui, &rects, dragging.get(), dropped.get()) {
+        let v = items.remove(from);
+        items.insert(to, v);
+    }
+    if let Some(i) = remove {
+        items.remove(i);
+    }
+    ui.horizontal(|ui| {
+        ui.add_space(42.0);
+        let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add item");
+        if ui.add(add).clicked() {
+            items.push(aschema::implicit_value(schema, item));
+        }
+    });
 }
 
 /// A gradient default in the gradient editor.
