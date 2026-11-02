@@ -164,10 +164,10 @@ The icon follows the entry's type, by extension (any case):
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `noise`                      | `image-play`              |
 | gradient: `gradient`                          | `swatch-book`             |
-| schema: `aschema`                             | `braces`                  |
-| directed graph: `agraph`                      | `graph-star`              |
-| data: `adata`                                 | `package`                 |
-| tree: `atree`                                 | `list-tree`               |
+| schema: `aschema`, `atype`                    | `braces`                  |
+| directed graph: `agraph`, `agph`              | `graph-star`              |
+| data: `adata`, `arec`                         | `package`                 |
+| tree: `atree`, `atre`                         | `list-tree`               |
 | palette: `palette`                            | `palette`                 |
 | mesh: `gltf`, `glb`, `obj`, `amesh`          | `torus`                   |
 | animation: `aanim`                            | `film`                    |
