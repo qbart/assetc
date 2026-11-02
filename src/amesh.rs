@@ -1,7 +1,7 @@
 //! `.amesh` meshes: submeshes with meshlets, bounds, levels of detail and skin; see
 //! docs/spec/amesh.md.
 
-use meshopt::{SimplifyOptions, VertexDataAdapter};
+use meshoptimizer::Meshlet;
 
 use serde::Deserialize;
 
@@ -127,19 +127,16 @@ impl MeshOptions {
         Ok(self)
     }
 
-    fn simplify_options(&self) -> SimplifyOptions {
-        let mut options = SimplifyOptions::None;
-        for (on, flag) in [
-            (self.lod_permissive, SimplifyOptions::Permissive),
-            (self.lod_lock_border, SimplifyOptions::LockBorder),
-            (self.lod_regularize, SimplifyOptions::Regularize),
-            (self.lod_prune, SimplifyOptions::Prune),
-        ] {
-            if on {
-                options |= flag;
-            }
-        }
-        options
+    fn simplify_options(&self) -> u32 {
+        [
+            (self.lod_permissive, meshoptimizer::SIMPLIFY_PERMISSIVE),
+            (self.lod_lock_border, meshoptimizer::SIMPLIFY_LOCK_BORDER),
+            (self.lod_regularize, meshoptimizer::SIMPLIFY_REGULARIZE),
+            (self.lod_prune, meshoptimizer::SIMPLIFY_PRUNE),
+        ]
+        .into_iter()
+        .filter(|(on, _)| *on)
+        .fold(0, |options, (_, flag)| options | flag)
     }
 }
 
@@ -365,42 +362,81 @@ pub fn encode(
 
     for primitive in primitives.iter().filter(|p| !p.indices.is_empty()) {
         submesh_count += 1;
-        let local = meshopt::optimize_vertex_cache(&primitive.indices, primitive.vertices.len());
-        let positions: Vec<u8> = primitive
-            .vertices
-            .iter()
-            .flat_map(|v| v.position.iter().flat_map(|c| c.to_le_bytes()))
-            .collect();
-        let adapter = VertexDataAdapter::new(&positions, 12, 0).expect("positions");
+        let vertex_count = primitive.vertices.len();
+        let index_count = primitive.indices.len();
+        let mut local = vec![0u32; index_count];
+        meshoptimizer::optimize_vertex_cache(
+            &mut local,
+            &primitive.indices,
+            index_count,
+            vertex_count,
+        )
+        .expect("vertex cache");
+        let positions: Vec<f32> = primitive.vertices.iter().flat_map(|v| v.position).collect();
         let base = vertices.len() as u32;
         let first_index = indices.len() as u32;
         let first_meshlet = meshlet_count;
 
-        let built = meshopt::build_meshlets(
+        // Meshlets, each then reordered for locality; see docs/spec/assetc.toml.md#meshes.
+        let bound = meshoptimizer::build_meshlets_bound(index_count, max_vertices, max_triangles)
+            .expect("meshlet limits");
+        let mut built = vec![Meshlet::default(); bound];
+        let mut built_vertices = vec![0u32; index_count];
+        let mut built_triangles = vec![0u8; index_count];
+        let count = meshoptimizer::build_meshlets(
+            &mut built,
+            &mut built_vertices,
+            &mut built_triangles,
             &local,
-            &adapter,
+            index_count,
+            &positions,
+            vertex_count,
+            12,
             max_vertices,
             max_triangles,
             options.meshlet_cone_weight as f32,
-        );
-        for meshlet in built.iter() {
-            let triangle_count = meshlet.triangles.len() / 3;
+        )
+        .expect("meshlets");
+        for meshlet in &built[..count] {
+            let (vertex_count_m, triangle_count) = (
+                meshlet.vertex_count as usize,
+                meshlet.triangle_count as usize,
+            );
+            let at = meshlet.vertex_offset as usize;
+            let own_vertices = &mut built_vertices[at..at + vertex_count_m];
+            let at = meshlet.triangle_offset as usize;
+            let own_triangles = &mut built_triangles[at..at + triangle_count * 3];
+            meshoptimizer::optimize_meshlet(
+                own_vertices,
+                own_triangles,
+                triangle_count,
+                vertex_count_m,
+            )
+            .expect("meshlet order");
             meshlets
                 .u32(meshlet_vertex_count)
-                .u32(meshlet.vertices.len() as u32)
+                .u32(vertex_count_m as u32)
                 .u32(meshlet_triangle_count)
                 .u32(triangle_count as u32);
-            for v in meshlet.vertices {
+            for v in own_vertices.iter() {
                 meshlet_vertices.u32(v + base);
             }
-            meshlet_triangles.0.extend_from_slice(meshlet.triangles);
-            let b = meshopt::compute_meshlet_bounds(meshlet, &adapter);
+            meshlet_triangles.0.extend_from_slice(own_triangles);
+            let b = meshoptimizer::compute_meshlet_bounds(
+                own_vertices,
+                own_triangles,
+                triangle_count,
+                &positions,
+                vertex_count,
+                12,
+            )
+            .expect("meshlet bounds");
             meshlet_bounds
                 .f32s(&b.center)
                 .f32s(&[b.radius])
                 .f32s(&b.cone_axis)
                 .f32s(&[b.cone_cutoff]);
-            meshlet_vertex_count += meshlet.vertices.len() as u32;
+            meshlet_vertex_count += vertex_count_m as u32;
             meshlet_triangle_count += triangle_count as u32;
             meshlet_count += 1;
         }
@@ -413,33 +449,52 @@ pub fn encode(
             .iter()
             .flat_map(|v| [v.uv[0], v.uv[1], v.normal[0], v.normal[1], v.normal[2]])
             .collect();
-        let unlocked = vec![false; primitive.vertices.len()];
         let mut previous = local.len();
         for &ratio in &options.lod_ratios {
             let target = ((local.len() as f64 * ratio / 3.0).round() as usize * 3).max(3);
             let mut error = options.lod_error as f32;
-            let mut level = Vec::new();
+            let mut level = vec![0u32; index_count];
+            let mut level_count = 0;
             for _ in 0..=options.lod_attempts {
-                level = meshopt::simplify_with_attributes_and_locks(
+                level_count = meshoptimizer::simplify_with_attributes(
+                    &mut level,
                     &local,
-                    &adapter,
+                    index_count,
+                    &positions,
+                    vertex_count,
+                    12,
                     &attributes,
-                    &weights,
                     5 * 4,
-                    &unlocked,
+                    &weights,
+                    5,
+                    None,
                     target,
                     error,
                     simplify_options,
                     None,
-                );
-                if level.len() < previous {
+                )
+                .expect("simplify");
+                if level_count < previous {
                     break;
                 }
                 error += options.lod_error_step as f32;
             }
-            if level.len() >= previous && options.lod_sloppy_fallback {
-                level = meshopt::simplify_sloppy(&local, &adapter, target, 1.0, None);
+            if level_count >= previous && options.lod_sloppy_fallback {
+                level_count = meshoptimizer::simplify_sloppy(
+                    &mut level,
+                    &local,
+                    index_count,
+                    &positions,
+                    vertex_count,
+                    12,
+                    None,
+                    target,
+                    1.0,
+                    None,
+                )
+                .expect("simplify sloppy");
             }
+            level.truncate(level_count);
             if level.is_empty() || level.len() >= previous {
                 lod_ranges.u32(lod_indices.len() as u32).u32(0);
                 continue;

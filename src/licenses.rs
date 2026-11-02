@@ -86,10 +86,10 @@ pub const PROJECTS: [Project; 21] = [
         "meshoptimizer.org",
     ),
     project(
-        "meshopt",
-        "meshoptimizer bindings",
-        "MIT or Apache-2.0",
-        "github.com/gwihlidal/meshopt-rs",
+        "meshopt-pure",
+        "meshoptimizer in Rust",
+        "MIT",
+        "github.com/qbart/meshopt-pure",
     ),
     project(
         "image",
