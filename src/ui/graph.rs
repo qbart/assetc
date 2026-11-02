@@ -25,6 +25,8 @@ const RIM: f32 = 8.0;
 const SPREAD: f32 = 0.2;
 const SPREAD_MAX: f32 = 0.4;
 const ARROW: f32 = 10.0;
+/// How near the pointer must be to an edge's start or tip to grab it, in points.
+const END: f32 = 8.0;
 
 /// What is chosen in a graph.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -62,6 +64,8 @@ enum GraphDrag {
     Move(usize, (f64, f64)),
     /// A rubber edge from a node's rim, and whether the pointer has left that node.
     Connect(usize, bool),
+    /// An edge's end detached: its tip (true) or its start.
+    Detach(usize, bool),
 }
 
 /// The canvas' view of a graph: the unit point at the canvas' center, and pixels per unit.
@@ -336,8 +340,46 @@ pub(super) fn canvas_graph(
             })
             .collect()
     };
+    // The edge from node `a` to node `b` as it would be added, the last of its ends; `skip`
+    // is an edge being moved, not counted.
+    let planned = |graph: &Graph, a: usize, b: usize, skip: Option<usize>| {
+        let (from, to) = (&graph.nodes[a].id, &graph.nodes[b].id);
+        let count = |f: &str, t: &str| {
+            graph
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(k, e)| Some(*k) != skip && e.from == f && e.to == t)
+                .count()
+        };
+        let link = if a == b {
+            Link::Loop(count(from, from))
+        } else {
+            let f = count(from, to);
+            Link::Across(spread(f, f + 1, count(to, from)))
+        };
+        edge_shape(
+            center(&graph.nodes[a]),
+            center(&graph.nodes[b]),
+            r,
+            link,
+            unit,
+        )
+    };
+    // The edge end nearest a point, within reach: its edge and whether it is the tip.
+    let end_at = |shapes: &[Option<EdgeShape>], p: egui::Pos2| {
+        shapes
+            .iter()
+            .enumerate()
+            .filter_map(|(k, shape)| Some((k, shape.as_ref()?)))
+            .flat_map(|(k, shape)| [(k, false, shape.line[0]), (k, true, shape.tip)])
+            .map(|(k, tip, at)| (k, tip, (at - p).length()))
+            .filter(|(_, _, d)| *d <= END)
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(k, tip, _)| (k, tip))
+    };
 
-    // Choose, move, connect, add, rename and remove.
+    // Choose, move, connect, detach, add, rename and remove.
     let graph = &mut edit.edit;
     if response.double_clicked()
         && let Some(p) = pointer
@@ -358,7 +400,10 @@ pub(super) fn canvas_graph(
         && response.hovered()
         && let Some(p) = pointer
     {
-        if let Some((i, d)) = node_at(&graph.nodes, p) {
+        if let Some((k, tip)) = end_at(&shapes(graph), p) {
+            edit.drag = Some(GraphDrag::Detach(k, tip));
+            edit.chosen = Some(Chosen::Edge(k));
+        } else if let Some((i, d)) = node_at(&graph.nodes, p) {
             edit.drag = Some(if d >= BODY * r {
                 GraphDrag::Connect(i, false)
             } else {
@@ -406,6 +451,29 @@ pub(super) fn canvas_graph(
                     let (from, to) = (graph.nodes[i].id.clone(), graph.nodes[j].id.clone());
                     graph.edges.push(Edge::new(from, to));
                     edit.chosen = Some(Chosen::Edge(graph.edges.len() - 1));
+                }
+                edit.drag = None;
+                target = None;
+            }
+        }
+        (Some(GraphDrag::Detach(k, tip)), Some(p)) if k < graph.edges.len() => {
+            target = node_at(&graph.nodes, p).map(|(j, _)| j);
+            if !down {
+                // Released on a node: that end attaches there; elsewhere the edge goes.
+                match target {
+                    Some(j) => {
+                        let id = graph.nodes[j].id.clone();
+                        let edge = &mut graph.edges[k];
+                        if tip {
+                            edge.to = id;
+                        } else {
+                            edge.from = id;
+                        }
+                    }
+                    None => {
+                        graph.edges.remove(k);
+                        edit.chosen = None;
+                    }
                 }
                 edit.drag = None;
                 target = None;
@@ -467,7 +535,14 @@ pub(super) fn canvas_graph(
         ));
         arrowhead(&painter, shape.tip, shape.dir, color);
     };
+    let detached = match edit.drag {
+        Some(GraphDrag::Detach(k, tip)) => Some((k, tip)),
+        _ => None,
+    };
     for (k, shape) in shapes.iter().enumerate() {
+        if detached.is_some_and(|(d, _)| d == k) {
+            continue;
+        }
         if let Some(shape) = shape {
             if edit.chosen == Some(Chosen::Edge(k)) {
                 draw_edge(shape, 2.5, ACCENT);
@@ -482,26 +557,7 @@ pub(super) fn canvas_graph(
         let c = center(n);
         match target {
             // The edge as it will be: the next of its ends.
-            Some(j) => {
-                let link = if j == i {
-                    let loops = graph
-                        .edges
-                        .iter()
-                        .filter(|e| e.from == n.id && e.to == n.id);
-                    Link::Loop(loops.count())
-                } else {
-                    let (from, to) = (n.id.clone(), graph.nodes[j].id.clone());
-                    let counts = counts(graph);
-                    let f = counts
-                        .get(&(from.clone(), to.clone()))
-                        .copied()
-                        .unwrap_or(0);
-                    let g = counts.get(&(to, from)).copied().unwrap_or(0);
-                    Link::Across(spread(f, f + 1, g))
-                };
-                let shape = edge_shape(c, center(&graph.nodes[j]), r, link, unit);
-                draw_edge(&shape, 2.5, ACCENT);
-            }
+            Some(j) => draw_edge(&planned(graph, i, j, None), 2.5, ACCENT),
             None if (p - c).length() > r => {
                 let dir = (p - c).normalized();
                 let color = ACCENT.gamma_multiply(0.6);
@@ -514,8 +570,49 @@ pub(super) fn canvas_graph(
             None => {}
         }
     }
+    // A detached edge: from its other end to the pointer, or as it will be on a target.
+    if let (Some((k, tip)), Some(p)) = (detached, pointer)
+        && let Some(e) = graph.edges.get(k)
+        && let Some(fixed) = graph.node_index(if tip { &e.from } else { &e.to })
+    {
+        let c = center(&graph.nodes[fixed]);
+        let color = ACCENT.gamma_multiply(0.6);
+        match (target, tip) {
+            (Some(j), true) => draw_edge(&planned(graph, fixed, j, Some(k)), 2.5, ACCENT),
+            (Some(j), false) => draw_edge(&planned(graph, j, fixed, Some(k)), 2.5, ACCENT),
+            (None, true) => {
+                let dir = (p - c).normalized();
+                painter.line_segment(
+                    [c + dir * r, p - dir * ARROW * 0.8],
+                    Stroke::new(1.5, color),
+                );
+                arrowhead(&painter, p, dir, color);
+            }
+            (None, false) => {
+                let dir = (c - p).normalized();
+                let end = c - dir * r;
+                painter.line_segment([p, end - dir * ARROW * 0.8], Stroke::new(1.5, color));
+                arrowhead(&painter, end, dir, color);
+            }
+        }
+    }
+    // An edge end under the pointer, grabbed before rims.
+    let hovered_end = match (edit.drag, pointer) {
+        (None, Some(p)) if response.hovered() => end_at(&shapes, p),
+        _ => None,
+    };
+    let end_dot = hovered_end.and_then(|(k, tip)| {
+        let shape = shapes[k].as_ref()?;
+        Some(if tip { shape.tip } else { shape.line[0] })
+    });
+    if end_dot.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    if detached.is_some() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    }
     let hovered_rim = match (edit.drag, pointer) {
-        (None, Some(p)) if response.hovered() => node_at(&graph.nodes, p)
+        (None, Some(p)) if response.hovered() && hovered_end.is_none() => node_at(&graph.nodes, p)
             .filter(|&(_, d)| d >= BODY * r)
             .map(|(i, _)| i),
         (Some(GraphDrag::Connect(i, _)), _) => Some(i),
@@ -557,6 +654,9 @@ pub(super) fn canvas_graph(
                 TEXT,
             );
         }
+    }
+    if let Some(at) = end_dot {
+        painter.circle_filled(at, 4.0, ACCENT);
     }
     let size = 12.0 * zoom;
     if size >= 6.0 {
