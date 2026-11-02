@@ -147,7 +147,7 @@ impl Default for LocatorTools {
             hidden: HashMap::new(),
             hidden_shapes: HashMap::new(),
             hidden_regions: HashMap::new(),
-            show: [true; 3],
+            show: [true, true, false],
             mirror_axis: 0,
             paint: false,
             paint_awaiting: false,
