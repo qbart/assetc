@@ -30,7 +30,7 @@ width are in `DESC`.
 | `LOCATORS` | no       | [`Locator`](#locator-64-bytes)`[]` (payload size / 64), see [Locators](#locators) |
 | `LOCNAMES` | no       | `u8[]`: the locators' names and tags, UTF-8, back to back         |
 | `LOCTAGS`  | no       | [`LocatorTag`](#locatortag-16-bytes)`[]` (payload size / 16), the locators' tags |
-| `STRINGS`  | no       | `u8[]`: UTF-8 text of properties, shapes and regions, back to back, see [Strings](#strings) |
+| `STRINGS`  | no       | `u8[]`: UTF-8 text of properties, shapes, regions and paths, back to back, see [Strings](#strings) |
 | `PROPS`    | no       | [`Property`](#property-32-bytes)`[]`: the model's properties, sorted by key |
 | `SHAPES`   | no       | [`Shape`](#shape-96-bytes)`[]`, see [Shapes](#shapes) |
 | `SHAPEPTS` | no       | `f32[3][]`: the hulls' points |
@@ -38,6 +38,10 @@ width are in `DESC`.
 | `REGIONS`  | no       | [`Region`](#region-32-bytes)`[]`, see [Regions](#regions) |
 | `REGTAGS`  | no       | [`Tag`](#tag-16-bytes)`[]`: the regions' tags |
 | `TRIREGN`  | no       | `u32[index_count / 3]`: per triangle of `INDICES`, its regions as bits |
+| `PATHS`    | no       | [`Path`](#path-80-bytes)`[]`, see [Paths](#paths) |
+| `PATHPTS`  | no       | `f32[3][]`: the paths' control points |
+| `PATHSMP`  | no       | [`PathSample`](#pathsample-32-bytes)`[]`: the paths' samples |
+| `PATHPRP`  | no       | [`Property`](#property-32-bytes)`[]`: the paths' properties |
 
 assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
 together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
@@ -46,7 +50,8 @@ follows them when a locator has tags. `STRINGS` comes when properties,
 shapes or regions do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
 and `SHAPEPRP` (with shapes; `SHAPEPTS` only with a hull, `SHAPEPRP` only
 when a shape has properties), `REGIONS`, `REGTAGS` (when a region has tags)
-and `TRIREGN` (with regions).
+and `TRIREGN` (with regions), `PATHS`, `PATHPTS`, `PATHSMP` and `PATHPRP`
+(with paths; `PATHPRP` only when a path has properties).
 
 ## MeshDesc (32 bytes)
 
@@ -233,7 +238,7 @@ sidecar lists them. A tag used by several locators appears once per locator.
 ## Strings
 
 `STRINGS` holds the text of properties (keys and Text values), shapes
-(names and kinds) and regions (names and tags), UTF-8, back to back, without
+(names and kinds), regions (names and tags) and paths (names and kinds), UTF-8, back to back, without
 terminators. Records point into it with a byte offset and length. Locators
 keep theirs in `LOCNAMES`.
 
@@ -249,8 +254,8 @@ keep theirs in `LOCNAMES`.
 
 Key / value pairs, see
 [`docs/features/properties.md`](../features/properties.md). `PROPS` holds the
-model's, sorted by key; `SHAPEPRP` the shapes', each shape's run sorted by
-key. Look one up by `key_hash`, the FNV-1a-64 of its UTF-8 key.
+model's, sorted by key; `SHAPEPRP` the shapes' and `PATHPRP` the paths',
+each one's run sorted by key. Look one up by `key_hash`, the FNV-1a-64 of its UTF-8 key.
 
 ### Property (32 bytes)
 
@@ -315,3 +320,61 @@ regions.
 |     18 |    2 | `tag_count`      | u16                                                      |
 |     20 |    4 | `triangle_count` | u32, triangles of `INDICES` in it                         |
 |     24 |    8 | `reserved`       | `0`                                                      |
+
+## Paths
+
+Curves, see [`docs/features/paths.md`](../features/paths.md#curve). `PATHS`
+holds one record per path in the sidecar's order. Points and samples are in
+the path's parent space: its joint (`joint ≥ 0`) or the mesh's own space,
+as for [locators](#locators).
+
+The curve is a cardinal spline through `PATHPTS`: segment `i` (from point
+`i` to point `i + 1`, or from the last to the first closing a loop) is the
+cubic Hermite curve `p₁ → p₂` with neighbors `p₀`, `p₃` (wrapping when
+closed; mirrored `2 p₀ − p₁` and `2 pₙ₋₁ − pₙ₋₂` past the ends when open)
+and tangents, with `dᵢⱼ = max(|pⱼ − pᵢ|^alpha, 1e-5)`:
+
+```
+m₁ = ((p₁ − p₀) / d₀₁ − (p₂ − p₀) / (d₀₁ + d₁₂) + (p₂ − p₁) / d₁₂) · d₁₂ · (1 − tension)
+m₂ = ((p₂ − p₁) / d₁₂ − (p₃ − p₁) / (d₁₂ + d₂₃) + (p₃ − p₂) / d₂₃) · d₁₂ · (1 − tension)
+```
+
+(matma's `cardinal`). The spline parameter `u` runs from `0` to the
+segment count; its integer part is the segment, its fraction the segment's
+`t`.
+
+### Path (80 bytes)
+
+| Offset | Size | Field            | Notes                                                    |
+|-------:|-----:|------------------|----------------------------------------------------------|
+|      0 |    8 | `name_hash`      | u64, FNV-1a-64 of the name                               |
+|      8 |    4 | `name_offset`    | u32, in `STRINGS`                                        |
+|     12 |    4 | `name_len`       | u32                                                      |
+|     16 |    8 | `kind_hash`      | u64, FNV-1a-64 of the kind (of the empty text when none) |
+|     24 |    4 | `kind_offset`    | u32, in `STRINGS`                                        |
+|     28 |    4 | `kind_len`       | u32, `0` when none                                       |
+|     32 |    4 | `joint`          | i32, index into `SKELETON`; `−1`: mesh space              |
+|     36 |    4 | `flags`          | u32, bit 0: closed                                       |
+|     40 |    4 | `tension`        | f32, 0 to 1                                              |
+|     44 |    4 | `alpha`          | f32, 0 to 1                                              |
+|     48 |    4 | `length`         | f32, the curve's length                                  |
+|     52 |    4 | `first_point`    | u32, index of its first point in `PATHPTS`                |
+|     56 |    4 | `point_count`    | u32, at least 2 (3 when closed)                          |
+|     60 |    4 | `first_sample`   | u32, index of its first sample in `PATHSMP`               |
+|     64 |    4 | `sample_count`   | u32, `16 · segments + 1`                                 |
+|     68 |    4 | `first_property` | u32, index of its first property in `PATHPRP` (`0` without) |
+|     72 |    4 | `property_count` | u32                                                      |
+|     76 |    4 | `reserved`       | `0`                                                      |
+
+### PathSample (32 bytes)
+
+Samples evenly spaced by distance: sample `k` is at `length · k / (count −
+1)` along the curve, the first on the first point, the last on the last
+point (closed: on the first point again).
+
+| Offset | Size | Field      | Notes                                                  |
+|-------:|-----:|------------|--------------------------------------------------------|
+|      0 |   12 | `position` | f32 × 3                                                |
+|     12 |    4 | `distance` | f32, from the start along the curve                    |
+|     16 |   12 | `tangent`  | f32 × 3, unit direction of travel (zero where the curve stops, e.g. at coincident points) |
+|     28 |    4 | `u`        | f32, the spline parameter                              |

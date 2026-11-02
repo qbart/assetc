@@ -70,6 +70,5 @@ Open:
 top of a model. Others share their storage (`.amod` tables), joint
 attachment by name, `.amesh` chunks and 3D editing:
 
-- **Paths**: polylines or splines in model space (ropes, rails, ladders).
 - **Animation events**: named times on a clip (footsteps, hit frames,
   sounds), in a new `.aanim` chunk, with a clip timeline to place them.

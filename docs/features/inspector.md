@@ -19,12 +19,13 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Thirteen icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Fourteen icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient`, `.palette` and model files,
 **Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
-(`paint-bucket`) and **Properties** (`list`) for model files (see
+(`paint-bucket`), **Paths** (`spline`) and **Properties** (`list`) for model
+files (see
 [`locators.md`](locators.md#locators-tab), [`shapes.md`](shapes.md#shapes-tab),
-[`regions.md`](regions.md#regions-tab),
+[`regions.md`](regions.md#regions-tab), [`paths.md`](paths.md#paths-tab),
 [`properties.md`](properties.md#properties-tab)),
 **Modifiers** (`wrench`) for `.noise` files and images (`.png`, `.jpg`,
 `.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and

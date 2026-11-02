@@ -94,6 +94,7 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | gltf                 | reading models         | MIT or Apache-2.0           | github.com/gltf-rs/gltf |
 | meshoptimizer        | meshlets, levels of detail | MIT                     | meshoptimizer.org |
 | meshopt-pure         | meshoptimizer in Rust  | MIT                         | github.com/qbart/meshopt-pure |
+| matma                | path curves            | MIT                         | github.com/qbart/matma |
 | image                | reading images         | MIT or Apache-2.0           | github.com/image-rs/image |
 | ttf-parser           | reading fonts          | MIT or Apache-2.0           | github.com/harfbuzz/ttf-parser |
 | ab_glyph             | font atlases           | Apache-2.0                  | github.com/alexheretic/ab-glyph |
@@ -191,6 +192,8 @@ gizmo modes), `crosshair` (placing locators on the surface),
 `flip-horizontal-2` (mirroring locators), `plus`, `trash-2`, `refresh-cw`
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
 `paint-bucket` (Inspector Regions tab), `paintbrush` (painting regions),
+`spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
+points), `x` (removing a path point),
 `list` (Inspector Properties tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after, locator visibility),

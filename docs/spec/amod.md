@@ -100,6 +100,26 @@ assetc writes `submeshes` sorted by mesh and primitive, and `triangles`
 sorted by mesh, primitive and triangle, with adjacent and overlapping runs
 merged, four runs per line.
 
+## `[[paths]]`
+
+For glTF models; see [`docs/features/paths.md`](../features/paths.md).
+One table per path:
+
+| Key          | Type                         | Default    | Meaning |
+|--------------|------------------------------|------------|---------|
+| `name`       | string                       | (required) | non-empty, unique among the file's paths |
+| `kind`       | string                       | `""`       | free text |
+| `joint`      | string                       | (none)     | as a locator's |
+| `points`     | array of arrays of 3 floats  | `[]`       | the control points, in the joint's (or model) space |
+| `closed`     | boolean                      | `false`    | the curve loops back to the first point |
+| `tension`    | float                        | `0`        | 0 to 1 |
+| `alpha`      | float                        | `0.5`      | 0 to 1 |
+| `color`      | string                       | (none)     | `#rrggbb`, not compiled |
+| `properties` | table                        | (none)     | as [`[properties]`](#properties), written as a `[paths.properties]` table after the path's keys |
+
+Fewer than 2 points (3 when closed) are allowed in the sidecar while
+editing; the build fails for such a path.
+
 ## `[[modifiers]]`
 
 For images (`*.png`, `*.jpg`, `*.jpeg`, `*.tga`); see
@@ -120,8 +140,11 @@ locator as a `[[locators]]` table (`name`, `tags` when there are any,
 (`name`, `kind` when not empty, `type`, `joint` when set, `translation`,
 `rotation` and the sizes of its type, `color` when set, then its
 `[shapes.properties]` when it has any), then each region as a `[[regions]]`
-table (`name`, `tags` when there are any, `color`, `materials` and
-`triangles` when there are any), then
+table (`name`, `tags` when there are any, `color`, `materials`,
+`submeshes` and `triangles` when there are any), then each path as a
+`[[paths]]` table (`name`, `kind` when not empty, `joint` when set,
+`points`, one point per line, `closed`, `tension`, `alpha`, `color` when
+set, then its `[paths.properties]` when it has any), then
 each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
 parameter, as `.noise` files write them), each table preceded by a blank line
 except the first:
@@ -162,6 +185,22 @@ color = "#3b82f6"
 materials = ["Steel"]
 submeshes = [[1, 0]]
 triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
+
+[[paths]]
+name = "tail"
+kind = "rope"
+joint = "Spine"
+points = [
+    [0.0, 0.0, 0.0],
+    [0.0, 0.1, -0.2],
+    [0.0, 0.05, -0.4],
+]
+closed = false
+tension = 0.0
+alpha = 0.5
+
+[paths.properties]
+stiffness = 0.8
 
 [[modifiers]]
 type = "levels"

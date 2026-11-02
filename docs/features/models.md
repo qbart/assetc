@@ -97,8 +97,9 @@ The toolbar's first group turns the drawing of each kind of
 | Locators | `map-pin`     | the visible locators: markers, names, the gizmo and attachment previews |
 | Shapes   | `shapes`      | the visible shapes' wireframes and the gizmo on the chosen shape |
 | Regions  | `paint-bucket`| the model in its visible regions' colors instead of its materials, and the chosen region's outline ([regions](regions.md#3d-view)) |
+| Paths    | `spline`      | the visible paths' curves and points, and the gizmo on the chosen point |
 
-- Toggles, Locators and Shapes on and Regions off to start with, for the session and every model. *Visible*
+- Toggles, Locators, Shapes and Paths on and Regions off to start with, for the session and every model. *Visible*
   is each item's own **Visible** (eye) in its tab: a button that is on shows
   the items whose eye is on; off hides them all, whatever their eyes, and
   keeps the eyes as they are.
@@ -108,7 +109,9 @@ The toolbar's first group turns the drawing of each kind of
   gizmo.
 - Turning a kind back on by using it: **Add** or **Place on surface** in the
   Locators tab (and `S`) turns Locators on, **Add shape** turns Shapes on,
-  **Paint** turns Regions on. Turning Regions off turns Paint off.
+  **Paint** turns Regions on, **Add path**, **Add point** and **Draw** turn
+  Paths on. Turning Regions off turns Paint off; turning Paths off turns
+  Draw off.
 
 ## Parameters tab
 
@@ -281,6 +284,10 @@ The **Chunks** view shows the data inside the `.amesh`
   | `REGIONS`  | Regions             | Name, Tags, Triangles                                  |
   | `REGTAGS`  | Region tags         | Name, Hash                                             |
   | `TRIREGN`  | Triangle regions    | Regions (the names of its bits, `, `-joined, or `—`)   |
+  | `PATHS`    | Paths               | Name, Kind, Joint (or `—`), Closed (`yes` / `no`), Tension, Alpha, Length, Points, Samples, Properties |
+  | `PATHPTS`  | Path points         | Point                                                  |
+  | `PATHSMP`  | Path samples        | Position, Distance, Tangent, U                         |
+  | `PATHPRP`  | Path properties     | Key, Type, Value                                       |
   | `LOCNAMES` | Locator names       | Offset, Bytes (16 per row, hex)                        |
   | other      | Unknown chunk       | Offset, Bytes (16 per row, hex)                        |
 
@@ -342,7 +349,7 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 | `P.aanim`                   | animation  | `P.aanim`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.md)) |
 
 The `.amesh` also carries the model's [properties](properties.md),
-[shapes](shapes.md) and [regions](regions.md), and its
+[shapes](shapes.md), [regions](regions.md) and [paths](paths.md), and its
 [locators](locators.md#build): its
 sidecar's, its file's `SOCKET_*` nodes and presets' (see
 [Inherited locators](locators.md#inherited-locators)).

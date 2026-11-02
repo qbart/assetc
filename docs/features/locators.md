@@ -341,5 +341,6 @@ rotation is zero.
 
 ## Not yet
 
-- Shapes (hitboxes, colliders), regions, paths and animation events; see the
-  other enrichments in [`DEFERRED.md`](../../DEFERRED.md#more-enrichments).
+- Animation events; see [`DEFERRED.md`](../../DEFERRED.md#more-enrichments).
+  Shapes, regions and paths have their own specs: [`shapes.md`](shapes.md),
+  [`regions.md`](regions.md), [`paths.md`](paths.md).

@@ -53,10 +53,12 @@ On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)
 | Left click on a locator                | Choose it (unfolds its card)                 |
 | Left click elsewhere (no drag)         | Choose none; while placing, add a locator where the model is hit |
 | Left drag on a gizmo handle            | Move / rotate the chosen locator (not while an animation plays) |
-| `W`                                    | Gizmo: Move (again: off)                     |
-| `E`                                    | Gizmo: Rotate (again: off)                   |
+| `W`                                    | Gizmo: Move (again: off); with the Paths tab, on the chosen path point |
+| `E`                                    | Gizmo: Rotate (again: off); nothing with the Paths tab |
 | `S`                                    | Arm Place on surface                         |
-| `Escape`                               | Gizmo off, disarm Place on surface, stop painting |
+| `Escape`                               | Gizmo off, disarm Place on surface, stop painting, stop drawing path points |
+| Left click on a path point             | Choose that path and point (unfolds its card) |
+| Left click on the model while drawing a path | Add a point there, after the chosen one |
 
 While a region paints (see [`docs/features/regions.md`](docs/features/regions.md#painting)):
 
