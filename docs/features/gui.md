@@ -186,7 +186,7 @@ gizmo modes), `crosshair` (placing locators on the surface),
 `flip-horizontal-2` (mirroring locators), `plus`, `trash-2`, `refresh-cw`
 (adding, deleting and reverting locators), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
-(canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after),
+(canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after, locator visibility),
 `sliders-vertical` (Inspector Parameters tab), `wrench`,
 `grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab),
 `grip-vertical` (LUT compare divider), `box-checker`, `box-shaded`, `box`, `squares-unite`, `image`, `boxes` (compiled mesh display modes), `loader`
