@@ -280,6 +280,7 @@ selection and active elements.
 | `BG_PANEL`     | `#1F1F22` | sidebars                              |
 | `BG_BAR`       | `#18181A` | menu bar, status bar, tab strip       |
 | `BG_HEADER`    | `#252528` | section headers                       |
+| `BG_HOVER`     | `#38383D` | hovered canvas items (graph nodes)    |
 | `STROKE`       | `#2E2E32` | panel separators                      |
 | `TEXT`         | `#D4D4D8` | regular text                          |
 | `TEXT_WEAK`    | `#7A7A82` | placeholders, secondary text          |

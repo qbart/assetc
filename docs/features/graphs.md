@@ -49,7 +49,9 @@ choices), on `BG_CENTER`:
 - **Nodes**: circles 1 unit across (0.5 unit radius), filled `BG_HEADER`
   with a 1 px `STROKE` border, the label (or id) centered in `TEXT`, 13 px
   at 64 px per unit (scaled, at least 8 px). The chosen node has a 2 px
-  `ACCENT` border. Nodes have no ports. A node has two areas:
+  `ACCENT` border. The node under the pointer (its body or rim, not while
+  an edge end is grabbable there), and a node being moved, is filled
+  `BG_HOVER` instead. Nodes have no ports. A node has two areas:
   - the **body**, the inner 60% of the radius: pressing it chooses and
     moves the node;
   - the **rim**, from 60% of the radius to 8 px outside the circle: edges
