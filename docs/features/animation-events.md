@@ -76,7 +76,14 @@ Interactions:
 - **`,`** / **`.`** (no text field focused, pointer anywhere): pauses and
   steps the playhead back / forward to the previous / next multiple of
   0.01 s (from 0.304 s: back to 0.30 s, forward to 0.31 s; from 0.30 s: to
-  0.29 s and 0.31 s), within 0 to the duration. Held, they repeat.
+  0.29 s and 0.31 s), within 0 to the duration. With **`Shift`**, by
+  multiples of 0.001 s instead (from 0.3045 s: 0.304 s and 0.305 s). Held,
+  they repeat.
+- **`E`** (no text field focused, pointer anywhere) toggles an event at the
+  playhead: the animation's event nearest the playhead within 0.0005 s is
+  deleted; without one, an event named `event` is added at the playhead
+  (rounded to 0.001 s) and chosen. The 3D view's `E` (gizmo Rotate) does
+  not apply while an animation is chosen, as transforms are locked then.
 - **Press a marker**: chooses that event; **drag it** sideways to change its
   time (clamped to the animation). Within 6 px of the pointer, the nearest
   marker wins.

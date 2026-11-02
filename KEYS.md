@@ -77,6 +77,8 @@ On the animation timeline (see [`docs/features/animation-events.md`](docs/featur
 |----------------------------------------|----------------------------------------------|
 | `Space` (pointer over the timeline)    | Play / pause                                 |
 | `,` / `.`                              | Pause and step back / forward to the previous / next 0.01 s |
+| `Shift` + `,` / `.`                    | The same by 0.001 s                          |
+| `E`                                    | Toggle an event at the playhead (delete the one there, or add one) |
 | Left press / drag on the ruler         | Move the playhead there (pauses)             |
 | Left press on an event marker          | Choose that event                            |
 | Left drag on an event marker           | Move the event in time                       |
