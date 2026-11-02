@@ -5,6 +5,7 @@ pub const BG_CENTER: Color32 = Color32::from_rgb(0x2B, 0x2B, 0x2D);
 pub const BG_PANEL: Color32 = Color32::from_rgb(0x1F, 0x1F, 0x22);
 pub const BG_BAR: Color32 = Color32::from_rgb(0x18, 0x18, 0x1A);
 pub const BG_HEADER: Color32 = Color32::from_rgb(0x25, 0x25, 0x28);
+pub const BG_HOVER: Color32 = Color32::from_rgb(0x38, 0x38, 0x3D);
 pub const STROKE: Color32 = Color32::from_rgb(0x2E, 0x2E, 0x32);
 pub const TEXT: Color32 = Color32::from_rgb(0xD4, 0xD4, 0xD8);
 pub const TEXT_WEAK: Color32 = Color32::from_rgb(0x7A, 0x7A, 0x82);

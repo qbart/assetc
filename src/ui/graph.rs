@@ -2,7 +2,7 @@
 //! see docs/features/graphs.md.
 
 use crate::agraph::{Edge, Node};
-use crate::theme::CHANNEL_R;
+use crate::theme::{BG_HOVER, CHANNEL_R};
 
 use super::schema::commit_field;
 use super::*;
@@ -630,9 +630,22 @@ pub(super) fn canvas_graph(
     if hovered_rim.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
     }
+    // The node under the pointer, or the one being moved.
+    let hovered_node = match (edit.drag, pointer) {
+        (Some(GraphDrag::Move(i, _)), _) => Some(i),
+        (None, Some(p)) if response.hovered() && end_dot.is_none() => {
+            node_at(&graph.nodes, p).map(|(i, _)| i)
+        }
+        _ => None,
+    };
     for (i, n) in graph.nodes.iter().enumerate() {
         let c = center(n);
-        painter.circle_filled(c, r, BG_HEADER);
+        let fill = if hovered_node == Some(i) {
+            BG_HOVER
+        } else {
+            BG_HEADER
+        };
+        painter.circle_filled(c, r, fill);
         if target == Some(i) {
             painter.circle_filled(c, r, ACCENT.gamma_multiply(0.15));
         }
