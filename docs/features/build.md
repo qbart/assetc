@@ -126,10 +126,22 @@ Built 2 textures (1 skipped, 1 removed) into /path/to/project/build
 
 Each built asset prints `<source> -> <output> (<details>)`; see
 [`materials.md`](materials.md#cli) for material and ORM lines. The summary
-counts textures and materials: `Built 4 textures, 1 material (3 skipped)`.
+counts what was built by kind, see [Summary](#summary).
 
 Errors are printed as `error: <source>: <message>`; exit code is non-zero if
 the build failed.
+
+## Summary
+
+After a successful build the CLI's last line and the GUI's status bar read
+`Built <counts> (<M> skipped)`, with `, <K> removed` inside the parentheses
+when stale outputs were removed:
+
+- `<counts>`: each kind of asset built at least once, in this order, as
+  `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat`),
+  meshes (`.amesh`), animations (`.aanim`), fonts (`.afont`); singular nouns
+  for 1 (`1 mesh`, `2 meshes`). `nothing` when nothing was built.
+- Example: `Built 12 textures, 1 material, 1 mesh, 1 animation, 1 font (1 skipped)`.
 
 ## GUI
 
@@ -140,9 +152,7 @@ the build failed.
   while a text field has focus or the sidebar is hidden); it does nothing
   when the button would be disabled.
 - The build runs on a background thread; the UI stays responsive.
-- Status bar shows `Building…` while running, then either
-  `Built N textures, K materials (M skipped)` (the materials part only when
-  there are materials; singular nouns for 1) (with `, K removed` added inside the
-  parentheses when stale outputs were removed) or `Build failed: <first error>` (with the
-  error count when more than one).
+- Status bar shows `Building…` while running, then either the
+  [summary](#summary) or `Build failed: <first error>` (with the error count
+  when more than one).
 - When the build finishes, both file trees are rescanned.
