@@ -124,6 +124,9 @@ struct LocatorTools {
     hidden: HashMap<PathBuf, HashSet<String>>,
     hidden_shapes: HashMap<PathBuf, HashSet<String>>,
     hidden_regions: HashMap<PathBuf, HashSet<String>>,
+    /// The toolbar's Show group: locators, shapes and regions drawn at all; see
+    /// docs/features/models.md#show.
+    show: [bool; 3],
     /// The plane Mirror reflects across: 0 X, 1 Y, 2 Z.
     mirror_axis: usize,
     /// The chosen region paints; a stroke's ray waits for its hit; it erases.
@@ -144,6 +147,7 @@ impl Default for LocatorTools {
             hidden: HashMap::new(),
             hidden_shapes: HashMap::new(),
             hidden_regions: HashMap::new(),
+            show: [true; 3],
             mirror_axis: 0,
             paint: false,
             paint_awaiting: false,
@@ -5027,6 +5031,14 @@ fn canvas_model(
     preview.model = Some(model);
     let joints = &inspected.inspection.joints;
     let empty = HashSet::new();
+    // Using a kind shows it; see docs/features/models.md#show.
+    if tools.armed {
+        tools.show[0] = true;
+    }
+    if tools.paint {
+        tools.show[2] = true;
+    }
+    let [show_locators, show_shapes, show_regions] = tools.show;
     let hidden = tools.hidden.get(&inspected.path).unwrap_or(&empty).clone();
     let hidden_shapes = tools
         .hidden_shapes
@@ -5094,7 +5106,7 @@ fn canvas_model(
             .iter()
             .map(|l| {
                 let parent = frames.parent(l.joint.as_deref())?;
-                (!hidden.contains(&l.name)).then(|| parent * gizmo::local(l))
+                (show_locators && !hidden.contains(&l.name)).then(|| parent * gizmo::local(l))
             })
             .collect(),
         _ => Vec::new(),
@@ -5121,7 +5133,7 @@ fn canvas_model(
                 } else {
                     shape_local(s)
                 };
-                (!hidden_shapes.contains(&s.name)).then(|| parent * local)
+                (show_shapes && !hidden_shapes.contains(&s.name)).then(|| parent * local)
             })
             .collect(),
         _ => Vec::new(),
@@ -5273,6 +5285,7 @@ fn canvas_model(
     if let Some(edit) = &edit {
         for l in &edit.edit.locators {
             if let Some(path) = &l.preview
+                && show_locators
                 && !hidden.contains(&l.name)
             {
                 preview.attachments.push(preview3d::Attachment {
@@ -5288,7 +5301,7 @@ fn canvas_model(
     preview.region_wants.clear();
     if let (Some(edit), Some(geometry)) = (&edit, geometry) {
         for (r, region) in edit.edit.regions.iter().enumerate() {
-            if hidden_regions.contains(&region.name) {
+            if !show_regions || hidden_regions.contains(&region.name) {
                 continue;
             }
             for (mesh, primitive, material, _) in &geometry.primitives {
@@ -5439,10 +5452,45 @@ fn canvas_model(
         }
     }
 
+    let counts = edit.as_ref().map_or([0; 3], |e| {
+        [
+            e.edit.locators.len(),
+            e.edit.shapes.len(),
+            e.edit.regions.len(),
+        ]
+    });
+    let show: Vec<Tool> = [
+        (Icon::MapPin, "Locators"),
+        (Icon::Shapes, "Shapes"),
+        (Icon::PaintBucket, "Regions"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, (icon, name))| Tool {
+        glyph: Glyph::Icon(icon),
+        name: if counts[i] > 0 {
+            name.into()
+        } else {
+            format!("{name} (none in this model)")
+        },
+        on: counts[i] > 0 && tools.show[i],
+        enabled: counts[i] > 0,
+    })
+    .collect();
     let seen = vision_tools(*vision);
-    if let Some((_, button)) = toolbar(ui, rect, &[&seen]) {
-        toggle_vision(vision, button);
-        ui.ctx().request_repaint();
+    match toolbar(ui, rect, &[&show, &seen]) {
+        Some((0, button)) => {
+            tools.show[button] = !tools.show[button];
+            if !tools.show[2] {
+                tools.paint = false;
+            }
+            ui.ctx().request_repaint();
+        }
+        Some((_, button)) => {
+            toggle_vision(vision, button);
+            ui.ctx().request_repaint();
+        }
+        None => {}
     }
     if let ModelStatus::Failed(error) = &preview.model_status {
         ui.painter().text(
@@ -5661,6 +5709,7 @@ fn locators_tab(
                     let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add");
                     if ui.add(add).clicked() {
                         add_locator(edit);
+                        tools.show[0] = true;
                     }
                     let mut place = egui::Button::image_and_text(
                         Icon::Crosshair.image(14.0, TEXT),
@@ -6306,6 +6355,7 @@ fn shapes_tab(
                     let name = enrich::free_name("shape", |n| shapes.iter().any(|s| s.name == n));
                     shapes.push(enrich::Shape::new(name, extent));
                     edit.shape = Some(shapes.len() - 1);
+                    tools.show[1] = true;
                 }
                 ui.add_space(8.0);
                 if edit.edit.shapes.is_empty() {
