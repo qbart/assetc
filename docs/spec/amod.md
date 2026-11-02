@@ -44,7 +44,9 @@ A list of locators, one table each:
 | `preview`     | string            | (none)         | input-relative path of a glTF model shown at the locator by the 3D view; not compiled |
 
 An empty or repeated `name`, a missing one, a wrong array length or an
-unknown key is an error. Whether `joint` exists is checked when the model
+unknown key is an error. A locator named like one the model inherits (from
+its file or a preset) replaces it, see
+[Inherited locators](../features/locators.md#inherited-locators). Whether `joint` exists is checked when the model
 builds.
 
 ## `[[modifiers]]`

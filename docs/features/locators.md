@@ -31,7 +31,75 @@ in the Inspector's [Locators tab](#locators-tab) and directly in the
   (see [Skinning](models.md#skinning-and-animations)); a joint is found by the
   first joint of that skin with the given name. Joints without a name cannot
   be used.
-- Locators are stored in the sidecar's order and compiled in that order.
+- A model's locators come from its file, from [presets](#presets) and from
+  its sidecar; see [Inherited locators](#inherited-locators). They are
+  listed and compiled in that order.
+
+## Inherited locators
+
+The sidecar holds only what is set for this model; other locators come from
+the model's file and from presets shared by models on the same skeleton.
+
+### From the file
+
+Locators placed in a 3D package travel in the glTF itself:
+
+- Every node of the default scene whose name starts with `SOCKET_` becomes a
+  locator named after the rest of its name (`SOCKET_hand_r` → `hand_r`;
+  `SOCKET_` alone is skipped), as in Unreal Engine.
+- A node whose glTF `extras` (Blender's custom properties) have a `locator`
+  key becomes one too: `true` names it after the node (skipped when the node
+  has no name), a string names it that string. Other values are ignored.
+- **Parent**: the node's nearest ancestor that is a named joint of the first
+  skin; its transform is the product of the local transforms of the node
+  and of its ancestors below that joint. Without such an ancestor it is in
+  model space, with its transform from the scene's root.
+- In scene order (depth-first, children in file order); a node whose name is
+  already taken by an earlier one is skipped.
+
+### Presets
+
+`[[locators.presets]]` in [`assetc.toml`](../spec/assetc.toml.md#locators)
+shares one model's locators with others:
+
+```toml
+[[locators.presets]]
+from = "characters/hero.glb"
+match = ["characters/**"]
+```
+
+- The preset's locators are those of the `from` model (from its file and its
+  sidecar; not its own presets).
+- They apply to every other model whose input-relative path matches a
+  `match` glob (every model when `match` is left out) **and** whose first
+  skin has a named joint for every joint they use, so models on the same
+  skeleton share them and others are left alone.
+- A `from` that is not a glTF model in the input, a model that does not
+  parse, a bad sidecar of it or a bad glob fails every model's build (and
+  shows in the Inspector) with `assetc.toml [[locators.presets]] <n>:
+  <problem>`.
+
+### Precedence
+
+The file's locators come first, then each preset's in order, then the
+sidecar's. A later locator with a name already there replaces the earlier
+one in place; new names are added at the end. The result is what the
+Inspector lists, the 3D view draws and the build compiles.
+
+### Editing inherited locators
+
+- In the [Locators tab](#locators-tab), an inherited locator's row shows
+  where it comes from after its parent: `b_Head · file` or
+  `b_Head · hero.glb` (the preset's model file name), and `, changed` when
+  the sidecar replaces it.
+- Its name cannot be edited (the field is disabled).
+- Any other change (fields, gizmo, Place, being the target of Mirror) writes
+  the whole locator into the sidecar, which then replaces the inherited one.
+- **Delete** becomes **Revert** (`refresh-cw`) for a changed inherited
+  locator: it drops the sidecar's copy. For an unchanged one it is disabled
+  (hover: `From <source>; remove it there`).
+- The sidecar keeps only its own locators and copies that differ from what
+  they replace: a copy edited back to the inherited values is dropped.
 
 ## Locators tab
 
@@ -232,14 +300,13 @@ rotation is zero.
 ## Inspector Info
 
 - A model in the Input tree: a **Locators** row after Levels of detail: their
-  count, or `none`.
+  count (all of them, inherited too), `<n> (<m> inherited)` when some are
+  inherited, or `none`. A [preset](#presets) error shows in it instead.
 - A compiled mesh: a **Locators** row after Skin: their count, or `none`.
 - The [Chunks view](models.md#chunks-view) shows `LOCATORS` (Name, Hash,
   Joint, Translation, Rotation, Scale) and `LOCNAMES` (bytes).
 
 ## Not yet
 
-- Importing glTF nodes named `SOCKET_*` and glTF `extras` as locators.
-- Presets shared by models with the same skeleton.
 - Shapes (hitboxes, colliders), regions, paths and animation events; see the
   other enrichments in [`DEFERRED.md`](../../DEFERRED.md#more-enrichments).

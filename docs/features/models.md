@@ -308,7 +308,9 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 | `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
 | `P.aanim`                   | animation  | `P.aanim`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.md)) |
 
-The `.amesh` also carries the model's [locators](locators.md#build).
+The `.amesh` also carries the model's [locators](locators.md#build): its
+sidecar's, its file's `SOCKET_*` nodes and presets' (see
+[Inherited locators](locators.md#inherited-locators)).
 
 Like other assets, each gets the FNV-1a-64 of its asset path as ID and a
 manifest entry; collisions are build errors as usual. The build prints one

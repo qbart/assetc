@@ -91,14 +91,36 @@ meshlet is one workgroup's output, so they are a per-GPU tuning choice. A
 value outside its range (in the defaults or any override) or a bad glob fails
 the build before anything is compiled, with `assetc.toml [meshes]: <problem>`.
 
+### `[locators]`
+
+Locators shared between models, see
+[`docs/features/locators.md`](../features/locators.md#presets).
+
+| Key       | Type            | Default | Meaning                       |
+|-----------|-----------------|---------|-------------------------------|
+| `presets` | array of tables | `[]`    | Shared locators, see below    |
+
+Each `[[locators.presets]]` entry:
+
+| Key     | Type             | Meaning |
+|---------|------------------|---------|
+| `from`  | string           | Required. Input-relative path of the glTF model whose locators (from its file and its sidecar) are shared |
+| `match` | array of strings | Optional. Globs of the models it applies to (syntax of `[textures]`); every model when left out. Only models whose first skin has every joint the locators use get them |
+
+```toml
+[[locators.presets]]
+from = "characters/hero.glb"
+match = ["characters/**"]
+```
+
 ### Paths
 
 `input` and `output` are relative to the project root (the directory containing
 `assetc.toml`). Absolute paths are used as-is. Neither directory has to exist
 when the config is loaded.
 
-Unknown keys (at the top level, inside `[textures]`, `[meshes]` or an
-override) are rejected with a parse error, so typos are caught early
+Unknown keys (at the top level, inside `[textures]`, `[meshes]`,
+`[locators]`, an override or a preset) are rejected with a parse error, so typos are caught early
 instead of being silently ignored.
 
 ## File written by `assetc init`

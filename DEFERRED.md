@@ -79,6 +79,3 @@ attachment by name, `.amesh` chunks and 3D editing:
 - **Animation events**: named times on a clip (footsteps, hit frames,
   sounds), in a new `.aanim` chunk, with a clip timeline to place them.
 - **Properties**: key / value pairs on the model (mass, tags).
-- **Presets** in `assetc.toml` matched by glob or skeleton, so models sharing
-  a skeleton share their locators.
-- For locators: importing glTF nodes named `SOCKET_*` and glTF `extras`.
