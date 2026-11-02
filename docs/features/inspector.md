@@ -79,6 +79,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | Source texture |
 | Input  | `*.mat.toml`               | Material source    |
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
+| Input  | `*.exr` (any case)         | HDR environment map, see [`hdr.md`](hdr.md#preview-and-inspector) |
 | Input  | `*.noise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |
 | Input  | `*.gradient` (any case)    | Gradient, see [`gradients.md`](gradients.md#inspector-info) |
 | Input  | `*.palette` (any case)     | Palette, see [`palettes.md`](palettes.md#inspector-info) |

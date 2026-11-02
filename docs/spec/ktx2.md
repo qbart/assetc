@@ -91,6 +91,31 @@ padding                     zero bytes to a multiple of 4
 
 `kvdByteLength` includes the padding.
 
+## Cubemaps
+
+An [HDR environment map](../features/hdr.md) is written with this profile
+instead:
+
+| Property      | Value |
+|---------------|-------|
+| `vkFormat`    | `VK_FORMAT_R16G16B16A16_SFLOAT` (`97`) |
+| `typeSize`    | `2` |
+| `pixelWidth` / `pixelHeight` | the face size (square, a power of two) |
+| `pixelDepth`, `layerCount` | `0` |
+| `faceCount`   | `6` |
+| `levelCount`  | `log2(size) + 1` (full chain to 1 × 1) |
+
+Each level image holds the six faces back to back in the order +X, −X, +Y,
+−Y, +Z, −Z, each face its rows top to bottom, each texel `R G B A` as IEEE
+half floats: `byteLength` = `6 × w_n × h_n × 8`.
+
+The data format descriptor is the same 92 bytes with these differences:
+`transferFunction` `1` (linear), `bytesPlane[0]` `8`, and each sample has
+`bitOffset` `0`, `16`, `32`, `48`, `bitLength` `15` (16 bits), the channel
+(`0x00`, `0x01`, `0x02`, `0x0F`) with the `SIGNED` (`0x40`) and `FLOAT`
+(`0x80`) qualifiers, `sampleLower` `0xBF800000` (−1.0) and `sampleUpper`
+`0x3F800000` (1.0).
+
 ## Color LUTs
 
 A compiled `.cube` LUT of size `N` (see [`lut.md`](../features/lut.md#build))

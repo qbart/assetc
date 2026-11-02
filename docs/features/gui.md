@@ -103,6 +103,7 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | meshopt-pure         | meshoptimizer in Rust  | MIT                         | github.com/qbart/meshopt-pure |
 | matma                | path curves            | MIT                         | github.com/qbart/matma |
 | image                | reading images         | MIT or Apache-2.0           | github.com/image-rs/image |
+| exr                  | reading HDR images     | BSD-3-Clause                | github.com/johannesvollmer/exrs |
 | ttf-parser           | reading fonts          | MIT or Apache-2.0           | github.com/harfbuzz/ttf-parser |
 | ab_glyph             | font atlases           | Apache-2.0                  | github.com/alexheretic/ab-glyph |
 | serde and toml       | settings and schema files | MIT or Apache-2.0        | serde.rs |
@@ -155,9 +156,9 @@ The icon follows the entry's type, by extension (any case):
 
 | Entry                                         | Icon                      |
 |-----------------------------------------------|---------------------------|
-| environment map folder (`*.env`)              | `sun-medium`              |
+| environment map folder (`*.env`), HDR environment map (`exr`) | `sun-medium` |
 | other folder                                  | `folder` / `folder-open`  |
-| image: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `tga`, `webp`, `tif`, `tiff`, `exr`, `hdr`, `dds`, `ktx2` | `image` |
+| image: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `tga`, `webp`, `tif`, `tiff`, `hdr`, `dds`, `ktx2` | `image` |
 | font: `ttf`, `otf`, `woff`, `woff2`, `afont`  | `type`                    |
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `noise`                      | `image-play`              |
