@@ -83,9 +83,8 @@ replaces the curve:
   - **Joined** slopes: one straight stroke through the point, `TEXT_WEAK`.
   - **Split** slopes: two strokes in `CHANNEL_B`, so the state shows before
     anything is touched.
-  - **While rotating** (dragging a handle, or rotation mode on): a 9 px
-    `ACCENT` ring around the point, and the active handle (both, when
-    joined) `ACCENT` and 56 px long.
+  - **While a handle is dragged**: a 9 px `ACCENT` ring around the point,
+    and the dragged handle (both, when joined) `ACCENT` and 56 px long.
 - **Playhead**: right of the plot, after an 8 px gap, a 12 px **lane**
   (`BG_HEADER`) where a 5 px radius `ACCENT` disc moves up and down at
   `eval(x)` while `x` sweeps 0..1; a 1 px `CHANNEL_R` line across the plot
@@ -96,23 +95,19 @@ replaces the curve:
 ### Readout and fields
 
 Under the plot: the chosen point's status, 12 px `TEXT_WEAK`:
-`point 2 of 3`, then `· split` when its slopes are split and, while
-rotating, `· rotating both` (joined), `· rotating out` or `· rotating in`;
-then its **X**, **Y**, **In**, **Out** number fields (three decimals) to
-read and type exact values (`X` stays between the neighbours; on a joined
-point a typed slope sets both). While rotating, the labels of the rotating
-slopes are `ACCENT`. With no point chosen: `<n> points · press one to edit
+`point 2 of 3`, then `· split` when its slopes are split; then its **X**,
+**Y**, **In**, **Out** number fields (three decimals) to read and type
+exact values (`X` stays between the neighbours; on a joined point a typed
+slope sets both). With no point chosen: `<n> points · press one to edit
 it`.
 
-### Buttons and steps
+### Buttons
 
 A row of icon buttons: **Play / Pause** (`play` / `pause`), **Add point**
 (`plus`), **Delete point** (`trash-2`; disabled on the first and last
 points and when two remain), **Split / Join** (`unlink-2` on a joined
-point, `link-2` on a split one), **Rotate** (`rotate-cw`, `ACCENT` while
-rotation mode is on). Then **Steps**: **x** (0.1), **y** (0.1) and
-**angle** (5°) number fields. Steps, play state and rotation mode are kept
-for the session, not in the data.
+point, `link-2` on a split one). The play state is kept for the session,
+not in the data.
 
 ### Editing
 
@@ -121,13 +116,12 @@ Every edit keeps the [model](#model)'s rules.
 | Edit | Behaviour |
 |------|-----------|
 | **Choose** | Press a point; `[` / `]` the previous / next point (wrapping), `Home` / `End` the first / last; pressing empty plot chooses none |
-| **Move** | Drag a point, or the arrow keys by the x / y step. `x` is clamped between the neighbours' and to 0..1 (no re-sorting); `y` is free |
+| **Move** | Drag a point. `x` is clamped between the neighbours' and to 0..1 (no re-sorting); `y` is free |
 | **Exact** | The X, Y, In, Out fields |
 | **Add** | **Add point** or `A`: halfway between the chosen point and the next (from the last point: halfway back to the previous), with `y = eval(mid)` and `in = out = slope(mid)`, so the shape is unchanged; joined and chosen. **Double-click** empty plot: the same at that `x` |
 | **Delete** | **Delete point**, `Delete` / `X`, or double-click a point; refused on the first and last points and when two remain |
-| **Rotate** | Drag a tangent handle: its slope follows the pointer's angle from the point. Or rotation mode (`R` or **Rotate**): the arrow keys turn the active tangent by the angle step, `↑` / `←` counter-clockwise (the out handle rises), `↓` / `→` clockwise. Angles are clamped to −89°..89° (`new = tan(clamp(atan(old) + Δ, −89°, 89°))`), so slopes reach about ±57 |
-| **Split / Join** | Joined (equal to three decimals) slopes turn together, keeping the curve smooth through the point. **Split** (`S`, the button, or `Shift` while starting a handle drag) marks the point split without writing anything; the next rotation then makes the slopes differ, and the data says split from then on. The mark is forgotten when another point is chosen. **Join** (`S` or the button on a split point) copies `out` into `in` |
-| **Active slope** | On a split point, the handle dragged, else `out` when rotation starts; in rotation mode `]` switches `out` → `in`, then moves to the next point (`[`: `in` → `out`, then the previous point) |
+| **Rotate** | Drag a tangent handle: its slope follows the pointer's angle from the point, clamped to −89°..89°, so slopes reach about ±57 |
+| **Split / Join** | Joined (equal to three decimals) slopes turn together, keeping the curve smooth through the point. **Split** (`S`, the button, or `Shift` while starting a handle drag) marks the point split without writing anything; the next handle drag then makes the slopes differ, and the data says split from then on. The mark is forgotten when another point is chosen. **Join** (`S` or the button on a split point) copies `out` into `in` |
 | **Preset** | Click a tile |
 | **Play** | `Space` or the button pauses and resumes the playhead where it is |
 
@@ -138,5 +132,5 @@ is not a curve shows its error and **Reset** (to linear).
 
 ## Not yet
 
-- Undo, repeat counts on keys, scrubbing the playhead, ping-pong playback
-  and an adjustable pass duration.
+- Undo, scrubbing the playhead, ping-pong playback and an adjustable pass
+  duration.

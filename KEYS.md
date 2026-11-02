@@ -108,10 +108,8 @@ act while the pointer is over the editor:
 | `Shift` + drag on a tangent handle     | Split the slopes, then rotate this one       |
 | Double-click on empty plot             | Add a point on the curve there               |
 | Double-click on a point                | Delete it (not the first, last, or one of two) |
-| `[` / `]`                              | Previous / next point (wrapping); in rotation mode on a split point, switch the active slope first |
+| `[` / `]`                              | Previous / next point (wrapping)             |
 | `Home` / `End`                         | First / last point                           |
-| Arrow keys                             | Move the point by the x / y step; in rotation mode, turn the active slope by the angle step (`↑` / `←` counter-clockwise) |
-| `R`                                    | Rotation mode on / off                       |
 | `S`                                    | Split / join the chosen point's slopes       |
 | `A`                                    | Add a point after the chosen one             |
 | `Delete` / `X`                         | Delete the chosen point                      |
