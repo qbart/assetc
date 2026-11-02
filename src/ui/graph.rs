@@ -2,6 +2,7 @@
 //! see docs/features/graphs.md.
 
 use crate::agraph::{Edge, Node};
+use crate::atree;
 use crate::theme::{BG_HOVER, CHANNEL_R};
 
 use super::schema::commit_field;
@@ -46,14 +47,18 @@ pub(super) struct GraphEdit {
     /// A node's or edge's label being edited on the canvas, and whether its field still
     /// needs focus.
     label: Option<(Chosen, String, bool)>,
+    /// A tree (`.atree`): node 0 is the root and the edges link parents to children; see
+    /// docs/features/trees.md.
+    pub(super) tree: bool,
 }
 
 impl GraphEdit {
-    /// `graph` as read, keeping `previous`'s choice.
-    pub(super) fn new(graph: Graph, previous: GraphEdit) -> Self {
+    /// `graph` as read (a tree when `tree`), keeping `previous`'s choice.
+    pub(super) fn new(graph: Graph, tree: bool, previous: GraphEdit) -> Self {
         Self {
             edit: graph.clone(),
             saved: graph,
+            tree,
             ..previous
         }
     }
@@ -85,11 +90,16 @@ impl Default for GraphView {
     }
 }
 
-fn graph_commit(ui: &Ui, edit: &mut GraphEdit) -> Option<Graph> {
+/// The text to write once nothing is being dragged or typed into.
+fn graph_commit(ui: &Ui, edit: &mut GraphEdit) -> Option<String> {
     let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
     (!busy && edit.edit != edit.saved).then(|| {
         edit.saved = edit.edit.clone();
-        edit.edit.clone()
+        if edit.tree {
+            atree::to_json(&edit.edit)
+        } else {
+            edit.edit.to_json()
+        }
     })
 }
 
@@ -218,7 +228,7 @@ pub(super) fn canvas_graph(
     inspected: &mut Inspected,
     views: &mut HashMap<PathBuf, GraphView>,
     keys: bool,
-) -> Option<Graph> {
+) -> Option<String> {
     let view = views.entry(inspected.path.clone()).or_default();
     let edit = match &mut inspected.graph {
         Some(Ok(edit)) => edit,
@@ -398,7 +408,9 @@ pub(super) fn canvas_graph(
             .map(|(k, _)| k)
     };
 
-    // Choose, move, connect, detach, add, rename and remove.
+    // Choose, move, connect, detach, add, rename and remove; a tree's links are not edges
+    // to choose, see docs/features/trees.md#canvas.
+    let tree = edit.tree;
     let graph = &mut edit.edit;
     if response.double_clicked()
         && let Some(p) = pointer
@@ -406,6 +418,14 @@ pub(super) fn canvas_graph(
         if let Some((i, _)) = node_at(&graph.nodes, p) {
             edit.label = Some((Chosen::Node(i), graph.nodes[i].label.clone(), true));
             edit.chosen = Some(Chosen::Node(i));
+        } else if tree {
+            let parent = match edit.chosen {
+                Some(Chosen::Node(i)) if i < graph.nodes.len() => i,
+                _ => 0,
+            };
+            let (x, y) = to_units(p);
+            let child = atree::add_child(graph, parent, place(x, shift), place(y, shift));
+            edit.chosen = Some(Chosen::Node(child));
         } else if let Some(k) = edge_at(&shapes(graph), p) {
             edit.label = Some((Chosen::Edge(k), graph.edges[k].label.clone(), true));
             edit.chosen = Some(Chosen::Edge(k));
@@ -422,7 +442,7 @@ pub(super) fn canvas_graph(
         && response.hovered()
         && let Some(p) = pointer
     {
-        if let Some((k, tip)) = end_at(&shapes(graph), p) {
+        if let Some((k, tip)) = end_at(&shapes(graph), p).filter(|_| !tree) {
             edit.drag = Some(GraphDrag::Detach(k, tip));
             edit.chosen = Some(Chosen::Edge(k));
         } else if let Some((i, d)) = node_at(&graph.nodes, p) {
@@ -435,7 +455,9 @@ pub(super) fn canvas_graph(
             });
             edit.chosen = Some(Chosen::Node(i));
         } else {
-            edit.chosen = edge_at(&shapes(graph), p).map(Chosen::Edge);
+            edit.chosen = edge_at(&shapes(graph), p)
+                .filter(|_| !tree)
+                .map(Chosen::Edge);
             edit.drag = None;
         }
     }
@@ -451,15 +473,32 @@ pub(super) fn canvas_graph(
         (Some(GraphDrag::Connect(i, left)), Some(p)) if i < graph.nodes.len() => {
             let under = node_at(&graph.nodes, p).map(|(j, _)| j);
             let left = left || under != Some(i);
-            target = under.filter(|&j| j != i || left);
+            target = match tree {
+                // Not the root, nor this node or one above it: that would make a loop.
+                true => under.filter(|&j| j != 0 && !atree::is_ancestor(graph, j, i)),
+                false => under.filter(|&j| j != i || left),
+            };
             if down {
                 edit.drag = Some(GraphDrag::Connect(i, left));
             } else {
-                // Released on a target: a new edge to it.
-                if let Some(j) = target {
-                    let (from, to) = (graph.nodes[i].id.clone(), graph.nodes[j].id.clone());
-                    graph.edges.push(Edge::new(from, to));
-                    edit.chosen = Some(Chosen::Edge(graph.edges.len() - 1));
+                match (tree, target) {
+                    // Released on a target: a new edge to it, or it moves under this node.
+                    (false, Some(j)) => {
+                        let (from, to) = (graph.nodes[i].id.clone(), graph.nodes[j].id.clone());
+                        graph.edges.push(Edge::new(from, to));
+                        edit.chosen = Some(Chosen::Edge(graph.edges.len() - 1));
+                    }
+                    (true, Some(j)) => {
+                        atree::move_under(graph, j, i);
+                        edit.chosen = Some(Chosen::Node(j));
+                    }
+                    // A tree's rim dropped on empty grid: a child there.
+                    (true, None) if under.is_none() => {
+                        let (x, y) = to_units(p);
+                        let child = atree::add_child(graph, i, place(x, shift), place(y, shift));
+                        edit.chosen = Some(Chosen::Node(child));
+                    }
+                    _ => {}
                 }
                 edit.drag = None;
                 target = None;
@@ -501,6 +540,8 @@ pub(super) fn canvas_graph(
         && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::X))
     {
         match edit.chosen.take() {
+            Some(Chosen::Node(0)) if tree => edit.chosen = Some(Chosen::Node(0)),
+            Some(Chosen::Node(i)) if tree && i < graph.nodes.len() => atree::remove(graph, i),
             Some(Chosen::Node(i)) if i < graph.nodes.len() => graph.remove_node(i),
             Some(Chosen::Edge(k)) if k < graph.edges.len() => {
                 graph.edges.remove(k);
@@ -537,12 +578,16 @@ pub(super) fn canvas_graph(
     // Edges, then the rubber edge, then nodes over them, then edge labels.
     let zoom = view.scale / SCALE;
     let shapes = shapes(graph);
+    // A tree's links have no arrowhead: they reach the child's border.
     let draw_edge = |shape: &EdgeShape, width: f32, color: egui::Color32| {
-        painter.add(egui::Shape::line(
-            shape.line.clone(),
-            Stroke::new(width, color),
-        ));
-        arrowhead(&painter, shape.tip, shape.dir, color);
+        let mut line = shape.line.clone();
+        if tree {
+            line.push(shape.tip);
+        }
+        painter.add(egui::Shape::line(line, Stroke::new(width, color)));
+        if !tree {
+            arrowhead(&painter, shape.tip, shape.dir, color);
+        }
     };
     let detached = match edit.drag {
         Some(GraphDrag::Detach(k, tip)) => Some((k, tip)),
@@ -570,11 +615,11 @@ pub(super) fn canvas_graph(
             None if (p - c).length() > r => {
                 let dir = (p - c).normalized();
                 let color = ACCENT.gamma_multiply(0.6);
-                painter.line_segment(
-                    [c + dir * r, p - dir * ARROW * 0.8],
-                    Stroke::new(1.5, color),
-                );
-                arrowhead(&painter, p, dir, color);
+                let end = if tree { p } else { p - dir * ARROW * 0.8 };
+                painter.line_segment([c + dir * r, end], Stroke::new(1.5, color));
+                if !tree {
+                    arrowhead(&painter, p, dir, color);
+                }
             }
             None => {}
         }
@@ -607,7 +652,7 @@ pub(super) fn canvas_graph(
     }
     // An edge end under the pointer, grabbed before rims.
     let hovered_end = match (edit.drag, pointer) {
-        (None, Some(p)) if response.hovered() => end_at(&shapes, p),
+        (None, Some(p)) if response.hovered() && !tree => end_at(&shapes, p),
         _ => None,
     };
     let end_dot = hovered_end.and_then(|(k, tip)| {
@@ -646,13 +691,20 @@ pub(super) fn canvas_graph(
             BG_HEADER
         };
         painter.circle_filled(c, r, fill);
+        // A node's color, see docs/features/graphs.md#node-colors.
+        let color = n.color.as_deref().and_then(hex_color32);
+        if let Some(color) = color {
+            painter.circle_filled(c, r, color.gamma_multiply(0.35));
+        }
         if target == Some(i) {
             painter.circle_filled(c, r, ACCENT.gamma_multiply(0.15));
         }
-        let stroke = if edit.chosen == Some(Chosen::Node(i)) {
-            Stroke::new(2.0, ACCENT)
-        } else {
-            Stroke::new(1.0, STROKE)
+        let stroke = match (edit.chosen == Some(Chosen::Node(i)), color) {
+            (true, _) => Stroke::new(2.0, ACCENT),
+            // The root of a tree.
+            (false, _) if tree && i == 0 => Stroke::new(2.0, TEXT_WEAK),
+            (false, Some(color)) => Stroke::new(1.0, color),
+            (false, None) => Stroke::new(1.0, STROKE),
         };
         painter.circle_stroke(c, r - stroke.width / 2.0, stroke);
         if hovered_rim == Some(i) && edit.drag.is_none() {
@@ -685,7 +737,7 @@ pub(super) fn canvas_graph(
         painter.circle_filled(at, 4.0, ACCENT);
     }
     let size = 12.0 * zoom;
-    if size >= 6.0 {
+    if size >= 6.0 && !tree {
         for (k, (e, shape)) in graph.edges.iter().zip(&shapes).enumerate() {
             let editing = edit
                 .label
@@ -717,8 +769,14 @@ pub(super) fn canvas_graph(
     painter.text(
         rect.left_bottom() + vec2(8.0, -8.0),
         Align2::LEFT_BOTTOM,
-        "Double-click to add a node · double-click a node or edge to rename · \
-         drag a node's rim onto a node to connect · Delete or X removes · Shift snaps to 0.25",
+        if tree {
+            "Double-click to add a child · double-click a node to rename · drag a node's rim \
+             to add a child or onto a node to move it under · Delete or X removes · \
+             Shift snaps to 0.25"
+        } else {
+            "Double-click to add a node · double-click a node or edge to rename · \
+             drag a node's rim onto a node to connect · Delete or X removes · Shift snaps to 0.25"
+        },
         FontId::proportional(12.0),
         TEXT_WEAK,
     );
@@ -766,7 +824,7 @@ pub(super) fn graph_tab(
     ui: &mut Ui,
     inspected: &mut Inspected,
     view: &mut GraphView,
-) -> Option<Graph> {
+) -> Option<String> {
     let edit = match &mut inspected.graph {
         Some(Ok(edit)) => edit,
         Some(Err(e)) => {
@@ -796,7 +854,11 @@ pub(super) fn graph_tab(
                 match edit.chosen {
                     None => {
                         problems(ui);
-                        node_list(ui, edit, view);
+                        if edit.tree {
+                            tree_outline(ui, edit, view);
+                        } else {
+                            node_list(ui, edit, view);
+                        }
                     }
                     Some(Chosen::Node(i)) => {
                         node_fields(ui, edit, i);
@@ -810,6 +872,58 @@ pub(super) fn graph_tab(
             });
         });
     graph_commit(ui, edit)
+}
+
+/// A tree's outline, depth first and indented, to choose a node, and Add child; see
+/// docs/features/trees.md#tree-tab.
+fn tree_outline(ui: &mut Ui, edit: &mut GraphEdit, view: &mut GraphView) {
+    let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add child");
+    if ui.add(add).clicked() && !edit.edit.nodes.is_empty() {
+        let (x, y) = view.center;
+        let child = atree::add_child(&mut edit.edit, 0, place(x, true), place(y, true));
+        edit.chosen = Some(Chosen::Node(child));
+        return;
+    }
+    ui.add_space(8.0);
+    let mut rows = Vec::new();
+    let mut stack = vec![(0usize, 0usize)];
+    while let Some((i, depth)) = stack.pop() {
+        if i >= edit.edit.nodes.len() || rows.iter().any(|(r, _)| *r == i) {
+            continue;
+        }
+        rows.push((i, depth));
+        for c in atree::children(&edit.edit, i).into_iter().rev() {
+            stack.push((c, depth + 1));
+        }
+    }
+    for (i, depth) in rows {
+        let n = &edit.edit.nodes[i];
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 4, BG_HEADER);
+        }
+        ui.painter().text(
+            rect.left_center() + vec2(6.0 + 16.0 * depth as f32, 0.0),
+            Align2::LEFT_CENTER,
+            &n.id,
+            FontId::monospace(13.0),
+            TEXT,
+        );
+        if !n.label.is_empty() {
+            ui.painter().text(
+                rect.right_center() - vec2(6.0, 0.0),
+                Align2::RIGHT_CENTER,
+                &n.label,
+                FontId::proportional(13.0),
+                TEXT_WEAK,
+            );
+        }
+        if response.clicked() {
+            edit.chosen = Some(Chosen::Node(i));
+            view.center = (n.x, n.y);
+        }
+    }
 }
 
 /// Every node, to choose one, and Add node.
@@ -855,11 +969,11 @@ fn node_list(ui: &mut Ui, edit: &mut GraphEdit, view: &mut GraphView) {
 }
 
 /// A pane's title, with Delete at its top right; returns whether Delete was clicked.
-fn pane_header(ui: &mut Ui, title: &str, tooltip: &str) -> bool {
+fn pane_header(ui: &mut Ui, title: &str, tooltip: &str, enabled: bool) -> bool {
     ui.horizontal(|ui| {
         ui.label(RichText::new(title).size(14.0).color(TEXT));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            icon_button(ui, Icon::Trash2, tooltip, true).clicked()
+            icon_button(ui, Icon::Trash2, tooltip, enabled).clicked()
         })
         .inner
     })
@@ -867,9 +981,15 @@ fn pane_header(ui: &mut Ui, title: &str, tooltip: &str) -> bool {
 }
 
 fn node_fields(ui: &mut Ui, edit: &mut GraphEdit, i: usize) {
+    let tree = edit.tree;
     let graph = &mut edit.edit;
-    if pane_header(ui, "Node", "Delete node") {
-        graph.remove_node(i);
+    // A tree's root stays; removing a node there removes what is under it.
+    if pane_header(ui, "Node", "Delete node", !(tree && i == 0)) {
+        if tree {
+            atree::remove(graph, i);
+        } else {
+            graph.remove_node(i);
+        }
         edit.chosen = None;
         edit.label = None;
         return;
@@ -890,12 +1010,46 @@ fn node_fields(ui: &mut Ui, edit: &mut GraphEdit, i: usize) {
             egui::TextEdit::singleline(&mut node.label),
         );
     });
+    color_row(ui, &mut node.color, true);
     for (label, value) in [("X", &mut node.x), ("Y", &mut node.y)] {
         prop_row(ui, label, |ui, width| {
             let field = egui::DragValue::new(value).speed(0.01).fixed_decimals(3);
             ui.add_sized(vec2(width, 22.0), field);
         });
     }
+    if tree {
+        tree_parent(ui, edit, i);
+        let graph = &mut edit.edit;
+        let node = &mut graph.nodes[i];
+        ui.add_space(6.0);
+        ui.label(RichText::new("Data").size(13.0).color(TEXT_WEAK));
+        properties_editor(ui, &mut node.data);
+        ui.add_space(6.0);
+        ui.label(RichText::new("Children").size(13.0).color(TEXT_WEAK));
+        for c in atree::children(graph, i) {
+            let n = &graph.nodes[c];
+            let text = if n.label.is_empty() {
+                n.id.clone()
+            } else {
+                format!("{}  {}", n.id, n.label)
+            };
+            if ui
+                .add(egui::Label::new(RichText::new(text).monospace()).sense(Sense::click()))
+                .clicked()
+            {
+                edit.chosen = Some(Chosen::Node(c));
+            }
+        }
+        let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add child");
+        if ui.add(add).clicked() {
+            let (x, y) = (graph.nodes[i].x, graph.nodes[i].y + 1.0);
+            let child = atree::add_child(graph, i, x, y);
+            edit.chosen = Some(Chosen::Node(child));
+        }
+        return;
+    }
+    let graph = &mut edit.edit;
+    let node = &mut graph.nodes[i];
     ui.add_space(6.0);
     ui.label(RichText::new("Data").size(13.0).color(TEXT_WEAK));
     properties_editor(ui, &mut node.data);
@@ -928,9 +1082,38 @@ fn node_fields(ui: &mut Ui, edit: &mut GraphEdit, i: usize) {
     }
 }
 
+/// A tree node's Parent: every node it can move under; the root has none.
+fn tree_parent(ui: &mut Ui, edit: &mut GraphEdit, i: usize) {
+    let graph = &mut edit.edit;
+    let current = atree::parent(graph, i);
+    let shown = current.map_or("—".to_owned(), |p| graph.nodes[p].id.clone());
+    let mut chosen = None;
+    prop_row(ui, "Parent", |ui, width| {
+        ui.add_enabled_ui(i != 0, |ui| {
+            egui::ComboBox::from_id_salt("tree_parent")
+                .width(width - 8.0)
+                .selected_text(shown)
+                .show_ui(ui, |ui| {
+                    for (p, n) in graph.nodes.iter().enumerate() {
+                        // Not itself nor anything under it.
+                        if atree::is_ancestor(graph, i, p) {
+                            continue;
+                        }
+                        if ui.selectable_label(current == Some(p), &n.id).clicked() {
+                            chosen = Some(p);
+                        }
+                    }
+                });
+        });
+    });
+    if let Some(p) = chosen.filter(|p| Some(*p) != current) {
+        atree::move_under(graph, i, p);
+    }
+}
+
 fn edge_fields(ui: &mut Ui, edit: &mut GraphEdit, k: usize) {
     let graph = &mut edit.edit;
-    if pane_header(ui, "Edge", "Delete edge") {
+    if pane_header(ui, "Edge", "Delete edge", true) {
         graph.edges.remove(k);
         edit.chosen = None;
         edit.label = None;

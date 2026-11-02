@@ -50,6 +50,14 @@ pub fn create_graph(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Creates `tree.atree` (or `tree 2.atree`, …) in `dir`; see docs/features/trees.md#creating.
+pub fn create_tree(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "tree", ".atree");
+    fs::write(&path, crate::atree::to_json(&crate::atree::new())).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Creates `data.adata` (or `data 2.adata`, …) in `dir`, naming the first schema of `dir`,
 /// else of `input`; see docs/features/instances.md#creating.
 pub fn create_data(input: &Path, dir: &Path) -> Result<PathBuf, String> {
@@ -192,6 +200,10 @@ mod tests {
         assert_eq!(graph, input.join("graph.agraph"));
         let parsed = crate::agraph::Graph::parse(&fs::read_to_string(&graph).unwrap()).unwrap();
         assert_eq!(parsed, crate::agraph::Graph::new());
+        let tree = create_tree(&input, &input).unwrap();
+        assert_eq!(tree, input.join("tree.atree"));
+        let parsed = crate::atree::parse(&fs::read_to_string(&tree).unwrap()).unwrap();
+        assert_eq!(parsed, crate::atree::new());
     }
 
     #[test]

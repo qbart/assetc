@@ -45,6 +45,7 @@ pub enum Icon {
     Info,
     Database,
     LayoutGrid,
+    ListTree,
     Link2,
     Loader,
     MapPin,
@@ -78,7 +79,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 70] = [
+const SVGS: [(&str, &str); 71] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -155,6 +156,7 @@ const SVGS: [(&str, &str); 70] = [
         "layout-grid",
         include_str!("../assets/icons/layout-grid.svg"),
     ),
+    ("list-tree", include_str!("../assets/icons/list-tree.svg")),
     ("link-2", include_str!("../assets/icons/link-2.svg")),
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("map-pin", include_str!("../assets/icons/map-pin.svg")),

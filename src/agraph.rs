@@ -28,6 +28,8 @@ pub struct Graph {
 pub struct Node {
     pub id: String,
     pub label: String,
+    /// `#rrggbb`, for telling nodes apart; see docs/features/graphs.md#node-colors.
+    pub color: Option<String>,
     /// The center, in grid units; Y grows down.
     pub x: f64,
     pub y: f64,
@@ -176,14 +178,7 @@ impl Graph {
             .nodes
             .iter()
             .map(|n| {
-                let mut o = Map::new();
-                o.insert("id".into(), n.id.clone().into());
-                if !n.label.is_empty() {
-                    o.insert("label".into(), n.label.clone().into());
-                }
-                o.insert("x".into(), json_number(n.x));
-                o.insert("y".into(), json_number(n.y));
-                write_data(&mut o, &n.data);
+                let mut o = write_node(n);
                 o.extend(n.extra.clone());
                 Value::Object(o)
             })
@@ -291,13 +286,35 @@ fn write_data(o: &mut Map<String, Value>, data: &Properties) {
     o.insert("data".into(), Value::Object(data));
 }
 
-fn parse_node(value: Value) -> Result<Node, String> {
+/// A node's keys in the written form; other keys are added after.
+pub(crate) fn write_node(n: &Node) -> Map<String, Value> {
+    let mut o = Map::new();
+    o.insert("id".into(), n.id.clone().into());
+    if !n.label.is_empty() {
+        o.insert("label".into(), n.label.clone().into());
+    }
+    if let Some(color) = &n.color {
+        o.insert("color".into(), color.clone().into());
+    }
+    o.insert("x".into(), json_number(n.x));
+    o.insert("y".into(), json_number(n.y));
+    write_data(&mut o, &n.data);
+    o
+}
+
+pub(crate) fn parse_node(value: Value) -> Result<Node, String> {
     let Value::Object(mut o) = value else {
         return Err("not an object".into());
+    };
+    let color = match o.shift_remove("color") {
+        None => None,
+        Some(Value::String(c)) if crate::amod::locator_color(&c).is_some() => Some(c),
+        Some(_) => return Err("color is not #rrggbb".into()),
     };
     Ok(Node {
         id: text(&mut o, "id", true)?,
         label: text(&mut o, "label", false)?,
+        color,
         x: number(&mut o, "x")?,
         y: number(&mut o, "y")?,
         data: parse_data(&mut o)?,
@@ -332,7 +349,7 @@ mod tests {
 
     #[test]
     fn graphs_round_trip() {
-        let text = r#"{
+        let text = r##"{
   "$dialect": "agraph/1",
   "nodes": [
     {
@@ -343,6 +360,7 @@ mod tests {
     },
     {
       "id": "dash",
+      "color": "#ef4444",
       "x": 2.5,
       "y": -1.25,
       "data": {
@@ -351,7 +369,7 @@ mod tests {
         "speed": 1.0,
         "unlocked": false
       },
-      "color": "red"
+      "note": "red"
     }
   ],
   "edges": [
@@ -367,10 +385,11 @@ mod tests {
   ],
   "x_tool": 1
 }
-"#;
+"##;
         let graph = Graph::parse(text).unwrap();
         assert_eq!(graph.nodes[1].data["speed"], PropValue::Float(1.0));
         assert_eq!(graph.nodes[1].data["cost"], PropValue::Int(2));
+        assert_eq!(graph.nodes[1].color.as_deref(), Some("#ef4444"));
         assert_eq!(graph.check(), Vec::<String>::new());
         assert_eq!(graph.to_json(), text);
         assert_eq!(Graph::parse(&Graph::new().to_json()).unwrap(), Graph::new());

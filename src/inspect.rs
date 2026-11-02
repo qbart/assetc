@@ -99,6 +99,7 @@ enum Kind {
     Palette,
     Schema,
     Graph,
+    Tree,
     Data,
     MaterialSource,
     ColorLut,
@@ -123,6 +124,7 @@ impl Kind {
             Self::Palette => "Palette",
             Self::Schema => "Schema",
             Self::Graph => "Graph",
+            Self::Tree => "Tree",
             Self::Data => "Data",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
@@ -190,6 +192,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if is_palette(file) => Kind::Palette,
         Location::Input if crate::aschema::is_schema(file) => Kind::Schema,
         Location::Input if crate::agraph::is_graph(file) => Kind::Graph,
+        Location::Input if crate::atree::is_tree(file) => Kind::Tree,
         Location::Input if crate::adata::is_data(file) => Kind::Data,
         Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if model::is_model(file) => Kind::Model,
@@ -219,6 +222,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::Schema => schema_rows(file, &mut out),
         Kind::Graph => graph_rows(file, &mut out),
+        Kind::Tree => tree_rows(file, &mut out),
         Kind::Data => data_rows(file, &mut out),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
@@ -401,6 +405,26 @@ fn graph_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     out.rows.push(("Nodes", graph.nodes.len().to_string()));
     out.rows.push(("Edges", graph.edges.len().to_string()));
     let problems = graph.check().len();
+    out.rows.push((
+        "Problems",
+        match problems {
+            0 => "none".into(),
+            1 => "1 error".into(),
+            n => format!("{n} errors"),
+        },
+    ));
+    Ok(())
+}
+
+/// See docs/features/trees.md#info-tab.
+fn tree_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    use crate::atree::{DIALECT, depth, parse};
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let tree = parse(&text)?;
+    out.rows.push(("Dialect", DIALECT.into()));
+    out.rows.push(("Nodes", tree.nodes.len().to_string()));
+    out.rows.push(("Depth", depth(&tree).to_string()));
+    let problems = tree.check().len();
     out.rows.push((
         "Problems",
         match problems {

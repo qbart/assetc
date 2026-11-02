@@ -541,6 +541,7 @@ enum InspectorTab {
     Colors,
     Types,
     Graph,
+    Tree,
     Instances,
     Animations,
     Mipmaps,
@@ -549,7 +550,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 18] = [
+    const ALL: [Self; 19] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -563,6 +564,7 @@ impl InspectorTab {
         Self::Colors,
         Self::Types,
         Self::Graph,
+        Self::Tree,
         Self::Instances,
         Self::Animations,
         Self::Mipmaps,
@@ -584,6 +586,7 @@ impl InspectorTab {
             Self::Gradients | Self::Colors => Icon::Palette,
             Self::Types => Icon::Braces,
             Self::Graph => Icon::GraphStar,
+            Self::Tree => Icon::ListTree,
             Self::Instances => Icon::Package,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
@@ -607,6 +610,7 @@ impl InspectorTab {
             Self::Colors => "Colors",
             Self::Types => "Types",
             Self::Graph => "Graph",
+            Self::Tree => "Tree",
             Self::Instances => "Instances",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
@@ -663,6 +667,9 @@ impl InspectorTab {
                 s.location == Location::Input
                     && crate::agraph::is_graph(&s.path)
                     && s.path.is_file()
+            }),
+            Self::Tree => selection.is_some_and(|s| {
+                s.location == Location::Input && crate::atree::is_tree(&s.path) && s.path.is_file()
             }),
             Self::Instances => selection.is_some_and(|s| {
                 s.location == Location::Input && crate::adata::is_data(&s.path) && s.path.is_file()
@@ -1012,7 +1019,7 @@ fn shell(
                             state.keys == KeyArea::Canvas,
                         )
                     {
-                        match std::fs::write(&inspected.path, graph.to_json()) {
+                        match std::fs::write(&inspected.path, graph) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
@@ -1093,7 +1100,8 @@ struct Prepared {
     gradient: Option<Result<Gradients, String>>,
     palette: Option<Result<Palette, String>>,
     schema: Option<Result<Schema, (String, String)>>,
-    graph: Option<Result<Graph, String>>,
+    /// A graph or (true) a tree.
+    graph: Option<Result<(Graph, bool), String>>,
     data: Option<Result<PreparedData, (String, String)>>,
     /// A model's sidecar (with every locator the model has), the meshlet limits the project
     /// gives it, and the locators it inherits.
@@ -1201,11 +1209,18 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
     });
     let data = (selection.location == Location::Input && crate::adata::is_data(&selection.path))
         .then(|| prepare_data(project, &selection.path));
-    let graph = (selection.location == Location::Input && crate::agraph::is_graph(&selection.path))
+    // Directed graphs, and trees held as graphs; see docs/features/trees.md.
+    let tree = crate::atree::is_tree(&selection.path);
+    let graph = (selection.location == Location::Input
+        && (crate::agraph::is_graph(&selection.path) || tree))
         .then(|| {
-            std::fs::read_to_string(&selection.path)
-                .map_err(|e| e.to_string())
-                .and_then(|text| Graph::parse(&text))
+            let text = std::fs::read_to_string(&selection.path).map_err(|e| e.to_string())?;
+            let graph = if tree {
+                crate::atree::parse(&text)
+            } else {
+                Graph::parse(&text)
+            };
+            graph.map(|g| (g, tree))
         });
     let mesh =
         (selection.location == Location::Input && model::is_model(&selection.path)).then(|| {
@@ -1345,10 +1360,10 @@ fn inspected(
             )
         });
     let graph = prepared.graph.map(|parsed| {
-        parsed.map(|graph| match kept_graph {
-            Some(edit) if edit.saved == graph => edit,
-            Some(edit) => GraphEdit::new(graph, edit),
-            None => GraphEdit::new(graph, GraphEdit::default()),
+        parsed.map(|(graph, tree)| match kept_graph {
+            Some(edit) if edit.saved == graph && edit.tree == tree => edit,
+            Some(edit) => GraphEdit::new(graph, tree, edit),
+            None => GraphEdit::new(graph, tree, GraphEdit::default()),
         })
     });
     let schema = prepared.schema.map(|parsed| {
@@ -1994,6 +2009,7 @@ enum FileOp {
     NewSchema(PathBuf),
     NewGraph(PathBuf),
     NewData(PathBuf),
+    NewTree(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -2062,6 +2078,10 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
             *action = Some(TreeAction::Op(FileOp::NewGraph(dir.to_path_buf())));
             ui.close();
         }
+        if menu_item(ui, "Tree", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewTree(dir.to_path_buf())));
+            ui.close();
+        }
         if menu_item(ui, "Instance", None).clicked() {
             *action = Some(TreeAction::Op(FileOp::NewData(dir.to_path_buf())));
             ui.close();
@@ -2094,6 +2114,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "aschema" => Icon::Braces,
         "agraph" => Icon::GraphStar,
         "adata" => Icon::Package,
+        "atree" => Icon::ListTree,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
@@ -2282,6 +2303,9 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             .map(|path| (dir, path)),
         FileOp::NewGraph(dir) => fileops::create_graph(&input, &dir)
             .map_err(|e| ("New Directed Graph", e))
+            .map(|path| (dir, path)),
+        FileOp::NewTree(dir) => fileops::create_tree(&input, &dir)
+            .map_err(|e| ("New Tree", e))
             .map(|path| (dir, path)),
         FileOp::NewData(dir) => fileops::create_data(&input, &dir)
             .map_err(|e| ("New Instance", e))
@@ -2601,10 +2625,10 @@ fn right_sidebar(
                 }
                 (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
                 (InspectorTab::Colors, Some(_), Some(_)) => placeholder(ui, "No colors"),
-                (InspectorTab::Graph, Some(inspected), Some(_)) => {
+                (InspectorTab::Graph | InspectorTab::Tree, Some(inspected), Some(_)) => {
                     let view = state.graph_views.entry(inspected.path.clone()).or_default();
                     if let Some(graph) = graph_tab(ui, inspected, view) {
-                        match std::fs::write(&inspected.path, graph.to_json()) {
+                        match std::fs::write(&inspected.path, graph) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
