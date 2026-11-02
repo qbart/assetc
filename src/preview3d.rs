@@ -54,7 +54,7 @@ impl Plugin for Preview3dPlugin {
                     (sync_compiled, sync, sync_model, sync_playback, sync_vision)
                         .chain()
                         .before(TransformSystems::Propagate),
-                    (sync_attachments, sync_region_view)
+                    (sync_attachments, sync_region_view, sync_grid)
                         .after(sync_model)
                         .before(TransformSystems::Propagate),
                     (fit_model, report_frames, cast_surface, report_regions)
@@ -116,7 +116,21 @@ impl Orbit {
         let step = 0.3f32.to_radians();
         let limit = Self::PITCH_LIMIT.to_radians();
         self.yaw -= delta.x * step;
+        // A view from straight above or below drags back within the limit.
+        let limit = limit.max(self.pitch.abs());
         self.pitch = (self.pitch + delta.y * step).clamp(-limit, limit);
+    }
+
+    /// Looks along world axis `axis` (0 X, 1 Y, 2 Z) toward the center from its `positive` or
+    /// negative side; see docs/features/canvas.md#orientation-gizmo.
+    pub fn look_from(&mut self, axis: usize, positive: bool) {
+        let side = if positive { 1.0 } else { -1.0 };
+        let (yaw, pitch) = match axis {
+            0 => (90f32 * side, 0.0),
+            1 => (0.0, 90.0 * side),
+            _ => (if positive { 0.0 } else { 180.0 }, 0.0),
+        };
+        (self.yaw, self.pitch) = (yaw.to_radians(), pitch.to_radians());
     }
 
     /// Divides the distance by `factor` (> 1 moves closer).
@@ -126,9 +140,10 @@ impl Orbit {
     }
 
     pub fn transform(&self) -> Transform {
-        let offset = Quat::from_euler(EulerRot::YXZ, self.yaw, -self.pitch, 0.0)
-            * Vec3::new(0.0, 0.0, self.distance);
-        Transform::from_translation(offset).looking_at(Vec3::ZERO, Vec3::Y)
+        // Turned rather than aimed, so straight above or below has an up direction too.
+        let rotation = Quat::from_euler(EulerRot::YXZ, self.yaw, -self.pitch, 0.0);
+        Transform::from_translation(rotation * Vec3::new(0.0, 0.0, self.distance))
+            .with_rotation(rotation)
     }
 }
 
@@ -198,6 +213,8 @@ pub struct Preview3d {
     /// The visible regions' triangles, written by the UI every frame; see
     /// docs/features/regions.md#3d-view.
     pub region_wants: Vec<RegionWant>,
+    /// Draw the shown model's ground grid; see docs/features/models.md#ground-grid.
+    pub grid: bool,
     /// Draw the model in its regions' colors (from `region_wants`) instead of its materials.
     pub region_view: bool,
     /// Draw the model in a color set's colors instead of its materials (or regions); see
@@ -1451,6 +1468,114 @@ fn sync_model(
     }
 }
 
+/// The ground grid of the model whose fit it hangs from.
+#[derive(Component)]
+struct GroundGrid {
+    fit: Entity,
+}
+
+/// Lines of the ground grid of a model whose largest side is `size`, with their colors; see
+/// docs/features/models.md#ground-grid.
+fn ground_grid(size: f32) -> (Vec<[f32; 3]>, Vec<[f32; 4]>) {
+    let size = if size > 0.0 { size } else { 1.0 };
+    let cell = 10f32.powf((size / 4.0).log10().floor());
+    let n = ((size / cell).ceil() as i32).clamp(1, 50);
+    let reach = n as f32 * cell;
+    let color = |c: bevy_egui::egui::Color32, alpha: f32| {
+        let [r, g, b, _] = c.to_array();
+        Color::srgba_u8(r, g, b, (alpha * 255.0).round() as u8)
+            .to_linear()
+            .to_f32_array()
+    };
+    let (mut lines, mut colors) = (Vec::new(), Vec::new());
+    for k in -n..=n {
+        let at = k as f32 * cell;
+        // Along X (at z = at), then along Z (at x = at).
+        lines.extend([[-reach, 0.0, at], [reach, 0.0, at]]);
+        colors.extend(
+            [if k == 0 {
+                color(crate::theme::CHANNEL_R, 0.8)
+            } else {
+                color(crate::theme::TEXT_WEAK, 0.35)
+            }; 2],
+        );
+        lines.extend([[at, 0.0, -reach], [at, 0.0, reach]]);
+        colors.extend(
+            [if k == 0 {
+                color(crate::theme::CHANNEL_B, 0.8)
+            } else {
+                color(crate::theme::TEXT_WEAK, 0.35)
+            }; 2],
+        );
+    }
+    (lines, colors)
+}
+
+/// Keeps a [`GroundGrid`] under the shown model's fit, shown while [`Preview3d::grid`] is on.
+fn sync_grid(
+    mut commands: Commands,
+    preview: Res<Preview3d>,
+    loaded: Res<LoadedModel>,
+    mut grids: Query<(Entity, &GroundGrid, &mut Visibility)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut material: Local<Option<Handle<StandardMaterial>>>,
+) {
+    let model = loaded.0.as_ref().filter(|m| m.fitted.is_some());
+    let mut found = false;
+    for (entity, grid, mut visibility) in &mut grids {
+        if model.is_none_or(|m| m.fit != grid.fit) {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        found = true;
+        let wanted = if preview.grid {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != wanted {
+            *visibility = wanted;
+        }
+    }
+    let Some(model) = model.filter(|_| !found) else {
+        return;
+    };
+    let Some(fitted) = model.fitted else {
+        return;
+    };
+    let scale = fitted.scale.max_element();
+    let size = if scale > 0.0 { MODEL_SIZE / scale } else { 1.0 };
+    let (lines, colors) = ground_grid(size);
+    let mesh = meshes.add(
+        Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, lines)
+            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, colors),
+    );
+    let material = material
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                unlit: true,
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            })
+        })
+        .clone();
+    commands.spawn((
+        Mesh3d(mesh),
+        MeshMaterial3d(material),
+        Transform::default(),
+        if preview.grid {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        },
+        ChildOf(model.fit),
+        GroundGrid { fit: model.fit },
+        bevy::camera::visibility::NoFrustumCulling,
+    ));
+}
+
 /// Pauses, resumes and seeks the shown model's animation, and reports its time; see
 /// docs/features/animation-events.md#timeline.
 fn sync_playback(
@@ -2323,5 +2448,47 @@ mod tests {
         assert!(t.translation.y > 0.0);
         let forward = t.forward();
         assert!((forward.dot(-t.translation.normalize()) - 1.0).abs() < 1e-4);
+        assert!(t.up().y > 0.0);
+    }
+
+    #[test]
+    fn grids_fit_the_model() {
+        // A 155-unit model gets 10-unit cells out to 160 each way, a 1.6-unit one 0.1.
+        let (lines, colors) = ground_grid(155.0);
+        assert_eq!(lines.len(), (2 * 16 + 1) * 4);
+        assert_eq!(colors.len(), lines.len());
+        assert_eq!(lines[0], [-160.0, 0.0, -160.0]);
+        let (lines, _) = ground_grid(1.6);
+        assert!((lines[0][0] + 1.6).abs() < 1e-4);
+        // Never more than 50 cells each way.
+        assert_eq!(ground_grid(1e6).0.len(), (2 * 10 + 1) * 4);
+    }
+
+    #[test]
+    fn axis_views_look_at_the_center() {
+        let mut orbit = Orbit::default();
+        for (axis, positive, from) in [
+            (0, true, Vec3::X),
+            (0, false, Vec3::NEG_X),
+            (1, true, Vec3::Y),
+            (1, false, Vec3::NEG_Y),
+            (2, true, Vec3::Z),
+            (2, false, Vec3::NEG_Z),
+        ] {
+            orbit.look_from(axis, positive);
+            let t = orbit.transform();
+            assert!((t.translation.normalize() - from).length() < 1e-4, "{from}");
+            assert!((t.forward().as_vec3() + from).length() < 1e-4, "{from}");
+        }
+        // From above, +X points right and +Z down the screen.
+        orbit.look_from(1, true);
+        let t = orbit.transform();
+        assert!((t.right().as_vec3() - Vec3::X).length() < 1e-4);
+        assert!((t.up().as_vec3() - Vec3::NEG_Z).length() < 1e-4);
+        // Dragging from there stays within reach of it, then within the limit.
+        orbit.drag(Vec2::new(0.0, 10.0));
+        assert!((orbit.pitch - 90f32.to_radians()).abs() < 1e-5);
+        orbit.drag(Vec2::new(0.0, -100.0));
+        assert!(orbit.pitch < 85f32.to_radians());
     }
 }

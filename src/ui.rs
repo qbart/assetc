@@ -133,7 +133,7 @@ struct LocatorTools {
     hidden_paths: HashMap<PathBuf, HashSet<String>>,
     /// The toolbar's Show group: locators, shapes, regions and paths drawn at all; see
     /// docs/features/models.md#show.
-    show: [bool; 4],
+    show: [bool; 5],
     /// Clicks on the model add points to the chosen path; a click's ray waits for its hit.
     draw: bool,
     draw_awaiting: bool,
@@ -169,7 +169,7 @@ impl Default for LocatorTools {
             hidden_shapes: HashMap::new(),
             hidden_regions: HashMap::new(),
             hidden_paths: HashMap::new(),
-            show: [true, true, false, true],
+            show: [true, true, false, true, true],
             draw: false,
             draw_awaiting: false,
             draw_last: None,
@@ -5203,7 +5203,14 @@ fn canvas_model(
     if tools.draw {
         tools.show[3] = true;
     }
-    let [show_locators, show_shapes, show_regions, show_paths] = tools.show;
+    let [
+        show_locators,
+        show_shapes,
+        show_regions,
+        show_paths,
+        show_grid,
+    ] = tools.show;
+    preview.grid = show_grid;
     let hidden = tools.hidden.get(&inspected.path).unwrap_or(&empty).clone();
     let hidden_shapes = tools
         .hidden_shapes
@@ -5910,12 +5917,14 @@ fn canvas_model(
         }
     }
 
-    let counts = edit.as_ref().map_or([0; 4], |e| {
+    // The grid is always there to show.
+    let counts = edit.as_ref().map_or([0, 0, 0, 0, 1], |e| {
         [
             e.edit.locators.len(),
             e.edit.shapes.len(),
             e.edit.regions.len(),
             e.edit.paths.len(),
+            1,
         ]
     });
     let show: Vec<Tool> = [
@@ -5923,6 +5932,7 @@ fn canvas_model(
         (Icon::Shapes, "Shapes"),
         (Icon::PaintBucket, "Regions"),
         (Icon::Spline, "Paths"),
+        (Icon::Grid3x3, "Grid"),
     ]
     .into_iter()
     .enumerate()
@@ -7132,7 +7142,7 @@ fn path_fields(
     animating: bool,
     draw: &mut bool,
     armed: &mut bool,
-    show: &mut [bool; 4],
+    show: &mut [bool; 5],
 ) -> Option<gizmo::Mode> {
     let saved = edit.saved.paths.get(i).map(|p| p.name.clone());
     let others: Vec<String> = edit
@@ -7312,6 +7322,18 @@ struct Timeline {
     flashes: HashMap<usize, Instant>,
 }
 
+/// The previous (or next) multiple of 0.01 s strictly before (after) `t`.
+fn step_time(t: f32, forward: bool) -> f32 {
+    const STEP: f32 = 0.01;
+    const SLACK: f32 = 1e-4;
+    let k = if forward {
+        ((t + SLACK) / STEP).floor() + 1.0
+    } else {
+        ((t - SLACK) / STEP).ceil() - 1.0
+    };
+    k * STEP
+}
+
 /// `0.5 s`, `1 s`, `0.25 s`: seconds without trailing zeros.
 fn seconds_label(t: f32) -> String {
     let text = format!("{t:.2}");
@@ -7374,6 +7396,20 @@ fn timeline(
         && ui.input(|i| i.key_pressed(egui::Key::Space))
     {
         state.paused = !state.paused;
+    }
+    // `,` and `.` step to the previous / next hundredth of a second, paused.
+    if !ui.ctx().egui_wants_keyboard_input() {
+        let (back, forward) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::Comma),
+                i.key_pressed(egui::Key::Period),
+            )
+        });
+        if back || forward {
+            now = step_time(now, forward).clamp(0.0, duration);
+            preview.animation_seek = Some(now);
+            state.paused = true;
+        }
     }
 
     // Header.
@@ -8330,12 +8366,12 @@ fn view_3d(ui: &mut Ui, rect: Rect, preview: &mut Preview3d, orbit: bool) -> Res
             preview.orbit.dolly(factor);
         }
     }
-    orientation_gizmo(ui, rect, &preview.orbit);
+    orientation_gizmo(ui, rect, &mut preview.orbit);
     response
 }
 
 /// World axes as seen from the orbit camera, see docs/features/canvas.md#orientation-gizmo.
-fn orientation_gizmo(ui: &Ui, rect: Rect, orbit: &Orbit) {
+fn orientation_gizmo(ui: &Ui, rect: Rect, orbit: &mut Orbit) {
     use bevy::math::Vec3;
     const SIZE: f32 = 64.0;
     const LENGTH: f32 = 22.0;
@@ -8344,22 +8380,61 @@ fn orientation_gizmo(ui: &Ui, rect: Rect, orbit: &Orbit) {
     let painter = ui.painter_at(rect);
     painter.circle_filled(center, SIZE / 2.0, BG_BAR.gamma_multiply(0.7));
     let to_view = orbit.transform().rotation.inverse();
-    // (screen offset, depth toward the camera, color, letter of a positive axis)
+    // (screen offset, depth toward the camera, color, letter of a positive axis, axis, sign)
     let mut marks = Vec::new();
-    for (axis, color, letter) in [
+    for (index, (axis, color, letter)) in [
         (Vec3::X, CHANNEL_R, "X"),
         (Vec3::Y, CHANNEL_G, "Y"),
         (Vec3::Z, CHANNEL_B, "Z"),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         for (sign, letter) in [(1.0, Some(letter)), (-1.0, None)] {
             let v = to_view * (axis * sign);
-            marks.push((vec2(v.x, -v.y) * LENGTH, v.z, color, letter));
+            marks.push((
+                vec2(v.x, -v.y) * LENGTH,
+                v.z,
+                color,
+                letter,
+                index,
+                sign > 0.0,
+            ));
         }
     }
     // Farthest first, so nearer marks cover them.
     marks.sort_by(|a, b| a.1.total_cmp(&b.1));
-    for (offset, _, color, letter) in marks {
+    // A click on a dot looks along its axis; the nearest dot wins.
+    let pointer = ui.input(|i| i.pointer.hover_pos());
+    let hovered = pointer.and_then(|p| {
+        marks
+            .iter()
+            .map(|m| (m, (center + m.0 - p).length()))
+            .filter(|(_, d)| *d <= 8.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(m, _)| (m.4, m.5, center + m.0))
+    });
+    if let Some((axis, positive, at)) = hovered {
+        let sign = if positive { "+" } else { "−" };
+        let name = ["X", "Y", "Z"][axis];
+        let dot = ui.interact(
+            Rect::from_center_size(at, vec2(16.0, 16.0)),
+            ui.id().with("orientation_dot"),
+            Sense::click(),
+        );
+        let dot = dot
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text(format!("View from {sign}{name}"));
+        if dot.clicked() {
+            orbit.look_from(axis, positive);
+        }
+    }
+    for (offset, _, color, letter, axis, positive) in marks {
         let end = center + offset;
+        if hovered.is_some_and(|h| (h.0, h.1) == (axis, positive)) {
+            let radius = if letter.is_some() { 9.0 } else { 6.0 };
+            painter.circle_stroke(end, radius, Stroke::new(1.0, TEXT));
+        }
         match letter {
             Some(letter) => {
                 painter.line_segment([center, end], Stroke::new(2.0, color));
@@ -8697,4 +8772,21 @@ fn placeholder(ui: &mut Ui, text: &str) {
         .show(ui, |ui| {
             ui.weak(text);
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn steps_land_on_hundredths() {
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
+        assert!(close(step_time(0.304, false), 0.30));
+        assert!(close(step_time(0.304, true), 0.31));
+        assert!(close(step_time(0.30, false), 0.29));
+        assert!(close(step_time(0.30, true), 0.31));
+        // A time a hair under a hundredth counts as on it.
+        assert!(close(step_time(0.29999, false), 0.29));
+        assert!(close(step_time(0.29999, true), 0.31));
+    }
 }
