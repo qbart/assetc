@@ -174,6 +174,71 @@ pub fn file_locators(data: &[u8]) -> Result<Vec<crate::amod::Locator>, String> {
     Ok(out)
 }
 
+/// The index of joint `name` among the skin's `joints`, or `-1` for model space.
+fn joint_index(name: Option<&str>, joints: Option<&[Option<&str>]>) -> Result<i32, String> {
+    match (name, joints) {
+        (None, _) => Ok(-1),
+        (Some(name), None) => Err(format!("no skeleton for joint {name:?}")),
+        (Some(name), Some(joints)) => joints
+            .iter()
+            .position(|j| *j == Some(name))
+            .map(|i| i as i32)
+            .ok_or_else(|| format!("no joint {name:?}")),
+    }
+}
+
+/// The sidecar's shapes with joints as skeleton indices and hulls computed; see
+/// docs/features/shapes.md#build.
+fn resolve_shapes(
+    shapes: &[crate::enrich::Shape],
+    joints: Option<&[Option<&str>]>,
+    geometry: &ModelGeometry,
+) -> Result<Vec<amesh::CompiledShape>, String> {
+    use crate::enrich::ShapeType;
+    shapes
+        .iter()
+        .map(|s| {
+            let fail = |problem: String| format!("shape {:?}: {problem}", s.name);
+            let joint = joint_index(s.joint.as_deref(), joints).map_err(fail)?;
+            let (size, points) = match s.shape {
+                ShapeType::Box { size } => (size, Vec::new()),
+                ShapeType::Sphere { radius } => ([radius, 0.0, 0.0], Vec::new()),
+                ShapeType::Capsule { radius, height } => ([radius, height, 0.0], Vec::new()),
+                ShapeType::Hull => {
+                    let points = geometry
+                        .hull_points(s.joint.as_deref())
+                        .and_then(|p| crate::hull::hull(&p))
+                        .ok_or_else(|| fail("no hull".into()))?;
+                    (
+                        [0.0; 3],
+                        points.points.iter().map(|p| p.to_array()).collect(),
+                    )
+                }
+            };
+            let (translation, rotation) = if s.shape == ShapeType::Hull {
+                ([0.0; 3], [0.0, 0.0, 0.0, 1.0])
+            } else {
+                let rotation = bevy::math::Quat::from_array(s.rotation);
+                if rotation.length_squared() == 0.0 {
+                    return Err(fail("zero rotation".into()));
+                }
+                (s.translation, rotation.normalize().to_array())
+            };
+            Ok(amesh::CompiledShape {
+                name: s.name.clone(),
+                kind: s.kind.clone(),
+                joint,
+                shape: s.shape.index() as u32,
+                translation,
+                rotation,
+                size,
+                points,
+                properties: s.properties.clone(),
+            })
+        })
+        .collect()
+}
+
 /// The sidecar's locators with their joints as skeleton indices; see
 /// docs/features/locators.md#build. `joints` are the skeleton's node names, if it has one.
 fn resolve_locators(
@@ -184,15 +249,7 @@ fn resolve_locators(
         .iter()
         .map(|l| {
             let fail = |problem: String| format!("locator {:?}: {problem}", l.name);
-            let joint = match (&l.joint, joints) {
-                (None, _) => -1,
-                (Some(name), None) => return Err(fail(format!("no skeleton for joint {name:?}"))),
-                (Some(name), Some(joints)) => joints
-                    .iter()
-                    .position(|j| *j == Some(name.as_str()))
-                    .ok_or_else(|| fail(format!("no joint {name:?}")))?
-                    as i32,
-            };
+            let joint = joint_index(l.joint.as_deref(), joints).map_err(fail)?;
             let rotation = bevy::math::Quat::from_array(l.rotation);
             if rotation.length_squared() == 0.0 {
                 return Err(fail("zero rotation".into()));
@@ -381,20 +438,13 @@ fn load_uri(uri: &str, dir: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("{uri}: {e}"))
 }
 
-/// Compiles the model in `file`, whose asset path is `asset_path` (`P`), with the locators of
-/// its sidecar.
-pub fn compile(
-    file: &Path,
-    asset_path: &str,
-    options: &amesh::MeshOptions,
-    locators: &[crate::amod::Locator],
-) -> Result<Compiled, String> {
+/// The glTF in `file` and its buffers.
+fn load(file: &Path) -> Result<(Gltf, Vec<Vec<u8>>), String> {
     let data = std::fs::read(file).map_err(|e| e.to_string())?;
     let gltf = parse(&data)?;
-    let document = &gltf.document;
-    let outputs = analyze(document)?;
     let dir = file.parent().unwrap_or(Path::new("."));
-    let buffers: Vec<Vec<u8>> = document
+    let buffers: Vec<Vec<u8>> = gltf
+        .document
         .buffers()
         .map(|buffer| match buffer.source() {
             gltf::buffer::Source::Bin => gltf
@@ -404,44 +454,60 @@ pub fn compile(
             gltf::buffer::Source::Uri(uri) => load_uri(uri, dir),
         })
         .collect::<Result<_, _>>()?;
-    let read = |buffer: gltf::Buffer<'_>| buffers.get(buffer.index()).map(Vec::as_slice);
+    Ok((gltf, buffers))
+}
 
-    // Geometry.
-    let slots: HashMap<usize, u32> = outputs
-        .materials
-        .iter()
-        .enumerate()
-        .map(|(slot, (i, _))| (*i, slot as u32))
-        .collect();
+/// A triangle primitive of a mesh node, as compiled.
+struct Part {
+    primitive: amesh::Primitive,
+    /// glTF mesh and primitive index, for regions.
+    mesh: u32,
+    index: u32,
+    /// glTF material index.
+    material: Option<usize>,
+    /// Bound to the skin: vertices in mesh space with weights.
+    skinned: bool,
+}
+
+/// Every triangle primitive of the default scene, weights renormalized when the model is
+/// skinned; and whether they all have tangents.
+fn read_parts(
+    document: &Document,
+    read: &Read<'_>,
+    slots: &HashMap<usize, u32>,
+) -> Result<(Vec<Part>, bool), String> {
     let instances = instances(document);
     let skinned = instances.iter().any(|i| i.skinned);
-    let mut primitives = Vec::new();
+    let mut parts = Vec::new();
     let mut tangents = true;
     for instance in &instances {
-        for primitive in instance
-            .node
-            .mesh()
-            .into_iter()
-            .flat_map(|m| m.primitives())
-        {
+        let Some(mesh) = instance.node.mesh() else {
+            continue;
+        };
+        for primitive in mesh.primitives() {
             if !is_triangles(&primitive) {
                 continue;
             }
-            let (vertices, indices, has_tangents) = read_primitive(&primitive, &read, instance)?;
+            let (vertices, indices, has_tangents) = read_primitive(&primitive, read, instance)?;
             tangents &= has_tangents;
-            primitives.push(amesh::Primitive {
-                vertices,
-                indices,
-                material: primitive
-                    .material()
-                    .index()
-                    .and_then(|i| slots.get(&i).copied()),
+            let material = primitive.material().index();
+            parts.push(Part {
+                primitive: amesh::Primitive {
+                    vertices,
+                    indices,
+                    material: material.and_then(|i| slots.get(&i).copied()),
+                    regions: Vec::new(),
+                },
+                mesh: mesh.index() as u32,
+                index: primitive.index() as u32,
+                material,
+                skinned: instance.skinned,
             });
         }
     }
     if skinned {
-        for p in &mut primitives {
-            for v in &mut p.vertices {
+        for p in &mut parts {
+            for v in &mut p.primitive.vertices {
                 let sum: f32 = v.weights.iter().sum();
                 if sum > 0.0 {
                     v.weights = v.weights.map(|w| w / sum);
@@ -451,6 +517,130 @@ pub fn compile(
             }
         }
     }
+    Ok((parts, tangents))
+}
+
+/// What hulls and the Inspector need of a model's geometry; see docs/features/shapes.md.
+#[derive(Debug, Clone, Default)]
+pub struct ModelGeometry {
+    /// Every vertex in model space (mesh space for skinned ones) and the skin joint (index)
+    /// with its largest weight, for vertices of skinned nodes.
+    pub points: Vec<(Vec3, Option<usize>)>,
+    /// The first skin's joints: name and inverse bind matrix.
+    pub joints: Vec<(Option<String>, Mat4)>,
+    /// Names of the materials triangles use, in file order.
+    pub materials: Vec<String>,
+    /// Largest side of the points' bounding box.
+    pub extent: f32,
+}
+
+impl ModelGeometry {
+    fn new(document: &Document, read: &Read<'_>, parts: &[Part]) -> Self {
+        let joints = document
+            .skins()
+            .next()
+            .map(|skin| {
+                let binds: Vec<[[f32; 4]; 4]> = skin
+                    .reader(read)
+                    .read_inverse_bind_matrices()
+                    .map(Iterator::collect)
+                    .unwrap_or_default();
+                skin.joints()
+                    .enumerate()
+                    .map(|(i, j)| {
+                        let bind = binds
+                            .get(i)
+                            .map_or(Mat4::IDENTITY, Mat4::from_cols_array_2d);
+                        (j.name().filter(|n| !n.is_empty()).map(str::to_owned), bind)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut points = Vec::new();
+        for part in parts {
+            for v in &part.primitive.vertices {
+                let dominant = part.skinned.then(|| {
+                    let k = (0..4)
+                        .max_by(|&a, &b| v.weights[a].total_cmp(&v.weights[b]))
+                        .unwrap_or(0);
+                    v.joints[k] as usize
+                });
+                points.push((Vec3::from(v.position), dominant));
+            }
+        }
+        let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+        for (p, _) in &points {
+            (min, max) = (min.min(*p), max.max(*p));
+        }
+        let names: Vec<_> = document.materials().map(|m| m.name()).collect();
+        let names = leaves(&names, "material");
+        let mut used: Vec<usize> = parts.iter().filter_map(|p| p.material).collect();
+        used.sort_unstable();
+        used.dedup();
+        Self {
+            points,
+            joints,
+            materials: used.into_iter().map(|i| names[i].clone()).collect(),
+            extent: if min.cmple(max).all() {
+                (max - min).max_element()
+            } else {
+                1.0
+            },
+        }
+    }
+
+    /// The points a hull on `joint` (by name) is made of, in the joint's space at the bind
+    /// pose; every point in model space. `None` for a joint the skin does not have.
+    pub fn hull_points(&self, joint: Option<&str>) -> Option<Vec<Vec3>> {
+        let Some(name) = joint else {
+            return Some(self.points.iter().map(|(p, _)| *p).collect());
+        };
+        let index = self
+            .joints
+            .iter()
+            .position(|(n, _)| n.as_deref() == Some(name))?;
+        let bind = self.joints[index].1;
+        Some(
+            self.points
+                .iter()
+                .filter(|(_, j)| *j == Some(index))
+                .map(|(p, _)| bind.transform_point3(*p))
+                .collect(),
+        )
+    }
+}
+
+/// The geometry of the model in `file`, for hulls and the Inspector.
+pub fn geometry(file: &Path) -> Result<ModelGeometry, String> {
+    let (gltf, buffers) = load(file)?;
+    let read = |buffer: gltf::Buffer<'_>| buffers.get(buffer.index()).map(Vec::as_slice);
+    let (parts, _) = read_parts(&gltf.document, &read, &HashMap::new())?;
+    Ok(ModelGeometry::new(&gltf.document, &read, &parts))
+}
+
+/// Compiles the model in `file`, whose asset path is `asset_path` (`P`), with the
+/// enrichments of its sidecar (its locators already merged with inherited ones).
+pub fn compile(
+    file: &Path,
+    asset_path: &str,
+    options: &amesh::MeshOptions,
+    sidecar: &crate::amod::Amod,
+) -> Result<Compiled, String> {
+    let (gltf, buffers) = load(file)?;
+    let document = &gltf.document;
+    let outputs = analyze(document)?;
+    let dir = file.parent().unwrap_or(Path::new("."));
+    let read = |buffer: gltf::Buffer<'_>| buffers.get(buffer.index()).map(Vec::as_slice);
+
+    // Geometry.
+    let slots: HashMap<usize, u32> = outputs
+        .materials
+        .iter()
+        .enumerate()
+        .map(|(slot, (i, _))| (*i, slot as u32))
+        .collect();
+    let (mut parts, tangents) = read_parts(document, &read, &slots)?;
+    let skinned = parts.iter().any(|p| p.skinned);
     let skeleton = skinned
         .then(|| document.skins().next())
         .flatten()
@@ -459,10 +649,51 @@ pub fn compile(
         let skin = document.skins().next()?;
         Some(skin.joints().map(|j| j.name()).collect())
     });
-    let locators = resolve_locators(locators, skin_joints.as_deref()).map_err(|e| {
+    let sidecar_error = |e: String| {
         let name = file.file_name().unwrap_or_default().to_string_lossy();
         format!("{name}.amod: {e}")
-    })?;
+    };
+    let locators =
+        resolve_locators(&sidecar.locators, skin_joints.as_deref()).map_err(sidecar_error)?;
+    let geometry = ModelGeometry::new(document, &read, &parts);
+    let shapes = resolve_shapes(&sidecar.shapes, skin_joints.as_deref(), &geometry)
+        .map_err(sidecar_error)?;
+
+    // Regions, as a mask per triangle; see docs/features/regions.md#build.
+    let material_names = leaves(
+        &document.materials().map(|m| m.name()).collect::<Vec<_>>(),
+        "material",
+    );
+    if !sidecar.regions.is_empty() {
+        for part in &mut parts {
+            let material = part.material.map(|i| material_names[i].as_str());
+            let count = part.primitive.indices.len() / 3;
+            part.primitive.regions = (0..count as u32)
+                .map(|t| {
+                    sidecar
+                        .regions
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, r)| {
+                            material.is_some_and(|m| r.materials.iter().any(|n| n == m))
+                                || r.triangles.contains(&(part.mesh, part.index, t))
+                        })
+                        .fold(0u32, |mask, (i, _)| mask | 1 << i)
+                })
+                .collect();
+        }
+    }
+    let primitives: Vec<amesh::Primitive> = parts.into_iter().map(|p| p.primitive).collect();
+    let extras = amesh::Extras {
+        locators,
+        properties: sidecar.properties.clone(),
+        shapes,
+        regions: sidecar
+            .regions
+            .iter()
+            .map(|r| (r.name.clone(), r.tags.clone()))
+            .collect(),
+    };
     let material_ids: Vec<u64> = outputs
         .materials
         .iter()
@@ -472,7 +703,7 @@ pub fn compile(
         &primitives,
         &material_ids,
         skeleton.as_deref(),
-        &locators,
+        &extras,
         tangents,
         options,
     );
@@ -975,7 +1206,13 @@ mod tests {
         assert_eq!(outputs.materials, [(0, "Paint".to_owned())]);
         assert!(!outputs.animation);
 
-        let compiled = compile(&file, "props/tri", &amesh::MeshOptions::default(), &[]).unwrap();
+        let compiled = compile(
+            &file,
+            "props/tri",
+            &amesh::MeshOptions::default(),
+            &Default::default(),
+        )
+        .unwrap();
         assert!(compiled.animation.is_none());
         assert_eq!(compiled.materials[0].0, "Paint");
         assert_eq!(compiled.materials[0].1.base_color, [1.0, 0.0, 0.0, 1.0]);
@@ -1031,7 +1268,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("Fox.glb");
         std::fs::write(&file, FOX).unwrap();
-        let compiled = compile(&file, "Fox", &amesh::MeshOptions::default(), &[hand]).unwrap();
+        let compiled = compile(
+            &file,
+            "Fox",
+            &amesh::MeshOptions::default(),
+            &crate::amod::Amod {
+                locators: vec![hand],
+                ..Default::default()
+            },
+        )
+        .unwrap();
         let reader = crate::chunks::Reader::parse(&compiled.mesh, "AMESH").unwrap();
         let locators = reader.require("LOCATORS").unwrap();
         assert_eq!(crate::chunks::u32_at(locators, 0, 64, 16), Some(5));
@@ -1039,10 +1285,83 @@ mod tests {
         static_hand.joint = Some("x".into());
         let tri = dir.path().join("tri.gltf");
         std::fs::write(&tri, static_triangle()).unwrap();
-        let err = compile(&tri, "tri", &amesh::MeshOptions::default(), &[static_hand]).err();
+        let err = compile(
+            &tri,
+            "tri",
+            &amesh::MeshOptions::default(),
+            &crate::amod::Amod {
+                locators: vec![static_hand],
+                ..Default::default()
+            },
+        )
+        .err();
         assert_eq!(
             err.as_deref(),
             Some(r#"tri.gltf.amod: locator "hand": no skeleton for joint "x""#)
+        );
+    }
+
+    #[test]
+    fn shapes_and_regions_on_the_fox() {
+        let amod = crate::amod::Amod::parse(
+            r##"[[shapes]]
+name = "head"
+type = "hull"
+joint = "b_Head_05"
+
+[[shapes]]
+name = "neck"
+type = "capsule"
+joint = "b_Neck_04"
+
+[[regions]]
+name = "fur"
+color = "#f97316"
+materials = ["fox_material"]
+
+[[regions]]
+name = "spot"
+color = "#22c55e"
+triangles = [[0, 0, 5, 1], [9, 9, 0, 3]]
+"##,
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Fox.glb");
+        std::fs::write(&file, FOX).unwrap();
+
+        // The head's hull is made of the head's vertices, in its bind space.
+        let geometry = geometry(&file).unwrap();
+        let head = geometry.hull_points(Some("b_Head_05")).unwrap();
+        assert!(head.len() > 10 && head.len() < geometry.points.len());
+        assert!(geometry.hull_points(Some("nope")).is_none());
+        assert_eq!(geometry.materials, ["fox_material"]);
+        assert!(geometry.extent > 0.0);
+
+        let compiled = compile(&file, "Fox", &amesh::MeshOptions::default(), &amod).unwrap();
+        let mesh = &compiled.mesh;
+        let reader = crate::chunks::Reader::parse(mesh, "AMESH").unwrap();
+        let points = reader.require("SHAPEPTS").unwrap().len() / 12;
+        assert!(points >= 4 && points <= head.len(), "{points}");
+        assert_eq!(amesh::cell(mesh, "SHAPES", 0, 3), "6");
+        assert_eq!(amesh::cell(mesh, "SHAPES", 1, 4), "capsule");
+        // Every triangle is fur; one is also the spot (the run on a missing mesh is ignored).
+        let masks = reader.require("TRIREGN").unwrap();
+        let masks: Vec<u32> = (0..masks.len() / 4)
+            .map(|t| crate::chunks::u32_at(masks, t, 4, 0).unwrap())
+            .collect();
+        assert_eq!(masks.len(), 576);
+        assert!(masks.iter().all(|m| m & 1 == 1));
+        assert_eq!(masks.iter().filter(|m| **m & 2 != 0).count(), 1);
+
+        let bad = crate::amod::Amod::parse(
+            "[[shapes]]\nname = \"x\"\ntype = \"box\"\njoint = \"nope\"\n",
+        )
+        .unwrap();
+        let err = compile(&file, "Fox", &amesh::MeshOptions::default(), &bad).err();
+        assert_eq!(
+            err.as_deref(),
+            Some(r#"Fox.glb.amod: shape "x": no joint "nope""#)
         );
     }
 

@@ -60,8 +60,9 @@ pub enum Job {
     Model {
         source: String,
         options: MeshOptions,
-        /// From the model's `.amod`; see docs/features/locators.md#build.
-        locators: Vec<crate::amod::Locator>,
+        /// The model's `.amod`, its locators merged with inherited ones; see
+        /// docs/features/locators.md#build.
+        sidecar: Box<crate::amod::Amod>,
     },
     /// Another output of a model, written by its [`Job::Model`].
     ModelPart { source: String },
@@ -131,7 +132,7 @@ fn model_assets(
     source: &str,
     outputs: &model::Outputs,
     options: MeshOptions,
-    locators: Vec<crate::amod::Locator>,
+    sidecar: crate::amod::Amod,
 ) {
     let p = strip_extension(source);
     let mut push = |kind: Kind, asset_path: String, job: Job| {
@@ -152,7 +153,7 @@ fn model_assets(
         Job::Model {
             source: source.to_owned(),
             options,
-            locators,
+            sidecar: Box::new(sidecar),
         },
     );
     if outputs.animation {
@@ -221,17 +222,20 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 let options = meshes
                     .options_with(&rel, amod.as_ref())
                     .map_err(|e| format!("{}.amod: {e}", split_dir(&rel).1))?;
-                Ok((options, amod.map(|a| a.locators).unwrap_or_default()))
+                Ok((options, amod.unwrap_or_default()))
             });
             match options.and_then(|(options, sidecar)| {
                 let data = fs::read(file).map_err(|e| e.to_string())?;
                 // See docs/features/locators.md#inherited-locators.
                 let inherited = crate::presets::inherited(&config.locators, input, &rel, &data)?;
-                let locators = crate::presets::merged(&inherited, &sidecar);
-                Ok((model::outputs(&data)?, options, locators))
+                let sidecar = crate::amod::Amod {
+                    locators: crate::presets::merged(&inherited, &sidecar.locators),
+                    ..sidecar
+                };
+                Ok((model::outputs(&data)?, options, sidecar))
             }) {
-                Ok((outputs, options, locators)) => {
-                    model_assets(&mut plan, &rel, &outputs, options, locators)
+                Ok((outputs, options, sidecar)) => {
+                    model_assets(&mut plan, &rel, &outputs, options, sidecar)
                 }
                 Err(message) => plan.failures.push(Failure {
                     source: rel,

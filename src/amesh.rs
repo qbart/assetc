@@ -1,6 +1,8 @@
 //! `.amesh` meshes: submeshes with meshlets, bounds, levels of detail and skin; see
 //! docs/spec/amesh.md.
 
+use std::collections::HashMap;
+
 use meshoptimizer::Meshlet;
 
 use serde::Deserialize;
@@ -211,6 +213,79 @@ pub struct Primitive {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
     pub material: Option<u32>,
+    /// Per triangle of `indices`, its regions as bits; empty without regions.
+    pub regions: Vec<u32>,
+}
+
+/// A shape ready to write; see docs/spec/amesh.md#shapes.
+pub struct CompiledShape {
+    pub name: String,
+    pub kind: String,
+    /// Index into the skeleton; `-1` is mesh space.
+    pub joint: i32,
+    /// `type`: 0 box, 1 sphere, 2 capsule, 3 hull.
+    pub shape: u32,
+    pub translation: [f32; 3],
+    pub rotation: [f32; 4],
+    pub size: [f32; 3],
+    /// A hull's points, in the parent's space.
+    pub points: Vec<[f32; 3]>,
+    pub properties: crate::enrich::Properties,
+}
+
+/// What a model carries besides its geometry: locators, properties, shapes and regions
+/// (name and tags; their triangles are in [`Primitive::regions`]).
+#[derive(Default)]
+pub struct Extras {
+    pub locators: Vec<Locator>,
+    pub properties: crate::enrich::Properties,
+    pub shapes: Vec<CompiledShape>,
+    pub regions: Vec<(String, Vec<String>)>,
+}
+
+/// The `STRINGS` chunk being built: text back to back.
+#[derive(Default)]
+struct Strings(Vec<u8>);
+
+impl Strings {
+    /// Adds `text`; returns its offset and length.
+    fn add(&mut self, text: &str) -> (u32, u32) {
+        let at = self.0.len() as u32;
+        self.0.extend_from_slice(text.as_bytes());
+        (at, text.len() as u32)
+    }
+}
+
+/// Writes `properties` as [`Property`](docs/spec/amesh.md#property-32-bytes) records.
+fn put_properties(out: &mut Bytes, strings: &mut Strings, properties: &crate::enrich::Properties) {
+    use crate::enrich::PropValue;
+    for (key, value) in properties {
+        let (at, len) = strings.add(key);
+        out.u64(crate::hash::fnv1a64(key.as_bytes()))
+            .u32(at)
+            .u32(len)
+            .u32(value.type_index() as u32)
+            .u32(0);
+        match value {
+            PropValue::Bool(b) => out.u64(u64::from(*b)),
+            PropValue::Int(i) => out.u64(*i as u64),
+            PropValue::Float(f) => out.u64(f.to_bits()),
+            PropValue::Text(t) => {
+                let (at, len) = strings.add(t);
+                out.u32(at).u32(len)
+            }
+        };
+    }
+}
+
+/// Writes `tags` as [`Tag`](docs/spec/amesh.md#tag-16-bytes) records.
+fn put_tags(out: &mut Bytes, strings: &mut Strings, tags: &[String]) {
+    for tag in tags {
+        let (at, len) = strings.add(tag);
+        out.u64(crate::hash::fnv1a64(tag.as_bytes()))
+            .u32(at)
+            .u32(len);
+    }
 }
 
 pub struct Joint {
@@ -332,7 +407,7 @@ pub fn encode(
     primitives: &[Primitive],
     materials: &[u64],
     skeleton: Option<&[Joint]>,
-    locators: &[Locator],
+    extras: &Extras,
     tangents: bool,
     options: &MeshOptions,
 ) -> (Vec<u8>, Summary) {
@@ -360,6 +435,9 @@ pub fn encode(
     let mut lod_ranges = Bytes::default();
     let (mut meshlet_count, mut meshlet_vertex_count, mut meshlet_triangle_count) = (0, 0, 0);
     let mut submesh_count = 0;
+    let locators = &extras.locators;
+    // Per triangle of `indices`, its regions; see docs/spec/amesh.md#regions.
+    let mut triangle_regions: Vec<u32> = Vec::new();
 
     for primitive in primitives.iter().filter(|p| !p.indices.is_empty()) {
         submesh_count += 1;
@@ -516,6 +594,32 @@ pub fn encode(
             .u32(primitive.material.unwrap_or(NO_MATERIAL))
             .u32(0);
         put_bounds(&mut submeshes, &own);
+        if !extras.regions.is_empty() {
+            // The vertex cache order moves triangles: find each one's source by its corners.
+            let mut sources: HashMap<[u32; 3], Vec<usize>> = HashMap::new();
+            for (t, triangle) in primitive
+                .indices
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .enumerate()
+                .rev()
+            {
+                let mut key = *triangle;
+                key.sort_unstable();
+                sources.entry(key).or_default().push(t);
+            }
+            for triangle in local.as_chunks::<3>().0 {
+                let mut key = *triangle;
+                key.sort_unstable();
+                let source = sources.get_mut(&key).and_then(Vec::pop);
+                triangle_regions.push(
+                    source
+                        .and_then(|t| primitive.regions.get(t).copied())
+                        .unwrap_or(0),
+                );
+            }
+        }
         indices.extend(local.iter().map(|i| i + base));
         vertices.extend_from_slice(&primitive.vertices);
     }
@@ -645,6 +749,95 @@ pub fn encode(
         if tag_count > 0 {
             writer.chunk("LOCTAGS", tags.take());
         }
+    }
+    // Properties, shapes and regions, their text in STRINGS.
+    let mut strings = Strings::default();
+    let mut props = Bytes::default();
+    put_properties(&mut props, &mut strings, &extras.properties);
+    let (mut shapes, mut shape_points, mut shape_props) =
+        (Bytes::default(), Bytes::default(), Bytes::default());
+    let (mut point_count, mut property_count) = (0u32, 0u32);
+    for shape in &extras.shapes {
+        let (name_at, name_len) = strings.add(&shape.name);
+        let (kind_at, kind_len) = strings.add(&shape.kind);
+        shapes
+            .u64(crate::hash::fnv1a64(shape.name.as_bytes()))
+            .u32(name_at)
+            .u32(name_len)
+            .u64(crate::hash::fnv1a64(shape.kind.as_bytes()))
+            .u32(kind_at)
+            .u32(kind_len)
+            .i32(shape.joint)
+            .u32(shape.shape)
+            .f32s(&shape.translation)
+            .f32s(&shape.rotation)
+            .f32s(&shape.size)
+            .u32(if shape.points.is_empty() {
+                0
+            } else {
+                point_count
+            })
+            .u32(shape.points.len() as u32)
+            .u32(if shape.properties.is_empty() {
+                0
+            } else {
+                property_count
+            })
+            .u32(shape.properties.len() as u32);
+        for point in &shape.points {
+            shape_points.f32s(point);
+        }
+        put_properties(&mut shape_props, &mut strings, &shape.properties);
+        point_count += shape.points.len() as u32;
+        property_count += shape.properties.len() as u32;
+    }
+    let (mut regions, mut region_tags) = (Bytes::default(), Bytes::default());
+    let mut tag_count = 0u16;
+    for (i, (name, tags)) in extras.regions.iter().enumerate() {
+        let (at, len) = strings.add(name);
+        let triangles = triangle_regions
+            .iter()
+            .filter(|m| *m & (1 << i) != 0)
+            .count();
+        regions
+            .u64(crate::hash::fnv1a64(name.as_bytes()))
+            .u32(at)
+            .u32(len)
+            .u16(if tags.is_empty() { 0 } else { tag_count })
+            .u16(tags.len() as u16)
+            .u32(triangles as u32)
+            .u64(0);
+        put_tags(&mut region_tags, &mut strings, tags);
+        tag_count += tags.len() as u16;
+    }
+    let has_props = !extras.properties.is_empty();
+    let has_shapes = !extras.shapes.is_empty();
+    let has_regions = !extras.regions.is_empty();
+    if has_props || has_shapes || has_regions {
+        writer.chunk("STRINGS", strings.0);
+    }
+    if has_props {
+        writer.chunk("PROPS", props.take());
+    }
+    if has_shapes {
+        writer.chunk("SHAPES", shapes.take());
+        if point_count > 0 {
+            writer.chunk("SHAPEPTS", shape_points.take());
+        }
+        if property_count > 0 {
+            writer.chunk("SHAPEPRP", shape_props.take());
+        }
+    }
+    if has_regions {
+        writer.chunk("REGIONS", regions.take());
+        if tag_count > 0 {
+            writer.chunk("REGTAGS", region_tags.take());
+        }
+        let mut masks = Bytes::default();
+        for mask in &triangle_regions {
+            masks.u32(*mask);
+        }
+        writer.chunk("TRIREGN", masks.take());
     }
     let summary = Summary {
         vertices: vertices.len(),
@@ -938,6 +1131,16 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     let f = |i: usize| chunks::f32_at(bounds, 0, 40, i * 4).unwrap_or(0.0);
     let joints = reader.chunk("SKELETON").map_or(0, |s| s.len() / 112);
     let locators = reader.chunk("LOCATORS").map_or(0, |l| l.len() / 64);
+    let count =
+        |chunk: &str, stride: usize| match reader.chunk(chunk).map_or(0, |c| c.len() / stride) {
+            0 => "none".to_owned(),
+            n => n.to_string(),
+        };
+    let (properties, shapes, regions) = (
+        count("PROPS", 32),
+        count("SHAPES", 96),
+        count("REGIONS", 32),
+    );
     let lods = reader
         .chunk("LODTABLE")
         .and_then(|t| chunks::u32_at(t, 0, 8, 0))
@@ -988,6 +1191,9 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
                 "none".into()
             },
         ),
+        ("Properties", properties),
+        ("Shapes", shapes),
+        ("Regions", regions),
         (
             "Bounds",
             format!(
@@ -1039,6 +1245,14 @@ pub fn describe(name: &str) -> &'static str {
         "LOCATORS" => "Locators",
         "LOCNAMES" => "Locator names",
         "LOCTAGS" => "Locator tags",
+        "STRINGS" => "Strings",
+        "PROPS" => "Properties",
+        "SHAPES" => "Shapes",
+        "SHAPEPTS" => "Hull points",
+        "SHAPEPRP" => "Shape properties",
+        "REGIONS" => "Regions",
+        "REGTAGS" => "Region tags",
+        "TRIREGN" => "Triangle regions",
         _ => "Unknown chunk",
     }
 }
@@ -1129,7 +1343,25 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
             ],
             64,
         ),
-        "LOCTAGS" => array(vec!["Name", "Hash"], 16),
+        "LOCTAGS" | "REGTAGS" => array(vec!["Name", "Hash"], 16),
+        "PROPS" | "SHAPEPRP" => array(vec!["Key", "Type", "Value"], 32),
+        "SHAPES" => array(
+            vec![
+                "Name",
+                "Kind",
+                "Joint",
+                "Type",
+                "Translation",
+                "Rotation",
+                "Size",
+                "Points",
+                "Properties",
+            ],
+            96,
+        ),
+        "SHAPEPTS" => array(vec!["Point"], 12),
+        "REGIONS" => array(vec!["Name", "Tags", "Triangles"], 32),
+        "TRIREGN" => array(vec!["Regions"], 4),
         _ => Table {
             columns: vec!["Offset", "Bytes"],
             rows: payload.len().div_ceil(16),
@@ -1270,6 +1502,9 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
             2 => vector(&floats(row, 112, 76, 4)),
             _ => vector(&floats(row, 112, 92, 3)),
         },
+        "PROPS" | "SHAPEPRP" | "SHAPES" | "SHAPEPTS" | "REGIONS" | "REGTAGS" | "TRIREGN" => {
+            enrichment_cell(&reader, p, name, row, column)
+        }
         "LOCATORS" | "LOCTAGS" => {
             let stride = if name == "LOCATORS" { 64 } else { 16 };
             let names = reader.chunk("LOCNAMES").unwrap_or_default();
@@ -1326,6 +1561,113 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
     }
 }
 
+/// A cell of the properties, shapes and regions chunks; see docs/features/models.md#chunks-view.
+fn enrichment_cell(
+    reader: &chunks::Reader<'_>,
+    p: &[u8],
+    name: &str,
+    row: usize,
+    column: usize,
+) -> String {
+    let strings = reader.chunk("STRINGS").unwrap_or_default();
+    let u32_at = |chunk: &[u8], stride: usize, row: usize, at: usize| {
+        chunks::u32_at(chunk, row, stride, at).unwrap_or(0) as usize
+    };
+    let text = |at: usize, len: usize| {
+        strings
+            .get(at..at + len)
+            .map(|t| String::from_utf8_lossy(t).into_owned())
+            .unwrap_or_default()
+    };
+    let hash = |stride: usize| {
+        p.get(row * stride..row * stride + 8)
+            .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
+    };
+    // A tag or property's name, at offset 8 of its record.
+    let named = |chunk: &[u8], stride: usize, row: usize| {
+        text(
+            u32_at(chunk, stride, row, 8),
+            u32_at(chunk, stride, row, 12),
+        )
+    };
+    let floats = |at: usize, n: usize| -> Vec<f32> {
+        (0..n)
+            .map(|k| chunks::f32_at(p, row, 96, at + k * 4).unwrap_or(0.0))
+            .collect()
+    };
+    match (name, column) {
+        ("REGTAGS", 0) => named(p, 16, row),
+        ("REGTAGS", _) => format!("{:#018x}", hash(16)),
+        ("PROPS" | "SHAPEPRP", 0) => named(p, 32, row),
+        ("PROPS" | "SHAPEPRP", 1) => crate::enrich::PropValue::TYPES
+            .get(u32_at(p, 32, row, 16))
+            .copied()
+            .unwrap_or("?")
+            .to_owned(),
+        ("PROPS" | "SHAPEPRP", _) => {
+            let raw = p
+                .get(row * 32 + 24..row * 32 + 32)
+                .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()));
+            match u32_at(p, 32, row, 16) {
+                0 => (raw != 0).to_string(),
+                1 => (raw as i64).to_string(),
+                2 => f64::from_bits(raw).to_string(),
+                _ => format!("{:?}", text(u32_at(p, 32, row, 24), u32_at(p, 32, row, 28))),
+            }
+        }
+        ("SHAPES", 0) => named(p, 96, row),
+        ("SHAPES", 1) => text(u32_at(p, 96, row, 24), u32_at(p, 96, row, 28)),
+        ("SHAPES", 2) => match u32_at(p, 96, row, 32) as i32 {
+            -1 => "—".into(),
+            joint => joint.to_string(),
+        },
+        ("SHAPES", 3) => ["box", "sphere", "capsule", "hull"]
+            .get(u32_at(p, 96, row, 36))
+            .copied()
+            .unwrap_or("?")
+            .to_owned(),
+        ("SHAPES", 4) => vector(&floats(40, 3)),
+        ("SHAPES", 5) => vector(&floats(52, 4)),
+        ("SHAPES", 6) => vector(&floats(68, 3)),
+        ("SHAPES", 7) => u32_at(p, 96, row, 84).to_string(),
+        ("SHAPES", _) => u32_at(p, 96, row, 92).to_string(),
+        ("SHAPEPTS", _) => vector(
+            &(0..3)
+                .map(|k| chunks::f32_at(p, row, 12, k * 4).unwrap_or(0.0))
+                .collect::<Vec<_>>(),
+        ),
+        ("REGIONS", 0) => named(p, 32, row),
+        ("REGIONS", 1) => {
+            let tags = reader.chunk("REGTAGS").unwrap_or_default();
+            let first = p
+                .get(row * 32 + 16..row * 32 + 18)
+                .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));
+            let count = p
+                .get(row * 32 + 18..row * 32 + 20)
+                .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));
+            (first..first + count)
+                .map(|t| named(tags, 16, t as usize))
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+        ("REGIONS", _) => u32_at(p, 32, row, 20).to_string(),
+        (_, _) => {
+            // TRIREGN: the names of the bits set.
+            let mask = u32_at(p, 4, row, 0);
+            let regions = reader.chunk("REGIONS").unwrap_or_default();
+            let names: Vec<String> = (0..32)
+                .filter(|i| mask & (1 << i) != 0)
+                .map(|i| named(regions, 32, i))
+                .collect();
+            if names.is_empty() {
+                "—".into()
+            } else {
+                names.join(", ")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1355,6 +1697,7 @@ mod tests {
             vertices,
             indices,
             material: Some(0),
+            regions: Vec::new(),
         }
     }
 
@@ -1366,7 +1709,7 @@ mod tests {
             &[grid(16), second],
             &[7],
             None,
-            &[],
+            &Extras::default(),
             true,
             &MeshOptions::default(),
         );
@@ -1434,7 +1777,14 @@ mod tests {
 
     #[test]
     fn chunk_tables_and_info() {
-        let (bytes, summary) = encode(&[grid(4)], &[9], None, &[], true, &MeshOptions::default());
+        let (bytes, summary) = encode(
+            &[grid(4)],
+            &[9],
+            None,
+            &Extras::default(),
+            true,
+            &MeshOptions::default(),
+        );
         let desc = table(&bytes, "DESC").unwrap();
         assert!(!desc.numbered);
         assert_eq!(desc.rows, 10);
@@ -1482,7 +1832,7 @@ mod tests {
             &[grid(16), grid(2)],
             &[42],
             None,
-            &[],
+            &Extras::default(),
             true,
             &MeshOptions::default(),
         );
@@ -1570,7 +1920,7 @@ meshlet_max_triangles = 64
             lod_ratios: Vec::new(),
             ..Default::default()
         };
-        let (bytes, summary) = encode(&[grid(16)], &[], None, &[], true, &options);
+        let (bytes, summary) = encode(&[grid(16)], &[], None, &Extras::default(), true, &options);
         let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
         let desc = reader.require("DESC").unwrap();
         assert_eq!(chunks::u32_at(desc, 0, 32, 24), Some(16));
@@ -1600,6 +1950,92 @@ meshlet_max_triangles = 64
     }
 
     #[test]
+    fn properties_shapes_and_regions() {
+        use crate::enrich::{PropValue, Properties};
+        let properties: Properties = [
+            ("mass".to_owned(), PropValue::Float(80.5)),
+            ("name".to_owned(), PropValue::Text("Hero".into())),
+        ]
+        .into();
+        let mut part = grid(4);
+        // Region 0 on the first two triangles, region 1 on every other one.
+        let triangles = part.indices.len() / 3;
+        part.regions = (0..triangles)
+            .map(|t| u32::from(t < 2) | (u32::from(t % 2 == 0) << 1))
+            .collect();
+        let corners: Vec<[u32; 3]> = part.indices.as_chunks::<3>().0.to_vec();
+        let expected: Vec<u32> = part.regions.clone();
+        let extras = Extras {
+            properties: properties.clone(),
+            shapes: vec![
+                CompiledShape {
+                    name: "head".into(),
+                    kind: "hitbox".into(),
+                    joint: -1,
+                    shape: 2,
+                    translation: [0.0, 1.0, 0.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    size: [0.5, 1.0, 0.0],
+                    points: Vec::new(),
+                    properties: [("damage".to_owned(), PropValue::Float(2.0))].into(),
+                },
+                CompiledShape {
+                    name: "body".into(),
+                    kind: String::new(),
+                    joint: -1,
+                    shape: 3,
+                    translation: [0.0; 3],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    size: [0.0; 3],
+                    points: vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    properties: Properties::new(),
+                },
+            ],
+            regions: vec![
+                ("metal".into(), vec!["surface".into()]),
+                ("breakable".into(), Vec::new()),
+            ],
+            ..Default::default()
+        };
+        let (bytes, _) = encode(&[part], &[0], None, &extras, true, &MeshOptions::default());
+        let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
+        assert_eq!(reader.require("PROPS").unwrap().len(), 64);
+        assert_eq!(cell(&bytes, "PROPS", 0, 1), "mass");
+        assert_eq!(cell(&bytes, "PROPS", 0, 3), "80.5");
+        assert_eq!(cell(&bytes, "PROPS", 1, 3), "\"Hero\"");
+        assert_eq!(cell(&bytes, "SHAPES", 0, 2), "hitbox");
+        assert_eq!(cell(&bytes, "SHAPES", 0, 4), "capsule");
+        assert_eq!(cell(&bytes, "SHAPES", 1, 8), "4");
+        assert_eq!(cell(&bytes, "SHAPEPRP", 0, 1), "damage");
+        assert_eq!(reader.require("SHAPEPTS").unwrap().len(), 4 * 12);
+        assert_eq!(cell(&bytes, "REGIONS", 0, 2), "surface");
+        assert_eq!(cell(&bytes, "REGIONS", 0, 3), "2");
+        assert!(rows(&bytes).unwrap().contains(&("Regions", "2".into())));
+        // Each written triangle keeps its source triangle's regions, wherever it moved.
+        let masks = reader.require("TRIREGN").unwrap();
+        let indices = reader.require("INDICES").unwrap();
+        for t in 0..triangles {
+            let corner = |k: usize| {
+                u32::from(u16::from_le_bytes([
+                    indices[t * 6 + k * 2],
+                    indices[t * 6 + k * 2 + 1],
+                ]))
+            };
+            let mut key = [corner(0), corner(1), corner(2)];
+            key.sort_unstable();
+            let source = corners
+                .iter()
+                .position(|c| {
+                    let mut c = *c;
+                    c.sort_unstable();
+                    c == key
+                })
+                .unwrap();
+            assert_eq!(chunks::u32_at(masks, t, 4, 0), Some(expected[source]));
+        }
+    }
+
+    #[test]
     fn skinned_meshes_carry_skin_and_skeleton() {
         let joint = Joint {
             inverse_bind: std::array::from_fn(|i| if i % 5 == 0 { 1.0 } else { 0.0 }),
@@ -1612,14 +2048,17 @@ meshlet_max_triangles = 64
             &[grid(2)],
             &[],
             Some(&[joint]),
-            &[Locator {
-                name: "hand".into(),
-                tags: vec!["weapon".into(), "right".into()],
-                joint: 0,
-                translation: [1.0, 2.0, 3.0],
-                rotation: [0.0, 0.0, 0.0, 1.0],
-                scale: [1.0; 3],
-            }],
+            &Extras {
+                locators: vec![Locator {
+                    name: "hand".into(),
+                    tags: vec!["weapon".into(), "right".into()],
+                    joint: 0,
+                    translation: [1.0, 2.0, 3.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [1.0; 3],
+                }],
+                ..Default::default()
+            },
             false,
             &MeshOptions::default(),
         );

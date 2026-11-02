@@ -7,14 +7,21 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
 use crate::amesh::MeshPatch;
+use crate::enrich::{self, Properties, Region, Shape};
 use crate::noise::{self, Modifier};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Amod {
     /// `[mesh]`: meshoptimizer settings of a glTF model.
     pub mesh: MeshPatch,
+    /// `[properties]`: a glTF model's properties, see docs/features/properties.md.
+    pub properties: Properties,
     /// `[[locators]]`: a glTF model's locators, see docs/features/locators.md.
     pub locators: Vec<Locator>,
+    /// `[[shapes]]`: a glTF model's shapes, see docs/features/shapes.md.
+    pub shapes: Vec<Shape>,
+    /// `[[regions]]`: a glTF model's regions, see docs/features/regions.md.
+    pub regions: Vec<Region>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
     pub modifiers: Vec<Modifier>,
 }
@@ -108,7 +115,12 @@ struct Tables {
 
 impl Amod {
     pub fn is_empty(&self) -> bool {
-        self.mesh.is_empty() && self.locators.is_empty() && self.modifiers.is_empty()
+        self.mesh.is_empty()
+            && self.properties.is_empty()
+            && self.locators.is_empty()
+            && self.shapes.is_empty()
+            && self.regions.is_empty()
+            && self.modifiers.is_empty()
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -119,6 +131,21 @@ impl Amod {
             None => Vec::new(),
             Some(value) => noise::parse_modifiers(value)?,
         };
+        let properties = table
+            .remove("properties")
+            .map(enrich::parse_properties)
+            .transpose()?
+            .unwrap_or_default();
+        let shapes = table
+            .remove("shapes")
+            .map(enrich::parse_shapes)
+            .transpose()?
+            .unwrap_or_default();
+        let regions = table
+            .remove("regions")
+            .map(enrich::parse_regions)
+            .transpose()?
+            .unwrap_or_default();
         let Tables { mesh, locators } = toml::Value::Table(table)
             .try_into()
             .map_err(|e: toml::de::Error| e.message().to_owned())?;
@@ -148,7 +175,10 @@ impl Amod {
         }
         Ok(Self {
             mesh,
+            properties,
             locators,
+            shapes,
+            regions,
             modifiers,
         })
     }
@@ -160,6 +190,7 @@ impl Amod {
             out += "[mesh]\n";
             out += &self.mesh.to_toml();
         }
+        enrich::write_properties("properties", &self.properties, &mut out);
         for locator in &self.locators {
             let floats = |values: &[f32]| {
                 let items: Vec<String> = values.iter().map(|v| format!("{v:?}")).collect();
@@ -188,6 +219,8 @@ impl Amod {
                 out += &format!("color = {}\n", toml::Value::from(color.as_str()));
             }
         }
+        enrich::write_shapes(&self.shapes, &mut out);
+        enrich::write_regions(&self.regions, &mut out);
         noise::write_modifiers(&self.modifiers, &mut out);
         // Each table after a blank line, but not the first.
         out.trim_start_matches('\n').to_owned()
@@ -295,7 +328,7 @@ mod tests {
                 },
                 Locator::new("muzzle".into()),
             ],
-            modifiers: Vec::new(),
+            ..Default::default()
         };
         let text = amod.to_toml();
         assert!(text.contains(
@@ -342,6 +375,78 @@ mod tests {
         assert!(Amod::parse("[[locators]]\nname = \"a\"\ntags = [\"\"]\n").is_err());
         assert!(Amod::parse("[[locators]]\nname = \"a\"\ntags = [\"a,b\"]\n").is_err());
         assert!(Amod::parse("[[locators]]\nname = \"a\"\ntags = [\"x\", \"x\"]\n").is_err());
+    }
+
+    #[test]
+    fn enrichments_round_trip() {
+        use crate::enrich::{PropValue, ShapeType};
+        let text = r##"[properties]
+"display name" = "Hero"
+lives = 3
+mass = 80.5
+playable = true
+
+[[shapes]]
+name = "head"
+kind = "hitbox"
+type = "capsule"
+joint = "Head"
+translation = [0.0, 0.1, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+radius = 0.1
+height = 0.12
+color = "#ef4444"
+
+[shapes.properties]
+damage = 2.0
+
+[[shapes]]
+name = "body"
+type = "hull"
+
+[[regions]]
+name = "armor"
+tags = ["metal"]
+color = "#3b82f6"
+materials = ["Steel"]
+triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
+"##;
+        let amod = Amod::parse(text).unwrap();
+        assert_eq!(amod.properties["lives"], PropValue::Int(3));
+        assert_eq!(
+            amod.properties["display name"],
+            PropValue::Text("Hero".into())
+        );
+        assert_eq!(
+            amod.shapes[0].shape,
+            ShapeType::Capsule {
+                radius: 0.1,
+                height: 0.12
+            }
+        );
+        assert_eq!(amod.shapes[0].properties["damage"], PropValue::Float(2.0));
+        assert_eq!(amod.shapes[1].shape, ShapeType::Hull);
+        assert_eq!(amod.regions[0].triangles.len(), 52);
+        assert_eq!(amod.to_toml(), text);
+        assert_eq!(Amod::parse(&amod.to_toml()).unwrap(), amod);
+
+        for bad in [
+            "[properties]\na = [1]\n",
+            "[[shapes]]\nname = \"a\"\n",
+            "[[shapes]]\nname = \"a\"\ntype = \"cone\"\n",
+            "[[shapes]]\nname = \"a\"\ntype = \"sphere\"\nsize = [1.0, 1.0, 1.0]\n",
+            "[[shapes]]\nname = \"a\"\ntype = \"hull\"\ntranslation = [0.0, 0.0, 0.0]\n",
+            "[[shapes]]\nname = \"a\"\ntype = \"box\"\nsize = [1.0, 0.0, 1.0]\n",
+            "[[shapes]]\nname = \"a\"\ntype = \"box\"\nmass = 1\n",
+            "[[regions]]\nname = \"a\"\n",
+            "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\ntriangles = [[0, 0, 1, 0]]\n",
+        ] {
+            assert!(Amod::parse(bad).is_err(), "{bad}");
+        }
+        let many: String = (0..33)
+            .map(|i| format!("[[regions]]\nname = \"r{i}\"\ncolor = \"#000000\"\n"))
+            .collect();
+        assert!(Amod::parse(&many).unwrap_err().contains("at most 32"));
     }
 
     #[test]

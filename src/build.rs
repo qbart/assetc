@@ -149,8 +149,8 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
             Job::Model {
                 source,
                 options,
-                locators,
-            } => compile_model(input, source, output, options, locators),
+                sidecar,
+            } => compile_model(input, source, output, options, sidecar),
             // Written with its model or font.
             Job::ModelPart { .. } | Job::FontPart { .. } => continue,
             Job::Font { source } => compile_font(input, source, output),
@@ -396,10 +396,10 @@ fn compile_model(
     source: &str,
     output: &Path,
     options: &crate::amesh::MeshOptions,
-    locators: &[crate::amod::Locator],
+    sidecar: &crate::amod::Amod,
 ) -> Result<String, String> {
     let p = strip_extension(source);
-    let model = crate::model::compile(&input.join(source), p, options, locators)?;
+    let model = crate::model::compile(&input.join(source), p, options, sidecar)?;
     write(&output.join(format!("{p}.amesh")), &model.mesh)?;
     if let Some(animation) = &model.animation {
         write(&output.join(format!("{p}.aanim")), animation)?;
