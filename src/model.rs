@@ -601,6 +601,31 @@ pub struct ModelGeometry {
     pub mesh_names: Vec<String>,
     /// Largest side of the points' bounding box.
     pub extent: f32,
+    /// The points' bounding box (zero without points).
+    pub bounds: [Vec3; 2],
+    /// Each triangle primitive, as its first instance is compiled.
+    pub parts: Vec<GeometryPart>,
+    /// `n` of every `COLOR_n` set any primitive has, ascending.
+    pub color_sets: Vec<u32>,
+}
+
+/// A triangle primitive's vertices as compiled; see docs/features/vertex-colors.md#3d-view.
+#[derive(Debug, Clone, Default)]
+pub struct GeometryPart {
+    /// glTF mesh and primitive.
+    pub id: (u32, u32),
+    /// Model space (mesh space for skinned ones).
+    pub positions: Vec<Vec3>,
+    /// Triangle list, in the glTF's triangle order.
+    pub indices: Vec<u32>,
+    /// Its `COLOR_n` sets: `n` and one linear color per vertex.
+    pub colors: Vec<(u32, Vec<[u8; 4]>)>,
+}
+
+/// A color set of a model, for its preview.
+pub enum SetRef<'a> {
+    Gltf(u32),
+    Authored(&'a crate::enrich::ColorSet),
 }
 
 impl ModelGeometry {
@@ -661,18 +686,80 @@ impl ModelGeometry {
             }
         }
         let mesh_names: Vec<_> = document.meshes().map(|m| m.name()).collect();
+        let mut geometry_parts: Vec<GeometryPart> = Vec::new();
+        for part in parts {
+            if geometry_parts
+                .iter()
+                .any(|g| g.id == (part.mesh, part.index))
+            {
+                continue;
+            }
+            geometry_parts.push(GeometryPart {
+                id: (part.mesh, part.index),
+                positions: part
+                    .primitive
+                    .vertices
+                    .iter()
+                    .map(|v| Vec3::from(v.position))
+                    .collect(),
+                indices: part.primitive.indices.clone(),
+                colors: part.colors.clone(),
+            });
+        }
+        let mut color_sets: Vec<u32> = parts
+            .iter()
+            .flat_map(|p| p.colors.iter().map(|(n, _)| *n))
+            .collect();
+        color_sets.sort_unstable();
+        color_sets.dedup();
+        let bounded = min.cmple(max).all();
         Self {
+            parts: geometry_parts,
+            color_sets,
+            bounds: if bounded { [min, max] } else { [Vec3::ZERO; 2] },
             points,
             joints,
             primitives,
             mesh_names: leaves(&mesh_names, "mesh"),
             materials: used.into_iter().map(|i| names[i].clone()).collect(),
-            extent: if min.cmple(max).all() {
+            extent: if bounded {
                 (max - min).max_element()
             } else {
                 1.0
             },
         }
+    }
+
+    /// Each primitive's colors in `set` (linear RGBA8), one per triangle corner in the
+    /// glTF's order; white where a primitive lacks a glTF set.
+    pub fn corner_colors(&self, set: &SetRef<'_>) -> Vec<crate::preview3d::Corners> {
+        self.parts
+            .iter()
+            .map(|part| {
+                let colors: Vec<[u8; 4]> = match set {
+                    SetRef::Gltf(n) => match part.colors.iter().find(|(m, _)| m == n) {
+                        Some((_, colors)) => part
+                            .indices
+                            .iter()
+                            .map(|&i| colors.get(i as usize).copied().unwrap_or([255; 4]))
+                            .collect(),
+                        None => vec![[255; 4]; part.indices.len()],
+                    },
+                    SetRef::Authored(set) => {
+                        let at: Vec<[u8; 4]> = part
+                            .positions
+                            .iter()
+                            .map(|p| crate::vertex_colors::evaluate(set, *p))
+                            .collect();
+                        part.indices
+                            .iter()
+                            .map(|&i| at.get(i as usize).copied().unwrap_or([255; 4]))
+                            .collect()
+                    }
+                };
+                (part.id, colors)
+            })
+            .collect()
     }
 
     /// The points a hull on `joint` (by name) is made of, in the joint's space at the bind
@@ -789,6 +876,39 @@ pub fn compile(
             })
             .collect();
     }
+    // Names, then authored sets after the glTF ones; see
+    // docs/features/vertex-colors.md#build.
+    if let Some(n) = sidecar.color_names.keys().find(|n| !color_sets.contains(n)) {
+        return Err(sidecar_error(format!(
+            "color_names: no COLOR_{n} in the model"
+        )));
+    }
+    let mut set_names: Vec<(String, u32)> = color_sets
+        .iter()
+        .map(|n| {
+            let name = sidecar.color_names.get(n).cloned();
+            (name.unwrap_or_else(|| format!("COLOR_{n}")), 0)
+        })
+        .collect();
+    set_names.extend(sidecar.colors.iter().map(|c| (c.name.clone(), 1)));
+    for (i, (name, _)) in set_names.iter().enumerate() {
+        if set_names[..i].iter().any(|(other, _)| other == name) {
+            return Err(sidecar_error(format!(
+                "color set {name:?}: name used twice"
+            )));
+        }
+    }
+    for part in &mut parts {
+        for set in &sidecar.colors {
+            let colors = part
+                .primitive
+                .vertices
+                .iter()
+                .map(|v| crate::vertex_colors::evaluate(set, Vec3::from(v.position)))
+                .collect();
+            part.primitive.colors.push(colors);
+        }
+    }
     let primitives: Vec<amesh::Primitive> = parts.into_iter().map(|p| p.primitive).collect();
     let extras = amesh::Extras {
         locators,
@@ -800,7 +920,7 @@ pub fn compile(
             .map(|r| (r.name.clone(), r.tags.clone()))
             .collect(),
         paths: resolve_paths(&sidecar.paths, skin_joints.as_deref()).map_err(sidecar_error)?,
-        color_sets: color_sets.iter().map(|n| format!("COLOR_{n}")).collect(),
+        color_sets: set_names,
     };
     let material_ids: Vec<u64> = outputs
         .materials
@@ -1374,6 +1494,50 @@ mod tests {
         // The preview's first level carries COLOR_0, linear.
         let preview = amesh::preview(mesh).unwrap();
         assert_eq!(preview.levels[0].colors.len(), 6);
+
+        // Renamed, and an authored gradient along X after it; see
+        // docs/features/vertex-colors.md#build.
+        let mut sidecar = crate::amod::Amod::default();
+        sidecar.color_names.insert(0, "tint".into());
+        sidecar.colors.push(crate::enrich::ColorSet::new(
+            "along_x".into(),
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+        ));
+        let compiled = compile(&file, "colors", &options, &sidecar).unwrap();
+        let mesh = &compiled.mesh;
+        assert_eq!(amesh::cell(mesh, "COLORSET", 0, 1), "tint");
+        assert_eq!(amesh::cell(mesh, "COLORSET", 0, 4), "glTF");
+        assert_eq!(amesh::cell(mesh, "COLORSET", 1, 1), "along_x");
+        assert_eq!(amesh::cell(mesh, "COLORSET", 1, 4), "assetc");
+        let along: Vec<String> = (0..6).map(|v| amesh::cell(mesh, "COLORS", v, 2)).collect();
+        let (black, white) = ("0, 0, 0, 255", "255, 255, 255, 255");
+        assert_eq!(along, [black, white, black, black, white, black]);
+        // The preview keeps the glTF set whatever its name.
+        assert_eq!(amesh::preview(mesh).unwrap().levels[0].colors.len(), 6);
+        // The 3D view's colors, per corner in the glTF's order.
+        let geometry = geometry(&file).unwrap();
+        assert_eq!(geometry.color_sets, [0]);
+        let corners = geometry.corner_colors(&SetRef::Authored(&sidecar.colors[0]));
+        assert_eq!(corners[0].0, (0, 0));
+        assert_eq!(corners[0].1, [[0, 0, 0, 255], [255; 4], [0, 0, 0, 255]]);
+        let corners = geometry.corner_colors(&SetRef::Gltf(0));
+        assert_eq!(corners[0].1[0], [0, 0, 255, 255]);
+        assert_eq!(corners[1].1, [[255; 4]; 3]);
+
+        sidecar.colors[0].name = "tint".into();
+        let error = compile(&file, "colors", &options, &sidecar).err().unwrap();
+        assert!(
+            error.contains("color set \"tint\": name used twice"),
+            "{error}"
+        );
+        sidecar.colors.clear();
+        sidecar.color_names.insert(1, "other".into());
+        let error = compile(&file, "colors", &options, &sidecar).err().unwrap();
+        assert!(
+            error.contains("color_names: no COLOR_1 in the model"),
+            "{error}"
+        );
 
         // Without colors, no color chunks.
         std::fs::write(&file, static_triangle()).unwrap();

@@ -244,7 +244,7 @@ impl Gradient {
 
     /// The color at `t` without dithering, e.g. for a new stop placed there.
     pub fn color_at(&self, t: f64) -> [u8; 4] {
-        shade(&self.stops, Dither::None, t, 0, 0)
+        color_at(&self.stops, t)
     }
 
     /// `width × height` RGBA8 of this gradient as a cell of the image: first stop at the bottom.
@@ -274,6 +274,11 @@ impl Gradient {
     fn is_opaque(&self) -> bool {
         self.stops.iter().all(|s| s.color[3] == 255)
     }
+}
+
+/// The color of `stops` (at least two, ordered) at `t`, without dithering.
+pub fn color_at(stops: &[Stop], t: f64) -> [u8; 4] {
+    shade(stops, Dither::None, t, 0, 0)
 }
 
 /// Position of pixel `i` along a gradient `length` pixels long: the ends are exact.
@@ -398,17 +403,7 @@ impl Gradients {
             out += "\n[[gradients]]\n";
             out += &format!("name = {}\n", toml::Value::String(gradient.name.clone()));
             out += &format!("dither = \"{}\"\n", gradient.dither.key());
-            out += "stops = [\n";
-            let mut stops = gradient.stops.clone();
-            stops.sort_by(|a, b| a.at.total_cmp(&b.at));
-            for stop in stops {
-                out += &format!(
-                    "    {{ at = {}, color = \"{}\" }},\n",
-                    float(stop.at),
-                    format_color(stop.color)
-                );
-            }
-            out += "]\n";
+            write_stops(&gradient.stops, &mut out);
         }
         out
     }
@@ -459,18 +454,7 @@ fn parse_gradient(item: toml::Value) -> Result<Gradient, String> {
             .and_then(|key| Dither::ALL.into_iter().find(|d| d.key() == key))
             .ok_or_else(|| format!("unknown dither {v} (use none, crosshatch or pixel)"))?,
     };
-    let stops: Vec<Stop> = match table.remove("stops") {
-        Some(toml::Value::Array(items)) => items
-            .into_iter()
-            .enumerate()
-            .map(|(i, item)| parse_stop(item).map_err(|e| format!("stop {}: {e}", i + 1)))
-            .collect::<Result<_, _>>()?,
-        Some(_) => return Err("stops must be an array of tables".into()),
-        None => return Err("missing stops".into()),
-    };
-    if stops.len() < 2 {
-        return Err("needs at least two stops".into());
-    }
+    let stops = parse_stops(table.remove("stops").ok_or("missing stops")?)?;
     if let Some(key) = table.keys().next() {
         return Err(format!("unknown key {key}"));
     }
@@ -481,6 +465,38 @@ fn parse_gradient(item: toml::Value) -> Result<Gradient, String> {
     };
     gradient.sort();
     Ok(gradient)
+}
+
+/// `stops = [...]`: at least two stops, ordered by position; see docs/spec/gradient.md.
+pub fn parse_stops(value: toml::Value) -> Result<Vec<Stop>, String> {
+    let toml::Value::Array(items) = value else {
+        return Err("stops must be an array of tables".into());
+    };
+    let mut stops: Vec<Stop> = items
+        .into_iter()
+        .enumerate()
+        .map(|(i, item)| parse_stop(item).map_err(|e| format!("stop {}: {e}", i + 1)))
+        .collect::<Result<_, _>>()?;
+    if stops.len() < 2 {
+        return Err("needs at least two stops".into());
+    }
+    stops.sort_by(|a, b| a.at.total_cmp(&b.at));
+    Ok(stops)
+}
+
+/// `stops = [...]` with one stop per line, ordered by position.
+pub fn write_stops(stops: &[Stop], out: &mut String) {
+    *out += "stops = [\n";
+    let mut stops = stops.to_vec();
+    stops.sort_by(|a, b| a.at.total_cmp(&b.at));
+    for stop in stops {
+        *out += &format!(
+            "    {{ at = {}, color = \"{}\" }},\n",
+            float(stop.at),
+            format_color(stop.color)
+        );
+    }
+    *out += "]\n";
 }
 
 fn parse_stop(item: toml::Value) -> Result<Stop, String> {

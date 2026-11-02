@@ -6,6 +6,7 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 #[derive(Clone, Copy)]
 pub enum Icon {
     Aperture,
+    Blend,
     Box,
     BoxChecker,
     BoxShaded,
@@ -68,8 +69,9 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 60] = [
+const SVGS: [(&str, &str); 61] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
+    ("blend", include_str!("../assets/icons/blend.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
         "box-checker",

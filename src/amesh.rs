@@ -260,8 +260,9 @@ pub struct Extras {
     pub shapes: Vec<CompiledShape>,
     pub regions: Vec<(String, Vec<String>)>,
     pub paths: Vec<CompiledPath>,
-    /// The names of the color sets every primitive has; see docs/spec/amesh.md#color-sets.
-    pub color_sets: Vec<String>,
+    /// The name and `source` of the color sets every primitive has; see
+    /// docs/spec/amesh.md#color-sets.
+    pub color_sets: Vec<(String, u32)>,
 }
 
 /// The `STRINGS` chunk being built: text back to back.
@@ -784,13 +785,13 @@ pub fn encode(
     if !colors.is_empty() {
         let mut sets = Bytes::default();
         let mut data = Bytes::default();
-        for (name, set) in extras.color_sets.iter().zip(&colors) {
+        for ((name, source), set) in extras.color_sets.iter().zip(&colors) {
             let (at, len) = strings.add(name);
             sets.u64(crate::hash::fnv1a64(name.as_bytes()))
                 .u32(at)
                 .u32(len)
                 .u32(0)
-                .u32(0)
+                .u32(*source)
                 .u64(0);
             for c in set {
                 data.0.extend_from_slice(c);
@@ -973,7 +974,7 @@ pub struct Level {
     pub uvs: Vec<[f32; 2]>,
     /// `w` is the handedness.
     pub tangents: Vec<[f32; 4]>,
-    /// The `COLOR_0` color set, linear; empty without one.
+    /// The first glTF color set, linear; empty without one.
     pub colors: Vec<[f32; 4]>,
     /// Empty for reduced levels.
     pub meshlets: Vec<u32>,
@@ -1091,11 +1092,12 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
             Some(u32::from(u16::from_le_bytes(raw.try_into().ok()?)))
         }
     };
-    // The COLOR_0 set's colors, when the mesh has one.
+    // The first glTF set's colors, when the mesh has one; see
+    // docs/features/vertex-colors.md#previews.
     let vertex_count = chunks::u32_at(desc, 0, 32, 0).unwrap_or(0) as usize;
-    let color0 = color_set_names(&reader)
-        .iter()
-        .position(|n| n == "COLOR_0")
+    let color0 = reader
+        .chunk("COLORSET")
+        .and_then(|sets| (0..sets.len() / 32).find(|&s| chunks::u32_at(sets, s, 32, 20) == Some(0)))
         .and_then(|s| {
             reader
                 .chunk("COLORS")?
@@ -1696,6 +1698,7 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
                 },
                 _ => match u32_at(row, 32, 20) {
                     0 => "glTF".into(),
+                    1 => "assetc".into(),
                     other => other.to_string(),
                 },
             }

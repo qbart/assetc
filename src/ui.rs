@@ -143,6 +143,17 @@ struct LocatorTools {
     erase: bool,
     /// The paint brush's radius on screen, in points.
     brush: f32,
+    /// The color set shown on the model: its model, what it shows and the colors; see
+    /// docs/features/vertex-colors.md#3d-view.
+    color_view: Option<(PathBuf, ColorKey, std::sync::Arc<preview3d::ColorView>)>,
+    color_generation: u64,
+}
+
+/// What a color view shows.
+#[derive(PartialEq)]
+enum ColorKey {
+    Gltf(u32),
+    Authored(enrich::ColorSet),
 }
 
 impl Default for LocatorTools {
@@ -166,6 +177,8 @@ impl Default for LocatorTools {
             paint_awaiting: false,
             erase: false,
             brush: 12.0,
+            color_view: None,
+            color_generation: 0,
         }
     }
 }
@@ -457,6 +470,7 @@ enum InspectorTab {
     Shapes,
     Regions,
     Paths,
+    VertexColors,
     Properties,
     Modifiers,
     Gradients,
@@ -468,13 +482,14 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 15] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
         Self::Shapes,
         Self::Regions,
         Self::Paths,
+        Self::VertexColors,
         Self::Properties,
         Self::Modifiers,
         Self::Gradients,
@@ -493,6 +508,7 @@ impl InspectorTab {
             Self::Shapes => Icon::Shapes,
             Self::Regions => Icon::PaintBucket,
             Self::Paths => Icon::Spline,
+            Self::VertexColors => Icon::Blend,
             Self::Properties => Icon::Database,
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
@@ -511,6 +527,7 @@ impl InspectorTab {
             Self::Shapes => "Shapes",
             Self::Regions => "Regions",
             Self::Paths => "Paths",
+            Self::VertexColors => "Vertex colors",
             Self::Properties => "Properties",
             Self::Modifiers => "Modifiers",
             Self::Gradients => "Gradients",
@@ -540,11 +557,14 @@ impl InspectorTab {
                         || model::is_model(&s.path))
                     && s.path.is_file()
             }),
-            Self::Locators | Self::Shapes | Self::Regions | Self::Paths | Self::Properties => {
-                selection.is_some_and(|s| {
-                    s.location == Location::Input && model::is_model(&s.path) && s.path.is_file()
-                })
-            }
+            Self::Locators
+            | Self::Shapes
+            | Self::Regions
+            | Self::Paths
+            | Self::VertexColors
+            | Self::Properties => selection.is_some_and(|s| {
+                s.location == Location::Input && model::is_model(&s.path) && s.path.is_file()
+            }),
             Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input
                     && (build::is_noise(&s.path) || build::is_image(&s.path))
@@ -1133,6 +1153,9 @@ fn inspected(
                 region: None,
                 path: None,
                 point: None,
+                color: None,
+                color_end: 0,
+                color_cards: Vec::new(),
                 inherited,
             },
         })
@@ -2157,6 +2180,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                     | InspectorTab::Shapes
                     | InspectorTab::Regions
                     | InspectorTab::Paths
+                    | InspectorTab::VertexColors
                     | InspectorTab::Properties),
                     Some(inspected),
                     Some(_),
@@ -2172,6 +2196,7 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                         InspectorTab::Shapes => shapes_tab(ui, inspected, tools, animating),
                         InspectorTab::Regions => regions_tab(ui, inspected, tools),
                         InspectorTab::Paths => paths_tab(ui, inspected, tools, animating),
+                        InspectorTab::VertexColors => vertex_colors_tab(ui, inspected, tools),
                         InspectorTab::Properties => properties_tab(ui, inspected),
                         _ => locators_tab(ui, inspected, frames, tools, animating),
                     };
@@ -2586,6 +2611,11 @@ struct MeshEdit {
     /// The chosen path and its chosen point.
     path: Option<usize>,
     point: Option<usize>,
+    /// The chosen color set, its chosen gradient end (0 From, 1 To) and each authored set's
+    /// gradient editor; see docs/features/vertex-colors.md#vertex-colors-tab.
+    color: Option<ColorPick>,
+    color_end: usize,
+    color_cards: Vec<GradientCard>,
     /// The locators the model has without its sidecar; `edit` and `saved` hold every locator,
     /// and only what differs from these is written.
     inherited: Vec<Inherited>,
@@ -2601,6 +2631,13 @@ impl MeshEdit {
             .find(|f| f.locator.name == locator.name)?;
         Some((from, from.locator != *locator))
     }
+}
+
+/// A color set of a model: a glTF one by `n` of `COLOR_n`, or an authored one by index.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum ColorPick {
+    Gltf(u32),
+    Authored(usize),
 }
 
 /// Label color of a mesh setting: `ACCENT` when the sidecar sets it.
@@ -2895,7 +2932,13 @@ fn mesh_commit(ui: &Ui, edit: &mut MeshEdit) -> Option<Amod> {
     let named = unique(edit.edit.locators.iter().map(|l| &l.name))
         && unique(edit.edit.shapes.iter().map(|s| &s.name))
         && unique(edit.edit.regions.iter().map(|r| &r.name))
-        && unique(edit.edit.paths.iter().map(|p| &p.name));
+        && unique(edit.edit.paths.iter().map(|p| &p.name))
+        && unique(
+            edit.edit
+                .color_names
+                .values()
+                .chain(edit.edit.colors.iter().map(|c| &c.name)),
+        );
     (!busy && named && edit.edit != edit.saved).then(|| {
         edit.saved = edit.edit.clone();
         Amod {
@@ -5048,6 +5091,7 @@ fn canvas_model(
 ) -> ModelCanvas {
     let shapes_active = tab == InspectorTab::Shapes;
     let paths_active = tab == InspectorTab::Paths;
+    let colors_active = tab == InspectorTab::VertexColors;
     use bevy::math::{Affine3A, Quat, Vec3};
     let mut out = ModelCanvas::default();
     let Some(inspected) = inspected else {
@@ -5216,6 +5260,29 @@ fn canvas_model(
         let point = e.edit.paths[p].points.get(e.point?)?;
         Some(parent * Affine3A::from_translation(Vec3::from(*point)))
     });
+    // The chosen gradient's ends, in the model's space as posed; see
+    // docs/features/vertex-colors.md#3d-view.
+    let model_space = frames.as_ref().and_then(|f| f.parent(None));
+    let gradient = match (&edit, model_space) {
+        (Some(e), Some(model)) if colors_active => match e.color {
+            Some(ColorPick::Authored(i)) => e
+                .edit
+                .colors
+                .get(i)
+                .filter(|c| c.fill != enrich::ColorFill::Solid)
+                .map(|c| {
+                    (
+                        c.fill,
+                        [c.from, c.to].map(|p| model.transform_point3(Vec3::from(p))),
+                    )
+                }),
+            _ => None,
+        },
+        _ => None,
+    };
+    let chosen_end = gradient
+        .zip(edit.as_ref())
+        .map(|((_, ends), e)| Affine3A::from_translation(ends[e.color_end.min(1)]));
     let chosen = edit
         .as_ref()
         .and_then(|e| e.locator)
@@ -5226,7 +5293,9 @@ fn canvas_model(
         .filter(|&i| shape_worlds.get(i).copied().flatten().is_some());
     // The gizmo acts on the chosen shape while the Shapes tab shows; see
     // docs/features/shapes.md#3d-view.
-    let target = if paths_active {
+    let target = if colors_active {
+        chosen_end.filter(|_| tools.gizmo == Some(gizmo::Mode::Move))
+    } else if paths_active {
         chosen_point.filter(|_| tools.gizmo == Some(gizmo::Mode::Move))
     } else if shapes_active {
         chosen_shape
@@ -5272,7 +5341,24 @@ fn canvas_model(
         if !down {
             tools.drag = None;
         } else if let (Some(edit), Some(frames), Some(p)) = (&mut edit, &frames, pointer) {
-            if paths_active {
+            if colors_active {
+                if let Some(ColorPick::Authored(i)) = edit.color
+                    && let Some(set) = edit.edit.colors.get_mut(i)
+                    && let Some(parent) = frames.parent(None)
+                {
+                    let point = if edit.color_end == 0 {
+                        &mut set.from
+                    } else {
+                        &mut set.to
+                    };
+                    let mut moved = amod::Locator {
+                        translation: *point,
+                        ..amod::Locator::new(String::new())
+                    };
+                    drag.apply(&mut moved, parent, &camera, p, delta);
+                    *point = moved.translation;
+                }
+            } else if paths_active {
                 if let (Some(k), Some(i)) = (edit.path, edit.point)
                     && let Some(path) = edit.edit.paths.get_mut(k)
                     && let Some(parent) = frames.parent(path.joint.as_deref())
@@ -5380,7 +5466,26 @@ fn canvas_model(
             .collect(),
         None => Vec::new(),
     };
-    if response.clicked()
+    // The chosen gradient's ends on screen.
+    let end_dots: Vec<Option<egui::Pos2>> = gradient
+        .map(|(_, ends)| ends.iter().map(|e| camera.project(*e)).collect())
+        .unwrap_or_default();
+    let picked_end = response
+        .interact_pointer_pos()
+        .filter(|_| response.clicked() && !grabbing)
+        .and_then(|at| {
+            end_dots
+                .iter()
+                .enumerate()
+                .filter_map(|(k, dot)| Some((k, (*dot)? - at)))
+                .map(|(k, d)| (k, d.length()))
+                .filter(|(_, d)| *d <= gizmo::PICK)
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(k, _)| k)
+        });
+    if let (Some(k), Some(edit)) = (picked_end, &mut edit) {
+        edit.color_end = k;
+    } else if response.clicked()
         && !grabbing
         && !painting
         && !drawing
@@ -5431,7 +5536,7 @@ fn canvas_model(
             } else if locked {
             } else if i.key_pressed(egui::Key::W) {
                 tools.toggle_gizmo(gizmo::Mode::Move);
-            } else if i.key_pressed(egui::Key::E) && !paths_active {
+            } else if i.key_pressed(egui::Key::E) && !paths_active && !colors_active {
                 tools.toggle_gizmo(gizmo::Mode::Rotate);
             } else if i.key_pressed(egui::Key::S) {
                 tools.armed = true;
@@ -5489,6 +5594,36 @@ fn canvas_model(
                     });
                 }
             }
+        }
+    }
+    // The chosen color set on the model; see docs/features/vertex-colors.md#3d-view.
+    preview.color_view = None;
+    if colors_active
+        && let (Some(edit), Some(geometry)) = (&edit, geometry)
+        && let Some(pick) = edit.color
+    {
+        let key = match pick {
+            ColorPick::Gltf(n) => Some(ColorKey::Gltf(n)),
+            ColorPick::Authored(i) => edit.edit.colors.get(i).cloned().map(ColorKey::Authored),
+        };
+        if let Some(key) = key {
+            let fresh = tools
+                .color_view
+                .as_ref()
+                .is_some_and(|(path, shown, _)| *path == inspected.path && *shown == key);
+            if !fresh {
+                let set = match &key {
+                    ColorKey::Gltf(n) => model::SetRef::Gltf(*n),
+                    ColorKey::Authored(set) => model::SetRef::Authored(set),
+                };
+                tools.color_generation += 1;
+                let view = preview3d::ColorView {
+                    generation: tools.color_generation,
+                    corners: geometry.corner_colors(&set),
+                };
+                tools.color_view = Some((inspected.path.clone(), key, std::sync::Arc::new(view)));
+            }
+            preview.color_view = tools.color_view.as_ref().map(|(_, _, view)| view.clone());
         }
     }
     let painter = ui.painter_at(rect);
@@ -5596,6 +5731,29 @@ fn canvas_model(
                 painter.circle_filled(*dot, 5.0, color.lerp_to_gamma(egui::Color32::WHITE, 0.5));
             } else {
                 painter.circle_filled(*dot, 5.0, color);
+            }
+        }
+    }
+
+    // The chosen gradient: a line between its ends, the radius around a radial one's center.
+    if let Some((fill, ends)) = gradient
+        && let [Some(from), Some(to)] = end_dots[..]
+    {
+        let stroke = Stroke::new(1.0, TEXT);
+        painter.line_segment([from, to], stroke);
+        if fill == enrich::ColorFill::Radial {
+            let radius = (ends[1] - ends[0]).length() / camera.world_per_point(ends[0]);
+            painter.circle_stroke(from, radius, stroke);
+        }
+    }
+    if let Some(edit) = &edit {
+        for (k, dot) in end_dots.iter().enumerate() {
+            let Some(dot) = dot else { continue };
+            if edit.color_end == k {
+                painter.circle_filled(*dot, 7.0, TEXT);
+                painter.circle_stroke(*dot, 7.0, Stroke::new(2.0, ACCENT));
+            } else {
+                painter.circle_filled(*dot, 5.0, TEXT);
             }
         }
     }
@@ -7050,6 +7208,327 @@ fn new_point(points: &[[f32; 3]], at: usize, closed: bool) -> [f32; 3] {
         (None, None) => Vec3::ZERO,
     };
     point.to_array()
+}
+
+/// The Vertex colors tab; see docs/features/vertex-colors.md#vertex-colors-tab.
+fn vertex_colors_tab(
+    ui: &mut Ui,
+    inspected: &mut Inspected,
+    tools: &mut LocatorTools,
+) -> Option<Amod> {
+    use bevy::math::Vec3;
+    let (gltf, bounds) = inspected
+        .geometry
+        .as_ref()
+        .map_or((Vec::new(), [Vec3::ZERO; 2]), |g| {
+            (g.color_sets.clone(), g.bounds)
+        });
+    let Some(Ok(edit)) = &mut inspected.mesh else {
+        placeholder(ui, "No color sets");
+        return None;
+    };
+    let gizmo = tools.gizmo;
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                edit.color_cards
+                    .resize_with(edit.edit.colors.len(), GradientCard::default);
+                // Every set's name, glTF ones first.
+                let gltf_name = |edit: &MeshEdit, n: u32| {
+                    edit.edit
+                        .color_names
+                        .get(&n)
+                        .cloned()
+                        .unwrap_or_else(|| format!("COLOR_{n}"))
+                };
+                let names: Vec<String> = gltf
+                    .iter()
+                    .map(|&n| gltf_name(edit, n))
+                    .chain(edit.edit.colors.iter().map(|c| c.name.clone()))
+                    .collect();
+                let add =
+                    egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add color set");
+                if ui.add(add).clicked() {
+                    let name = enrich::free_name("colors", |n| names.iter().any(|m| m == n));
+                    let [min, max] = bounds;
+                    let middle = (min + max) / 2.0;
+                    let from = Vec3::new(middle.x, min.y, middle.z).to_array();
+                    let to = Vec3::new(middle.x, max.y, middle.z).to_array();
+                    edit.edit.colors.push(enrich::ColorSet::new(name, from, to));
+                    edit.color_cards.push(GradientCard::default());
+                    edit.color = Some(ColorPick::Authored(edit.edit.colors.len() - 1));
+                    edit.color_end = 0;
+                }
+                ui.add_space(8.0);
+                if names.is_empty() {
+                    ui.weak("No color sets");
+                }
+                let mut fold = None;
+                let mut delete = None;
+                let mut gizmo_click = false;
+                for (k, &n) in gltf.iter().enumerate() {
+                    let pick = ColorPick::Gltf(n);
+                    let others: Vec<&str> = names
+                        .iter()
+                        .enumerate()
+                        .filter(|(j, _)| *j != k)
+                        .map(|(_, m)| m.as_str())
+                        .collect();
+                    let attribute = format!("COLOR_{n}");
+                    let (_, folded) = ui
+                        .push_id(("gltf_colors", n), |ui| {
+                            card(
+                                ui,
+                                Some(edit.color == Some(pick)),
+                                RichText::new(&names[k]),
+                                |ui| {
+                                    ui.add_sized(
+                                        vec2(48.0, 12.0),
+                                        egui::Label::new(
+                                            RichText::new("glTF").size(11.0).color(TEXT_WEAK),
+                                        ),
+                                    );
+                                },
+                                |_, _| {},
+                                |ui| {
+                                    let saved = edit
+                                        .saved
+                                        .color_names
+                                        .get(&n)
+                                        .cloned()
+                                        .unwrap_or_else(|| attribute.clone());
+                                    let mut name = names[k].clone();
+                                    let mut done = false;
+                                    prop_row(ui, "Name", |ui, width| {
+                                        let field = egui::TextEdit::singleline(&mut name);
+                                        done = ui.add_sized(vec2(width, 22.0), field).lost_focus();
+                                    });
+                                    if done {
+                                        if name.is_empty() {
+                                            name = attribute.clone();
+                                        }
+                                        if others.contains(&name.as_str()) {
+                                            name = if others.contains(&saved.as_str()) {
+                                                attribute.clone()
+                                            } else {
+                                                saved
+                                            };
+                                        }
+                                    }
+                                    if !done && name.is_empty() || name != attribute {
+                                        edit.edit.color_names.insert(n, name);
+                                    } else {
+                                        edit.edit.color_names.remove(&n);
+                                    }
+                                    ui.weak(format!("From the glTF's {attribute}"));
+                                },
+                            )
+                        })
+                        .inner;
+                    if folded {
+                        fold = Some(pick);
+                    }
+                }
+                for i in 0..edit.edit.colors.len() {
+                    let pick = ColorPick::Authored(i);
+                    let open = edit.color == Some(pick);
+                    let others: Vec<String> = names
+                        .iter()
+                        .enumerate()
+                        .filter(|(j, _)| *j != gltf.len() + i)
+                        .map(|(_, m)| m.clone())
+                        .collect();
+                    let others: Vec<&str> = others.iter().map(String::as_str).collect();
+                    let saved = edit.saved.colors.get(i).map(|c| c.name.clone());
+                    let mut mini = edit.color_cards[i].mini.take();
+                    let shown = edit.edit.colors[i].clone();
+                    let mut deleted = false;
+                    let (_, folded) = ui
+                        .push_id(("colors", i), |ui| {
+                            card(
+                                ui,
+                                Some(open),
+                                RichText::new(&shown.name),
+                                |ui| color_set_preview(ui, &shown, &mut mini),
+                                |ui, open| {
+                                    deleted = open
+                                        && icon_button(ui, Icon::Trash2, "Delete", true).clicked();
+                                },
+                                |ui| {
+                                    let set = &mut edit.edit.colors[i];
+                                    let card = &mut edit.color_cards[i];
+                                    name_row(
+                                        ui,
+                                        &mut set.name,
+                                        saved.as_deref(),
+                                        &others,
+                                        "colors",
+                                    );
+                                    gizmo_click |= color_set_fields(
+                                        ui,
+                                        set,
+                                        card,
+                                        &mut edit.color_end,
+                                        gizmo,
+                                        bounds,
+                                    );
+                                },
+                            )
+                        })
+                        .inner;
+                    edit.color_cards[i].mini = mini;
+                    if folded {
+                        fold = Some(pick);
+                    }
+                    if deleted {
+                        delete = Some(i);
+                    }
+                }
+                if let Some(pick) = fold {
+                    edit.color = (edit.color != Some(pick)).then_some(pick);
+                    edit.color_end = 0;
+                }
+                if gizmo_click {
+                    tools.toggle_gizmo(gizmo::Mode::Move);
+                }
+                if let Some(i) = delete {
+                    edit.edit.colors.remove(i);
+                    edit.color_cards.remove(i);
+                    edit.color = None;
+                }
+            });
+        });
+    mesh_commit(ui, edit)
+}
+
+/// A color set's 48 × 12 preview: its gradient, first stop on the left, or its color.
+fn color_set_preview(
+    ui: &mut Ui,
+    set: &enrich::ColorSet,
+    mini: &mut Option<(Gradient, [usize; 2], egui::TextureHandle)>,
+) {
+    let (rect, _) = ui.allocate_exact_size(vec2(48.0, 12.0), Sense::hover());
+    color_picker::checker(ui, rect, 3);
+    if set.fill == enrich::ColorFill::Solid {
+        let color = color_picker::to_color32(set.color);
+        ui.painter().rect_filled(rect, 3, color);
+    } else {
+        let gradient = Gradient {
+            name: String::new(),
+            dither: Dither::None,
+            stops: set.stops.clone(),
+        };
+        let texture = gradient_texture(ui, mini, &gradient, rect.size());
+        egui::Image::from_texture((texture.id(), rect.size()))
+            .corner_radius(3)
+            .paint_at(ui, rect);
+    }
+}
+
+/// An authored color set's fields after its name; returns whether Move was clicked.
+fn color_set_fields(
+    ui: &mut Ui,
+    set: &mut enrich::ColorSet,
+    card: &mut GradientCard,
+    end: &mut usize,
+    gizmo: Option<gizmo::Mode>,
+    bounds: [bevy::math::Vec3; 2],
+) -> bool {
+    use enrich::ColorFill;
+    prop_row(ui, "Fill", |ui, width| {
+        egui::ComboBox::from_id_salt("color_fill")
+            .width(width - 8.0)
+            .selected_text(set.fill.name())
+            .show_ui(ui, |ui| {
+                for fill in ColorFill::ALL {
+                    ui.selectable_value(&mut set.fill, fill, fill.name());
+                }
+            });
+    });
+    if set.fill == ColorFill::Solid {
+        ui.add_space(4.0);
+        card.picker.show(ui, &mut set.color);
+        return false;
+    }
+    let mut clicked = false;
+    prop_row(ui, "Gizmo", |ui, _| {
+        let buttons = [(Icon::Move3d, "Move (W)", gizmo == Some(gizmo::Mode::Move))];
+        clicked = button_group(ui, &buttons, true).is_some();
+    });
+    let labels = if set.fill == ColorFill::Radial {
+        ["Center", "Edge"]
+    } else {
+        ["From", "To"]
+    };
+    for (k, label) in labels.into_iter().enumerate() {
+        let point = if k == 0 { &mut set.from } else { &mut set.to };
+        ui.push_id(("end", k), |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let color = if *end == k { ACCENT } else { TEXT_WEAK };
+                let name =
+                    egui::Label::new(RichText::new(label).color(color)).sense(Sense::click());
+                if ui.add_sized(vec2(44.0, 22.0), name).clicked() {
+                    *end = k;
+                }
+                let each = ((ui.available_width() - 12.0) / 3.0).max(20.0);
+                for value in point.iter_mut() {
+                    let field = egui::DragValue::new(value).speed(0.001).fixed_decimals(3);
+                    if ui.add_sized(vec2(each, 22.0), field).gained_focus() {
+                        *end = k;
+                    }
+                }
+            });
+        });
+    }
+    prop_row(ui, "Fit", |ui, _| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
+            let fit = ui
+                .add_sized(vec2(28.0, 22.0), egui::Button::new(label))
+                .on_hover_text(format!("Along the model's {label} axis"));
+            if fit.clicked() {
+                (set.from, set.to) = fit_gradient(set.fill, bounds, axis);
+            }
+        }
+        if ui
+            .button("Swap")
+            .on_hover_text("From and To trade places")
+            .clicked()
+        {
+            std::mem::swap(&mut set.from, &mut set.to);
+        }
+    });
+    ui.add_space(4.0);
+    let mut gradient = Gradient {
+        name: String::new(),
+        dither: Dither::None,
+        stops: std::mem::take(&mut set.stops),
+    };
+    ui.push_id("color_gradient", |ui| {
+        gradient_editor(ui, &mut gradient, card)
+    });
+    set.stops = gradient.stops;
+    clicked
+}
+
+/// From and To laying a gradient along `axis` of the model's bounding box; see
+/// docs/features/vertex-colors.md#vertex-colors-tab.
+fn fit_gradient(
+    fill: enrich::ColorFill,
+    [min, max]: [bevy::math::Vec3; 2],
+    axis: usize,
+) -> ([f32; 3], [f32; 3]) {
+    let middle = (min + max) / 2.0;
+    let (mut from, mut to) = (middle, middle);
+    if fill == enrich::ColorFill::Radial {
+        to[axis] = max[axis];
+    } else {
+        (from[axis], to[axis]) = (min[axis], max[axis]);
+    }
+    (from.to_array(), to.to_array())
 }
 
 /// The Regions tab; see docs/features/regions.md#regions-tab.

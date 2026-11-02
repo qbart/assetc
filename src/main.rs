@@ -33,6 +33,7 @@ mod texture;
 mod theme;
 mod tree;
 mod ui;
+mod vertex_colors;
 mod vision;
 
 use std::env;

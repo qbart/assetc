@@ -194,6 +194,9 @@ pub struct Preview3d {
     pub region_wants: Vec<RegionWant>,
     /// Draw the model in its regions' colors (from `region_wants`) instead of its materials.
     pub region_view: bool,
+    /// Draw the model in a color set's colors instead of its materials (or regions); see
+    /// docs/features/vertex-colors.md#3d-view.
+    pub color_view: Option<std::sync::Arc<ColorView>>,
     /// The region whose triangles to report in `region_triangles`.
     pub region_outline: Option<usize>,
     /// The outlined region's triangles as posed this frame: region and corners; written by
@@ -223,6 +226,19 @@ pub struct RegionWant {
     pub mesh: u32,
     pub primitive: u32,
     pub triangles: Option<Vec<u32>>,
+}
+
+/// A glTF primitive (mesh, primitive) and a color per triangle corner.
+pub type Corners = ((u32, u32), Vec<[u8; 4]>);
+
+/// A color set to show on the model, one color per triangle corner.
+#[derive(Clone, Debug, Default)]
+pub struct ColorView {
+    /// Different whenever `corners` are.
+    pub generation: u64,
+    /// Each glTF primitive's linear RGBA8 colors, by mesh and primitive, in the glTF's
+    /// triangle order.
+    pub corners: Vec<Corners>,
 }
 
 /// Where a ray hit the shown model; see docs/features/locators.md#place-on-surface.
@@ -1643,14 +1659,21 @@ struct PosedMesh<'a> {
     skin: Option<PosedSkin<'a>>,
 }
 
-/// The glTF mesh and primitive of a mesh loaded from a glTF (`Mesh<m>/Primitive<p>`).
-/// A copy of one of the shown model's meshes drawn in its regions' colors, beside the mesh
-/// it stands in for; see docs/features/regions.md#3d-view.
+/// A copy of one of the shown model's meshes drawn in its regions' colors (or a color set's),
+/// beside the mesh it stands in for; see docs/features/regions.md#3d-view and
+/// docs/features/vertex-colors.md#3d-view.
 #[derive(Component)]
 struct RegionOverlay {
     source: Entity,
-    /// Each triangle's color, as uploaded.
-    colors: Vec<[u8; 3]>,
+    /// What its colors show: the triangles' region colors, or a color view's generation.
+    shows: Shows,
+}
+
+#[derive(PartialEq)]
+enum Shows {
+    Regions(Vec<[u8; 3]>),
+    /// Smooth shaded, unlike regions.
+    Colors(u64),
 }
 
 /// Triangles in no visible region.
@@ -1691,8 +1714,25 @@ fn color_attribute(colors: &[[u8; 3]]) -> Vec<[f32; 4]> {
         .collect()
 }
 
+/// A color view's colors of glTF primitive `id` with `count` corners; white where it has none.
+fn corner_attribute(view: &ColorView, id: (u32, u32), count: usize) -> Vec<[f32; 4]> {
+    let corners = view
+        .corners
+        .iter()
+        .find(|(k, _)| *k == id)
+        .map_or(&[][..], |(_, c)| c.as_slice());
+    (0..count)
+        .map(|i| {
+            corners
+                .get(i)
+                .map_or([1.0; 4], |c| c.map(|v| f32::from(v) / 255.0))
+        })
+        .collect()
+}
+
 /// Shows [`RegionOverlay`]s in place of the shown model's meshes while
-/// [`Preview3d::region_view`] is on, and the meshes again when it is off.
+/// [`Preview3d::region_view`] is on or a [`Preview3d::color_view`] is set, and the meshes
+/// again when neither is.
 #[allow(clippy::too_many_arguments)]
 fn sync_region_view(
     mut commands: Commands,
@@ -1707,13 +1747,15 @@ fn sync_region_view(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut material: Local<Option<Handle<StandardMaterial>>>,
 ) {
+    let view = preview.color_view.as_deref();
     let model = loaded
         .0
         .as_ref()
-        .filter(|m| m.ready && m.fitted.is_some() && preview.region_view);
-    // Overlays no longer wanted, or whose mesh is gone.
+        .filter(|m| m.ready && m.fitted.is_some() && (preview.region_view || view.is_some()));
+    // Overlays no longer wanted, whose mesh is gone, or shaded the other way.
     for (entity, overlay, _, _) in &overlays {
-        if model.is_none() || !sources.contains(overlay.source) {
+        let smooth = matches!(overlay.shows, Shows::Colors(_));
+        if model.is_none() || !sources.contains(overlay.source) || smooth != view.is_some() {
             commands.entity(entity).despawn();
             if let Ok(mut visibility) = visibilities.get_mut(overlay.source) {
                 *visibility = Visibility::Inherited;
@@ -1745,20 +1787,37 @@ fn sync_region_view(
         let Some(id) = primitive_id(&mesh3d.0) else {
             continue;
         };
-        let existing = overlays
-            .iter_mut()
-            .find(|(_, overlay, _, _)| overlay.source == entity);
+        let existing = overlays.iter_mut().find(|(_, overlay, _, _)| {
+            overlay.source == entity && matches!(overlay.shows, Shows::Colors(_)) == view.is_some()
+        });
         match existing {
             Some((_, mut overlay, overlay_mesh, mut overlay_transform)) => {
                 if *overlay_transform != *transform {
                     *overlay_transform = *transform;
                 }
-                let colors = region_colors(&preview.region_wants, id, overlay.colors.len());
-                if colors != overlay.colors
-                    && let Some(mut mesh) = meshes.get_mut(&overlay_mesh.0)
-                {
-                    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_attribute(&colors));
-                    overlay.colors = colors;
+                let Some(mut mesh) = meshes.get_mut(&overlay_mesh.0) else {
+                    continue;
+                };
+                let count = mesh.count_vertices();
+                match view {
+                    Some(view) => {
+                        if overlay.shows != Shows::Colors(view.generation) {
+                            let colors = corner_attribute(view, id, count);
+                            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+                            overlay.shows = Shows::Colors(view.generation);
+                        }
+                    }
+                    None => {
+                        let colors = region_colors(&preview.region_wants, id, count / 3);
+                        let shows = Shows::Regions(colors);
+                        if overlay.shows != shows {
+                            let Shows::Regions(colors) = &shows else {
+                                unreachable!()
+                            };
+                            mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_attribute(colors));
+                            overlay.shows = shows;
+                        }
+                    }
                 }
             }
             None => {
@@ -1774,10 +1833,22 @@ fn sync_region_view(
                 mesh.duplicate_vertices();
                 mesh.remove_indices();
                 mesh.remove_attribute(Mesh::ATTRIBUTE_TANGENT);
-                mesh.compute_flat_normals();
-                let count = mesh.count_vertices() / 3;
-                let colors = region_colors(&preview.region_wants, id, count);
-                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_attribute(&colors));
+                if view.is_none() || !mesh.contains_attribute(Mesh::ATTRIBUTE_NORMAL) {
+                    mesh.compute_flat_normals();
+                }
+                let count = mesh.count_vertices();
+                let shows = match view {
+                    Some(view) => {
+                        let colors = corner_attribute(view, id, count);
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+                        Shows::Colors(view.generation)
+                    }
+                    None => {
+                        let colors = region_colors(&preview.region_wants, id, count / 3);
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_attribute(&colors));
+                        Shows::Regions(colors)
+                    }
+                };
                 let mut overlay = commands.spawn((
                     Mesh3d(meshes.add(mesh)),
                     MeshMaterial3d(material.clone()),
@@ -1785,7 +1856,7 @@ fn sync_region_view(
                     ChildOf(parent.parent()),
                     RegionOverlay {
                         source: entity,
-                        colors,
+                        shows,
                     },
                 ));
                 if let Some(skin) = skin {
@@ -1799,6 +1870,7 @@ fn sync_region_view(
     }
 }
 
+/// The glTF mesh and primitive of a mesh loaded from a glTF (`Mesh<m>/Primitive<p>`).
 fn primitive_id(mesh: &Handle<Mesh>) -> Option<(u32, u32)> {
     let label = mesh.path()?.label()?;
     let (m, p) = label.strip_prefix("Mesh")?.split_once("/Primitive")?;

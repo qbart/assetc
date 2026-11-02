@@ -1,9 +1,10 @@
-//! Model properties, shapes and regions as kept in `.amod` sidecars; see
+//! Model properties, shapes, regions, paths and color sets as kept in `.amod` sidecars; see
 //! docs/spec/amod.md#properties, docs/features/shapes.md and docs/features/regions.md.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::amod::locator_color;
+use crate::gradient::{self, Stop, format_color, parse_color};
 
 /// A property's value; see docs/features/properties.md#property.
 #[derive(Debug, Clone, PartialEq)]
@@ -739,6 +740,190 @@ pub fn write_paths(paths: &[Path], out: &mut String) {
             *out += &format!("color = {}\n", string(color));
         }
         write_properties("paths.properties", &path.properties, out);
+    }
+}
+
+/// How an authored color set colors the vertices; see
+/// docs/features/vertex-colors.md#authored-sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ColorFill {
+    Solid,
+    #[default]
+    Linear,
+    Radial,
+}
+
+impl ColorFill {
+    pub const ALL: [Self; 3] = [Self::Solid, Self::Linear, Self::Radial];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Solid => "solid",
+            Self::Linear => "linear",
+            Self::Radial => "radial",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Solid => "Solid",
+            Self::Linear => "Linear",
+            Self::Radial => "Radial",
+        }
+    }
+}
+
+/// A color set made in assetc; see docs/features/vertex-colors.md#authored-sets.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ColorSet {
+    pub name: String,
+    pub fill: ColorFill,
+    /// Solid: sRGB, straight alpha.
+    pub color: [u8; 4],
+    /// Linear and Radial: the ends, in model space.
+    pub from: [f32; 3],
+    pub to: [f32; 3],
+    /// Linear and Radial: at least two, ordered by position.
+    pub stops: Vec<Stop>,
+}
+
+fn black_to_white() -> Vec<Stop> {
+    vec![
+        Stop {
+            at: 0.0,
+            color: [0, 0, 0, 255],
+        },
+        Stop {
+            at: 1.0,
+            color: [255, 255, 255, 255],
+        },
+    ]
+}
+
+impl ColorSet {
+    /// Linear, black to white, from `from` to `to`.
+    pub fn new(name: String, from: [f32; 3], to: [f32; 3]) -> Self {
+        Self {
+            name,
+            fill: ColorFill::Linear,
+            color: [255; 4],
+            from,
+            to,
+            stops: black_to_white(),
+        }
+    }
+}
+
+pub fn parse_colors(value: toml::Value) -> Result<Vec<ColorSet>, String> {
+    named_tables(value, "color set")?
+        .into_iter()
+        .map(|(name, mut table)| {
+            let fail = |e: String| format!("color set {name:?}: {e}");
+            let fill = match table.remove("fill") {
+                Some(v) => {
+                    let key = text("fill", &v).map_err(fail)?;
+                    ColorFill::ALL
+                        .into_iter()
+                        .find(|f| f.key() == key)
+                        .ok_or_else(|| {
+                            fail(format!(
+                                "unknown fill {key:?} (use solid, linear or radial)"
+                            ))
+                        })?
+                }
+                None => ColorFill::Linear,
+            };
+            let color = match table.remove("color") {
+                Some(v) => {
+                    let text = text("color", &v).map_err(fail)?;
+                    parse_color(&text)
+                        .filter(|_| text.starts_with('#'))
+                        .ok_or_else(|| {
+                            fail(format!("color {text:?} is not #rrggbb or #rrggbbaa"))
+                        })?
+                }
+                None => [255; 4],
+            };
+            let point = |table: &mut toml::Table, key: &str, default: [f32; 3]| {
+                table
+                    .remove(key)
+                    .map(|v| floats::<3>(key, &v))
+                    .transpose()
+                    .map(|p| p.unwrap_or(default))
+            };
+            let from = point(&mut table, "from", [0.0; 3]).map_err(fail)?;
+            let to = point(&mut table, "to", [0.0, 1.0, 0.0]).map_err(fail)?;
+            let stops = table
+                .remove("stops")
+                .map(gradient::parse_stops)
+                .transpose()
+                .map_err(fail)?
+                .unwrap_or_else(black_to_white);
+            if let Some(key) = table.keys().next() {
+                return Err(fail(format!("unknown key {key:?}")));
+            }
+            Ok(ColorSet {
+                name: name.clone(),
+                fill,
+                color,
+                from,
+                to,
+                stops,
+            })
+        })
+        .collect()
+}
+
+pub fn write_colors(sets: &[ColorSet], out: &mut String) {
+    for set in sets {
+        *out += "\n[[colors]]\n";
+        *out += &format!("name = {}\n", toml::Value::from(set.name.as_str()));
+        *out += &format!("fill = \"{}\"\n", set.fill.key());
+        if set.fill == ColorFill::Solid {
+            *out += &format!("color = \"{}\"\n", format_color(set.color));
+        } else {
+            *out += &format!("from = {}\n", write_floats(&set.from));
+            *out += &format!("to = {}\n", write_floats(&set.to));
+            gradient::write_stops(&set.stops, out);
+        }
+    }
+}
+
+/// `COLOR_<n>` as `n`.
+pub fn color_attribute(name: &str) -> Option<u32> {
+    let n = name.strip_prefix("COLOR_")?;
+    (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) && (n == "0" || !n.starts_with('0')))
+        .then(|| n.parse().ok())
+        .flatten()
+}
+
+/// `[color_names]`: new names of glTF color sets, by `n` of `COLOR_n`; see
+/// docs/features/vertex-colors.md#renaming.
+pub fn parse_color_names(value: toml::Value) -> Result<BTreeMap<u32, String>, String> {
+    let toml::Value::Table(table) = value else {
+        return Err("color_names is not a table".into());
+    };
+    table
+        .into_iter()
+        .map(|(key, value)| {
+            let n = color_attribute(&key)
+                .ok_or_else(|| format!("color_names: {key:?} is not COLOR_<n>"))?;
+            let name = text(&key, &value).map_err(|e| format!("color_names: {e}"))?;
+            if name.is_empty() {
+                return Err(format!("color_names: {key} has an empty name"));
+            }
+            Ok((n, name))
+        })
+        .collect()
+}
+
+pub fn write_color_names(names: &BTreeMap<u32, String>, out: &mut String) {
+    if names.is_empty() {
+        return;
+    }
+    *out += "\n[color_names]\n";
+    for (n, name) in names {
+        *out += &format!("COLOR_{n} = {}\n", toml::Value::from(name.as_str()));
     }
 }
 

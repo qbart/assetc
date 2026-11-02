@@ -1,5 +1,6 @@
 //! `.amod` sidecars: per-file settings next to an input file, see docs/spec/amod.md.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -24,6 +25,11 @@ pub struct Amod {
     pub regions: Vec<Region>,
     /// `[[paths]]`: a glTF model's paths, see docs/features/paths.md.
     pub paths: Vec<enrich::Path>,
+    /// `[color_names]`: new names of a glTF model's color sets, by `n` of `COLOR_n`; see
+    /// docs/features/vertex-colors.md#renaming.
+    pub color_names: BTreeMap<u32, String>,
+    /// `[[colors]]`: a glTF model's authored color sets.
+    pub colors: Vec<enrich::ColorSet>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
     pub modifiers: Vec<Modifier>,
 }
@@ -123,6 +129,8 @@ impl Amod {
             && self.shapes.is_empty()
             && self.regions.is_empty()
             && self.paths.is_empty()
+            && self.color_names.is_empty()
+            && self.colors.is_empty()
             && self.modifiers.is_empty()
     }
 
@@ -152,6 +160,16 @@ impl Amod {
         let paths = table
             .remove("paths")
             .map(enrich::parse_paths)
+            .transpose()?
+            .unwrap_or_default();
+        let color_names = table
+            .remove("color_names")
+            .map(enrich::parse_color_names)
+            .transpose()?
+            .unwrap_or_default();
+        let colors = table
+            .remove("colors")
+            .map(enrich::parse_colors)
             .transpose()?
             .unwrap_or_default();
         let Tables { mesh, locators } = toml::Value::Table(table)
@@ -188,6 +206,8 @@ impl Amod {
             shapes,
             regions,
             paths,
+            color_names,
+            colors,
             modifiers,
         })
     }
@@ -231,6 +251,8 @@ impl Amod {
         enrich::write_shapes(&self.shapes, &mut out);
         enrich::write_regions(&self.regions, &mut out);
         enrich::write_paths(&self.paths, &mut out);
+        enrich::write_color_names(&self.color_names, &mut out);
+        enrich::write_colors(&self.colors, &mut out);
         noise::write_modifiers(&self.modifiers, &mut out);
         // Each table after a blank line, but not the first.
         out.trim_start_matches('\n').to_owned()
@@ -444,6 +466,26 @@ closed = true
 tension = 0.25
 alpha = 1.0
 color = "#22c55e"
+
+[color_names]
+COLOR_0 = "tint"
+COLOR_2 = "wear"
+
+[[colors]]
+name = "height"
+fill = "linear"
+from = [0.0, 0.0, 0.0]
+to = [0.0, 1.8, 0.0]
+stops = [
+    { at = 0.0, color = "#1e3a8a" },
+    { at = 0.5, color = "#ffffff80" },
+    { at = 1.0, color = "#fde68a" },
+]
+
+[[colors]]
+name = "flat"
+fill = "solid"
+color = "#ff000080"
 "##;
         let amod = Amod::parse(text).unwrap();
         assert_eq!(amod.properties["lives"], PropValue::Int(3));
@@ -465,6 +507,10 @@ color = "#22c55e"
         assert_eq!(amod.paths[0].points[1], [0.0, 0.1, -0.2]);
         assert_eq!(amod.paths[0].properties["stiffness"], PropValue::Float(0.8));
         assert!(amod.paths[1].closed);
+        assert_eq!(amod.color_names[&2], "wear");
+        assert_eq!(amod.colors[0].stops[1].color, [255, 255, 255, 0x80]);
+        assert_eq!(amod.colors[1].fill, crate::enrich::ColorFill::Solid);
+        assert_eq!(amod.colors[1].color, [255, 0, 0, 0x80]);
         assert_eq!(amod.to_toml(), text);
         assert_eq!(Amod::parse(&amod.to_toml()).unwrap(), amod);
 
@@ -482,6 +528,13 @@ color = "#22c55e"
             "[[paths]]\nname = \"a\"\ntension = 2.0\n",
             "[[paths]]\nname = \"a\"\npoints = [[0.0, 1.0]]\n",
             "[[paths]]\nname = \"a\"\nclosed = 1\n",
+            "[color_names]\nCOLOR_x = \"a\"\n",
+            "[color_names]\nCOLOR_01 = \"a\"\n",
+            "[color_names]\nCOLOR_0 = \"\"\n",
+            "[[colors]]\nname = \"a\"\nfill = \"conic\"\n",
+            "[[colors]]\nname = \"a\"\ncolor = \"red\"\n",
+            "[[colors]]\nname = \"a\"\nstops = [{ at = 0.0, color = \"#000000\" }]\n",
+            "[[colors]]\nname = \"a\"\n\n[[colors]]\nname = \"a\"\n",
             "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\nsubmeshes = [[0, 1], [0, 1]]\n",
         ] {
             assert!(Amod::parse(bad).is_err(), "{bad}");
