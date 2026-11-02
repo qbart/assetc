@@ -61,13 +61,17 @@ enum Command {
     /// Create assetc.toml in the current directory
     Init,
     /// Compile input into output
-    Build,
+    Build {
+        /// Build this target of assetc.toml instead of the default
+        #[arg(long)]
+        target: Option<String>,
+    },
 }
 
 fn main() -> ExitCode {
     let result = match Cli::parse().command {
         Some(Command::Init) => init(),
-        Some(Command::Build) => build(),
+        Some(Command::Build { target }) => build(target.as_deref()),
         None => open(),
     };
     match result {
@@ -85,8 +89,15 @@ fn init() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn build() -> Result<(), Box<dyn std::error::Error>> {
-    let project = config::load(&env::current_dir()?)?;
+/// Builds the default target, or `target`; see docs/features/cli.md#assetc-build.
+fn build(target: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut project = config::load(&env::current_dir()?)?;
+    if let Some(name) = target {
+        if project.root.is_none() {
+            return Err(format!("no {} found (run assetc init)", config::FILE_NAME).into());
+        }
+        project.config = project.config.target(name)?;
+    }
     let (Some(input), Some(output)) = (project.input_dir(), project.output_dir()) else {
         return Err(format!("no {} found (run assetc init)", config::FILE_NAME).into());
     };

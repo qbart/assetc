@@ -42,6 +42,11 @@ pub struct Config {
     pub textures: Textures,
     pub meshes: Meshes,
     pub locators: Locators,
+    /// Named build targets, as written; see docs/spec/assetc.toml.md#targets.
+    pub targets: std::collections::BTreeMap<String, toml::Table>,
+    /// The file's top-level table, that targets are merged into.
+    #[serde(skip)]
+    pub raw: toml::Table,
 }
 
 /// Locators shared between models, see docs/spec/assetc.toml.md#locators.
@@ -135,7 +140,58 @@ impl Default for Config {
             textures: Textures::default(),
             meshes: Meshes::default(),
             locators: Locators::default(),
+            targets: Default::default(),
+            raw: toml::Table::new(),
         }
+    }
+}
+
+impl Config {
+    /// The settings of target `name`: the top level with the target's replacing them, tables
+    /// merged key by key; see docs/spec/assetc.toml.md#targets.
+    pub fn target(&self, name: &str) -> Result<Config, String> {
+        let Some(target) = self.targets.get(name) else {
+            let names: Vec<&str> = self.targets.keys().map(String::as_str).collect();
+            let list = if names.is_empty() {
+                "no targets".to_owned()
+            } else {
+                format!("targets: {}", names.join(", "))
+            };
+            return Err(format!("no target {name:?} ({list})"));
+        };
+        let fail = |e: String| format!("targets.{name}: {e}");
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(fail("a target's name is letters, digits, _ and -".into()));
+        }
+        let mut merged = self.raw.clone();
+        merged.remove("targets");
+        let output = self.output.to_string_lossy().into_owned();
+        merged.insert("output".into(), format!("{output}-{name}").into());
+        for (key, value) in target {
+            match (key.as_str(), merged.get_mut(key), value) {
+                ("input" | "targets", _, _) => {
+                    return Err(fail(format!("{key} cannot be set per target")));
+                }
+                (_, Some(toml::Value::Table(base)), toml::Value::Table(over)) => {
+                    for (k, v) in over {
+                        base.insert(k.clone(), v.clone());
+                    }
+                }
+                _ => {
+                    merged.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        let mut config: Config = toml::Value::Table(merged.clone())
+            .try_into()
+            .map_err(|e: toml::de::Error| fail(e.message().to_owned()))?;
+        config.raw = merged;
+        config.targets.clear();
+        Ok(config)
     }
 }
 
@@ -161,6 +217,8 @@ pub enum Error {
     Exists(PathBuf),
     Io(PathBuf, io::Error),
     Parse(PathBuf, toml::de::Error),
+    /// A target that does not resolve.
+    Target(PathBuf, String),
 }
 
 impl fmt::Display for Error {
@@ -169,6 +227,7 @@ impl fmt::Display for Error {
             Self::Exists(path) => write!(f, "{} already exists", path.display()),
             Self::Io(path, e) => write!(f, "{}: {e}", path.display()),
             Self::Parse(path, e) => write!(f, "{}: {e}", path.display()),
+            Self::Target(path, e) => write!(f, "{}: {e}", path.display()),
         }
     }
 }
@@ -189,7 +248,14 @@ pub fn load(start: &Path) -> Result<Project, Error> {
         return Ok(Project::default());
     };
     let text = fs::read_to_string(&path).map_err(|e| Error::Io(path.clone(), e))?;
-    let config = toml::from_str(&text).map_err(|e| Error::Parse(path.clone(), e))?;
+    let mut config: Config = toml::from_str(&text).map_err(|e| Error::Parse(path.clone(), e))?;
+    config.raw = toml::from_str(&text).map_err(|e| Error::Parse(path.clone(), e))?;
+    // Every target must resolve, even when building the default.
+    for name in config.targets.keys() {
+        config
+            .target(name)
+            .map_err(|e| Error::Target(path.clone(), e))?;
+    }
     Ok(Project {
         root: path.parent().map(Path::to_path_buf),
         config,
@@ -334,6 +400,46 @@ mod tests {
         assert_eq!(
             template.meshes.overrides[0].patch.meshlet_max_vertices,
             Some(128)
+        );
+    }
+
+    #[test]
+    fn targets_replace_and_merge_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(FILE_NAME),
+            "output = \"out\"\n[textures]\nlinear = [\"*_n.png\"]\nno_mipmaps = [\"ui/**\"]\n\
+             [targets.mobile]\ntextures = { no_mipmaps = [] }\nmeshes = { lod_ratios = [0.5] }\n\
+             [targets.web]\noutput = \"site\"\n",
+        )
+        .unwrap();
+        let project = load(dir.path()).unwrap();
+        let mobile = project.config.target("mobile").unwrap();
+        assert_eq!(mobile.output, PathBuf::from("out-mobile"));
+        assert_eq!(mobile.textures.linear, ["*_n.png"]);
+        assert!(mobile.textures.no_mipmaps.is_empty());
+        assert_eq!(mobile.meshes.defaults.lod_ratios, [0.5]);
+        assert_eq!(
+            project.config.target("web").unwrap().output,
+            PathBuf::from("site")
+        );
+        let missing = project.config.target("tablet").unwrap_err();
+        assert_eq!(missing, "no target \"tablet\" (targets: mobile, web)");
+
+        // A broken target makes the file unreadable.
+        fs::write(
+            dir.path().join(FILE_NAME),
+            "[targets.mobile]\ntextures = { nope = 1 }\n",
+        )
+        .unwrap();
+        let error = load(dir.path()).unwrap_err().to_string();
+        assert!(error.contains("targets.mobile: unknown field"), "{error}");
+        fs::write(dir.path().join(FILE_NAME), "[targets.m]\ninput = \"x\"\n").unwrap();
+        assert!(
+            load(dir.path())
+                .unwrap_err()
+                .to_string()
+                .contains("cannot be set per target")
         );
     }
 
