@@ -95,11 +95,14 @@ replaces the curve:
 
 ### Readout and fields
 
-Under the plot: the chosen point as monospace `TEXT_WEAK` text,
-`point 2 of 3  x 0.500  y 0.800  in 1.000  out 1.000`, with `split` when
-its slopes are split and the active slope in brackets (`out [1.000]`) while
-rotating; then **X**, **Y**, **In**, **Out** number fields (three decimals)
-to type exact values (`X` stays between the neighbours).
+Under the plot: the chosen point's status, 12 px `TEXT_WEAK`:
+`point 2 of 3`, then `· split` when its slopes are split and, while
+rotating, `· rotating both` (joined), `· rotating out` or `· rotating in`;
+then its **X**, **Y**, **In**, **Out** number fields (three decimals) to
+read and type exact values (`X` stays between the neighbours; on a joined
+point a typed slope sets both). While rotating, the labels of the rotating
+slopes are `ACCENT`. With no point chosen: `<n> points · press one to edit
+it`.
 
 ### Buttons and steps
 
