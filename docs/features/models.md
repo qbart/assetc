@@ -98,7 +98,7 @@ The toolbar's first group turns the drawing of each kind of
 | Shapes   | `shapes`      | the visible shapes' wireframes and the gizmo on the chosen shape |
 | Regions  | `paint-bucket`| the model in its visible regions' colors instead of its materials, and the chosen region's outline ([regions](regions.md#3d-view)) |
 
-- Toggles, all on to start with, for the session and every model. *Visible*
+- Toggles, Locators and Shapes on and Regions off to start with, for the session and every model. *Visible*
   is each item's own **Visible** (eye) in its tab: a button that is on shows
   the items whose eye is on; off hides them all, whatever their eyes, and
   keeps the eyes as they are.
