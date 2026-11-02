@@ -19,6 +19,7 @@ Right-clicking an Input row, or the empty area below the last row (the
 | New Palette          | as New Folder, see [`palettes.md`](palettes.md#creating) | always |
 | New Data ▸ Schema    | as New Folder, see [`schemas.md`](schemas.md#creating) | always |
 | New Data ▸ Directed Graph | as New Folder, see [`graphs.md`](graphs.md#creating) | always |
+| New Data ▸ Instance  | as New Folder, see [`instances.md`](instances.md#creating) | always |
 | Rename               | the row                                   | rows               |
 | Delete               | the row                                   | rows               |
 

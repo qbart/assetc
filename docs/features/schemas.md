@@ -3,7 +3,8 @@
 A **schema** (`*.aschema`) defines struct and enum types for game data, in
 the [a/1 property format](../aschema.md): which fields a `Weapon` has, their
 types, defaults, limits and how an editor lays them out. assetc edits schema
-files; data files (`*.adata`) that hold instances of the types come later.
+files, and data files (`*.adata`) that hold instances of the types (see
+[`instances.md`](instances.md)).
 
 The file format is [`docs/aschema.md`](../aschema.md); what assetc writes is
 [`docs/spec/aschema.md`](../spec/aschema.md).
@@ -239,6 +240,6 @@ Schemas are not built yet: the build skips them.
 
 ## Not yet
 
-- `.adata` files: instances, references, the project index, refactoring data
-  when fields, values or types are renamed.
+- Refactoring data files when fields, values or types are renamed (see
+  [`instances.md`](instances.md#not-yet)).
 - Migrating files of an older major version.

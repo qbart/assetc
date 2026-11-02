@@ -98,6 +98,14 @@ In a schema's editor (see [`docs/features/schemas.md`](docs/features/schemas.md#
 | Left drag on a field's handle          | Move the field within its group              |
 | Left drag on a list item's handle      | Move the item within a list default          |
 
+In a data file's editor (see [`docs/features/instances.md`](docs/features/instances.md)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left drag on an instance's handle (Instances tab) | Move the instance                 |
+| Left drag on a list item's handle      | Move the item within the list                |
+| Double-click on a colour swatch, curve or gradient preview | Open its editor          |
+
 In a curve editor (see [`docs/features/curves.md`](docs/features/curves.md#editing)); keys
 act while the pointer is over the editor:
 
