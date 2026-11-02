@@ -180,8 +180,10 @@ in the type's data encoding:
   outside or `Escape` closes it.
 - A struct: `n of m set` (`TEXT_WEAK`) in the row, and under the row
   (indented, before the details) the **struct's fields**, one 28 px row each
-  in the struct's field order: the name (monospace, 140 px), the type
-  (monospace, `TEXT_WEAK`, 150 px), a **Set** checkbox and, ticked, the
+  in the struct's field order, columns under the field row's (each nesting
+  level indented further): the name (monospace, 140 px), the type
+  (monospace, `TEXT_WEAK`, 180 px: the Type field and its button), a
+  **Set** checkbox and, ticked, the
   value's editor (any of these, a nested struct's own rows under its row).
   A struct default is partial ([§3](../aschema.md#3-type-expressions)): an
   unticked field is left out and falls back to the struct's own default.
