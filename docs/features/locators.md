@@ -17,6 +17,7 @@ in the Inspector's [Locators tab](#locators-tab) and directly in the
 | Field       | Meaning                                                                 |
 |-------------|-------------------------------------------------------------------------|
 | Name        | Identifies the locator; non-empty and unique within the model. The game finds it by the FNV-1a-64 hash of the name (see [`amesh.md`](../spec/amesh.md#locators)). Case is kept. |
+| Tags        | Names the game can group locators by (e.g. `weapon`, `left`), none to start with; each non-empty, without commas, at most once. Compiled with the locator. |
 | Joint       | The skin joint it is attached to, by the glTF node's **name**; none puts it in model space. Names survive re-exporting the model, indices do not. |
 | Translation | Offset in the parent's space (the joint's, or the model's), in model units. |
 | Rotation    | Unit quaternion `x y z w` relative to the parent. The Inspector edits it as Euler angles in degrees (X, then Y, then Z). |
@@ -142,6 +143,10 @@ the top:
     `ACCENT`. Disabled while an animation plays or the locator is hidden.
   - **Name**: a text field. When it loses focus empty or equal to another
     locator's name, it gets the old name back.
+  - **Tags**: a text field of the tags separated by commas (`weapon, left`).
+    When it loses focus (or Enter is pressed), the text is split at commas,
+    each part trimmed, and empty and repeated parts dropped; the field then
+    shows the result joined with `, `.
   - **Color**: a row of swatches (18 px squares, 4 px corners): **none**
     (a `TEXT_WEAK` outline with a diagonal line) and eight colors (`#ef4444`,
     `#f97316`, `#eab308`, `#22c55e`, `#06b6d4`, `#3b82f6`, `#a855f7`,
@@ -314,7 +319,8 @@ on to start with, disabled when the file has none) is on:
 
 A model's locators are written to its `.amesh` as the
 [`LOCATORS` and `LOCNAMES`](../spec/amesh.md#locators) chunks (none when it
-has no locators). A joint is stored as its index in `SKELETON`, `−1` for
+has no locators), and their tags as `LOCTAGS` (none when no locator has
+tags). A joint is stored as its index in `SKELETON`, `−1` for
 model space; the rotation is normalized.
 
 The model fails to build (`<file>.amod: locator "<name>": <problem>`) when a
@@ -329,7 +335,8 @@ rotation is zero.
   inherited, or `none`. A [preset](#presets) error shows in it instead.
 - A compiled mesh: a **Locators** row after Skin: their count, or `none`.
 - The [Chunks view](models.md#chunks-view) shows `LOCATORS` (Name, Hash,
-  Joint, Translation, Rotation, Scale) and `LOCNAMES` (bytes).
+  Joint, Translation, Rotation, Scale, Tags), `LOCTAGS` (Name, Hash) and
+  `LOCNAMES` (bytes).
 
 ## Not yet
 

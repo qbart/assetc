@@ -28,11 +28,13 @@ width are in `DESC`.
 | `SKIN`     | no       | [`SkinVertex`](#skinvertex-24-bytes)`[vertex_count]`, parallel to `VERTICES` |
 | `SKELETON` | no       | [`Joint`](#joint-112-bytes)`[joint_count]`                        |
 | `LOCATORS` | no       | [`Locator`](#locator-64-bytes)`[]` (payload size / 64), see [Locators](#locators) |
-| `LOCNAMES` | no       | `u8[]`: the locators' names, UTF-8, back to back                  |
+| `LOCNAMES` | no       | `u8[]`: the locators' names and tags, UTF-8, back to back         |
+| `LOCTAGS`  | no       | [`LocatorTag`](#locatortag-16-bytes)`[]` (payload size / 16), the locators' tags |
 
 assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
 together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
-`LOCATORS` and `LOCNAMES` (only for models with locators).
+`LOCATORS` and `LOCNAMES` (only for models with locators); `LOCTAGS`
+follows them when a locator has tags.
 
 ## MeshDesc (32 bytes)
 
@@ -176,7 +178,8 @@ and animation channels index them directly.
 Named transforms authored in the model's
 [`.amod`](amod.md#locators), see
 [`docs/features/locators.md`](../features/locators.md). `LOCATORS` holds one
-record per locator in the sidecar's order; `LOCNAMES` holds their names.
+record per locator in the sidecar's order; `LOCNAMES` holds their names
+(and their tags' text, after them); `LOCTAGS` their tags.
 
 A locator's transform is `T · R · S` (translation, rotation, scale) relative
 to its parent: the joint's current transform (as animations pose it,
@@ -198,4 +201,19 @@ within a file. The names are there for tools and debugging.
 |     20 |   12 | `translation` | f32 × 3                                                     |
 |     32 |   16 | `rotation`    | f32 × 4, unit quaternion `x y z w`                          |
 |     48 |   12 | `scale`       | f32 × 3                                                     |
-|     60 |    4 | `reserved`    | u32, `0`                                                    |
+|     60 |    2 | `first_tag`   | u16, index of its first tag in `LOCTAGS` (`0` without tags)  |
+|     62 |    2 | `tag_count`   | u16, number of its tags, consecutive in `LOCTAGS`            |
+
+`first_tag` and `tag_count` were a reserved `u32` of `0` before tags: a file
+without `LOCTAGS` reads as locators without tags.
+
+### LocatorTag (16 bytes)
+
+The tags of every locator, the first locator's first, in the order the
+sidecar lists them. A tag used by several locators appears once per locator.
+
+| Offset | Size | Field         | Notes                                                       |
+|-------:|-----:|---------------|-------------------------------------------------------------|
+|      0 |    8 | `hash`        | u64, FNV-1a-64 of the tag's UTF-8 text                      |
+|      8 |    4 | `name_offset` | u32, byte offset of the text in `LOCNAMES`                  |
+|     12 |    4 | `name_len`    | u32, byte length of the text                                |

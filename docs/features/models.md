@@ -247,7 +247,8 @@ The **Chunks** view shows the data inside the `.amesh`
   | `LODTABLE` | LOD table           | Submesh, Level, First index, Index count (the header's counts in the header line) |
   | `SKIN`     | Skin weights        | Joints, Weights                                       |
   | `SKELETON` | Skeleton            | Parent (or `—`), Translation, Rotation, Scale          |
-  | `LOCATORS` | Locators            | Name, Hash (`0x` + 16 hex digits), Joint (or `—`), Translation, Rotation, Scale |
+  | `LOCATORS` | Locators            | Name, Hash (`0x` + 16 hex digits), Joint (or `—`), Translation, Rotation, Scale, Tags (joined with `, `) |
+  | `LOCTAGS`  | Locator tags        | Name, Hash                                             |
   | `LOCNAMES` | Locator names       | Offset, Bytes (16 per row, hex)                        |
   | other      | Unknown chunk       | Offset, Bytes (16 per row, hex)                        |
 

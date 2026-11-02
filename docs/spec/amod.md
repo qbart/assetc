@@ -37,6 +37,7 @@ A list of locators, one table each:
 | Key           | Type              | Default        | Meaning                                           |
 |---------------|-------------------|----------------|---------------------------------------------------|
 | `name`        | string            | (required)     | non-empty, unique among the file's locators       |
+| `tags`        | array of strings  | `[]`           | each non-empty, without commas, at most once      |
 | `joint`       | string            | (none)         | name of a joint of the model's first skin; left out: model space |
 | `translation` | array of 3 floats | `[0, 0, 0]`    | in the parent's (joint's or model's) space        |
 | `rotation`    | array of 4 floats | `[0, 0, 0, 1]` | quaternion `x y z w`, normalized when built; not all zero |
@@ -44,8 +45,9 @@ A list of locators, one table each:
 | `preview`     | string            | (none)         | input-relative path of a glTF model shown at the locator by the 3D view; not compiled |
 | `color`       | string            | (none)         | `#rrggbb`, the marker's color in the 3D view; not compiled |
 
-An empty or repeated `name`, a missing one, a wrong array length, a `color`
-that is not `#` and six hex digits, or an unknown key is an error. A locator named like one the model inherits (from
+An empty or repeated `name`, a missing one, a wrong array length, an empty,
+repeated or comma-holding tag, a `color` that is not `#` and six hex digits,
+or an unknown key is an error. A locator named like one the model inherits (from
 its file or a preset) replaces it, see
 [Inherited locators](../features/locators.md#inherited-locators). Whether `joint` exists is checked when the model
 builds.
@@ -62,7 +64,8 @@ whenever assetc loads it.
 ## Written form
 
 assetc writes the `[mesh]` keys that are set, in the order listed, then each
-locator as a `[[locators]]` table (`name`, `joint` when set, `translation`,
+locator as a `[[locators]]` table (`name`, `tags` when there are any,
+`joint` when set, `translation`,
 `rotation`, `scale`, always all three, floats in Rust's shortest form,
 `preview` and `color` when set), then
 each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
