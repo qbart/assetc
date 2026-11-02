@@ -44,5 +44,6 @@ prints the error and exits with a non-zero code.
 - Window title is `assetc`, with or without a project.
 - Left sidebar browses the configured `input` and `output` directories (see
   [`gui.md`](gui.md#file-browser)).
-- Status bar shows `Ready` when a project was loaded, or
+- Status bar shows `Ready` when a project was loaded (`Processing…` while
+  background work runs, see [`gui.md`](gui.md#layout)), or
   `No assetc.toml found (run assetc init)` otherwise.

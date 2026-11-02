@@ -39,7 +39,11 @@ the platform's default size.
   (14 px, `ACCENT`) spinning one turn per second while background work
   runs (a [build](build.md#gui) or an [inspection](inspector.md#loading)).
   It appears only once the work has run for 150 ms, so quick work does not
-  flicker it
+  flicker it. While the loader shows for work other than a build (an
+  inspection, such as the one after an edit is saved), the message is
+  `Processing…` instead of `Ready` or the last build's result; a failed
+  file operation's message still comes first, and a build shows
+  `Building…`
   (see [`cli.md`](cli.md) and [`build.md`](build.md#gui)), `assetc <version>` on the right in weak text.
 - **Center**: the canvas, previewing the selected file in 2D (zoom, pan,
   tiling) or 3D (on a rotating shape), with a view bar on top; see
