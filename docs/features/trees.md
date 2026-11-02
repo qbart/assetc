@@ -91,8 +91,8 @@ px).
 
 ## Build
 
-Each tree is written to the same path under `output` (asset kind `tree`,
-asset path its input-relative path with the extension), in its
-[written form](../spec/atree.md#written-form). A file that cannot be read,
+Each tree is compiled to `<asset path>.atre` (asset kind `tree`, asset
+path its input-relative path without the extension, plus `.atre`), a
+[binary file](../spec/atre.md) of its nodes, breadth first. A file that cannot be read,
 or has [problems](#problems), fails the build with the first one (`(and <n>
 more)`). The CLI line reads `<source> -> <output> (<n> nodes, depth <d>)`.

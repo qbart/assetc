@@ -236,10 +236,10 @@ kept.
 
 ## Build
 
-Each schema is written to the same path under `output` (asset kind
-`schema`, asset path its input-relative path with the extension), in its
-[written form](../spec/aschema.md#written-form), so a game can read the
-types its data uses. A file that cannot be read, or has
+Each schema is compiled to `<asset path>.atype` (asset kind `schema`,
+asset path its input-relative path without the extension, plus `.atype`),
+a [binary file](../spec/atype.md) of its types, fields and enum values, so
+a game can read the types its data uses. A file that cannot be read, or has
 [problems](#problems), fails the build: `<problem path>: <message>` for the
 first one, and `(and <n> more)` when there are more. The CLI line reads
 `<source> -> <output> (<n> types)`.

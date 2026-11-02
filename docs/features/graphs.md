@@ -176,9 +176,9 @@ Graph tab (`CHANNEL_R`, 12 px).
 
 ## Build
 
-Each graph is written to the same path under `output` (asset kind
-`graph`, asset path its input-relative path with the extension), in its
-[written form](../spec/agraph.md#written-form). A file that cannot be read,
+Each graph is compiled to `<asset path>.agph` (asset kind `graph`, asset
+path its input-relative path without the extension, plus `.agph`), a
+[binary file](../spec/agph.md) of its nodes, edges and data. A file that cannot be read,
 or has [problems](#problems), fails the build with the first one (`(and <n>
 more)`). The CLI line reads `<source> -> <output> (<n> nodes, <m> edges)`.
 

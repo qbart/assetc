@@ -91,6 +91,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `*.amesh`                  | Compiled mesh, see [`models.md`](models.md#inspector) |
 | Output | `*.aanim`                  | Compiled animation, see [`models.md`](models.md#inspector) |
 | Output | `*.afont`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
+| Output | `*.atype`, `*.arec`, `*.agph`, `*.atre` | Compiled schema, data, graph or tree, see [Compiled data](#compiled-data) |
 | Output | `assets.aman` at the output root | Manifest, see [Manifest view](#manifest-view) |
 | Output | anything else              | File               |
 | either | folder named `*.env` (any case) | Environment map |
@@ -190,6 +191,23 @@ square, the same size, and a power of two.
 If the file cannot be read or decoded (corrupt PNG, not a KTX2 file, bad
 manifest), the details show the rows that are still known (Kind, Size) and an
 **Error** row with the message. The canvas shows no image.
+
+## Compiled data
+
+Compiled schemas, data, graphs and trees (`.atype`, `.arec`, `.agph`,
+`.atre` in the Output tree) are read only. Selecting one shows:
+
+- **Info**: Kind (`Compiled schema`, `Compiled data`, `Compiled graph`,
+  `Compiled tree`), Size, the counts of its descriptor (Types, Fields and
+  Values; Types and Instances and Values; Nodes, Edges and Properties;
+  Nodes, Properties and Depth), Asset path and Asset ID.
+- The canvas: its [Chunks view](models.md#chunks-view), every chunk as a
+  table: one row per record, one column per field of the record's spec
+  (hashes in hex, text read from `STRINGS`, colors as `#rrggbbaa`, a
+  value's kind by name), and `STRINGS` as offset / text rows.
+
+A compiled animation (`.aanim`) keeps its [player](models.md#compiled-animation-preview)
+and also offers **Chunks** in the view bar.
 
 ## Mipmaps tab
 

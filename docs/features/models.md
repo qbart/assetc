@@ -262,7 +262,9 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
 
 Selecting a compiled animation (`*.aanim` in the Output tree) plays it, to
 check what the build kept: its clips, read from the file, on its companion
-mesh, `P.amesh` next to it (same folder and name).
+mesh, `P.amesh` next to it (same folder and name). The [view bar](canvas.md#view-bar) offers **Play** (the
+default) and **Chunks** (the file's data as tables, see
+[Chunks view](#chunks-view)); the choice lasts for the session.
 
 - **3D view**: the mesh as the [compiled mesh preview](#compiled-mesh-preview)
   shows LOD 0 (its display modes and overlays, centered and scaled by its
@@ -297,8 +299,9 @@ mesh, `P.amesh` next to it (same folder and name).
 
 ## Chunks view
 
-The **Chunks** view shows the data inside the `.amesh`
-[chunked file](../spec/chunks.md), chunk by chunk:
+The **Chunks** view shows the data inside a [chunked file](../spec/chunks.md)
+(an `.amesh`, `.aanim`, `.afont`, or [compiled data](inspector.md#compiled-data)),
+chunk by chunk:
 
 - **Chunk list** on the left (220 px, `BG_PANEL`, 1 px `STROKE` line on its
   right): one 40 px row per chunk in file order with the chunk name

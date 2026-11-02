@@ -58,10 +58,10 @@ back.
 |     2 | mesh     | [`amesh.md`](amesh.md)       |
 |     3 | animation | [`aanim.md`](aanim.md)      |
 |     4 | font     | [`afont.md`](afont.md)       |
-|     5 | schema   | [`aschema.md`](aschema.md), JSON |
-|     6 | data     | [`adata.md`](adata.md#built-form), JSON, resolved |
-|     7 | graph    | [`agraph.md`](agraph.md), JSON |
-|     8 | tree     | [`atree.md`](atree.md), JSON |
+|     5 | schema   | [`atype.md`](atype.md)       |
+|     6 | data     | [`arec.md`](arec.md)         |
+|     7 | graph    | [`agph.md`](agph.md)         |
+|     8 | tree     | [`atre.md`](atre.md)         |
 
 Other values are reserved. Readers should skip entries with unknown kinds.
 

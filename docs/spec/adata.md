@@ -59,15 +59,5 @@ This page only states how assetc writes the files it edits (see
 
 ## Built form
 
-What the [build](../features/instances.md#build) writes: the written form
-with every value **resolved**:
-
-- An instance has `$type`, `$id`, then **every field** of its struct in
-  field order, each its set value or the value it inherits
-  ([§4.2](../aschema.md#42-sparse-storage)); `null` for an optional field
-  with no value. Other `$`-keys and keys that are not fields are left out.
-- A struct value (at any depth, list items too) has every field of its
-  struct the same way, inheriting from the enclosing defaults.
-- `$schema` is unchanged: the schema is built to the same relative place.
-- Values are in their canonical form (lower-case colors, `rgba` with 8
-  digits, curve points with all four numbers, integers as integers).
+The build compiles a data file to a binary [`.arec`](arec.md) with every
+field resolved; the `.adata` itself is never written to the output.

@@ -194,10 +194,10 @@ inspected again. Keys that are not fields are kept.
 
 ## Build
 
-Each data file is written to the same path under `output` (asset kind
-`data`, asset path its input-relative path with the extension), in the
-[built form](../spec/adata.md#built-form): every instance with **every
-field resolved**, so a game reads plain values with no defaults to apply.
+Each data file is compiled to `<asset path>.arec` (asset kind `data`,
+asset path its input-relative path without the extension, plus `.arec`), a
+[binary file](../spec/arec.md) of its instances with **every field
+resolved**, so a game reads typed values with no defaults to apply.
 A file that cannot be read, whose schema cannot be read, or that has
 errors, fails the build: `<message>` of the first error, `(and <n> more)`
 when there are more; warnings do not. The CLI line reads `<source> ->

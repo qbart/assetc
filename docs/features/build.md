@@ -41,10 +41,10 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat`, see [`materials.md`](materials.md) |
 | `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh` and more, see [`models.md`](models.md#build) |
 | `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
-| `*.aschema` (any case) | schema | the same path, see [`schemas.md`](schemas.md#build) |
-| `*.adata` (any case) | data | the same path, resolved, see [`instances.md`](instances.md#build) |
-| `*.agraph` (any case) | graph | the same path, see [`graphs.md`](graphs.md#build) |
-| `*.atree` (any case) | tree | the same path, see [`trees.md`](trees.md#build) |
+| `*.aschema` (any case) | schema | `<asset path>.atype`, see [`schemas.md`](schemas.md#build) |
+| `*.adata` (any case) | data | `<asset path>.arec`, resolved, see [`instances.md`](instances.md#build) |
+| `*.agraph` (any case) | graph | `<asset path>.agph`, see [`graphs.md`](graphs.md#build) |
+| `*.atree` (any case) | tree | `<asset path>.atre`, see [`trees.md`](trees.md#build) |
 | anything else      | —          | ignored, counted as skipped                   |
 
 Texture sources that belong to a material are compiled as that material
@@ -89,10 +89,10 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | mesh       | `*.amesh`      |
   | animation  | `*.aanim`      |
   | font       | `*.afont`      |
-  | schema     | `*.aschema`    |
-  | data       | `*.adata`      |
-  | graph      | `*.agraph`     |
-  | tree       | `*.atree`      |
+  | schema     | `*.atype`      |
+  | data       | `*.arec`       |
+  | graph      | `*.agph`       |
+  | tree       | `*.atre`       |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assets.aman` is rewritten, never removed; a leftover
@@ -149,8 +149,7 @@ when stale outputs were removed:
 - `<counts>`: each kind of asset built at least once, in this order, as
   `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat`),
   meshes (`.amesh`), animations (`.aanim`), fonts (`.afont`), schemas
-  (`.aschema`), data files (`.adata`), graphs (`.agraph`), trees
-  (`.atree`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
+  (`.atype`), data files (`.arec`), graphs (`.agph`), trees (`.atre`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
   `nothing` when nothing was built.
 - Outputs written along with a model or font count too (a model's `.aanim`,
   `.amat`s and textures, a font's atlas), though the CLI prints one line for
