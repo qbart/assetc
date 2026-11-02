@@ -1317,6 +1317,11 @@ fn bar_frame() -> Frame {
         .stroke(Stroke::new(1.0, STROKE))
 }
 
+const BUILD_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::B);
+const RESCAN_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R);
+
 fn menu_bar(
     ui: &mut Ui,
     logo: &egui::TextureHandle,
@@ -1353,6 +1358,13 @@ fn menu_bar(
         let quit = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Q);
         if ui.input_mut(|i| i.consume_shortcut(&quit)) {
             exit.write(AppExit::Success);
+        }
+        // Build and rescan; see docs/features/build.md#gui and docs/features/gui.md#file-browser.
+        if ui.input_mut(|i| i.consume_shortcut(&BUILD_SHORTCUT)) {
+            state.start_build = true;
+        }
+        if ui.input_mut(|i| i.consume_shortcut(&RESCAN_SHORTCUT)) {
+            state.rescan = true;
         }
         ui.menu_button("File", |ui| {
             let response = menu_row(ui, "Quit", None, true);
@@ -1522,11 +1534,13 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
     }
     tabs.with_layout(Layout::right_to_left(Align::Center), |ui| {
         ui.add_space(6.0);
-        if icon_button(ui, Icon::RefreshCw, "Rescan", true).clicked() {
+        let shortcut = |s: &egui::KeyboardShortcut| ui.ctx().format_shortcut(s);
+        let (rescan, build) = (shortcut(&RESCAN_SHORTCUT), shortcut(&BUILD_SHORTCUT));
+        if icon_button(ui, Icon::RefreshCw, &format!("Rescan ({rescan})"), true).clicked() {
             state.rescan = true;
         }
         let can_build = project.root.is_some() && !matches!(state.build, BuildStatus::Running(..));
-        if icon_button(ui, Icon::Hammer, "Build", can_build).clicked() {
+        if icon_button(ui, Icon::Hammer, &format!("Build ({build})"), can_build).clicked() {
             state.start_build = true;
         }
     });
