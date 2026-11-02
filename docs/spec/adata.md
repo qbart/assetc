@@ -24,7 +24,9 @@ This page only states how assetc writes the files it edits (see
   4. keys that are not fields, in their order.
 - A struct value (a field of struct type, at any depth) is written the same
   way as an instance's fields (3 and 4); one left with no keys is left out.
-  List items are written whole.
+- A list is written whole when it differs from what it inherits; its items
+  of a struct type are written as struct values are, against their
+  struct's own defaults, an item left with no keys as `{}`.
 - Numbers keep their form: an integer stays an integer (`10`, not `10.0`);
   values of integer fields are written as integers.
 - Colours are written in lower case, `rgba` with 8 digits; curve points
