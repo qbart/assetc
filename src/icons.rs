@@ -6,7 +6,6 @@ use bevy_egui::egui::{Color32, Image, ImageSource, load::Bytes, vec2};
 #[derive(Clone, Copy)]
 pub enum Icon {
     Aperture,
-    Blend,
     Box,
     BoxChecker,
     BoxShaded,
@@ -43,6 +42,7 @@ pub enum Icon {
     Info,
     Database,
     LayoutGrid,
+    Link2,
     Loader,
     MapPin,
     Move3d,
@@ -71,7 +71,6 @@ pub enum Icon {
 // Same order as `Icon`.
 const SVGS: [(&str, &str); 61] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
-    ("blend", include_str!("../assets/icons/blend.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
         "box-checker",
@@ -144,6 +143,7 @@ const SVGS: [(&str, &str); 61] = [
         "layout-grid",
         include_str!("../assets/icons/layout-grid.svg"),
     ),
+    ("link-2", include_str!("../assets/icons/link-2.svg")),
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("map-pin", include_str!("../assets/icons/map-pin.svg")),
     ("move-3d", include_str!("../assets/icons/move-3d.svg")),

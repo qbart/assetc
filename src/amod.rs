@@ -1,6 +1,5 @@
 //! `.amod` sidecars: per-file settings next to an input file, see docs/spec/amod.md.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -25,10 +24,7 @@ pub struct Amod {
     pub regions: Vec<Region>,
     /// `[[paths]]`: a glTF model's paths, see docs/features/paths.md.
     pub paths: Vec<enrich::Path>,
-    /// `[color_names]`: new names of a glTF model's color sets, by `n` of `COLOR_n`; see
-    /// docs/features/vertex-colors.md#renaming.
-    pub color_names: BTreeMap<u32, String>,
-    /// `[[colors]]`: a glTF model's authored color sets.
+    /// `[[colors]]`: a glTF model's color sets, see docs/features/vertex-colors.md.
     pub colors: Vec<enrich::ColorSet>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
     pub modifiers: Vec<Modifier>,
@@ -129,7 +125,6 @@ impl Amod {
             && self.shapes.is_empty()
             && self.regions.is_empty()
             && self.paths.is_empty()
-            && self.color_names.is_empty()
             && self.colors.is_empty()
             && self.modifiers.is_empty()
     }
@@ -160,11 +155,6 @@ impl Amod {
         let paths = table
             .remove("paths")
             .map(enrich::parse_paths)
-            .transpose()?
-            .unwrap_or_default();
-        let color_names = table
-            .remove("color_names")
-            .map(enrich::parse_color_names)
             .transpose()?
             .unwrap_or_default();
         let colors = table
@@ -206,7 +196,6 @@ impl Amod {
             shapes,
             regions,
             paths,
-            color_names,
             colors,
             modifiers,
         })
@@ -251,7 +240,6 @@ impl Amod {
         enrich::write_shapes(&self.shapes, &mut out);
         enrich::write_regions(&self.regions, &mut out);
         enrich::write_paths(&self.paths, &mut out);
-        enrich::write_color_names(&self.color_names, &mut out);
         enrich::write_colors(&self.colors, &mut out);
         noise::write_modifiers(&self.modifiers, &mut out);
         // Each table after a blank line, but not the first.
@@ -467,9 +455,9 @@ tension = 0.25
 alpha = 1.0
 color = "#22c55e"
 
-[color_names]
-COLOR_0 = "tint"
-COLOR_2 = "wear"
+[[colors]]
+name = "tint"
+gltf = "COLOR_0"
 
 [[colors]]
 name = "height"
@@ -481,6 +469,7 @@ stops = [
     { at = 0.5, color = "#ffffff80" },
     { at = 1.0, color = "#fde68a" },
 ]
+blend = { with = "tint", mode = "multiply", amount = 0.5 }
 
 [[colors]]
 name = "flat"
@@ -507,10 +496,13 @@ color = "#ff000080"
         assert_eq!(amod.paths[0].points[1], [0.0, 0.1, -0.2]);
         assert_eq!(amod.paths[0].properties["stiffness"], PropValue::Float(0.8));
         assert!(amod.paths[1].closed);
-        assert_eq!(amod.color_names[&2], "wear");
-        assert_eq!(amod.colors[0].stops[1].color, [255, 255, 255, 0x80]);
-        assert_eq!(amod.colors[1].fill, crate::enrich::ColorFill::Solid);
-        assert_eq!(amod.colors[1].color, [255, 0, 0, 0x80]);
+        assert_eq!(amod.colors[0].gltf, Some(0));
+        assert_eq!(amod.colors[1].stops[1].color, [255, 255, 255, 0x80]);
+        let blend = amod.colors[1].blend.as_ref().unwrap();
+        assert_eq!((blend.with.as_str(), blend.amount), ("tint", 0.5));
+        assert_eq!(blend.mode, crate::enrich::BlendMode::Multiply);
+        assert_eq!(amod.colors[2].fill, crate::enrich::ColorFill::Solid);
+        assert_eq!(amod.colors[2].color, [255, 0, 0, 0x80]);
         assert_eq!(amod.to_toml(), text);
         assert_eq!(Amod::parse(&amod.to_toml()).unwrap(), amod);
 
@@ -528,9 +520,13 @@ color = "#ff000080"
             "[[paths]]\nname = \"a\"\ntension = 2.0\n",
             "[[paths]]\nname = \"a\"\npoints = [[0.0, 1.0]]\n",
             "[[paths]]\nname = \"a\"\nclosed = 1\n",
-            "[color_names]\nCOLOR_x = \"a\"\n",
-            "[color_names]\nCOLOR_01 = \"a\"\n",
-            "[color_names]\nCOLOR_0 = \"\"\n",
+            "[[colors]]\nname = \"a\"\ngltf = \"COLOR_x\"\n",
+            "[[colors]]\nname = \"a\"\ngltf = \"COLOR_01\"\n",
+            "[[colors]]\nname = \"a\"\ngltf = \"COLOR_0\"\nfill = \"solid\"\n",
+            "[[colors]]\nname = \"a\"\ngltf = \"COLOR_0\"\n\n[[colors]]\nname = \"b\"\ngltf = \"COLOR_0\"\n",
+            "[[colors]]\nname = \"a\"\nblend = { mode = \"mix\" }\n",
+            "[[colors]]\nname = \"a\"\nblend = { with = \"b\", mode = \"burn\" }\n",
+            "[[colors]]\nname = \"a\"\nblend = { with = \"b\", amount = 2.0 }\n",
             "[[colors]]\nname = \"a\"\nfill = \"conic\"\n",
             "[[colors]]\nname = \"a\"\ncolor = \"red\"\n",
             "[[colors]]\nname = \"a\"\nstops = [{ at = 0.0, color = \"#000000\" }]\n",

@@ -773,10 +773,66 @@ impl ColorFill {
     }
 }
 
-/// A color set made in assetc; see docs/features/vertex-colors.md#authored-sets.
+/// How a color set is laid over the set it blends with; see
+/// docs/features/vertex-colors.md#blending.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BlendMode {
+    #[default]
+    Mix,
+    Multiply,
+    Screen,
+    Overlay,
+    Add,
+}
+
+impl BlendMode {
+    pub const ALL: [Self; 5] = [
+        Self::Mix,
+        Self::Multiply,
+        Self::Screen,
+        Self::Overlay,
+        Self::Add,
+    ];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Mix => "mix",
+            Self::Multiply => "multiply",
+            Self::Screen => "screen",
+            Self::Overlay => "overlay",
+            Self::Add => "add",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Mix => "Mix",
+            Self::Multiply => "Multiply",
+            Self::Screen => "Screen",
+            Self::Overlay => "Overlay",
+            Self::Add => "Add",
+        }
+    }
+}
+
+/// A set an authored color set is laid over.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Blend {
+    /// The base, by name.
+    pub with: String,
+    pub mode: BlendMode,
+    /// 0 to 1.
+    pub amount: f32,
+}
+
+/// A color set of a model: one of its glTF sets, or one made in assetc; see
+/// docs/features/vertex-colors.md.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ColorSet {
     pub name: String,
+    /// `n` of the glTF's `COLOR_n` this set is; `None` for an authored set, which the fields
+    /// below describe.
+    pub gltf: Option<u32>,
     pub fill: ColorFill,
     /// Solid: sRGB, straight alpha.
     pub color: [u8; 4],
@@ -785,6 +841,7 @@ pub struct ColorSet {
     pub to: [f32; 3],
     /// Linear and Radial: at least two, ordered by position.
     pub stops: Vec<Stop>,
+    pub blend: Option<Blend>,
 }
 
 fn black_to_white() -> Vec<Stop> {
@@ -805,20 +862,39 @@ impl ColorSet {
     pub fn new(name: String, from: [f32; 3], to: [f32; 3]) -> Self {
         Self {
             name,
+            gltf: None,
             fill: ColorFill::Linear,
             color: [255; 4],
             from,
             to,
             stops: black_to_white(),
+            blend: None,
+        }
+    }
+
+    /// The glTF's `COLOR_<n>`, named `name`.
+    pub fn gltf(n: u32, name: String) -> Self {
+        Self {
+            gltf: Some(n),
+            ..Self::new(name, [0.0; 3], [0.0, 1.0, 0.0])
         }
     }
 }
 
 pub fn parse_colors(value: toml::Value) -> Result<Vec<ColorSet>, String> {
-    named_tables(value, "color set")?
+    let sets: Vec<ColorSet> = named_tables(value, "color set")?
         .into_iter()
         .map(|(name, mut table)| {
             let fail = |e: String| format!("color set {name:?}: {e}");
+            if let Some(v) = table.remove("gltf") {
+                let key = text("gltf", &v).map_err(fail)?;
+                let n = color_attribute(&key)
+                    .ok_or_else(|| fail(format!("gltf {key:?} is not COLOR_<n>")))?;
+                if let Some(key) = table.keys().next() {
+                    return Err(fail(format!("unknown key {key:?} for a glTF set")));
+                }
+                return Ok(ColorSet::gltf(n, name.clone()));
+            }
             let fill = match table.remove("fill") {
                 Some(v) => {
                     let key = text("fill", &v).map_err(fail)?;
@@ -859,25 +935,79 @@ pub fn parse_colors(value: toml::Value) -> Result<Vec<ColorSet>, String> {
                 .transpose()
                 .map_err(fail)?
                 .unwrap_or_else(black_to_white);
+            let blend = table
+                .remove("blend")
+                .map(parse_blend)
+                .transpose()
+                .map_err(fail)?;
             if let Some(key) = table.keys().next() {
                 return Err(fail(format!("unknown key {key:?}")));
             }
             Ok(ColorSet {
                 name: name.clone(),
+                gltf: None,
                 fill,
                 color,
                 from,
                 to,
                 stops,
+                blend,
             })
         })
-        .collect()
+        .collect::<Result<_, String>>()?;
+    for (i, set) in sets.iter().enumerate() {
+        if let Some(n) = set.gltf
+            && sets[..i].iter().any(|s| s.gltf == Some(n))
+        {
+            return Err(format!("color set {:?}: COLOR_{n} listed twice", set.name));
+        }
+    }
+    Ok(sets)
+}
+
+fn parse_blend(value: toml::Value) -> Result<Blend, String> {
+    let toml::Value::Table(mut table) = value else {
+        return Err("blend is not a table".into());
+    };
+    let with = match table.remove("with") {
+        Some(v) => text("blend with", &v)?,
+        None => return Err("blend has no with".into()),
+    };
+    if with.is_empty() {
+        return Err("blend with is empty".into());
+    }
+    let mode = match table.remove("mode") {
+        Some(v) => {
+            let key = text("blend mode", &v)?;
+            BlendMode::ALL
+                .into_iter()
+                .find(|m| m.key() == key)
+                .ok_or_else(|| format!("unknown blend mode {key:?}"))?
+        }
+        None => BlendMode::Mix,
+    };
+    let amount = match table.remove("amount") {
+        Some(v) => float("blend amount", &v)?,
+        None => 1.0,
+    };
+    if !(0.0..=1.0).contains(&amount) {
+        return Err("blend amount is not between 0 and 1".into());
+    }
+    if let Some(key) = table.keys().next() {
+        return Err(format!("unknown blend key {key:?}"));
+    }
+    Ok(Blend { with, mode, amount })
 }
 
 pub fn write_colors(sets: &[ColorSet], out: &mut String) {
     for set in sets {
+        let string = |s: &str| toml::Value::from(s).to_string();
         *out += "\n[[colors]]\n";
-        *out += &format!("name = {}\n", toml::Value::from(set.name.as_str()));
+        *out += &format!("name = {}\n", string(&set.name));
+        if let Some(n) = set.gltf {
+            *out += &format!("gltf = \"COLOR_{n}\"\n");
+            continue;
+        }
         *out += &format!("fill = \"{}\"\n", set.fill.key());
         if set.fill == ColorFill::Solid {
             *out += &format!("color = \"{}\"\n", format_color(set.color));
@@ -885,6 +1015,14 @@ pub fn write_colors(sets: &[ColorSet], out: &mut String) {
             *out += &format!("from = {}\n", write_floats(&set.from));
             *out += &format!("to = {}\n", write_floats(&set.to));
             gradient::write_stops(&set.stops, out);
+        }
+        if let Some(blend) = &set.blend {
+            *out += &format!(
+                "blend = {{ with = {}, mode = \"{}\", amount = {:?} }}\n",
+                string(&blend.with),
+                blend.mode.key(),
+                blend.amount
+            );
         }
     }
 }
@@ -895,36 +1033,6 @@ pub fn color_attribute(name: &str) -> Option<u32> {
     (!n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) && (n == "0" || !n.starts_with('0')))
         .then(|| n.parse().ok())
         .flatten()
-}
-
-/// `[color_names]`: new names of glTF color sets, by `n` of `COLOR_n`; see
-/// docs/features/vertex-colors.md#renaming.
-pub fn parse_color_names(value: toml::Value) -> Result<BTreeMap<u32, String>, String> {
-    let toml::Value::Table(table) = value else {
-        return Err("color_names is not a table".into());
-    };
-    table
-        .into_iter()
-        .map(|(key, value)| {
-            let n = color_attribute(&key)
-                .ok_or_else(|| format!("color_names: {key:?} is not COLOR_<n>"))?;
-            let name = text(&key, &value).map_err(|e| format!("color_names: {e}"))?;
-            if name.is_empty() {
-                return Err(format!("color_names: {key} has an empty name"));
-            }
-            Ok((n, name))
-        })
-        .collect()
-}
-
-pub fn write_color_names(names: &BTreeMap<u32, String>, out: &mut String) {
-    if names.is_empty() {
-        return;
-    }
-    *out += "\n[color_names]\n";
-    for (n, name) in names {
-        *out += &format!("COLOR_{n} = {}\n", toml::Value::from(name.as_str()));
-    }
 }
 
 #[cfg(test)]

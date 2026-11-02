@@ -15,6 +15,7 @@ use crate::amesh::{self, Joint, Vertex};
 use crate::hash::fnv1a64;
 use crate::material::{AlphaMode, HeightMode, Material, TextureIds};
 use crate::texture::ColorSpace;
+use crate::vertex_colors;
 
 /// Whether `file` is a model assetc reads (`*.gltf`, `*.glb`, any case).
 pub fn is_model(file: &Path) -> bool {
@@ -622,12 +623,6 @@ pub struct GeometryPart {
     pub colors: Vec<(u32, Vec<[u8; 4]>)>,
 }
 
-/// A color set of a model, for its preview.
-pub enum SetRef<'a> {
-    Gltf(u32),
-    Authored(&'a crate::enrich::ColorSet),
-}
-
 impl ModelGeometry {
     fn new(document: &Document, read: &Read<'_>, parts: &[Part]) -> Self {
         let joints = document
@@ -730,34 +725,23 @@ impl ModelGeometry {
         }
     }
 
-    /// Each primitive's colors in `set` (linear RGBA8), one per triangle corner in the
-    /// glTF's order; white where a primitive lacks a glTF set.
-    pub fn corner_colors(&self, set: &SetRef<'_>) -> Vec<crate::preview3d::Corners> {
+    /// Each primitive's colors of set `i` of the whole list `sets` (linear RGBA8, blended),
+    /// one per triangle corner in the glTF's order.
+    pub fn corner_colors(
+        &self,
+        sets: &[crate::enrich::ColorSet],
+        i: usize,
+    ) -> Vec<crate::preview3d::Corners> {
         self.parts
             .iter()
             .map(|part| {
-                let colors: Vec<[u8; 4]> = match set {
-                    SetRef::Gltf(n) => match part.colors.iter().find(|(m, _)| m == n) {
-                        Some((_, colors)) => part
-                            .indices
-                            .iter()
-                            .map(|&i| colors.get(i as usize).copied().unwrap_or([255; 4]))
-                            .collect(),
-                        None => vec![[255; 4]; part.indices.len()],
-                    },
-                    SetRef::Authored(set) => {
-                        let at: Vec<[u8; 4]> = part
-                            .positions
-                            .iter()
-                            .map(|p| crate::vertex_colors::evaluate(set, *p))
-                            .collect();
-                        part.indices
-                            .iter()
-                            .map(|&i| at.get(i as usize).copied().unwrap_or([255; 4]))
-                            .collect()
-                    }
-                };
-                (part.id, colors)
+                let at = vertex_colors::colors(sets, i, &part.positions, &part.colors);
+                let corners = part
+                    .indices
+                    .iter()
+                    .map(|&v| at.get(v as usize).copied().unwrap_or([255; 4]))
+                    .collect();
+                (part.id, corners)
             })
             .collect()
     }
@@ -857,58 +841,41 @@ pub fn compile(
                 .collect();
         }
     }
-    // Every set any primitive has, white where one does not; see
-    // docs/features/vertex-colors.md#from-gltf.
-    let mut color_sets: Vec<u32> = parts
-        .iter()
-        .flat_map(|p| p.colors.iter().map(|(n, _)| *n))
-        .collect();
-    color_sets.sort_unstable();
-    color_sets.dedup();
-    for part in &mut parts {
-        let count = part.primitive.vertices.len();
-        let mut own = std::mem::take(&mut part.colors);
-        part.primitive.colors = color_sets
-            .iter()
-            .map(|n| match own.iter().position(|(m, _)| m == n) {
-                Some(i) => own.swap_remove(i).1,
-                None => vec![[255; 4]; count],
-            })
-            .collect();
-    }
-    // Names, then authored sets after the glTF ones; see
-    // docs/features/vertex-colors.md#build.
-    if let Some(n) = sidecar.color_names.keys().find(|n| !color_sets.contains(n)) {
-        return Err(sidecar_error(format!(
-            "color_names: no COLOR_{n} in the model"
-        )));
-    }
-    let mut set_names: Vec<(String, u32)> = color_sets
-        .iter()
-        .map(|n| {
-            let name = sidecar.color_names.get(n).cloned();
-            (name.unwrap_or_else(|| format!("COLOR_{n}")), 0)
-        })
-        .collect();
-    set_names.extend(sidecar.colors.iter().map(|c| (c.name.clone(), 1)));
-    for (i, (name, _)) in set_names.iter().enumerate() {
-        if set_names[..i].iter().any(|(other, _)| other == name) {
+    // The whole list in order, bases left out; see docs/features/vertex-colors.md#build.
+    let sets = vertex_colors::full_list(&sidecar.colors, &geometry.color_sets);
+    for set in &sets {
+        if let Some(n) = set.gltf
+            && !geometry.color_sets.contains(&n)
+        {
             return Err(sidecar_error(format!(
-                "color set {name:?}: name used twice"
+                "color set {:?}: no COLOR_{n} in the model",
+                set.name
             )));
         }
     }
+    vertex_colors::check(&sets).map_err(sidecar_error)?;
+    let written: Vec<usize> = vertex_colors::bases(&sets)
+        .iter()
+        .enumerate()
+        .filter(|(_, into)| into.is_none())
+        .map(|(i, _)| i)
+        .collect();
     for part in &mut parts {
-        for set in &sidecar.colors {
-            let colors = part
-                .primitive
-                .vertices
-                .iter()
-                .map(|v| crate::vertex_colors::evaluate(set, Vec3::from(v.position)))
-                .collect();
-            part.primitive.colors.push(colors);
-        }
+        let positions: Vec<Vec3> = part
+            .primitive
+            .vertices
+            .iter()
+            .map(|v| Vec3::from(v.position))
+            .collect();
+        part.primitive.colors = written
+            .iter()
+            .map(|&i| vertex_colors::colors(&sets, i, &positions, &part.colors))
+            .collect();
     }
+    let set_names: Vec<(String, u32)> = written
+        .iter()
+        .map(|&i| (sets[i].name.clone(), u32::from(sets[i].gltf.is_none())))
+        .collect();
     let primitives: Vec<amesh::Primitive> = parts.into_iter().map(|p| p.primitive).collect();
     let extras = amesh::Extras {
         locators,
@@ -1497,13 +1464,12 @@ mod tests {
 
         // Renamed, and an authored gradient along X after it; see
         // docs/features/vertex-colors.md#build.
+        use crate::enrich::{Blend, BlendMode, ColorSet};
         let mut sidecar = crate::amod::Amod::default();
-        sidecar.color_names.insert(0, "tint".into());
-        sidecar.colors.push(crate::enrich::ColorSet::new(
-            "along_x".into(),
-            [0.0; 3],
-            [1.0, 0.0, 0.0],
-        ));
+        sidecar.colors.push(ColorSet::gltf(0, "tint".into()));
+        sidecar
+            .colors
+            .push(ColorSet::new("along_x".into(), [0.0; 3], [1.0, 0.0, 0.0]));
         let compiled = compile(&file, "colors", &options, &sidecar).unwrap();
         let mesh = &compiled.mesh;
         assert_eq!(amesh::cell(mesh, "COLORSET", 0, 1), "tint");
@@ -1518,24 +1484,54 @@ mod tests {
         // The 3D view's colors, per corner in the glTF's order.
         let geometry = geometry(&file).unwrap();
         assert_eq!(geometry.color_sets, [0]);
-        let corners = geometry.corner_colors(&SetRef::Authored(&sidecar.colors[0]));
+        let sets = vertex_colors::full_list(&sidecar.colors, &geometry.color_sets);
+        let corners = geometry.corner_colors(&sets, 1);
         assert_eq!(corners[0].0, (0, 0));
         assert_eq!(corners[0].1, [[0, 0, 0, 255], [255; 4], [0, 0, 0, 255]]);
-        let corners = geometry.corner_colors(&SetRef::Gltf(0));
+        let corners = geometry.corner_colors(&sets, 0);
         assert_eq!(corners[0].1[0], [0, 0, 255, 255]);
         assert_eq!(corners[1].1, [[255; 4]; 3]);
 
-        sidecar.colors[0].name = "tint".into();
+        // Blended over the glTF set, which is then not written; see
+        // docs/features/vertex-colors.md#blending.
+        sidecar.colors[1].blend = Some(Blend {
+            with: "tint".into(),
+            mode: BlendMode::Multiply,
+            amount: 1.0,
+        });
+        let compiled = compile(&file, "colors", &options, &sidecar).unwrap();
+        let mesh = &compiled.mesh;
+        assert_eq!(
+            amesh::rows(mesh)
+                .unwrap()
+                .iter()
+                .find(|r| r.0 == "Color sets")
+                .unwrap()
+                .1,
+            "along_x"
+        );
+        assert_eq!(amesh::cell(mesh, "COLORSET", 0, 4), "assetc");
+        let blended: Vec<String> = (0..6).map(|v| amesh::cell(mesh, "COLORS", v, 1)).collect();
+        assert_eq!(
+            blended,
+            [black, "0, 255, 0, 255", black, black, white, black]
+        );
+        assert!(amesh::preview(mesh).unwrap().levels[0].colors.is_empty());
+
+        sidecar.colors[1].blend.as_mut().unwrap().with = "nothing".into();
+        let error = compile(&file, "colors", &options, &sidecar).err().unwrap();
+        assert!(error.contains("blends with no set \"nothing\""), "{error}");
+        sidecar.colors[1].blend = None;
+        sidecar.colors[1].name = "tint".into();
         let error = compile(&file, "colors", &options, &sidecar).err().unwrap();
         assert!(
             error.contains("color set \"tint\": name used twice"),
             "{error}"
         );
-        sidecar.colors.clear();
-        sidecar.color_names.insert(1, "other".into());
+        sidecar.colors = vec![ColorSet::gltf(1, "other".into())];
         let error = compile(&file, "colors", &options, &sidecar).err().unwrap();
         assert!(
-            error.contains("color_names: no COLOR_1 in the model"),
+            error.contains("color set \"other\": no COLOR_1 in the model"),
             "{error}"
         );
 
