@@ -97,6 +97,17 @@ Interactions (left button unless said):
   Released on the node it started from, it adds a loop, but only once the
   pointer has left that node (before that, the start node is no target);
   released elsewhere, nothing is added.
+- **Drag an edge's end** to detach it: each edge has two ends, its
+  **start** (where it leaves its From node's border) and its **tip** (its
+  arrow's point). Hovering within 8 px of an end draws a 4 px `ACCENT` dot
+  there and shows the grab cursor; ends come before rims, the nearest end
+  first. Pressing one chooses the edge, and dragging detaches that end:
+  the edge is drawn from its other end to the pointer (`ACCENT` at 60%,
+  arrow at its tip end), and a node under the pointer is the target, as
+  when connecting (tinted, ringed, the edge drawn as it will be). Released
+  on a node, that end attaches there (the edge's other fields, and its place
+  in the file, are kept; onto its other end's node it becomes a loop);
+  released on empty grid, the edge is **removed**.
 - **Click an edge** (within 7 px of its curve) chooses it.
 - **Click empty grid** chooses nothing.
 - **Double-click empty grid** adds a node `node` (`node_2`, …, label empty)

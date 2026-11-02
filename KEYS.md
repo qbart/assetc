@@ -130,6 +130,7 @@ On a directed graph (see [`docs/features/graphs.md`](docs/features/graphs.md#can
 | Double-click on a node                 | Edit its label in place                      |
 | `Enter` / `Escape` while editing a label | Keep / drop the new label                  |
 | Left click on an edge                  | Choose it                                    |
+| Left drag on an edge's start or tip    | Detach that end: drop on a node to attach it there, on empty grid to remove the edge |
 | Left click on empty grid               | Choose nothing                               |
 | Double-click on empty grid             | Add a node there                             |
 
