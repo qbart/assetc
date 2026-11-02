@@ -21,6 +21,7 @@ in the Inspector's [Locators tab](#locators-tab) and directly in the
 | Translation | Offset in the parent's space (the joint's, or the model's), in model units. |
 | Rotation    | Unit quaternion `x y z w` relative to the parent. The Inspector edits it as Euler angles in degrees (X, then Y, then Z). |
 | Scale       | Per axis, relative to the parent.                                        |
+| Preview     | Another glTF model of the Input tree shown at the locator in the [3D view](#attachment-preview), e.g. the sword in the hand; for assetc only, not compiled. |
 
 - **Model space** is the space of the default scene's root nodes, which is
   the space of a static model's `.amesh` vertices (see
@@ -61,8 +62,18 @@ the [property editor](gui.md#property-editor) look, inside 8 px margins.
     **Rotation** X, Y, Z (drag fields, degrees, 0.5 per point, one decimal)
     and **Scale** X, Y, Z (drag fields, 0.01 per point, three decimals, at
     least 0.001).
+  - **Preview**: a dropdown with `None` and every glTF model in the Input
+    tree (input-relative paths, sorted, without the model itself); see
+    [Attachment preview](#attachment-preview).
+  - **Mirror**: a **Mirror** button (`flip-horizontal-2`) and a dropdown of the
+    plane to mirror across: `X` (the default), `Y` or `Z`, in model space
+    (the dropdown's choice lasts for the session). See [Mirroring](#mirroring).
+- While an [animation plays](#animations), Joint, Position, Rotation, Scale
+  and Mirror are disabled, and a weak line under the section says
+  `Transforms are locked while an animation plays. Choose Rest pose to edit
+  them.`
 - A weak hint at the bottom: `Click a locator in the view to choose it. Drag
-  its gizmo to move (W) or rotate (E) it.`
+  its gizmo to move (W) or rotate (E) it, or click the model to place it (S).`
 - The chosen locator (by index) is remembered while the file is the
   inspected one; it is cleared when another file is inspected.
 
@@ -77,6 +88,30 @@ the file's own changes, a rescan or selecting it again do), so the view, the
 camera and a playing animation stay as they are.
 
 If the sidecar does not parse, the tab shows the error instead.
+
+### Mirroring
+
+**Mirror** makes the chosen locator's left / right counterpart, or updates
+it when it exists:
+
+- **Name**: every left / right token of the name is swapped: `Left` ↔
+  `Right`, `left` ↔ `right`, `LEFT` ↔ `RIGHT` anywhere, and `L` ↔ `R`,
+  `l` ↔ `r` when they stand alone between separators (`_`, `.`, `-`, space)
+  or the name's ends (`hand_l` ↔ `hand_r`, `L.hand` ↔ `R.hand`,
+  `LeftHand` ↔ `RightHand`). A name without such a token cannot be mirrored
+  (the button is disabled).
+- **Joint**: the joint's name with its tokens swapped the same way, when the
+  skin has a joint with that name; otherwise the same joint (e.g. the spine).
+  Model space stays model space.
+- **Transform**: the locator's transform in model space, at the pose shown,
+  reflected across the chosen plane through the origin (`S · T · S`, with `S`
+  negating that axis, so the result is not mirrored itself), then put in the
+  new joint's space. Scale and preview are copied.
+- The counterpart is the locator with the mirrored name: it is replaced in
+  place, or added after the others when there is none. It becomes the
+  chosen locator.
+- Mirroring needs the model shown in the 3D view (the button is disabled
+  until then).
 
 ## 3D view
 
@@ -118,10 +153,65 @@ be seen and picked), following their joints in the shown pose and animation.
 
   The mode and the toggle last for the session, for every model.
 - **Keys** (pointer over the canvas, no text field focused): `W` Move, `E`
-  Rotate; see [`KEYS.md`](../../KEYS.md#canvas-3d).
-- The view computes positions from the pose being shown; editing while an
-  animation plays edits the locator relative to its joint, so it keeps
-  following it.
+  Rotate, `S` Place; see [`KEYS.md`](../../KEYS.md#canvas-3d).
+
+### Place on surface
+
+The toolbar's **Place** mode (`crosshair`, key `S`) puts a locator on the
+model's surface:
+
+- Clicking within 8 px of a marker still chooses it. Clicking the model
+  elsewhere places the chosen locator where the pointer's ray first hits a
+  triangle, or adds a new locator there (as **Add**) when none is chosen.
+  Clicking empty space does nothing; dragging orbits.
+- The locator's position is the hit point; its rotation turns its **Y** axis
+  along the surface's normal (the triangle's, facing the camera), keeping X
+  and Z as the shortest turn from the model's; its scale is kept.
+- A locator without a joint on a skinned model is attached to the joint
+  that weighs most on the hit triangle (the sum of its three vertices'
+  weights), when that joint has a name; a locator with a joint keeps it.
+- The ray is cast against the triangles as drawn: skinned meshes in the pose
+  shown, through their joints (Bevy's mesh ray cast ignores skinning, so
+  assetc casts its own).
+- No gizmo is drawn in this mode; the chosen marker shows as usual.
+
+### Animations
+
+While the [Animations tab](models.md#animations-tab) plays an animation,
+locators follow their joints, but their transforms cannot be changed: they
+are relative to the joint at rest, and the pose shown moves every frame.
+
+- The gizmo is not drawn; Move, Rotate and Place are disabled in the
+  toolbar; markers can still be clicked to choose them.
+- The Locators tab disables what moves a locator (see
+  [Locators tab](#locators-tab)); Add, Delete, Name and Preview still work.
+- Choosing **Rest pose** unlocks them.
+
+### Attachment preview
+
+A locator with a **Preview** model shows that model at the locator, so a
+socket can be checked with what it will hold:
+
+- The model is loaded like the [preview](models.md#preview)'s (its default
+  scene, its own materials), placed by the locator's transform in its parent
+  (joint or model) and scaled with the shown model's fit, so it keeps its
+  units relative to the model; it follows joints and animations. Its own
+  animations do not play.
+- It is shown only while the Locators toggle is on and the shown model is
+  fitted; a file that does not load shows nothing.
+- It is not compiled: the game attaches what it wants.
+
+## Compiled mesh preview
+
+The [compiled mesh preview](models.md#compiled-mesh-preview) draws the
+file's locators as markers (dots, axes and names, as above; none chosen, no
+gizmo), when its **Locators** toggle (`map-pin`, last in the bounds group,
+on to start with, disabled when the file has none) is on:
+
+- A locator on a joint is placed by the joint's bind pose (the inverse of its
+  `inverse_bind`) × the locator's transform; one in mesh space by its
+  transform. Both are then centered and scaled like the mesh.
+- They are drawn for every level of detail.
 
 ## Build
 
@@ -145,8 +235,7 @@ rotation is zero.
 
 ## Not yet
 
-- Showing locators in the [compiled mesh preview](models.md#compiled-mesh-preview).
-- Placing a locator by clicking the model's surface, mirroring left / right
-  by name, and previewing another model attached to a locator.
+- Importing glTF nodes named `SOCKET_*` and glTF `extras` as locators.
+- Presets shared by models with the same skeleton.
 - Shapes (hitboxes, colliders), regions, paths and animation events; see the
   other enrichments in [`DEFERRED.md`](../../DEFERRED.md#more-enrichments).

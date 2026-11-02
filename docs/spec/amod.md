@@ -41,6 +41,7 @@ A list of locators, one table each:
 | `translation` | array of 3 floats | `[0, 0, 0]`    | in the parent's (joint's or model's) space        |
 | `rotation`    | array of 4 floats | `[0, 0, 0, 1]` | quaternion `x y z w`, normalized when built; not all zero |
 | `scale`       | array of 3 floats | `[1, 1, 1]`    | per axis                                          |
+| `preview`     | string            | (none)         | input-relative path of a glTF model shown at the locator by the 3D view; not compiled |
 
 An empty or repeated `name`, a missing one, a wrong array length or an
 unknown key is an error. Whether `joint` exists is checked when the model
@@ -59,7 +60,8 @@ whenever assetc loads it.
 
 assetc writes the `[mesh]` keys that are set, in the order listed, then each
 locator as a `[[locators]]` table (`name`, `joint` when set, `translation`,
-`rotation`, `scale`, always all three, floats in Rust's shortest form), then
+`rotation`, `scale`, always all three, floats in Rust's shortest form,
+`preview` when set), then
 each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
 parameter, as `.noise` files write them), each table preceded by a blank line
 except the first:

@@ -182,7 +182,9 @@ tinted per use. In use: `info` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `film` (Inspector Animations tab), `images` (Inspector Mipmaps tab),
 `bring-to-front` (Inspector Levels of detail tab), `map-pin` (Inspector
 Locators tab, canvas locator toggle), `move-3d`, `rotate-3d` (canvas locator
-gizmo modes), `plus`, `trash-2` (adding and deleting locators), `check` (menu
+gizmo modes), `crosshair` (placing locators on the surface),
+`flip-horizontal-2` (mirroring locators), `plus`, `trash-2` (adding and
+deleting locators), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after),
 `sliders-vertical` (Inspector Parameters tab), `wrench`,

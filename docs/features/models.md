@@ -188,6 +188,7 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   | Meshlet boxes   | `layout-grid`   | each meshlet's box, around the vertices of its triangles, in the meshlet's color |
   | Meshlet spheres | `circle-dot`    | each meshlet's bounding sphere (`MLBOUNDS` `center`, `radius`) in the meshlet's color |
   | Meshlet cones   | `cone`          | each meshlet's normal cone, in the meshlet's color: apex at its sphere's center, axis `cone_axis`, half-angle `asin(cone_cutoff)`, slant `radius` long; meshlets with `cone_cutoff ≥ 1` (no cone, never culled) draw none |
+  | Locators        | `map-pin`       | the file's locators as markers, see [`locators.md`](locators.md#compiled-mesh-preview); on to start with, disabled without `LOCATORS` |
 
 - Bounds are drawn in every display mode as unlit 1 px lines, hidden behind
   nearer faces like the mesh's own (switch to Wireframe to see inside).

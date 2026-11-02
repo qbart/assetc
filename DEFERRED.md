@@ -81,8 +81,4 @@ attachment by name, `.amesh` chunks and 3D editing:
 - **Properties**: key / value pairs on the model (mass, tags).
 - **Presets** in `assetc.toml` matched by glob or skeleton, so models sharing
   a skeleton share their locators.
-- For locators: placing on the model's surface (ray cast; Bevy's mesh ray cast
-  ignores skinning, so skinned models need their own), mirroring left / right
-  by name, previewing another model attached to a locator, importing glTF
-  nodes named `SOCKET_*` and glTF `extras`, and showing locators in the
-  compiled mesh preview (joint transforms from `SKELETON`'s bind pose).
+- For locators: importing glTF nodes named `SOCKET_*` and glTF `extras`.

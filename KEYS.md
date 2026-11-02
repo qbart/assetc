@@ -52,9 +52,11 @@ On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)
 |----------------------------------------|----------------------------------------------|
 | Left click on a locator                | Choose it                                    |
 | Left click elsewhere (no drag)         | Clear the chosen locator                     |
-| Left drag on a gizmo handle            | Move / rotate the chosen locator             |
+| Left drag on a gizmo handle            | Move / rotate the chosen locator (not while an animation plays) |
 | `W`                                    | Gizmo: Move                                  |
 | `E`                                    | Gizmo: Rotate                                |
+| `S`                                    | Place on surface                             |
+| Left click on the model (Place)        | Place the chosen locator there (or add one)  |
 
 ## Canvas (color LUT)
 
