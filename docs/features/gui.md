@@ -59,6 +59,9 @@ the platform's default size.
 - `File → Quit` exits the application. Its shortcut, `Ctrl+Q` (`Cmd+Q` on
   macOS), works anywhere, even while a text field has focus, and is shown
   right-aligned in the item in `TEXT_WEAK`.
+- Global shortcuts (see [`KEYS.md`](../../KEYS.md#global)): `Ctrl+Q` quit,
+  `Ctrl+B` [build](build.md#gui), `Ctrl+R` rescan (`Cmd` on macOS); each
+  works anywhere, even while a text field has focus.
 - `Edit` contains no items yet (button shown disabled).
 - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar (check
   shown when visible); the menu stays open after toggling.
@@ -133,8 +136,9 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   each group is sorted by name, case-insensitively.
 - Entries whose name starts with `.` are hidden.
 - Symlinks are listed as plain entries and never followed.
-- Directories are scanned when the app opens and when the rescan button is clicked; there
-  is no live file watching.
+- Directories are scanned when the app opens, when the rescan button is
+  clicked (tooltip `Rescan (Ctrl+R)`) and on `Ctrl+R` (`Cmd+R` on macOS),
+  which works anywhere, like `Ctrl+Q`; there is no live file watching.
 - Placeholders (weak text) instead of a tree:
   - no project: "No project open"
   - directory missing: "<path> does not exist"

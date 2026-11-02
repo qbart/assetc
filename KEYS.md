@@ -10,6 +10,8 @@ See [`docs/features/gui.md`](docs/features/gui.md#menus).
 | Input                         | Action |
 |-------------------------------|--------|
 | `Ctrl+Q` (`Cmd+Q` on macOS)   | Quit   |
+| `Ctrl+B` (`Cmd+B` on macOS)   | Build (see [`docs/features/build.md`](docs/features/build.md#gui)) |
+| `Ctrl+R` (`Cmd+R` on macOS)   | Rescan the Input and Output trees |
 
 ## File browser (Input tree)
 
