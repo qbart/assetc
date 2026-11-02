@@ -20,6 +20,7 @@ Right-clicking an Input row, or the empty area below the last row (the
 | New Data ▸ Schema    | as New Folder, see [`schemas.md`](schemas.md#creating) | always |
 | New Data ▸ Directed Graph | as New Folder, see [`graphs.md`](graphs.md#creating) | always |
 | New Data ▸ Instance  | as New Folder, see [`instances.md`](instances.md#creating) | always |
+| New Data ▸ Tree      | as New Folder, see [`trees.md`](trees.md#creating) | always |
 | Rename               | the row                                   | rows               |
 | Delete               | the row                                   | rows               |
 

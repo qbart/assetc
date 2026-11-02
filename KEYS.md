@@ -144,6 +144,15 @@ On a directed graph (see [`docs/features/graphs.md`](docs/features/graphs.md#can
 | Left click on empty grid               | Choose nothing                               |
 | Double-click on empty grid             | Add a node there                             |
 
+On a tree (see [`docs/features/trees.md`](docs/features/trees.md#canvas)), as on a directed graph, except:
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left drag from a node's rim onto empty grid | Add a child there                       |
+| Left drag from a node's rim onto a node | Move that node (and what is under it) under this one |
+| Double-click on empty grid             | Add a child of the chosen node (or the root) |
+| `Delete` / `X`                         | Remove the chosen node and what is under it  |
+
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
 
 | Input                                  | Action                                       |

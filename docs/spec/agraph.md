@@ -21,6 +21,7 @@ Other top-level keys are kept, after these.
 |---------|----------|-------|
 | `id`    | yes      | Identifier (`[A-Za-z_][A-Za-z0-9_]*`), unique among the nodes |
 | `label` | no       | String shown on the node; written only when not empty |
+| `color` | no       | `"#rrggbb"`, the node's color in editors; written only when set |
 | `x`     | yes      | Number: the center's X, in grid units (right is positive) |
 | `y`     | yes      | Number: the center's Y, in grid units (down is positive) |
 | `data`  | no       | Object of [values](#data); written only when not empty |

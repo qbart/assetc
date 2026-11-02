@@ -14,6 +14,7 @@ File format: [`docs/spec/agraph.md`](../spec/agraph.md).
 |------------|---------|
 | Id         | An identifier (`[A-Za-z_][A-Za-z0-9_]*`), unique in the graph; edges refer to it. |
 | Label      | Free text shown on the node; the id when empty. |
+| Color      | None, or one of the [preset colors](#node-colors), for telling nodes apart at a glance. |
 | X, Y       | Its center, in grid units (one cell is 1 × 1); X grows right, Y down. |
 | Data       | Key / value pairs, as the [model's properties](properties.md#property) (Bool, Int, Float, Text). |
 
@@ -23,6 +24,15 @@ File format: [`docs/spec/agraph.md`](../spec/agraph.md).
 | Label      | Free text, empty to start with. |
 | Weight     | A 32-bit signed integer, 1 to start with. |
 | Data       | Key / value pairs, as nodes'. |
+
+### Node colors
+
+The locators' [marker colors](locators.md#locators-tab): `#ef4444`,
+`#f97316`, `#eab308`, `#22c55e`, `#06b6d4`, `#3b82f6`, `#a855f7`,
+`#ec4899`. A colored node is filled with its color at 35% over its usual
+fill and has a 1 px border in its color (the chosen node's border stays
+`ACCENT`). A color written by hand that is not one of them is still shown,
+and offered as an extra swatch.
 
 ## Creating
 
@@ -145,7 +155,8 @@ canvas, in the [property editor](gui.md#property-editor) look:
 - A node: a header row, **Node** (14 px, `TEXT`) and, at the pane's top
   right, **Delete** (`trash-2` icon button; its edges go too); then **Id**
   (text; an empty, invalid or taken id gets the old one back when it loses
-  focus; renaming updates the edges), **Label** (text), **X** and **Y**
+  focus; renaming updates the edges), **Label** (text), **Color** (a row
+  of swatches as the locators': none and the eight presets), **X** and **Y**
   (drag fields, three decimals), **Data** (the property editor), and its
   edges (`→ to` and `← from` rows, with the edge's label when it has one;
   a loop shows `↻`; clicking one chooses it).
