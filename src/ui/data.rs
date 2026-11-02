@@ -593,21 +593,27 @@ fn field_row(
                 format!("{}: {}\n{}", f.name, f.ty, f.doc)
             };
             response.on_hover_text(tip);
-            // The optional checkbox, or its room.
-            if f.optional {
-                let mut has = !value.is_null();
-                if ui.checkbox(&mut has, "").changed() {
-                    value = match (has, &f.default) {
-                        (false, _) => Value::Null,
-                        (true, Some(d)) if !d.is_null() => d.clone(),
-                        (true, _) => ty
-                            .as_ref()
-                            .map_or(Value::Null, |t| aschema::implicit_value(cx.schema, t)),
-                    };
-                }
-            } else {
-                ui.add_space(18.0);
-            }
+            // The optional checkbox, in a cell of its own either way.
+            ui.allocate_ui_with_layout(
+                vec2(20.0, 22.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.set_min_width(20.0);
+                    if !f.optional {
+                        return;
+                    }
+                    let mut has = !value.is_null();
+                    if ui.checkbox(&mut has, "").changed() {
+                        value = match (has, &f.default) {
+                            (false, _) => Value::Null,
+                            (true, Some(d)) if !d.is_null() => d.clone(),
+                            (true, _) => ty
+                                .as_ref()
+                                .map_or(Value::Null, |t| aschema::implicit_value(cx.schema, t)),
+                        };
+                    }
+                },
+            );
             ui.add_enabled_ui(!f.readonly, |ui| {
                 ui.allocate_ui_with_layout(
                     vec2(VALUE_W, 22.0),
