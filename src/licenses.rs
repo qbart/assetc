@@ -112,7 +112,7 @@ pub const PROJECTS: [Project; 23] = [
     ),
     project(
         "serde and toml",
-        "settings files",
+        "settings and schema files",
         "MIT or Apache-2.0",
         "serde.rs",
     ),
@@ -160,7 +160,7 @@ mod tests {
         fn part_of(name: &str) -> &str {
             match name {
                 "egui_extras" => "egui",
-                "serde" | "toml" => "serde and toml",
+                "serde" | "serde_json" | "toml" => "serde and toml",
                 other => other,
             }
         }

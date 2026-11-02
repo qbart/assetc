@@ -32,6 +32,15 @@ pub fn create_gradient(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Creates `schema.aschema` (or `schema 2.aschema`, …) in `dir`; see
+/// docs/features/schemas.md#creating.
+pub fn create_schema(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "schema", ".aschema");
+    fs::write(&path, crate::aschema::Schema::new().to_json()).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Creates `palette.palette` (or `palette 2.palette`, …) in `dir`; see
 /// docs/features/palettes.md#creating.
 pub fn create_palette(input: &Path, dir: &Path) -> Result<PathBuf, String> {
@@ -149,6 +158,10 @@ mod tests {
         assert_eq!(palette, input.join("palette.palette"));
         let parsed = Palette::parse(&fs::read_to_string(&palette).unwrap()).unwrap();
         assert_eq!(parsed, Palette::new());
+        let schema = create_schema(&input, &input).unwrap();
+        assert_eq!(schema, input.join("schema.aschema"));
+        let parsed = crate::aschema::Schema::parse(&fs::read_to_string(&schema).unwrap()).unwrap();
+        assert_eq!(parsed, crate::aschema::Schema::new());
     }
 
     #[test]

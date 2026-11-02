@@ -1,6 +1,7 @@
 mod aanim;
 mod amesh;
 mod amod;
+mod aschema;
 mod assets;
 mod build;
 mod chart;

@@ -10,6 +10,7 @@ pub enum Icon {
     BoxChecker,
     BoxShaded,
     Boxes,
+    Braces,
     CircleDashed,
     CircleDot,
     BringToFront,
@@ -71,7 +72,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 63] = [
+const SVGS: [(&str, &str); 64] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -80,6 +81,7 @@ const SVGS: [(&str, &str); 63] = [
     ),
     ("box-shaded", include_str!("../assets/icons/box-shaded.svg")),
     ("boxes", include_str!("../assets/icons/boxes.svg")),
+    ("braces", include_str!("../assets/icons/braces.svg")),
     (
         "circle-dashed",
         include_str!("../assets/icons/circle-dashed.svg"),

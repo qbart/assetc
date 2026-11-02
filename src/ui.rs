@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use crate::amesh::{MeshOptions, MeshSettings};
 use crate::amod::{self, Amod};
+use crate::aschema::{self, Body, Schema};
 use crate::assets::Assets;
 use crate::build::{self, Outcome};
 use crate::color_picker::{self, Picker};
@@ -43,8 +44,11 @@ use crate::theme::{
 };
 use crate::tree::{FileTrees, Listing, Node};
 use crate::vertex_colors;
+
+mod schema;
 use crate::vision::Vision;
 use crate::{chart, preview3d};
+use schema::{SchemaEdit, canvas_schema, types_tab};
 
 pub struct UiPlugin;
 
@@ -95,6 +99,8 @@ struct UiState {
     /// The color set each compiled mesh shows, by path; see
     /// docs/features/vertex-colors.md#compiled-meshes.
     mesh_colors: HashMap<PathBuf, Option<usize>>,
+    /// The type each schema's editor shows, by path; see docs/features/schemas.md#types-tab.
+    schema_types: HashMap<PathBuf, usize>,
     /// The animation timeline under a model; see docs/features/animation-events.md#timeline.
     timeline: Timeline,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
@@ -251,6 +257,8 @@ struct Inspected {
     gradient: Option<Result<GradientEdit, String>>,
     /// A `.palette` file being edited, or why it can't be read.
     palette: Option<Result<PaletteEdit, String>>,
+    /// An `.aschema` file being edited, or why it can't be read and its text.
+    schema: Option<Result<SchemaEdit, (String, String)>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
     mesh: Option<Result<MeshEdit, String>>,
     /// An image's `.amod` (its modifiers) being edited, or why it can't be read.
@@ -430,6 +438,7 @@ impl Default for UiState {
             mesh_view: MeshView::default(),
             lod_levels: HashMap::new(),
             mesh_colors: HashMap::new(),
+            schema_types: HashMap::new(),
             timeline: Timeline::default(),
             mesh_in_3d: true,
             font_atlas: true,
@@ -480,6 +489,7 @@ enum InspectorTab {
     Modifiers,
     Gradients,
     Colors,
+    Types,
     Animations,
     Mipmaps,
     Lods,
@@ -487,7 +497,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 16] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -499,6 +509,7 @@ impl InspectorTab {
         Self::Modifiers,
         Self::Gradients,
         Self::Colors,
+        Self::Types,
         Self::Animations,
         Self::Mipmaps,
         Self::Lods,
@@ -517,6 +528,7 @@ impl InspectorTab {
             Self::Properties => Icon::Database,
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
+            Self::Types => Icon::Braces,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
             Self::Lods => Icon::BringToFront,
@@ -537,6 +549,7 @@ impl InspectorTab {
             Self::Modifiers => "Modifiers",
             Self::Gradients => "Gradients",
             Self::Colors => "Colors",
+            Self::Types => "Types",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
             Self::Lods => "Levels of detail",
@@ -587,6 +600,11 @@ impl InspectorTab {
             }),
             Self::Colors => selection.is_some_and(|s| {
                 s.location == Location::Input && palette::is_palette(&s.path) && s.path.is_file()
+            }),
+            Self::Types => selection.is_some_and(|s| {
+                s.location == Location::Input
+                    && crate::aschema::is_schema(&s.path)
+                    && s.path.is_file()
             }),
             // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
@@ -723,7 +741,7 @@ fn shell(
         Shown::Environment | Shown::Model => true,
         Shown::CompiledMesh => state.mesh_in_3d,
         Shown::Lut => state.lut.view == LutView::Cube,
-        Shown::Specimen | Shown::CompiledFont | Shown::Data | Shown::Other => false,
+        Shown::Specimen | Shown::CompiledFont | Shown::Data | Shown::Schema | Shown::Other => false,
     };
     let fill = if show_3d {
         egui::Color32::TRANSPARENT
@@ -755,9 +773,11 @@ fn shell(
                     Some(usize::from(!state.font_atlas)),
                     true,
                 ),
-                Shown::Environment | Shown::Specimen | Shown::Model | Shown::Data => {
-                    (&[], None, false)
-                }
+                Shown::Environment
+                | Shown::Specimen
+                | Shown::Model
+                | Shown::Data
+                | Shown::Schema => (&[], None, false),
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -885,6 +905,17 @@ fn shell(
                     &mut preview3d,
                     &mut state.vision,
                 ),
+                (Shown::Schema, _) => {
+                    if let Some(inspected) = state.inspected.as_mut()
+                        && let Some(schema) =
+                            canvas_schema(ui, rect, inspected, &mut state.schema_types)
+                    {
+                        match std::fs::write(&inspected.path, schema.to_json()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (Shown::Data, _) => {
                     if let Some(table) = state
                         .inspected
@@ -959,6 +990,7 @@ struct Prepared {
     noise: Option<Result<Noise, String>>,
     gradient: Option<Result<Gradients, String>>,
     palette: Option<Result<Palette, String>>,
+    schema: Option<Result<Schema, (String, String)>>,
     /// A model's sidecar (with every locator the model has), the meshlet limits the project
     /// gives it, and the locators it inherits.
     mesh: Option<Result<PreparedMesh, String>>,
@@ -1037,6 +1069,12 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
                 .map_err(|e| e.to_string())
                 .and_then(|text| Palette::parse(&text))
         });
+    let schema = (selection.location == Location::Input
+        && crate::aschema::is_schema(&selection.path))
+    .then(|| match std::fs::read_to_string(&selection.path) {
+        Ok(text) => Schema::parse(&text).map_err(|e| (e, text)),
+        Err(e) => Err((e.to_string(), String::new())),
+    });
     let mesh =
         (selection.location == Location::Input && model::is_model(&selection.path)).then(|| {
             let settings = MeshSettings::new(&project.config.meshes)
@@ -1071,6 +1109,7 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
         compiled_bytes: inspection.compiled_bytes.take(),
         gradient,
         palette,
+        schema,
         mesh,
         model,
         pixels: inspection
@@ -1151,16 +1190,24 @@ fn inspected(
     prepared: Prepared,
     previous: Option<Inspected>,
 ) -> Inspected {
-    let (kept, kept_gradient, kept_palette, kept_mesh, kept_sidecar) =
-        previous.map_or((None, None, None, None, None), |p| {
+    let (kept, kept_gradient, kept_palette, kept_mesh, kept_sidecar, kept_schema) = previous
+        .map_or((None, None, None, None, None, None), |p| {
             (
                 p.noise.and_then(Result::ok),
                 p.gradient.and_then(Result::ok),
                 p.palette.and_then(Result::ok),
                 p.mesh.and_then(Result::ok),
                 p.sidecar.and_then(Result::ok),
+                p.schema.and_then(Result::ok),
             )
         });
+    let schema = prepared.schema.map(|parsed| {
+        parsed.map(|schema| match kept_schema {
+            Some(edit) if edit.saved == schema => edit,
+            Some(edit) => SchemaEdit::new(schema, edit),
+            None => SchemaEdit::new(schema, SchemaEdit::default()),
+        })
+    });
     let palette = prepared.palette.map(|parsed| {
         parsed.map(|p| match kept_palette {
             Some(edit) if edit.saved == p => edit,
@@ -1256,6 +1303,7 @@ fn inspected(
         noise,
         gradient,
         palette,
+        schema,
         mesh,
         sidecar,
         compiled_mesh: prepared.compiled_mesh,
@@ -1763,6 +1811,7 @@ enum FileOp {
     NewNoise(PathBuf, GeneratorKind),
     NewGradient(PathBuf),
     NewPalette(PathBuf),
+    NewSchema(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -1822,6 +1871,12 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
         *action = Some(TreeAction::Op(FileOp::NewPalette(dir.to_path_buf())));
         ui.close();
     }
+    ui.menu_button(RichText::new("New data").size(14.0).color(TEXT), |ui| {
+        if menu_item(ui, "Schema", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewSchema(dir.to_path_buf())));
+            ui.close();
+        }
+    });
 }
 
 /// The row icon by type, see docs/features/gui.md#tree-icons.
@@ -1846,6 +1901,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "noise" => Icon::ImagePlay,
         "gradient" => Icon::SwatchBook,
         "palette" => Icon::Palette,
+        "aschema" => Icon::Braces,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
@@ -2028,6 +2084,9 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             .map(|path| (dir, path)),
         FileOp::NewPalette(dir) => fileops::create_palette(&input, &dir)
             .map_err(|e| ("New Palette", e))
+            .map(|path| (dir, path)),
+        FileOp::NewSchema(dir) => fileops::create_schema(&input, &dir)
+            .map_err(|e| ("New Schema", e))
             .map(|path| (dir, path)),
         FileOp::Rename(path) => {
             let text = path
@@ -2343,6 +2402,18 @@ fn right_sidebar(
                 }
                 (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
                 (InspectorTab::Colors, Some(_), Some(_)) => placeholder(ui, "No colors"),
+                (InspectorTab::Types, Some(inspected), Some(_)) => {
+                    let chosen = state
+                        .schema_types
+                        .entry(inspected.path.clone())
+                        .or_default();
+                    if let Some(schema) = types_tab(ui, inspected, chosen) {
+                        match std::fs::write(&inspected.path, schema.to_json()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (InspectorTab::Lods, Some(inspected), Some(_)) => {
                     let choice = state.lod_levels.entry(inspected.path.clone()).or_default();
                     if let Some(mesh) = &inspected.compiled_mesh {
@@ -4349,6 +4420,8 @@ enum Shown {
     Lut,
     /// A file shown as a table of its data (manifest, `.amat`).
     Data,
+    /// An `.aschema`'s type editor.
+    Schema,
     Other,
 }
 
@@ -4362,6 +4435,7 @@ impl Shown {
             Some(i) if i.lut.is_some() => Self::Lut,
             Some(i) if i.inspection.specimen && i.preview.is_some() => Self::Specimen,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
+            Some(i) if i.schema.is_some() => Self::Schema,
             Some(i) if i.inspection.data.is_some() => Self::Data,
             _ => Self::Other,
         }

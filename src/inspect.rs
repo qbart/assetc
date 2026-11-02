@@ -97,6 +97,7 @@ enum Kind {
     Noise,
     Gradient,
     Palette,
+    Schema,
     MaterialSource,
     ColorLut,
     Font,
@@ -118,6 +119,7 @@ impl Kind {
             Self::Noise => "Noise",
             Self::Gradient => "Gradient",
             Self::Palette => "Palette",
+            Self::Schema => "Schema",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
@@ -182,6 +184,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if is_noise(file) => Kind::Noise,
         Location::Input if is_gradient(file) => Kind::Gradient,
         Location::Input if is_palette(file) => Kind::Palette,
+        Location::Input if crate::aschema::is_schema(file) => Kind::Schema,
         Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if model::is_model(file) => Kind::Model,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
@@ -208,6 +211,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::Palette => palette_rows(file, &mut out)
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
+        Kind::Schema => schema_rows(file, &mut out),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
         Kind::Font => font_rows(project, file, &rel, &mut out),
@@ -377,6 +381,49 @@ fn gradient_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     out.rows
         .push(("Gradients", gradients.gradients.len().to_string()));
     grid_rows(&gradients, out);
+    Ok(())
+}
+
+/// See docs/features/schemas.md#info-tab.
+fn schema_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    use crate::aschema::{Body, DIALECT, Schema};
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let schema = Schema::parse(&text)?;
+    out.rows.push(("Dialect", DIALECT.into()));
+    let structs = schema
+        .types
+        .iter()
+        .filter(|t| matches!(t.body, Body::Struct { .. }))
+        .count();
+    let enums = schema.types.len() - structs;
+    let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+    out.rows.push((
+        "Types",
+        match (structs, enums) {
+            (0, 0) => "none".into(),
+            (s, 0) => plural(s, "struct"),
+            (0, e) => plural(e, "enum"),
+            (s, e) => format!("{}, {}", plural(s, "struct"), plural(e, "enum")),
+        },
+    ));
+    let fields: usize = schema
+        .types
+        .iter()
+        .map(|t| match &t.body {
+            Body::Struct { fields, .. } => fields.len(),
+            Body::Enum { .. } => 0,
+        })
+        .sum();
+    out.rows.push(("Fields", fields.to_string()));
+    let problems = schema.check().len();
+    out.rows.push((
+        "Problems",
+        if problems == 0 {
+            "none".into()
+        } else {
+            plural(problems, "error")
+        },
+    ));
     Ok(())
 }
 
