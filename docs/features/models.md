@@ -63,10 +63,11 @@ Selecting a model shows it in the canvas' [3D view](canvas.md#3d) instead of
 a shape.
 
 - The view bar is empty (no `View` label, no buttons): a model only exists
-  in 3D. The toolbar (Shape, Channels) is not shown; it has only Color
-  vision.
-- The model's [locators](locators.md) are drawn over it and edited there,
-  see [`locators.md`](locators.md#3d-view).
+  in 3D. The toolbar (Shape, Channels) is not shown; it has a
+  [Show](#show) group, then Color vision.
+- The model's [locators](locators.md), [shapes](shapes.md) and
+  [regions](regions.md) are drawn over it and edited there, see
+  [`locators.md`](locators.md#3d-view).
 - Loaded with Bevy's glTF loader from an asset source registered at startup
   for the project's `input` directory, so the model's own meshes, materials
   and textures (embedded or next to the file) are used, as Bevy renders them.
@@ -85,6 +86,29 @@ a shape.
   fails the canvas shows `Could not load the model: <error>`.
 - Each new inspection of the file (selecting it, a rescan) reloads it from
   disk, so changes made in another program show up.
+
+### Show
+
+The toolbar's first group turns the drawing of each kind of
+[enrichment](locators.md) on or off, over the Color vision group:
+
+| Button   | Icon          | Shows |
+|----------|---------------|-------|
+| Locators | `map-pin`     | the visible locators: markers, names, the gizmo and attachment previews |
+| Shapes   | `shapes`      | the visible shapes' wireframes and the gizmo on the chosen shape |
+| Regions  | `paint-bucket`| the visible regions' tint and outline |
+
+- Toggles, all on to start with, for the session and every model. *Visible*
+  is each item's own **Visible** (eye) in its tab: a button that is on shows
+  the items whose eye is on; off hides them all, whatever their eyes, and
+  keeps the eyes as they are.
+- A button is disabled (and drawn off) when the model has none of its kind;
+  its tooltip adds `(none in this model)`.
+- A hidden locator cannot be clicked; a hidden locator or shape has no
+  gizmo.
+- Turning a kind back on by using it: **Add** or **Place on surface** in the
+  Locators tab (and `S`) turns Locators on, **Add shape** turns Shapes on,
+  **Paint** turns Regions on. Turning Regions off turns Paint off.
 
 ## Parameters tab
 

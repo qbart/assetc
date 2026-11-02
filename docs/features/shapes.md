@@ -78,6 +78,7 @@ The model's preview draws its visible shapes as wireframes over the model
 - With the **Shapes** tab showing, the [gizmo](locators.md#3d-view) (and
   `W` / `E`) acts on the chosen shape instead of the chosen locator.
 - Shapes are not picked by clicking them; choose them in the list.
+- The toolbar's [Show](models.md#show) **Shapes** button hides them all.
 
 ## Build
 

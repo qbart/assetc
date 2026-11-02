@@ -70,6 +70,8 @@ camera are left out), following the pose and animation:
 - Each covered triangle is filled with its region's color at 30% opacity; a
   triangle in several visible regions is filled by each, in list order.
 - The chosen region's triangles are also outlined (1 px, its color).
+- The toolbar's [Show](models.md#show) **Regions** button hides them all
+  (and turns Paint off); Paint turns it back on.
 
 ### Painting
 

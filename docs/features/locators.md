@@ -222,7 +222,8 @@ The model's [preview](models.md#preview) draws its visible locators over
 the model, on top of it (they are never hidden by faces, so locators inside
 the mesh can be seen and picked), following their joints in the shown pose
 and animation. The canvas has no locator buttons: they are in the
-[Locators tab](#locators-tab).
+[Locators tab](#locators-tab). The toolbar's [Show](models.md#show)
+**Locators** button hides them all.
 
 - **Markers**: each locator is a dot in its color (`TEXT` without one), 5 px
   across, with three 16 px lines along its X, Y and Z axes (`CHANNEL_R`,
