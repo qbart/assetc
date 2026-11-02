@@ -11,6 +11,7 @@ pub enum Icon {
     BoxShaded,
     Boxes,
     Braces,
+    Bug,
     CircleDashed,
     CircleDot,
     BringToFront,
@@ -32,6 +33,7 @@ pub enum Icon {
     Folder,
     FolderOpen,
     Globe,
+    GraphStar,
     GripHorizontal,
     GripVertical,
     Grid3x3,
@@ -67,13 +69,12 @@ pub enum Icon {
     Torus,
     Trash2,
     Type,
-    Workflow,
     Wrench,
     X,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 65] = [
+const SVGS: [(&str, &str); 66] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -83,6 +84,7 @@ const SVGS: [(&str, &str); 65] = [
     ("box-shaded", include_str!("../assets/icons/box-shaded.svg")),
     ("boxes", include_str!("../assets/icons/boxes.svg")),
     ("braces", include_str!("../assets/icons/braces.svg")),
+    ("bug", include_str!("../assets/icons/bug.svg")),
     (
         "circle-dashed",
         include_str!("../assets/icons/circle-dashed.svg"),
@@ -128,6 +130,7 @@ const SVGS: [(&str, &str); 65] = [
         include_str!("../assets/icons/folder-open.svg"),
     ),
     ("globe", include_str!("../assets/icons/globe.svg")),
+    ("graph-star", include_str!("../assets/icons/graph-star.svg")),
     (
         "grip-horizontal",
         include_str!("../assets/icons/grip-horizontal.svg"),
@@ -184,7 +187,6 @@ const SVGS: [(&str, &str); 65] = [
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
     ("type", include_str!("../assets/icons/type.svg")),
-    ("workflow", include_str!("../assets/icons/workflow.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
     ("x", include_str!("../assets/icons/x.svg")),
 ];

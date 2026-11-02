@@ -931,6 +931,27 @@ pub fn implicit_default(schema: &Schema, ty: &Ty) -> String {
     }
 }
 
+/// The value a field of type `ty` holds without a default, to start an explicit one from;
+/// see docs/features/schemas.md#defaults.
+pub fn implicit_value(schema: &Schema, ty: &Ty) -> Value {
+    match ty {
+        Ty::Prim("bool") => false.into(),
+        Ty::Prim("string") => "".into(),
+        Ty::Prim("rgb") => "#000000".into(),
+        Ty::Prim("rgba") => "#000000ff".into(),
+        Ty::Prim("curve") => linear_curve(),
+        Ty::Prim("gradient") => default_gradient(),
+        Ty::Prim(_) => 0.into(),
+        Ty::List(_) => Value::Array(Vec::new()),
+        Ty::Optional(_) => Value::Null,
+        Ty::Ref(_) => "".into(),
+        Ty::Named(n) => match schema.type_index(n).map(|i| &schema.types[i].body) {
+            Some(Body::Enum { values }) => values.first().cloned().unwrap_or_default().into(),
+            _ => Value::Object(Map::new()),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

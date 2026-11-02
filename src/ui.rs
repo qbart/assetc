@@ -539,7 +539,7 @@ impl InspectorTab {
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
             Self::Types => Icon::Braces,
-            Self::Graph => Icon::Workflow,
+            Self::Graph => Icon::GraphStar,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
             Self::Lods => Icon::BringToFront,
@@ -1923,7 +1923,7 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
         *action = Some(TreeAction::Op(FileOp::NewPalette(dir.to_path_buf())));
         ui.close();
     }
-    ui.menu_button(RichText::new("New data").size(14.0).color(TEXT), |ui| {
+    ui.menu_button(RichText::new("New Data").size(14.0).color(TEXT), |ui| {
         if menu_item(ui, "Schema", None).clicked() {
             *action = Some(TreeAction::Op(FileOp::NewSchema(dir.to_path_buf())));
             ui.close();
@@ -1958,7 +1958,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "gradient" => Icon::SwatchBook,
         "palette" => Icon::Palette,
         "aschema" => Icon::Braces,
-        "agraph" => Icon::Workflow,
+        "agraph" => Icon::GraphStar,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,

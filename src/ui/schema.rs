@@ -15,11 +15,15 @@ pub(super) struct SchemaEdit {
     pub(super) edit: Schema,
     /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
     pub(super) saved: Schema,
-    /// Unfolded field rows, by type and field.
-    open: HashSet<(usize, usize)>,
-    /// Curve and gradient editors of defaults, by type and field.
-    curves: HashMap<(usize, usize), CurveState>,
-    gradients: HashMap<(usize, usize), GradientCard>,
+    /// Unfolded field rows, by type and field name.
+    open: HashSet<(usize, String)>,
+    /// Curve and gradient editors of defaults, by type and field name.
+    curves: HashMap<(usize, String), CurveState>,
+    gradients: HashMap<(usize, String), GradientCard>,
+    /// The color picker of a colour default.
+    picker: Picker,
+    /// Whether a group was being dragged last frame: groups then show their headers only.
+    group_drag: bool,
 }
 
 impl SchemaEdit {
@@ -209,12 +213,17 @@ pub(super) fn types_tab(
                         FontId::proportional(13.0),
                         TEXT_WEAK,
                     );
-                    if problems.iter().any(|p| p.type_index == i) {
-                        painter.circle_filled(
-                            pos2(size.left() - 8.0, rect.center().y),
-                            3.0,
-                            CHANNEL_R,
+                    let messages: Vec<&str> = problems
+                        .iter()
+                        .filter(|p| p.type_index == i)
+                        .map(|p| p.message.as_str())
+                        .collect();
+                    if !messages.is_empty() {
+                        let at = Rect::from_center_size(
+                            pos2(size.left() - 14.0, rect.center().y),
+                            vec2(16.0, 16.0),
                         );
+                        problem_icon(ui, at, ("type_problems", i), &messages);
                     }
                     if *chosen == i {
                         let bin =
@@ -290,35 +299,45 @@ pub(super) fn canvas_schema(
     egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
         property_style(ui);
         let ti = *chosen;
-        type_header(ui, edit, ti);
+        type_header(ui, edit, ti, &problems);
         ui.add_space(12.0);
         match edit.edit.types[ti].body {
             Body::Struct { .. } => struct_editor(ui, edit, &snapshot, ti, &problems),
             Body::Enum { .. } => enum_editor(ui, edit, ti),
         }
-        // Every problem of the file; clicking one chooses its type.
-        ui.add_space(16.0);
-        ui.label(RichText::new("Problems").size(14.0).color(TEXT));
-        if problems.is_empty() {
-            ui.weak("None");
-        }
-        for p in &problems {
-            let text = RichText::new(format!("{}: {}", p.path, p.message))
-                .size(12.0)
-                .color(CHANNEL_R);
-            if ui
-                .add(egui::Label::new(text).sense(Sense::click()))
-                .clicked()
-            {
-                *chosen = p.type_index;
-            }
-        }
     });
     schema_commit(ui, edit)
 }
 
-/// Kind, name and doc of type `ti`.
-fn type_header(ui: &mut Ui, edit: &mut SchemaEdit, ti: usize) {
+/// The problem icon over `rect`, listing `messages` on hover; see
+/// docs/features/schemas.md#problems.
+fn problem_icon(
+    ui: &Ui,
+    rect: Rect,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    messages: &[&str],
+) {
+    Icon::Bug.image(16.0, CHANNEL_R).paint_at(ui, rect);
+    ui.interact(rect, ui.id().with(salt), Sense::hover())
+        .on_hover_text(messages.join("\n"));
+}
+
+/// The problem icon as a widget, when there are `messages`.
+fn problem_widget(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, messages: &[&str]) {
+    if messages.is_empty() {
+        return;
+    }
+    let (rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+    problem_icon(
+        ui,
+        Rect::from_center_size(rect.center(), vec2(16.0, 16.0)),
+        salt,
+        messages,
+    );
+}
+
+/// Kind, name and doc of type `ti`, and the problems of the type itself.
+fn type_header(ui: &mut Ui, edit: &mut SchemaEdit, ti: usize, problems: &[Problem]) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         let t = &edit.edit.types[ti];
@@ -334,21 +353,64 @@ fn type_header(ui: &mut Ui, edit: &mut SchemaEdit, ti: usize) {
                 edit.edit.rename_type(&old, &new);
             }
         }
+        let messages: Vec<&str> = problems
+            .iter()
+            .filter(|p| p.type_index == ti && p.field.is_none())
+            .map(|p| p.message.as_str())
+            .collect();
         let doc = &mut edit.edit.types[ti].doc;
         let field = egui::TextEdit::singleline(doc).hint_text("Doc");
-        ui.add_sized(vec2(ui.available_width().max(120.0), 22.0), field);
+        let room = ui.available_width() - if messages.is_empty() { 0.0 } else { 32.0 };
+        ui.add_sized(vec2(room.max(120.0), 22.0), field);
+        problem_widget(ui, "type_header_problems", &messages);
     });
 }
 
-/// Column widths of the fields table: name, type, default, min/max/step, group, label.
-const NAME_W: f32 = 110.0;
-const TYPE_W: f32 = 130.0;
-const DEFAULT_W: f32 = 130.0;
-const NUMBER_W: f32 = 50.0;
-const TEXT_W: f32 = 80.0;
-const DOC_W: f32 = 100.0;
+/// Widths in a field's row: name, type, and the default's editor.
+const NAME_W: f32 = 140.0;
+const TYPE_W: f32 = 150.0;
+const DEFAULT_W: f32 = 200.0;
 
-/// The fields table, groups and Add buttons of struct `ti`; see
+/// The struct's groups as shown: its `groups` in order, then names only fields use.
+fn group_names(fields: &[Field], groups: &[Group]) -> Vec<String> {
+    let mut names: Vec<String> = groups.iter().map(|g| g.name.clone()).collect();
+    for f in fields {
+        if !f.group.is_empty() && !names.contains(&f.group) {
+            names.push(f.group.clone());
+        }
+    }
+    names
+}
+
+/// Puts the fields in the order shown (ungrouped, then group by group) and gives every group of
+/// `order` an entry, in that order; see docs/features/schemas.md#struct.
+fn arrange(fields: &mut [Field], groups: &mut Vec<Group>, order: &[String]) {
+    *groups = order
+        .iter()
+        .map(|name| {
+            groups
+                .iter()
+                .find(|g| g.name == *name)
+                .cloned()
+                .unwrap_or_else(|| Group {
+                    name: name.clone(),
+                    ..Group::default()
+                })
+        })
+        .collect();
+    fields.sort_by_key(|f| {
+        if f.group.is_empty() {
+            0
+        } else {
+            order
+                .iter()
+                .position(|g| *g == f.group)
+                .map_or(usize::MAX, |i| i + 1)
+        }
+    });
+}
+
+/// The struct's sections: Ungrouped, the group cards and Add group; see
 /// docs/features/schemas.md#struct.
 fn struct_editor(
     ui: &mut Ui,
@@ -357,123 +419,231 @@ fn struct_editor(
     ti: usize,
     problems: &[Problem],
 ) {
-    ui.label(RichText::new("Fields").size(14.0).color(TEXT));
+    let Body::Struct { fields, groups } = &edit.edit.types[ti].body else {
+        return;
+    };
+    let names = group_names(fields, groups);
+    let folded = edit.group_drag;
+    ui.label(RichText::new("Ungrouped").size(14.0).color(TEXT_WEAK));
     ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let head = |ui: &mut Ui, text: &str, width: f32| {
-            ui.add_sized(
-                vec2(width, 18.0),
-                egui::Label::new(RichText::new(text).size(12.0).color(TEXT_WEAK)),
-            );
-        };
-        head(ui, "", 24.0);
-        head(ui, "Name", NAME_W);
-        head(ui, "Type", TYPE_W + 26.0);
-        head(ui, "Default", DEFAULT_W);
-        head(ui, "Min", NUMBER_W);
-        head(ui, "Max", NUMBER_W);
-        head(ui, "Step", NUMBER_W);
-        head(ui, "Group", TEXT_W);
-        head(ui, "Label", TEXT_W);
-        head(ui, "Doc", (ui.available_width() - 60.0).max(DOC_W));
-    });
+    if !folded {
+        ui.push_id("ungrouped", |ui| {
+            field_rows(ui, edit, snapshot, ti, "", &names, problems);
+        });
+    }
+    ui.add_space(12.0);
+
+    let dragging = Cell::new(None);
+    let dropped = Cell::new(None);
+    let mut rects = Vec::new();
+    let mut remove = None;
+    let mut rename = None;
+    let mut declare = false;
+    for (gi, name) in names.iter().enumerate() {
+        let card = Frame::new()
+            .fill(BG_PANEL)
+            .corner_radius(6)
+            .inner_margin(Margin::same(8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.push_id(("group", name), |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 8.0;
+                        let grip = drag_handle(ui);
+                        if grip.dragged() {
+                            dragging.set(Some(gi));
+                        }
+                        if grip.drag_stopped() {
+                            dropped.set(Some(gi));
+                        }
+                        if let Some(new) = commit_field(ui, "name", name, NAME_W, "Group")
+                            && !new.is_empty()
+                            && !names.contains(&new)
+                        {
+                            rename = Some((name.clone(), new));
+                        }
+                        let Body::Struct { fields, groups } = &mut edit.edit.types[ti].body else {
+                            return;
+                        };
+                        let count = fields.iter().filter(|f| f.group == *name).count();
+                        let entry = groups.iter_mut().find(|g| g.name == *name);
+                        let mut group = entry.as_deref().cloned().unwrap_or_else(|| Group {
+                            name: name.clone(),
+                            ..Group::default()
+                        });
+                        ui.checkbox(&mut group.collapsed, "Collapsed");
+                        let doc = egui::TextEdit::singleline(&mut group.doc).hint_text("Doc");
+                        ui.add_sized(vec2((ui.available_width() - 110.0).max(80.0), 22.0), doc);
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if icon_button(ui, Icon::X, "Remove group", true).clicked() {
+                                remove = Some(name.clone());
+                            }
+                            let plural = if count == 1 { "" } else { "s" };
+                            ui.label(
+                                RichText::new(format!("{count} field{plural}")).color(TEXT_WEAK),
+                            );
+                        });
+                        match entry {
+                            Some(entry) => *entry = group,
+                            None if group.collapsed || !group.doc.is_empty() => {
+                                groups.push(group);
+                                declare = true;
+                            }
+                            None => {}
+                        }
+                    });
+                    if !folded {
+                        ui.add_space(4.0);
+                        field_rows(ui, edit, snapshot, ti, name, &names, problems);
+                    }
+                });
+            })
+            .response
+            .rect;
+        rects.push(card);
+        ui.add_space(8.0);
+    }
+    edit.group_drag = dragging.get().is_some();
+    let Body::Struct { fields, groups } = &mut edit.edit.types[ti].body else {
+        return;
+    };
+    let mut order = names.clone();
+    let mut changed = declare;
+    if let Some((from, to)) = card_reorder(ui, &rects, dragging.get(), dropped.get()) {
+        let name = order.remove(from);
+        order.insert(to, name);
+        changed = true;
+    }
+    if let Some((old, new)) = rename {
+        for f in fields.iter_mut().filter(|f| f.group == old) {
+            f.group = new.clone();
+        }
+        for g in groups.iter_mut().filter(|g| g.name == old) {
+            g.name = new.clone();
+        }
+        for n in order.iter_mut().filter(|n| **n == old) {
+            *n = new.clone();
+        }
+        changed = true;
+    }
+    if let Some(name) = remove {
+        for f in fields.iter_mut().filter(|f| f.group == name) {
+            f.group.clear();
+        }
+        groups.retain(|g| g.name != name);
+        order.retain(|n| *n != name);
+        changed = true;
+    }
+    if changed {
+        arrange(fields, groups, &order);
+    }
+    let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add group");
+    if ui.add(add).clicked() {
+        let name = free_name("Group", |n| order.iter().any(|g| g == n));
+        order.push(name);
+        arrange(fields, groups, &order);
+    }
+}
+
+/// The fields of group `group` (`""`: ungrouped) and its Add field; see
+/// docs/features/schemas.md#struct.
+fn field_rows(
+    ui: &mut Ui,
+    edit: &mut SchemaEdit,
+    snapshot: &Schema,
+    ti: usize,
+    group: &str,
+    names: &[String],
+    problems: &[Problem],
+) {
+    let Body::Struct { fields, .. } = &edit.edit.types[ti].body else {
+        return;
+    };
+    let shown: Vec<usize> = (0..fields.len())
+        .filter(|&fi| fields[fi].group == group)
+        .collect();
     let dragging = Cell::new(None);
     let dropped = Cell::new(None);
     let mut delete = None;
+    let mut regroup = false;
     let mut rects = Vec::new();
-    let count = match &edit.edit.types[ti].body {
-        Body::Struct { fields, .. } => fields.len(),
-        Body::Enum { .. } => 0,
-    };
-    for fi in 0..count {
-        let open = edit.open.contains(&(ti, fi));
-        let mut toggle = false;
-        let names: Vec<String> = match &edit.edit.types[ti].body {
-            Body::Struct { fields, .. } => fields.iter().map(|f| f.name.clone()).collect(),
-            Body::Enum { .. } => Vec::new(),
-        };
-        let Body::Struct { fields, .. } = &mut edit.edit.types[ti].body else {
+    for (row, &fi) in shown.iter().enumerate() {
+        let Body::Struct { fields, .. } = &edit.edit.types[ti].body else {
             return;
         };
-        let field = &mut fields[fi];
-        let ty = parse_type(&field.ty).ok();
-        let row = ui
-            .push_id(("field", fi), |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
-                    let grip = drag_handle(ui);
-                    if grip.dragged() {
-                        dragging.set(Some(fi));
-                    }
-                    if grip.drag_stopped() {
-                        dropped.set(Some(fi));
-                    }
-                    if let Some(new) = commit_field(ui, "name", &field.name, NAME_W, "name")
-                        && aschema::is_identifier(&new)
-                        && !names.iter().enumerate().any(|(k, n)| k != fi && *n == new)
-                    {
-                        field.name = new;
-                    }
-                    type_cell(ui, field, snapshot, ty.is_some());
-                    toggle |= default_cell(ui, field, snapshot, ty.as_ref());
-                    let numeric = ty.as_ref().is_some_and(Ty::is_number);
-                    ui.add_enabled_ui(numeric, |ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        for (salt, value) in [
-                            ("min", &mut field.min),
-                            ("max", &mut field.max),
-                            ("step", &mut field.step),
-                        ] {
-                            if let Some(new) = number_field(ui, salt, value.as_ref(), NUMBER_W) {
-                                *value = new;
-                            }
-                        }
-                    });
-                    let text = |ui: &mut Ui, value: &mut String, width: f32| {
-                        ui.add_sized(vec2(width, 22.0), egui::TextEdit::singleline(value));
-                    };
-                    text(ui, &mut field.group, TEXT_W);
-                    text(ui, &mut field.label, TEXT_W);
-                    // Doc takes what the two buttons leave.
-                    let doc = (ui.available_width() - 2.0 * 30.0).max(DOC_W);
-                    text(ui, &mut field.doc, doc);
-                    let chevron = if open {
-                        Icon::ChevronDown
-                    } else {
-                        Icon::ChevronRight
-                    };
-                    toggle |= icon_button(ui, chevron, "More", true).clicked();
-                    if icon_button(ui, Icon::X, "Remove field", true).clicked() {
-                        delete = Some(fi);
-                    }
-                })
-                .response
-                .rect
-            })
-            .inner;
-        rects.push(row);
-        if open {
-            ui.push_id(("details", fi), |ui| {
-                ui.indent("details", |ui| {
-                    field_details(ui, edit, ti, fi, ty.as_ref(), snapshot);
-                });
-            });
-        }
-        for p in problems
+        let name = fields[fi].name.clone();
+        let taken: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+        let key = (ti, name.clone());
+        let open = edit.open.contains(&key);
+        let ty = parse_type(&fields[fi].ty).ok();
+        let messages: Vec<&str> = problems
             .iter()
             .filter(|p| p.type_index == ti && p.field == Some(fi))
-        {
-            ui.horizontal(|ui| {
-                ui.add_space(30.0);
-                ui.label(RichText::new(&p.message).size(12.0).color(CHANNEL_R));
-            });
-        }
+            .map(|p| p.message.as_str())
+            .collect();
+        let mut toggle = false;
+        let rect = ui
+            .push_id(("field", fi), |ui| {
+                let background = ui.painter().add(egui::Shape::Noop);
+                let rect = ui
+                    .horizontal(|ui| {
+                        ui.set_min_height(28.0);
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let grip = drag_handle(ui);
+                        if grip.dragged() {
+                            dragging.set(Some(row));
+                        }
+                        if grip.drag_stopped() {
+                            dropped.set(Some(row));
+                        }
+                        let chevron = if open {
+                            Icon::ChevronDown
+                        } else {
+                            Icon::ChevronRight
+                        };
+                        toggle |= icon_button(ui, chevron, "Details", true).clicked();
+                        let Body::Struct { fields, .. } = &mut edit.edit.types[ti].body else {
+                            return;
+                        };
+                        let field = &mut fields[fi];
+                        if let Some(new) = commit_field(ui, "name", &field.name, NAME_W, "name")
+                            && aschema::is_identifier(&new)
+                            && !taken.contains(&new)
+                        {
+                            field.name = new;
+                        }
+                        type_cell(ui, field, snapshot, ty.is_some());
+                        ui.add_space(6.0);
+                        toggle |= default_cell(ui, &mut edit.picker, field, snapshot, ty.as_ref());
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if icon_button(ui, Icon::X, "Remove field", true).clicked() {
+                                delete = Some(fi);
+                            }
+                            problem_widget(ui, "problems", &messages);
+                        });
+                    })
+                    .response
+                    .rect;
+                if ui.rect_contains_pointer(rect) {
+                    ui.painter().set(
+                        background,
+                        egui::Shape::rect_filled(rect.expand(2.0), 4, BG_HEADER),
+                    );
+                }
+                if open {
+                    ui.indent("details", |ui| {
+                        regroup |= field_details(ui, edit, ti, fi, ty.as_ref(), snapshot, names);
+                    });
+                }
+                rect
+            })
+            .inner;
+        rects.push(rect);
         if toggle {
             if open {
-                edit.open.remove(&(ti, fi));
+                edit.open.remove(&key);
             } else {
-                edit.open.insert((ti, fi));
+                edit.open.insert(key);
             }
         }
     }
@@ -481,56 +651,32 @@ fn struct_editor(
         return;
     };
     if let Some((from, to)) = card_reorder(ui, &rects, dragging.get(), dropped.get()) {
-        let f = fields.remove(from);
-        fields.insert(to, f);
-        edit.open.clear();
+        // Within the group: take it out, then put it before the field now at `to`.
+        let f = fields.remove(shown[from]);
+        let rest: Vec<usize> = (0..fields.len())
+            .filter(|&k| fields[k].group == group)
+            .collect();
+        let at = rest
+            .get(to)
+            .copied()
+            .unwrap_or_else(|| rest.last().map_or(shown[from], |&k| k + 1));
+        fields.insert(at, f);
+        regroup = true;
     }
     if let Some(fi) = delete {
         fields.remove(fi);
-        edit.open.clear();
     }
-    ui.add_space(4.0);
     let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add field");
     if ui.add(add).clicked() {
         let name = free_name("field", |n| fields.iter().any(|f| f.name == n));
-        fields.push(Field::new(name, "string"));
-    }
-
-    // Groups; see docs/features/schemas.md#struct.
-    ui.add_space(12.0);
-    ui.label(RichText::new("Groups").size(14.0).color(TEXT));
-    let mut remove = None;
-    for gi in 0..groups.len() {
-        let names: Vec<String> = groups.iter().map(|g| g.name.clone()).collect();
-        let group = &mut groups[gi];
-        ui.push_id(("group", gi), |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                if let Some(new) = commit_field(ui, "name", &group.name, NAME_W, "name")
-                    && !new.is_empty()
-                    && !names.iter().enumerate().any(|(k, n)| k != gi && *n == new)
-                {
-                    group.name = new;
-                }
-                ui.checkbox(&mut group.collapsed, "Collapsed");
-                let doc = egui::TextEdit::singleline(&mut group.doc).hint_text("Doc");
-                ui.add_sized(vec2(DOC_W * 2.0, 22.0), doc);
-                if icon_button(ui, Icon::X, "Remove group", true).clicked() {
-                    remove = Some(gi);
-                }
-            });
+        fields.push(Field {
+            group: group.to_owned(),
+            ..Field::new(name, "string")
         });
+        regroup = true;
     }
-    if let Some(gi) = remove {
-        groups.remove(gi);
-    }
-    let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add group");
-    if ui.add(add).clicked() {
-        let name = free_name("Group", |n| groups.iter().any(|g| g.name == n));
-        groups.push(Group {
-            name,
-            ..Group::default()
-        });
+    if regroup {
+        arrange(fields, groups, names);
     }
 }
 
@@ -582,12 +728,30 @@ fn check_known(schema: &Schema, ty: &Ty) -> bool {
     }
 }
 
-/// The Default cell of a field; returns whether it asks to unfold the row. See
-/// docs/features/schemas.md#defaults.
-fn default_cell(ui: &mut Ui, field: &mut Field, schema: &Schema, ty: Option<&Ty>) -> bool {
-    let hint = ty
-        .map(|t| aschema::implicit_default(schema, t))
-        .unwrap_or_default();
+/// A field's Default: the checkbox, then the default's editor or the implicit default;
+/// returns whether it asks to unfold the row. See docs/features/schemas.md#defaults.
+fn default_cell(
+    ui: &mut Ui,
+    picker: &mut Picker,
+    field: &mut Field,
+    schema: &Schema,
+    ty: Option<&Ty>,
+) -> bool {
+    let mut has = field.default.is_some();
+    if ui.checkbox(&mut has, "Default").changed() {
+        field.default =
+            has.then(|| ty.map_or(Value::Null, |ty| aschema::implicit_value(schema, ty)));
+    }
+    let Some(default) = &mut field.default else {
+        let hint = ty
+            .map(|t| aschema::implicit_default(schema, t))
+            .unwrap_or_default();
+        ui.add_sized(
+            vec2(DEFAULT_W, 22.0),
+            egui::Label::new(RichText::new(hint).monospace().color(TEXT_WEAK)).truncate(),
+        );
+        return false;
+    };
     let enum_values = match ty {
         Some(Ty::Named(n)) => schema
             .type_index(n)
@@ -597,122 +761,96 @@ fn default_cell(ui: &mut Ui, field: &mut Field, schema: &Schema, ty: Option<&Ty>
             }),
         _ => None,
     };
-    let shown = |v: &Option<Value>| match v {
-        None => "—".to_owned(),
-        Some(Value::String(s)) => s.clone(),
-        Some(other) => other.to_string(),
+    let json = |ui: &mut Ui, default: &mut Value, salt: &str| {
+        if let Some(new) = commit_field(ui, salt, &default.to_string(), DEFAULT_W, "")
+            && let Ok(v) = serde_json::from_str::<Value>(new.trim())
+        {
+            *default = v;
+        }
     };
-    let mut unfold = false;
     match (ty, enum_values) {
-        (Some(Ty::Prim("bool")), _) | (_, Some(_)) if ty.is_some() => {
-            let choices: Vec<Option<Value>> = match ty {
-                Some(Ty::Prim("bool")) => vec![None, Some(false.into()), Some(true.into())],
-                _ => std::iter::once(None)
-                    .chain(
-                        match ty {
-                            Some(Ty::Named(n)) => {
-                                match schema.type_index(n).map(|i| &schema.types[i].body) {
-                                    Some(Body::Enum { values }) => values.clone(),
-                                    _ => Vec::new(),
-                                }
-                            }
-                            _ => Vec::new(),
-                        }
-                        .into_iter()
-                        .map(|v| Some(Value::String(v))),
-                    )
-                    .collect(),
-            };
+        (_, Some(values)) => {
+            let current = default.as_str().unwrap_or_default().to_owned();
             egui::ComboBox::from_id_salt("default")
                 .width(DEFAULT_W - 8.0)
-                .selected_text(shown(&field.default))
+                .selected_text(&current)
                 .show_ui(ui, |ui| {
-                    for choice in choices {
-                        let text = shown(&choice);
-                        ui.selectable_value(&mut field.default, choice, text);
+                    for v in values {
+                        if ui.selectable_label(v == current, &v).clicked() {
+                            *default = Value::String(v);
+                        }
                     }
                 });
         }
-        (Some(ty), _) if ty.is_number() => {
-            let current = field
-                .default
-                .as_ref()
-                .map(Value::to_string)
-                .unwrap_or_default();
-            if let Some(new) = commit_field(ui, "default", &current, DEFAULT_W, &hint) {
-                let new = new.trim();
-                if new.is_empty() {
-                    field.default = None;
-                } else if let Ok(v) = serde_json::from_str::<Value>(new)
-                    && v.is_number()
-                {
-                    field.default = Some(v);
-                }
+        (Some(Ty::Prim("bool")), _) => {
+            let mut on = default.as_bool().unwrap_or_default();
+            if ui.checkbox(&mut on, "").changed() {
+                *default = on.into();
             }
         }
-        (Some(Ty::Prim(p @ ("string" | "rgb" | "rgba"))), _) => {
-            let mut width = DEFAULT_W;
-            if *p != "string" {
-                let color = field
-                    .default
-                    .as_ref()
-                    .and_then(Value::as_str)
-                    .and_then(crate::gradient::parse_color);
-                let (swatch, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
-                color_picker::checker(ui, swatch, 3);
-                if let Some(c) = color {
-                    ui.painter()
-                        .rect_filled(swatch, 3, color_picker::to_color32(c));
-                }
-                width -= 22.0;
+        (Some(ty), _) if ty.is_number() => {
+            json(ui, default, "default");
+            if !default.is_number() {
+                *default = 0.into();
             }
-            let current = field
-                .default
-                .as_ref()
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned();
-            if let Some(new) = commit_field(ui, "default", &current, width, &hint) {
-                field.default = (!new.is_empty()).then(|| Value::String(new));
+        }
+        (Some(Ty::Prim("string")), _) => {
+            let mut text = default.as_str().unwrap_or_default().to_owned();
+            if ui
+                .add_sized(vec2(DEFAULT_W, 22.0), egui::TextEdit::singleline(&mut text))
+                .changed()
+            {
+                *default = Value::String(text);
+            }
+        }
+        (Some(Ty::Prim(p @ ("rgb" | "rgba"))), _) => {
+            let alpha = *p == "rgba";
+            let color = default.as_str().and_then(gradient::parse_color);
+            let (swatch, response) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+            color_picker::checker(ui, swatch, 3);
+            if let Some(c) = color {
+                ui.painter()
+                    .rect_filled(swatch, 3, color_picker::to_color32(c));
+            }
+            let open = response
+                .double_clicked()
+                .then_some(egui::SetOpenCommand::Bool(true));
+            egui::Popup::from_response(&response.on_hover_text("Double-click to pick"))
+                .open_memory(open)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .width(240.0)
+                .show(|ui| {
+                    ui.set_width(240.0);
+                    let mut c = color.unwrap_or([0, 0, 0, 255]);
+                    if picker.show(ui, &mut c) {
+                        let [r, g, b, a] = c;
+                        *default = if alpha {
+                            format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+                        } else {
+                            format!("#{r:02x}{g:02x}{b:02x}")
+                        }
+                        .into();
+                    }
+                });
+            let current = default.as_str().unwrap_or_default().to_owned();
+            if let Some(new) = commit_field(ui, "default", &current, DEFAULT_W - 22.0, "") {
+                *default = Value::String(new.trim().to_owned());
             }
         }
         (Some(Ty::Prim(p @ ("curve" | "gradient"))), _) => {
-            let (rect, response) = ui.allocate_exact_size(vec2(DEFAULT_W, 22.0), Sense::click());
-            let preview = Rect::from_min_size(rect.min + vec2(0.0, 2.0), vec2(60.0, 18.0));
-            let painter = ui.painter();
-            match &field.default {
-                None => {
-                    painter.text(
-                        preview.left_center(),
-                        Align2::LEFT_CENTER,
-                        "—",
-                        FontId::proportional(14.0),
-                        TEXT_WEAK,
-                    );
-                }
-                Some(v) if *p == "curve" => curve_preview(painter, preview, v),
-                Some(v) => gradient_preview(ui, preview, v),
+            let (rect, response) = ui.allocate_exact_size(vec2(60.0, 18.0), Sense::click());
+            if *p == "curve" {
+                curve_preview(ui.painter(), rect, default);
+            } else {
+                gradient_preview(ui, rect, default);
             }
-            unfold = response
-                .on_hover_text("Edit in the row's details")
+            return response
+                .on_hover_text("Edit in the field's details")
                 .clicked();
         }
-        _ => {
-            let current = field
-                .default
-                .as_ref()
-                .map(Value::to_string)
-                .unwrap_or_default();
-            if let Some(new) = commit_field(ui, "default", &current, DEFAULT_W, &hint) {
-                if new.trim().is_empty() {
-                    field.default = None;
-                } else if let Ok(v) = serde_json::from_str::<Value>(&new) {
-                    field.default = Some(v);
-                }
-            }
-        }
+        _ => json(ui, default, "default"),
     }
-    unfold
+    false
 }
 
 fn curve_preview(painter: &egui::Painter, rect: Rect, value: &Value) {
@@ -758,7 +896,8 @@ fn gradient_preview(ui: &Ui, rect: Rect, value: &Value) {
     }
 }
 
-/// An unfolded field row: layout keys, and the curve or gradient default's editor.
+/// A field's details: only what its type can use; returns whether it moved to another group.
+/// See docs/features/schemas.md#struct.
 fn field_details(
     ui: &mut Ui,
     edit: &mut SchemaEdit,
@@ -766,74 +905,118 @@ fn field_details(
     fi: usize,
     ty: Option<&Ty>,
     schema: &Schema,
-) {
+    groups: &[String],
+) -> bool {
     let Body::Struct { fields, .. } = &mut edit.edit.types[ti].body else {
-        return;
+        return false;
     };
     let field = &mut fields[fi];
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let weak = |ui: &mut Ui, text: &str| {
-            ui.label(RichText::new(text).color(TEXT_WEAK));
-        };
-        weak(ui, "Order");
-        if let Some(new) = number_field(ui, "order", field.order.as_ref(), NUMBER_W) {
-            field.order = new;
+    let key = (ti, field.name.clone());
+    let mut regroup = false;
+    ui.set_max_width(560.0);
+    let text = |ui: &mut Ui, label: &str, value: &mut String, mono: bool| {
+        prop_row(ui, label, |ui, width| {
+            let mut edit = egui::TextEdit::singleline(value);
+            if mono {
+                edit = edit.font(egui::TextStyle::Monospace);
+            }
+            ui.add_sized(vec2(width, 22.0), edit);
+        });
+    };
+    text(ui, "Label", &mut field.label, false);
+    text(ui, "Doc", &mut field.doc, false);
+    if ty.is_some_and(Ty::is_number) {
+        for (label, value) in [
+            ("Min", &mut field.min),
+            ("Max", &mut field.max),
+            ("Step", &mut field.step),
+        ] {
+            prop_row(ui, label, |ui, width| {
+                if let Some(new) = number_field(ui, label, value.as_ref(), width) {
+                    *value = new;
+                }
+            });
         }
-        ui.checkbox(&mut field.readonly, "Readonly");
-        weak(ui, "Show if");
-        ui.add_sized(
-            vec2(140.0, 22.0),
-            egui::TextEdit::singleline(&mut field.show_if).font(egui::TextStyle::Monospace),
-        );
-        weak(ui, "Hide if");
-        ui.add_sized(
-            vec2(140.0, 22.0),
-            egui::TextEdit::singleline(&mut field.hide_if).font(egui::TextStyle::Monospace),
-        );
-        weak(ui, "Widget");
-        egui::ComboBox::from_id_salt("widget")
-            .width(80.0)
-            .selected_text(if field.widget.is_empty() {
-                "—"
+    }
+    // The one widget the field's type can use, or the one it has.
+    let target = match ty {
+        Some(Ty::Named(n)) => schema.type_index(n).map(|i| &schema.types[i].body),
+        _ => None,
+    };
+    let fits = match target {
+        Some(Body::Enum { .. }) => "toggle",
+        Some(Body::Struct { .. }) => "inline",
+        None => "",
+    };
+    if !fits.is_empty() || !field.widget.is_empty() {
+        prop_row(ui, "Widget", |ui, width| {
+            let shown = |w: &str| {
+                if w.is_empty() {
+                    "—".to_owned()
+                } else {
+                    w.to_owned()
+                }
+            };
+            egui::ComboBox::from_id_salt("widget")
+                .width(width - 8.0)
+                .selected_text(shown(&field.widget))
+                .show_ui(ui, |ui| {
+                    let mut choices = vec![String::new()];
+                    for w in [fits, field.widget.as_str()] {
+                        if !w.is_empty() && !choices.iter().any(|c| c == w) {
+                            choices.push(w.to_owned());
+                        }
+                    }
+                    for w in choices {
+                        let text = shown(&w);
+                        ui.selectable_value(&mut field.widget, w, text);
+                    }
+                });
+        });
+    }
+    prop_row(ui, "Group", |ui, width| {
+        let shown = |g: &str| {
+            if g.is_empty() {
+                "—".to_owned()
             } else {
-                field.widget.as_str()
-            })
+                g.to_owned()
+            }
+        };
+        egui::ComboBox::from_id_salt("group")
+            .width(width - 8.0)
+            .selected_text(shown(&field.group))
             .show_ui(ui, |ui| {
-                for w in ["", "toggle", "inline"] {
-                    let text = if w.is_empty() { "—" } else { w };
-                    ui.selectable_value(&mut field.widget, w.to_owned(), text);
+                for g in std::iter::once("").chain(groups.iter().map(String::as_str)) {
+                    if ui.selectable_label(field.group == g, shown(g)).clicked() && field.group != g
+                    {
+                        field.group = g.to_owned();
+                        regroup = true;
+                    }
                 }
             });
     });
-    let _ = schema;
-    let kind = match ty {
-        Some(Ty::Prim(p @ ("curve" | "gradient"))) => *p,
-        _ => return,
-    };
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Default").color(TEXT_WEAK));
-        if field.default.is_none() {
-            if ui.button("Set").clicked() {
-                field.default = Some(if kind == "curve" {
-                    aschema::linear_curve()
-                } else {
-                    aschema::default_gradient()
-                });
-            }
-        } else if ui.button("Clear").clicked() {
-            field.default = None;
+    prop_row(ui, "Order", |ui, width| {
+        if let Some(new) = number_field(ui, "order", field.order.as_ref(), width) {
+            field.order = new;
         }
     });
-    let Some(value) = &mut field.default else {
-        return;
+    prop_row(ui, "Readonly", |ui, _| {
+        ui.checkbox(&mut field.readonly, "");
+    });
+    text(ui, "Show if", &mut field.show_if, true);
+    text(ui, "Hide if", &mut field.hide_if, true);
+    let kind = match ty {
+        Some(Ty::Prim(p @ ("curve" | "gradient"))) => *p,
+        _ => return regroup,
     };
-    ui.set_max_width(560.0);
+    let Some(value) = &mut field.default else {
+        return regroup;
+    };
+    ui.add_space(4.0);
     if kind == "curve" {
-        curve_editor(ui, value, edit.curves.entry((ti, fi)).or_default());
+        curve_editor(ui, value, edit.curves.entry(key).or_default());
     } else {
-        let card = edit.gradients.entry((ti, fi)).or_default();
+        let card = edit.gradients.entry(key).or_default();
         match aschema::gradient_stops(value) {
             Ok(stops) => {
                 let mut g = Gradient {
@@ -869,6 +1052,7 @@ fn field_details(
             }
         }
     }
+    regroup
 }
 
 /// The curve editor's state.

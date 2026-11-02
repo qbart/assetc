@@ -35,12 +35,28 @@ pub struct Node {
     pub extra: Map<String, Value>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+/// Edges are told apart by their place in the graph: any number may join the same nodes.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Edge {
     pub from: String,
     pub to: String,
+    pub label: String,
+    pub weight: i32,
     pub data: Properties,
     pub extra: Map<String, Value>,
+}
+
+impl Edge {
+    pub fn new(from: String, to: String) -> Self {
+        Self {
+            from,
+            to,
+            label: String::new(),
+            weight: 1,
+            data: Properties::new(),
+            extra: Map::new(),
+        }
+    }
 }
 
 impl Node {
@@ -91,11 +107,6 @@ impl Graph {
             })
             .find(|id| self.node_index(id).is_none())
             .unwrap_or_default()
-    }
-
-    /// Whether an edge from `from` to `to` may be added: both differ and it is not there yet.
-    pub fn can_connect(&self, from: &str, to: &str) -> bool {
-        from != to && !self.edges.iter().any(|e| e.from == from && e.to == to)
     }
 
     /// Renames node `from` to `to`, in its edges too.
@@ -185,6 +196,8 @@ impl Graph {
                 let mut o = Map::new();
                 o.insert("from".into(), e.from.clone().into());
                 o.insert("to".into(), e.to.clone().into());
+                o.insert("label".into(), e.label.clone().into());
+                o.insert("weight".into(), e.weight.into());
                 write_data(&mut o, &e.data);
                 o.extend(e.extra.clone());
                 Value::Object(o)
@@ -197,7 +210,8 @@ impl Graph {
         text
     }
 
-    /// Ids and edges that break the rules of docs/spec/agraph.md.
+    /// Ids and edges that break the rules of docs/spec/agraph.md; loops and repeated edges
+    /// are fine.
     pub fn check(&self) -> Vec<String> {
         let mut out = Vec::new();
         for (i, n) in self.nodes.iter().enumerate() {
@@ -208,21 +222,12 @@ impl Graph {
                 out.push(format!("node {:?}: the id is used twice", n.id));
             }
         }
-        for (i, e) in self.edges.iter().enumerate() {
+        for e in &self.edges {
             let name = format!("edge {} → {}", e.from, e.to);
             for end in [&e.from, &e.to] {
                 if self.node_index(end).is_none() {
                     out.push(format!("{name}: no node {end:?}"));
                 }
-            }
-            if e.from == e.to {
-                out.push(format!("{name}: connects a node to itself"));
-            }
-            if self.edges[..i]
-                .iter()
-                .any(|o| o.from == e.from && o.to == e.to)
-            {
-                out.push(format!("{name}: is there twice"));
             }
         }
         out
@@ -304,9 +309,18 @@ fn parse_edge(value: Value) -> Result<Edge, String> {
     let Value::Object(mut o) = value else {
         return Err("not an object".into());
     };
+    let weight = match o.shift_remove("weight") {
+        None => 1,
+        Some(v) => v
+            .as_i64()
+            .and_then(|w| i32::try_from(w).ok())
+            .ok_or("weight is not a 32-bit integer")?,
+    };
     Ok(Edge {
         from: text(&mut o, "from", true)?,
         to: text(&mut o, "to", true)?,
+        label: text(&mut o, "label", false)?,
+        weight,
         data: parse_data(&mut o)?,
         extra: o,
     })
@@ -344,6 +358,8 @@ mod tests {
     {
       "from": "start",
       "to": "dash",
+      "label": "unlock",
+      "weight": -3,
       "data": {
         "level": 3
       }
@@ -366,17 +382,13 @@ mod tests {
         graph.nodes.push(Node::new(graph.free_id("node"), 1.0, 0.0));
         graph.nodes.push(Node::new(graph.free_id("node"), 2.0, 0.0));
         assert_eq!(graph.nodes[2].id, "node_2");
-        assert!(graph.can_connect("start", "node"));
-        graph.edges.push(Edge {
-            from: "start".into(),
-            to: "node".into(),
-            ..Edge::default()
-        });
-        assert!(!graph.can_connect("start", "node"));
-        assert!(graph.can_connect("node", "start"));
-        assert!(!graph.can_connect("node", "node"));
+        graph.edges.push(Edge::new("start".into(), "node".into()));
+        graph.edges.push(Edge::new("start".into(), "node".into()));
+        graph.edges.push(Edge::new("node".into(), "node".into()));
+        assert_eq!(graph.check(), Vec::<String>::new());
         graph.rename_node("node", "dash");
         assert_eq!(graph.edges[0].to, "dash");
+        assert_eq!(graph.edges[2].from, "dash");
         graph.remove_node(1);
         assert!(graph.edges.is_empty());
     }
@@ -386,11 +398,9 @@ mod tests {
         let mut graph = Graph::new();
         graph.nodes.push(Node::new("start".into(), 1.0, 0.0));
         graph.nodes.push(Node::new("9lives".into(), 1.0, 0.0));
-        graph.edges.push(Edge {
-            from: "start".into(),
-            to: "nowhere".into(),
-            ..Edge::default()
-        });
+        graph
+            .edges
+            .push(Edge::new("start".into(), "nowhere".into()));
         let problems = graph.check().join("\n");
         assert!(problems.contains("used twice"));
         assert!(problems.contains("not an identifier"));
@@ -400,5 +410,10 @@ mod tests {
         assert!(Graph::parse(newer).unwrap_err().contains("newer"));
         let bad = r#"{"$dialect": "agraph/1", "nodes": [{"id": "a"}], "edges": []}"#;
         assert!(Graph::parse(bad).unwrap_err().contains("node 1: x"));
+        let heavy = r#"{"$dialect": "agraph/1", "nodes": [], "edges": [{"from": "a", "to": "b", "weight": 3000000000}]}"#;
+        assert!(Graph::parse(heavy).unwrap_err().contains("edge 1: weight"));
+        let light = r#"{"$dialect": "agraph/1", "nodes": [], "edges": [{"from": "a", "to": "b"}]}"#;
+        let edge = &Graph::parse(light).unwrap().edges[0];
+        assert_eq!((edge.label.as_str(), edge.weight), ("", 1));
     }
 }
