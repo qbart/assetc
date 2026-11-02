@@ -25,6 +25,8 @@ pub enum Mode {
     #[default]
     Move,
     Rotate,
+    /// Clicking the model places the chosen locator; no gizmo.
+    Place,
 }
 
 /// A part of the gizmo that can be dragged.
@@ -75,6 +77,19 @@ impl ViewCamera {
         ))
     }
 
+    /// The ray through canvas point `p`: origin and unit direction, in world space.
+    pub fn ray(&self, p: Pos2) -> (Vec3, Vec3) {
+        let aspect = self.rect.width() / self.rect.height().max(1.0);
+        let c = self.rect.center();
+        let x = (p.x - c.x) / (self.rect.width() / 2.0);
+        let y = -(p.y - c.y) / (self.rect.height() / 2.0);
+        let view = Vec3::new(x * self.tan_half * aspect, y * self.tan_half, -1.0);
+        (
+            self.camera.translation,
+            (self.camera.rotation * view).normalize(),
+        )
+    }
+
     /// World units per canvas point across the view at `p`'s depth.
     pub fn world_per_point(&self, p: Vec3) -> f32 {
         let depth = -self.to_view.transform_point3(p).z;
@@ -105,6 +120,61 @@ pub fn set_local(locator: &mut Locator, local: Affine3A) {
     locator.scale = scale.to_array();
 }
 
+/// Puts `locator` at world `point` with its Y axis along world `normal`, keeping its scale;
+/// see docs/features/locators.md#place-on-surface.
+pub fn place(locator: &mut Locator, parent: Affine3A, point: Vec3, normal: Vec3) {
+    let world =
+        Affine3A::from_rotation_translation(Quat::from_rotation_arc(Vec3::Y, normal), point);
+    let (_, rotation, translation) = (parent.inverse() * world).to_scale_rotation_translation();
+    locator.translation = translation.to_array();
+    locator.rotation = rotation.normalize().to_array();
+}
+
+/// `world` reflected across the model-space plane through the origin that is across `axis`
+/// (0 X, 1 Y, 2 Z), unmirrored again: `S · T · S` in model space.
+pub fn mirrored(model: Affine3A, world: Affine3A, axis: usize) -> Affine3A {
+    let mut s = Vec3::ONE;
+    s[axis] = -1.0;
+    let s = Affine3A::from_scale(s);
+    model * s * model.inverse() * world * s
+}
+
+/// `name` with its left / right tokens swapped, or `None` when it has none; see
+/// docs/features/locators.md#mirroring.
+pub fn mirror_name(name: &str) -> Option<String> {
+    const WORDS: [(&str, &str); 6] = [
+        ("Left", "Right"),
+        ("Right", "Left"),
+        ("left", "right"),
+        ("right", "left"),
+        ("LEFT", "RIGHT"),
+        ("RIGHT", "LEFT"),
+    ];
+    let separator = |c: Option<char>| c.is_none_or(|c| matches!(c, '_' | '.' | '-' | ' '));
+    let chars: Vec<char> = name.chars().collect();
+    let mut out = String::with_capacity(name.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let rest: String = chars[i..].iter().collect();
+        if let Some((word, other)) = WORDS.iter().find(|(w, _)| rest.starts_with(w)) {
+            out += other;
+            i += word.chars().count();
+            continue;
+        }
+        let alone =
+            separator(i.checked_sub(1).map(|k| chars[k])) && separator(chars.get(i + 1).copied());
+        out.push(match chars[i] {
+            'l' if alone => 'r',
+            'r' if alone => 'l',
+            'L' if alone => 'R',
+            'R' if alone => 'L',
+            c => c,
+        });
+        i += 1;
+    }
+    (out != name).then_some(out)
+}
+
 /// Direction of a transform's axis `i` in world space.
 fn axis(world: Affine3A, i: usize) -> Vec3 {
     world.matrix3.col(i).normalize_or_zero().into()
@@ -123,6 +193,9 @@ impl Gizmo {
     /// The gizmo of a locator whose world transform is `world`; `None` when it is behind
     /// the camera.
     pub fn new(camera: &ViewCamera, world: Affine3A, mode: Mode) -> Option<Self> {
+        if mode == Mode::Place {
+            return None;
+        }
         let origin = Vec3::from(world.translation);
         let center = camera.project(origin)?;
         let scale = camera.world_per_point(origin);
@@ -154,6 +227,7 @@ impl Gizmo {
                     runs.retain(|run| run.len() > 1);
                     gizmo.rings[i] = runs;
                 }
+                Mode::Place => {}
             }
         }
         Some(gizmo)
@@ -394,6 +468,62 @@ mod tests {
         let turned = Quat::from_array(locator.rotation);
         let expected = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
         assert!(turned.angle_between(expected) < 1e-3, "{turned:?}");
+    }
+
+    #[test]
+    fn names_mirror_by_their_tokens() {
+        let m = |n: &str| mirror_name(n);
+        assert_eq!(m("hand_l").as_deref(), Some("hand_r"));
+        assert_eq!(m("R.hand").as_deref(), Some("L.hand"));
+        assert_eq!(
+            m("b_LeftUpperArm_09").as_deref(),
+            Some("b_RightUpperArm_09")
+        );
+        assert_eq!(m("foot-left").as_deref(), Some("foot-right"));
+        assert_eq!(m("RIGHT EYE").as_deref(), Some("LEFT EYE"));
+        assert_eq!(m("l_hand_r").as_deref(), Some("r_hand_l"));
+        // Letters inside words are not tokens.
+        assert_eq!(m("muzzle"), None);
+        assert_eq!(m("hr_l2"), None);
+    }
+
+    #[test]
+    fn mirroring_reflects_without_mirroring() {
+        let mut t = Locator::new("a".into());
+        t.translation = [1.0, 2.0, 3.0];
+        t.rotation = Quat::from_rotation_y(0.5).to_array();
+        let world = local(&t);
+        let m = mirrored(Affine3A::IDENTITY, world, 0);
+        let (scale, rotation, translation) = m.to_scale_rotation_translation();
+        assert!(translation.abs_diff_eq(Vec3::new(-1.0, 2.0, 3.0), 1e-5));
+        assert!(scale.abs_diff_eq(Vec3::ONE, 1e-5), "not mirrored: {scale}");
+        assert!(rotation.angle_between(Quat::from_rotation_y(-0.5)) < 1e-4);
+        // Twice is back.
+        let back = mirrored(Affine3A::IDENTITY, m, 0);
+        assert!(back.abs_diff_eq(world, 1e-5));
+    }
+
+    #[test]
+    fn rays_go_through_the_pointer() {
+        let camera = test_camera();
+        let (origin, dir) = camera.ray(pos2(400.0, 300.0));
+        assert!(origin.abs_diff_eq(Vec3::Z * 4.0, 1e-4));
+        assert!(dir.abs_diff_eq(Vec3::NEG_Z, 1e-4));
+        let p = Vec3::new(0.3, -0.2, 0.5);
+        let (origin, dir) = camera.ray(camera.project(p).unwrap());
+        assert!((p - origin).normalize().abs_diff_eq(dir, 1e-4));
+    }
+
+    #[test]
+    fn placing_turns_y_along_the_normal() {
+        let mut locator = Locator::new("a".into());
+        locator.scale = [2.0; 3];
+        let parent = Affine3A::from_translation(Vec3::X);
+        place(&mut locator, parent, Vec3::new(1.0, 1.0, 0.0), Vec3::X);
+        assert!(Vec3::from(locator.translation).abs_diff_eq(Vec3::Y, 1e-5));
+        let y = Quat::from_array(locator.rotation) * Vec3::Y;
+        assert!(y.abs_diff_eq(Vec3::X, 1e-5));
+        assert_eq!(locator.scale, [2.0; 3]);
     }
 
     #[test]

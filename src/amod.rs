@@ -33,6 +33,9 @@ pub struct Locator {
     pub rotation: [f32; 4],
     #[serde(default = "unit")]
     pub scale: [f32; 3],
+    /// An input-relative glTF model the 3D view shows at the locator; not compiled.
+    #[serde(default)]
+    pub preview: Option<String>,
 }
 
 fn identity() -> [f32; 4] {
@@ -52,6 +55,7 @@ impl Locator {
             translation: [0.0; 3],
             rotation: identity(),
             scale: unit(),
+            preview: None,
         }
     }
 }
@@ -124,6 +128,9 @@ impl Amod {
             out += &format!("translation = {}\n", floats(&locator.translation));
             out += &format!("rotation = {}\n", floats(&locator.rotation));
             out += &format!("scale = {}\n", floats(&locator.scale));
+            if let Some(preview) = &locator.preview {
+                out += &format!("preview = {}\n", toml::Value::from(preview.as_str()));
+            }
         }
         noise::write_modifiers(&self.modifiers, &mut out);
         // Each table after a blank line, but not the first.
@@ -225,12 +232,18 @@ mod tests {
                 meshlet_max_vertices: Some(128),
                 ..Default::default()
             },
-            locators: vec![hand, Locator::new("muzzle".into())],
+            locators: vec![
+                Locator {
+                    preview: Some("weapons/sword.glb".into()),
+                    ..hand
+                },
+                Locator::new("muzzle".into()),
+            ],
             modifiers: Vec::new(),
         };
         let text = amod.to_toml();
         assert!(text.contains(
-            "\n\n[[locators]]\nname = 'hand \"r\"'\njoint = \"RightHand\"\ntranslation = [0.02, 0.08, 0.0]\nrotation = [0.0, 0.0, 0.70710677, 0.70710677]\nscale = [1.0, 1.0, 1.0]\n"
+            "\n\n[[locators]]\nname = 'hand \"r\"'\njoint = \"RightHand\"\ntranslation = [0.02, 0.08, 0.0]\nrotation = [0.0, 0.0, 0.70710677, 0.70710677]\nscale = [1.0, 1.0, 1.0]\npreview = \"weapons/sword.glb\"\n"
         ), "{text}");
         assert!(text.ends_with("\n\n[[locators]]\nname = \"muzzle\"\ntranslation = [0.0, 0.0, 0.0]\nrotation = [0.0, 0.0, 0.0, 1.0]\nscale = [1.0, 1.0, 1.0]\n"));
         assert_eq!(Amod::parse(&text).unwrap(), amod);

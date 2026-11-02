@@ -625,6 +625,54 @@ pub struct Preview {
     pub meshlet_bounds: Vec<MeshletBounds>,
     /// Asset IDs of the material slots (`MATERIAL`).
     pub materials: Vec<u64>,
+    /// Each locator's name and transform in mesh space, joints at their bind pose; see
+    /// docs/features/locators.md#compiled-mesh-preview.
+    pub locators: Vec<(String, bevy::math::Affine3A)>,
+}
+
+/// The locators of a compiled mesh, placed in mesh space.
+fn preview_locators(reader: &chunks::Reader<'_>) -> Vec<(String, bevy::math::Affine3A)> {
+    use bevy::math::{Affine3A, Mat4, Quat, Vec3};
+    let (Some(records), names) = (reader.chunk("LOCATORS"), reader.chunk("LOCNAMES")) else {
+        return Vec::new();
+    };
+    let skeleton = reader.chunk("SKELETON").unwrap_or_default();
+    let floats = |p: &[u8], at: usize, n: usize| -> Option<Vec<f32>> {
+        (0..n)
+            .map(|k| chunks::f32_at(p, 0, 0, at + k * 4))
+            .collect()
+    };
+    records
+        .as_chunks::<64>()
+        .0
+        .iter()
+        .filter_map(|r| {
+            let (at, len) = (
+                chunks::u32_at(r, 0, 64, 8)? as usize,
+                chunks::u32_at(r, 0, 64, 12)? as usize,
+            );
+            let name = names
+                .and_then(|n| n.get(at..at + len))
+                .map(|n| String::from_utf8_lossy(n).into_owned())
+                .unwrap_or_default();
+            let t = floats(r, 20, 3)?;
+            let q = floats(r, 32, 4)?;
+            let s = floats(r, 48, 3)?;
+            let local = Affine3A::from_scale_rotation_translation(
+                Vec3::from_slice(&s),
+                Quat::from_slice(&q).normalize(),
+                Vec3::from_slice(&t),
+            );
+            let joint = chunks::u32_at(r, 0, 64, 16)? as i32;
+            let parent = usize::try_from(joint)
+                .ok()
+                .and_then(|j| floats(skeleton.get(j * 112..j * 112 + 64)?, 0, 16))
+                .map_or(Affine3A::IDENTITY, |m| {
+                    Affine3A::from_mat4(Mat4::from_cols_slice(&m).inverse())
+                });
+            Some((name, parent * local))
+        })
+        .collect()
 }
 
 impl Preview {
@@ -769,6 +817,7 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
     let mesh_bounds = reader.require("BOUNDS")?;
     let meshlet_bounds = reader.require("MLBOUNDS")?;
     Ok(Preview {
+        locators: preview_locators(&reader),
         levels,
         bounds: Bounds::read(mesh_bounds, 0).ok_or_else(bad)?,
         submesh_bounds: (0..submesh_count)
@@ -1485,5 +1534,10 @@ meshlet_max_triangles = 64
         assert_eq!(cell(&bytes, "LOCATORS", 0, 1), "hand");
         assert_eq!(cell(&bytes, "LOCATORS", 0, 3), "0");
         assert_eq!(cell(&bytes, "LOCATORS", 0, 4), "1.000, 2.000, 3.000");
+        // In the preview, placed by the joint's bind pose (identity here).
+        let locators = preview(&bytes).unwrap().locators;
+        assert_eq!(locators.len(), 1);
+        assert_eq!(locators[0].0, "hand");
+        assert_eq!(locators[0].1.translation.to_array(), [1.0, 2.0, 3.0]);
     }
 }

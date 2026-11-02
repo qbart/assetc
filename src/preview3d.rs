@@ -33,7 +33,7 @@ pub const INPUT_SOURCE: &str = "input";
 /// Vertical field of view of the preview camera.
 pub const FOV_DEGREES: f32 = 45.0;
 /// Longest side of a fitted model's bounding box, in units.
-const MODEL_SIZE: f32 = 1.5;
+pub const MODEL_SIZE: f32 = 1.5;
 
 pub struct Preview3dPlugin;
 
@@ -54,7 +54,10 @@ impl Plugin for Preview3dPlugin {
                     (sync_compiled, sync, sync_model, sync_vision)
                         .chain()
                         .before(TransformSystems::Propagate),
-                    (fit_model, report_frames)
+                    sync_attachments
+                        .after(sync_model)
+                        .before(TransformSystems::Propagate),
+                    (fit_model, report_frames, cast_surface)
                         .chain()
                         .after(TransformSystems::Propagate),
                 ),
@@ -179,6 +182,34 @@ pub struct Preview3d {
     pub vision: Option<Vision>,
     /// Where the shown model's locators hang, once it is fitted; written by [`report_frames`].
     pub frames: Option<ModelFrames>,
+    /// A ray (origin, unit direction) to cast against the shown model, taken by
+    /// [`cast_surface`], which answers in `surface_hit`.
+    pub surface_ray: Option<(Vec3, Vec3)>,
+    /// The answer to the last `surface_ray`, for the UI to take: `Some(None)` is a miss.
+    pub surface_hit: Option<Option<SurfaceHit>>,
+    /// Models shown at the shown model's locators, written by the UI every frame.
+    pub attachments: Vec<Attachment>,
+}
+
+/// Where a ray hit the shown model; see docs/features/locators.md#place-on-surface.
+#[derive(Clone, Debug)]
+pub struct SurfaceHit {
+    pub point: Vec3,
+    /// The triangle's unit normal, facing the ray's origin.
+    pub normal: Vec3,
+    /// The named joint weighing most on the triangle, for skinned meshes.
+    pub joint: Option<String>,
+}
+
+/// A model shown at a locator; see docs/features/locators.md#attachment-preview.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Attachment {
+    /// Input-relative glTF path.
+    pub path: PathBuf,
+    /// The joint the locator hangs on, by name; `None` is model space.
+    pub joint: Option<String>,
+    /// The locator's transform in that space.
+    pub transform: Transform,
 }
 
 /// World transforms of a shown model's spaces, as posed this frame; see
@@ -1440,10 +1471,295 @@ fn report_frames(
     });
 }
 
+/// The root of a model shown at a locator.
+#[derive(Component)]
+struct AttachmentRoot;
+
+/// An attachment as spawned.
+struct Spawned {
+    path: PathBuf,
+    parent: Entity,
+    entity: Entity,
+    gltf: Handle<Gltf>,
+    /// Its scene was spawned.
+    scene: bool,
+}
+
+/// The entity of the shown model's first skin's joint named `name`.
+fn find_joint(
+    fit: Entity,
+    name: &str,
+    children: &Query<&Children>,
+    skins: &Query<&SkinnedMesh>,
+    names: &Query<&Name>,
+) -> Option<Entity> {
+    let skin = children
+        .iter_descendants(fit)
+        .find_map(|entity| skins.get(entity).ok())?;
+    skin.joints
+        .iter()
+        .copied()
+        .find(|&joint| names.get(joint).is_ok_and(|n| n.as_str() == name))
+}
+
+type AttachmentQueries<'w, 's> = (
+    Query<'w, 's, &'static Children>,
+    Query<'w, 's, &'static SkinnedMesh>,
+    Query<'w, 's, &'static Name>,
+    Query<'w, 's, (), With<AttachmentRoot>>,
+);
+
+/// Spawns, moves and removes the models shown at locators to match
+/// [`Preview3d::attachments`]; see docs/features/locators.md#attachment-preview.
+#[allow(clippy::too_many_arguments)]
+fn sync_attachments(
+    mut commands: Commands,
+    preview: Res<Preview3d>,
+    loaded: Res<LoadedModel>,
+    server: Res<AssetServer>,
+    gltfs: Res<Assets<Gltf>>,
+    mut spawned: Local<Vec<Spawned>>,
+    (children, skins, names, roots): AttachmentQueries,
+    mut transforms: Query<&mut Transform, With<AttachmentRoot>>,
+) {
+    let fit = loaded
+        .0
+        .as_ref()
+        .filter(|m| m.ready && m.fitted.is_some() && preview.viewport.is_some())
+        .map(|m| m.fit);
+    let mut kept = Vec::new();
+    let mut old: Vec<Option<Spawned>> = spawned.drain(..).map(Some).collect();
+    for (i, wanted) in preview.attachments.iter().enumerate() {
+        let Some(fit) = fit else { break };
+        let parent = match &wanted.joint {
+            None => Some(fit),
+            Some(name) => find_joint(fit, name, &children, &skins, &names),
+        };
+        let Some(parent) = parent else { continue };
+        let reuse = old.get_mut(i).and_then(|slot| {
+            slot.take_if(|s| {
+                s.path == wanted.path && s.parent == parent && roots.contains(s.entity)
+            })
+        });
+        let mut item = reuse.unwrap_or_else(|| {
+            let entity = commands
+                .spawn((
+                    wanted.transform,
+                    Visibility::default(),
+                    ChildOf(parent),
+                    AttachmentRoot,
+                ))
+                .id();
+            let path = AssetPath::from(wanted.path.clone()).with_source(INPUT_SOURCE);
+            Spawned {
+                path: wanted.path.clone(),
+                parent,
+                entity,
+                gltf: server.load(path),
+                scene: false,
+            }
+        });
+        if let Ok(mut transform) = transforms.get_mut(item.entity)
+            && *transform != wanted.transform
+        {
+            *transform = wanted.transform;
+        }
+        if !item.scene
+            && let Some(gltf) = gltfs.get(&item.gltf)
+            && let Some(scene) = gltf
+                .default_scene
+                .clone()
+                .or_else(|| gltf.scenes.first().cloned())
+        {
+            commands.entity(item.entity).insert(WorldAssetRoot(scene));
+            item.scene = true;
+        }
+        kept.push(item);
+    }
+    for gone in old.into_iter().flatten() {
+        if roots.contains(gone.entity) {
+            commands.entity(gone.entity).despawn();
+        }
+    }
+    *spawned = kept;
+}
+
+/// Answers [`Preview3d::surface_ray`] with the nearest triangle of the shown model (not its
+/// attachments), skinned meshes as posed; see docs/features/locators.md#place-on-surface.
+#[allow(clippy::too_many_arguments)]
+fn cast_surface(
+    loaded: Res<LoadedModel>,
+    mut preview: ResMut<Preview3d>,
+    children: Query<&Children>,
+    mesh_entities: Query<(&Mesh3d, &GlobalTransform, Option<&SkinnedMesh>)>,
+    nodes: Query<(&GlobalTransform, Option<&Name>)>,
+    roots: Query<Entity, With<AttachmentRoot>>,
+    meshes: Res<Assets<Mesh>>,
+    bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+) {
+    let Some((origin, dir)) = preview.surface_ray.take() else {
+        return;
+    };
+    let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some()) else {
+        preview.surface_hit = Some(None);
+        return;
+    };
+    let attached: std::collections::HashSet<Entity> = roots
+        .iter()
+        .flat_map(|root| std::iter::once(root).chain(children.iter_descendants(root)))
+        .collect();
+    let mut best: Option<(f32, SurfaceHit)> = None;
+    for entity in children.iter_descendants(model.fit) {
+        if attached.contains(&entity) {
+            continue;
+        }
+        let Ok((mesh, global, skin)) = mesh_entities.get(entity) else {
+            continue;
+        };
+        let Some(mesh) = meshes.get(&mesh.0) else {
+            continue;
+        };
+        let Some(positions) = mesh
+            .attribute(Mesh::ATTRIBUTE_POSITION)
+            .and_then(|a| a.as_float3())
+        else {
+            continue;
+        };
+        let joint_indices = match mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX) {
+            Some(bevy::mesh::VertexAttributeValues::Uint16x4(v)) => Some(v),
+            _ => None,
+        };
+        let joint_weights = match mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x4(v)) => Some(v),
+            _ => None,
+        };
+        // Joint matrices of a skinned mesh: joint world × inverse bind.
+        let skinning = skin
+            .zip(joint_indices.zip(joint_weights))
+            .and_then(|(skin, weights)| {
+                let binds = bindposes.get(&skin.inverse_bindposes)?;
+                let matrices: Vec<Mat4> = skin
+                    .joints
+                    .iter()
+                    .zip(binds.iter())
+                    .map(|(&joint, bind)| {
+                        nodes
+                            .get(joint)
+                            .map_or(Mat4::IDENTITY, |(g, _)| g.to_matrix() * *bind)
+                    })
+                    .collect();
+                Some((skin, matrices, weights))
+            });
+        let world: Vec<Vec3> = positions
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let p = Vec3::from(*p);
+                match &skinning {
+                    Some((_, matrices, (indices, weights))) => (0..4)
+                        .map(|k| {
+                            let m = matrices.get(indices[i][k] as usize).copied();
+                            m.unwrap_or(Mat4::IDENTITY).transform_point3(p) * weights[i][k]
+                        })
+                        .sum(),
+                    None => global.transform_point(p),
+                }
+            })
+            .collect();
+        let indices: Vec<usize> = match mesh.indices() {
+            Some(indices) => indices.iter().collect(),
+            None => (0..world.len()).collect(),
+        };
+        for triangle in indices.as_chunks::<3>().0 {
+            let (Some(&a), Some(&b), Some(&c)) = (
+                world.get(triangle[0]),
+                world.get(triangle[1]),
+                world.get(triangle[2]),
+            ) else {
+                continue;
+            };
+            let Some(t) = ray_triangle(origin, dir, a, b, c) else {
+                continue;
+            };
+            if best.as_ref().is_some_and(|(d, _)| *d <= t) {
+                continue;
+            }
+            let mut normal = (b - a).cross(c - a).normalize_or_zero();
+            if normal.dot(dir) > 0.0 {
+                normal = -normal;
+            }
+            // The named joint weighing most on the triangle.
+            let joint = skinning.as_ref().and_then(|(skin, _, (ji, jw))| {
+                let mut sums: Vec<(u16, f32)> = Vec::new();
+                for &v in triangle {
+                    for k in 0..4 {
+                        let (j, w) = (ji[v][k], jw[v][k]);
+                        match sums.iter_mut().find(|(sj, _)| *sj == j) {
+                            Some((_, sw)) => *sw += w,
+                            None => sums.push((j, w)),
+                        }
+                    }
+                }
+                let (j, _) = sums.into_iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
+                let (_, name) = nodes.get(*skin.joints.get(j as usize)?).ok()?;
+                Some(name?.to_string())
+            });
+            best = Some((
+                t,
+                SurfaceHit {
+                    point: origin + dir * t,
+                    normal,
+                    joint,
+                },
+            ));
+        }
+    }
+    preview.surface_hit = Some(best.map(|(_, hit)| hit));
+}
+
+/// Distance along the ray to triangle `a b c` (either side), Möller–Trumbore.
+fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+    let (e1, e2) = (b - a, c - a);
+    let p = dir.cross(e2);
+    let det = e1.dot(p);
+    if det.abs() < 1e-12 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let s = origin - a;
+    let u = s.dot(p) * inv;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = s.cross(e1);
+    let v = dir.dot(q) * inv;
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    let t = e2.dot(q) * inv;
+    (t > 0.0).then_some(t)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::lut::Lut;
+
+    #[test]
+    fn rays_hit_triangles_in_front() {
+        let (a, b, c) = (Vec3::ZERO, Vec3::X, Vec3::Y);
+        let t = ray_triangle(Vec3::new(0.2, 0.2, 5.0), Vec3::NEG_Z, a, b, c);
+        assert_eq!(t, Some(5.0));
+        // Behind the origin, or beside the triangle.
+        assert_eq!(
+            ray_triangle(Vec3::new(0.2, 0.2, 5.0), Vec3::Z, a, b, c),
+            None
+        );
+        assert_eq!(
+            ray_triangle(Vec3::new(0.9, 0.9, 5.0), Vec3::NEG_Z, a, b, c),
+            None
+        );
+    }
 
     #[test]
     fn cube_faces_wind_outward_and_stand_upright() {

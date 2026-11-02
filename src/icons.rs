@@ -18,6 +18,7 @@ pub enum Icon {
     ChevronRight,
     CircleSmall,
     Cone,
+    Crosshair,
     Cylinder,
     Eye,
     EyeOff,
@@ -25,6 +26,7 @@ pub enum Icon {
     File,
     Files,
     Film,
+    FlipHorizontal2,
     Folder,
     FolderOpen,
     Globe,
@@ -58,7 +60,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 50] = [
+const SVGS: [(&str, &str); 52] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -90,6 +92,7 @@ const SVGS: [(&str, &str); 50] = [
         include_str!("../assets/icons/circle-small.svg"),
     ),
     ("cone", include_str!("../assets/icons/cone.svg")),
+    ("crosshair", include_str!("../assets/icons/crosshair.svg")),
     ("cylinder", include_str!("../assets/icons/cylinder.svg")),
     ("eye", include_str!("../assets/icons/eye.svg")),
     ("eye-off", include_str!("../assets/icons/eye-off.svg")),
@@ -100,6 +103,10 @@ const SVGS: [(&str, &str); 50] = [
     ("file", include_str!("../assets/icons/file.svg")),
     ("files", include_str!("../assets/icons/files.svg")),
     ("film", include_str!("../assets/icons/film.svg")),
+    (
+        "flip-horizontal-2",
+        include_str!("../assets/icons/flip-horizontal-2.svg"),
+    ),
     ("folder", include_str!("../assets/icons/folder.svg")),
     (
         "folder-open",

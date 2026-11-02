@@ -114,6 +114,10 @@ struct LocatorTools {
     shown: bool,
     /// A gizmo handle being dragged.
     drag: Option<gizmo::Drag>,
+    /// A Place click waiting for its surface hit: the locator to place, `None` to add one.
+    placing: Option<Option<usize>>,
+    /// The plane Mirror reflects across: 0 X, 1 Y, 2 Z.
+    mirror_axis: usize,
 }
 
 impl Default for LocatorTools {
@@ -122,6 +126,8 @@ impl Default for LocatorTools {
             mode: gizmo::Mode::default(),
             shown: true,
             drag: None,
+            placing: None,
+            mirror_axis: 0,
         }
     }
 }
@@ -604,6 +610,7 @@ fn shell(
     preview3d.colors = false;
     preview3d.model = None;
     preview3d.compiled_shown = false;
+    preview3d.attachments.clear();
     preview3d.vision = state.vision;
     let shown = Shown::of(state.inspected.as_ref());
     let show_3d = match shown {
@@ -2049,7 +2056,15 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                     }
                 }
                 (InspectorTab::Locators, Some(inspected), Some(_)) => {
-                    if let Some(amod) = locators_tab(ui, inspected, frames) {
+                    let animating = state
+                        .animations
+                        .get(&inspected.path)
+                        .copied()
+                        .flatten()
+                        .is_some();
+                    if let Some(amod) =
+                        locators_tab(ui, inspected, frames, &mut state.locators, animating)
+                    {
                         match amod::write(&inspected.path, &amod) {
                             Ok(()) => {
                                 state.reinspect = true;
@@ -4496,7 +4511,11 @@ fn canvas_compiled_mesh(
         inspected.uploaded_lod = Some(lod);
     }
     preview.compiled_shown = true;
-    let MeshView { display, overlays } = mesh_view;
+    let MeshView {
+        display,
+        overlays,
+        hide_locators,
+    } = mesh_view;
     preview.display = *display;
     // Meshlets exist only for LOD 0.
     let available = |overlay: MeshOverlay| lod == 0 || !overlay.of_meshlets();
@@ -4518,7 +4537,28 @@ fn canvas_compiled_mesh(
             enabled: true,
         })
         .collect();
-    let bounds: Vec<Tool> = MeshOverlay::ALL
+    let has_locators = !mesh.locators.is_empty();
+    if has_locators && !*hide_locators {
+        // Centered and scaled like the mesh, see docs/features/models.md#compiled-mesh-preview.
+        use bevy::math::{Affine3A, Vec3};
+        let (min, max) = (Vec3::from(mesh.bounds.min), Vec3::from(mesh.bounds.max));
+        let size = (max - min).max_element();
+        let scale = if size > 0.0 {
+            preview3d::MODEL_SIZE / size
+        } else {
+            1.0
+        };
+        let fit = Affine3A::from_scale(Vec3::splat(scale))
+            * Affine3A::from_translation(-(min + max) / 2.0);
+        let camera = gizmo::ViewCamera::new(rect, &preview.orbit);
+        let painter = ui.painter_at(rect);
+        for (name, transform) in &mesh.locators {
+            if let Some((dot, ends)) = gizmo::marker(&camera, fit * *transform) {
+                paint_marker(&painter, dot, &ends, name, false);
+            }
+        }
+    }
+    let mut bounds: Vec<Tool> = MeshOverlay::ALL
         .into_iter()
         .enumerate()
         .map(|(i, overlay)| Tool {
@@ -4535,12 +4575,19 @@ fn canvas_compiled_mesh(
             enabled: available(overlay),
         })
         .collect();
+    bounds.push(Tool {
+        glyph: Glyph::Icon(Icon::MapPin),
+        name: "Locators".into(),
+        on: has_locators && !*hide_locators,
+        enabled: has_locators,
+    });
     let seen = vision_tools(*vision);
     match toolbar(ui, rect, &[&tools, &bounds, &seen]) {
         Some((0, button)) => {
             *display = MeshDisplay::ALL[button];
             ui.ctx().request_repaint();
         }
+        Some((1, button)) if button == MeshOverlay::ALL.len() => *hide_locators = !*hide_locators,
         Some((1, button)) => {
             overlays[button] = !overlays[button];
             ui.ctx().request_repaint();
@@ -4848,12 +4895,42 @@ fn canvas_model(
         return out;
     };
     preview.model = Some(model);
+    let joints = &inspected.inspection.joints;
     let mut edit = match &mut inspected.mesh {
         Some(Ok(edit)) => Some(edit),
         _ => None,
     };
+    // Transforms are relative to joints at rest; see docs/features/locators.md#animations.
+    let locked = preview.animation.is_some();
     let camera = gizmo::ViewCamera::new(rect, &preview.orbit);
     let frames = preview.frames.clone().filter(|_| tools.shown);
+
+    // The answer to a Place click; see docs/features/locators.md#place-on-surface.
+    if let Some(hit) = preview.surface_hit.take()
+        && let Some(target) = tools.placing.take()
+        && let (Some(hit), Some(edit), Some(frames)) = (hit, &mut edit, &frames)
+        && !locked
+    {
+        let i = match target.filter(|&i| i < edit.edit.locators.len()) {
+            Some(i) => i,
+            None => {
+                add_locator(edit);
+                edit.edit.locators.len() - 1
+            }
+        };
+        edit.locator = Some(i);
+        let locator = &mut edit.edit.locators[i];
+        if locator.joint.is_none()
+            && let Some(joint) = hit.joint.filter(|j| joints.contains(j))
+        {
+            locator.joint = Some(joint);
+        }
+        if let Some(parent) = frames.parent(locator.joint.as_deref()) {
+            gizmo::place(locator, parent, hit.point, hit.normal);
+        }
+        out.show_tab = true;
+    }
+
     // Each locator's world transform in the pose shown; `None` when its joint is not found.
     let worlds: Vec<Option<bevy::math::Affine3A>> = match (&edit, &frames) {
         (Some(edit), Some(frames)) => edit
@@ -4872,7 +4949,9 @@ fn canvas_model(
         .as_ref()
         .and_then(|e| e.locator)
         .filter(|&i| worlds.get(i).copied().flatten().is_some());
-    let handles = chosen.and_then(|i| gizmo::Gizmo::new(&camera, worlds[i]?, tools.mode));
+    let handles = chosen
+        .filter(|_| !locked)
+        .and_then(|i| gizmo::Gizmo::new(&camera, worlds[i]?, tools.mode));
     if handles.is_none() {
         tools.drag = None;
     }
@@ -4917,55 +4996,59 @@ fn canvas_model(
         && !grabbing
         && let Some(edit) = &mut edit
         && frames.is_some()
+        && let Some(at) = response.interact_pointer_pos()
     {
-        let at = response.interact_pointer_pos();
-        edit.locator = at.and_then(|at| {
-            markers
-                .iter()
-                .map(|(i, (dot, _))| (*i, (*dot - at).length()))
-                .filter(|(_, d)| *d <= gizmo::PICK)
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(i, _)| i)
-        });
-        out.show_tab = edit.locator.is_some();
+        let picked = markers
+            .iter()
+            .map(|(i, (dot, _))| (*i, (*dot - at).length()))
+            .filter(|(_, d)| *d <= gizmo::PICK)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i);
+        if picked.is_some() {
+            edit.locator = picked;
+            out.show_tab = true;
+        } else if tools.mode == gizmo::Mode::Place {
+            if !locked {
+                preview.surface_ray = Some(camera.ray(at));
+                tools.placing = Some(edit.locator);
+                ui.ctx().request_repaint();
+            }
+        } else {
+            edit.locator = None;
+        }
     }
-    if ui.rect_contains_pointer(rect) && ui.memory(|m| m.focused().is_none()) {
+    if !locked && ui.rect_contains_pointer(rect) && ui.memory(|m| m.focused().is_none()) {
         ui.input(|i| {
             if i.key_pressed(egui::Key::W) {
                 tools.mode = gizmo::Mode::Move;
             } else if i.key_pressed(egui::Key::E) {
                 tools.mode = gizmo::Mode::Rotate;
+            } else if i.key_pressed(egui::Key::S) {
+                tools.mode = gizmo::Mode::Place;
             }
         });
     }
 
+    // Models shown at locators; see docs/features/locators.md#attachment-preview.
+    if let Some(edit) = &edit
+        && tools.shown
+    {
+        for l in &edit.edit.locators {
+            if let Some(path) = &l.preview {
+                preview.attachments.push(preview3d::Attachment {
+                    path: path.into(),
+                    joint: l.joint.clone(),
+                    transform: Transform::from_matrix(Mat4::from(gizmo::local(l))),
+                });
+            }
+        }
+    }
+
     let painter = ui.painter_at(rect);
-    let axes = [CHANNEL_R, CHANNEL_G, CHANNEL_B];
     if let Some(edit) = &edit {
         for (i, (dot, ends)) in &markers {
-            for (end, color) in ends.iter().zip(axes) {
-                if let Some(end) = end {
-                    painter.line_segment([*dot, *end], Stroke::new(1.5, color));
-                }
-            }
-            let (radius, fill) = if chosen == Some(*i) {
-                (7.0, ACCENT)
-            } else {
-                (5.0, TEXT)
-            };
-            painter.circle_filled(*dot, radius, fill);
-            let galley = painter.layout_no_wrap(
-                edit.edit.locators[*i].name.clone(),
-                FontId::proportional(12.0),
-                TEXT,
-            );
-            let at = pos2(dot.x + 12.0, dot.y - galley.size().y / 2.0);
-            painter.rect_filled(
-                Rect::from_min_size(at, galley.size()).expand2(vec2(4.0, 1.0)),
-                3,
-                BG_BAR.gamma_multiply(0.7),
-            );
-            painter.galley(at, galley, TEXT);
+            let name = &edit.edit.locators[*i].name;
+            paint_marker(&painter, *dot, ends, name, chosen == Some(*i));
         }
     }
     if let Some(handles) = &handles {
@@ -4976,7 +5059,7 @@ fn canvas_model(
                 (2.0, color)
             }
         };
-        for (i, color) in axes.into_iter().enumerate() {
+        for (i, color) in MARKER_AXES.into_iter().enumerate() {
             match tools.mode {
                 gizmo::Mode::Move => {
                     if let Some(tip) = handles.arrows[i] {
@@ -4998,6 +5081,7 @@ fn canvas_model(
                         painter.add(egui::Shape::line(run.clone(), Stroke::new(width, color)));
                     }
                 }
+                gizmo::Mode::Place => {}
             }
         }
         if tools.mode == gizmo::Mode::Move {
@@ -5012,13 +5096,14 @@ fn canvas_model(
         on,
         enabled: true,
     };
+    let mode = |icon, name: &str, mode| Tool {
+        enabled: !locked,
+        ..tool(icon, name, !locked && tools.mode == mode)
+    };
     let locator_tools = [
-        tool(Icon::Move3d, "Move (W)", tools.mode == gizmo::Mode::Move),
-        tool(
-            Icon::Rotate3d,
-            "Rotate (E)",
-            tools.mode == gizmo::Mode::Rotate,
-        ),
+        mode(Icon::Move3d, "Move (W)", gizmo::Mode::Move),
+        mode(Icon::Rotate3d, "Rotate (E)", gizmo::Mode::Rotate),
+        mode(Icon::Crosshair, "Place on surface (S)", gizmo::Mode::Place),
         tool(Icon::MapPin, "Locators", tools.shown),
         Tool {
             enabled: edit.is_some(),
@@ -5029,7 +5114,8 @@ fn canvas_model(
     match toolbar(ui, rect, &[&locator_tools, &seen]) {
         Some((0, 0)) => tools.mode = gizmo::Mode::Move,
         Some((0, 1)) => tools.mode = gizmo::Mode::Rotate,
-        Some((0, 2)) => tools.shown = !tools.shown,
+        Some((0, 2)) => tools.mode = gizmo::Mode::Place,
+        Some((0, 3)) => tools.shown = !tools.shown,
         Some((0, _)) => {
             if let Some(edit) = &mut edit {
                 add_locator(edit);
@@ -5052,6 +5138,34 @@ fn canvas_model(
     out
 }
 
+/// Colors of a locator's X, Y and Z axes.
+const MARKER_AXES: [egui::Color32; 3] = [CHANNEL_R, CHANNEL_G, CHANNEL_B];
+
+/// A locator's dot, axis lines and name; see docs/features/locators.md#3d-view.
+fn paint_marker(
+    painter: &egui::Painter,
+    dot: egui::Pos2,
+    ends: &[Option<egui::Pos2>; 3],
+    name: &str,
+    chosen: bool,
+) {
+    for (end, color) in ends.iter().zip(MARKER_AXES) {
+        if let Some(end) = end {
+            painter.line_segment([dot, *end], Stroke::new(1.5, color));
+        }
+    }
+    let (radius, fill) = if chosen { (7.0, ACCENT) } else { (5.0, TEXT) };
+    painter.circle_filled(dot, radius, fill);
+    let galley = painter.layout_no_wrap(name.to_owned(), FontId::proportional(12.0), TEXT);
+    let at = pos2(dot.x + 12.0, dot.y - galley.size().y / 2.0);
+    painter.rect_filled(
+        Rect::from_min_size(at, galley.size()).expand2(vec2(4.0, 1.0)),
+        3,
+        BG_BAR.gamma_multiply(0.7),
+    );
+    painter.galley(at, galley, TEXT);
+}
+
 /// Adds a locator at the model's origin and chooses it; see docs/features/locators.md#locators-tab.
 fn add_locator(edit: &mut MeshEdit) {
     let locators = &mut edit.edit.locators;
@@ -5059,13 +5173,62 @@ fn add_locator(edit: &mut MeshEdit) {
     edit.locator = Some(locators.len() - 1);
 }
 
+/// Makes or updates the left / right counterpart of locator `i` and chooses it; see
+/// docs/features/locators.md#mirroring.
+fn mirror_locator(
+    edit: &mut MeshEdit,
+    i: usize,
+    joints: &[String],
+    frames: &ModelFrames,
+    axis: usize,
+) {
+    let source = edit.edit.locators[i].clone();
+    let Some(name) = gizmo::mirror_name(&source.name) else {
+        return;
+    };
+    let joint = source.joint.as_ref().map(|j| {
+        gizmo::mirror_name(j)
+            .filter(|m| joints.contains(m))
+            .unwrap_or_else(|| j.clone())
+    });
+    let (Some(from), Some(to)) = (
+        frames.parent(source.joint.as_deref()),
+        frames.parent(joint.as_deref()),
+    ) else {
+        return;
+    };
+    let world = gizmo::mirrored(frames.model, from * gizmo::local(&source), axis);
+    let mut mirrored = amod::Locator {
+        name,
+        joint,
+        ..source.clone()
+    };
+    gizmo::set_local(&mut mirrored, to.inverse() * world);
+    mirrored.scale = source.scale;
+    let locators = &mut edit.edit.locators;
+    let k = match locators.iter().position(|l| l.name == mirrored.name) {
+        Some(k) => {
+            locators[k] = mirrored;
+            k
+        }
+        None => {
+            locators.push(mirrored);
+            locators.len() - 1
+        }
+    };
+    edit.locator = Some(k);
+}
+
 /// The Locators tab; returns the sidecar to write. See docs/features/locators.md#locators-tab.
 fn locators_tab(
     ui: &mut Ui,
     inspected: &mut Inspected,
     frames: Option<&ModelFrames>,
+    tools: &mut LocatorTools,
+    animating: bool,
 ) -> Option<Amod> {
     let joints = &inspected.inspection.joints;
+    let models = &inspected.inspection.models;
     let edit = match &mut inspected.mesh {
         Some(Ok(edit)) => edit,
         Some(Err(e)) => {
@@ -5118,28 +5281,58 @@ fn locators_tab(
                         RichText::new("Locator"),
                         |_| {},
                         |_, _| {},
-                        |ui| locator_fields(ui, edit, i, joints, frames),
+                        |ui| {
+                            let fields = LocatorFields {
+                                joints,
+                                models,
+                                frames,
+                                animating,
+                            };
+                            locator_fields(ui, edit, i, &fields, &mut tools.mirror_axis);
+                        },
                     );
+                    if animating {
+                        ui.add_space(4.0);
+                        ui.weak(
+                            "Transforms are locked while an animation plays. Choose Rest pose \
+                             to edit them.",
+                        );
+                    }
                 }
                 ui.add_space(8.0);
                 ui.weak(
                     "Click a locator in the view to choose it. Drag its gizmo to move (W) or \
-                     rotate (E) it.",
+                     rotate (E) it, or click the model to place it (S).",
                 );
             });
         });
     mesh_commit(ui, edit)
 }
 
-/// Name, joint and transform of locator `i`.
+/// What the locator fields choose from.
+struct LocatorFields<'a> {
+    joints: &'a [String],
+    models: &'a [String],
+    frames: Option<&'a ModelFrames>,
+    /// An animation plays: transforms are locked.
+    animating: bool,
+}
+
+/// Name, joint, transform, preview and mirroring of locator `i`.
 fn locator_fields(
     ui: &mut Ui,
     edit: &mut MeshEdit,
     i: usize,
-    joints: &[String],
-    frames: Option<&ModelFrames>,
+    fields: &LocatorFields,
+    mirror_axis: &mut usize,
 ) {
     use bevy::math::{EulerRot, Quat};
+    let LocatorFields {
+        joints,
+        models,
+        frames,
+        animating,
+    } = *fields;
     let saved_name = edit.saved.locators.get(i).map(|l| l.name.clone());
     let locators = &mut edit.edit.locators;
     let mut renamed = false;
@@ -5156,51 +5349,88 @@ fn locator_fields(
     }
 
     let locator = &mut locators[i];
-    let mut joint = locator.joint.clone();
-    prop_row(ui, "Joint", |ui, width| {
-        egui::ComboBox::from_id_salt("locator_joint")
+    ui.add_enabled_ui(!animating, |ui| {
+        let mut joint = locator.joint.clone();
+        prop_row(ui, "Joint", |ui, width| {
+            egui::ComboBox::from_id_salt("locator_joint")
+                .width(width - 8.0)
+                .selected_text(joint.as_deref().unwrap_or("None (model space)"))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut joint, None, "None (model space)");
+                    for name in joints {
+                        ui.selectable_value(&mut joint, Some(name.clone()), name);
+                    }
+                });
+        });
+        if joint != locator.joint {
+            // Kept in place in the view, at the pose shown.
+            if let Some(frames) = frames
+                && let (Some(from), Some(to)) = (
+                    frames.parent(locator.joint.as_deref()),
+                    frames.parent(joint.as_deref()),
+                )
+            {
+                gizmo::set_local(locator, to.inverse() * from * gizmo::local(locator));
+            }
+            locator.joint = joint;
+        }
+
+        vec3_row(ui, "Position", &mut locator.translation, 0.001, 3, None);
+        let rotation = Quat::from_array(locator.rotation);
+        let rotation = if rotation.length_squared() > 0.0 {
+            rotation.normalize()
+        } else {
+            Quat::IDENTITY
+        };
+        let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
+        // Rounding noise would show as −0.0.
+        let mut degrees = [x, y, z].map(|a| {
+            let d = a.to_degrees();
+            if d.abs() < 1e-3 { 0.0 } else { d }
+        });
+        let before = degrees;
+        vec3_row(ui, "Rotation", &mut degrees, 0.5, 1, None);
+        if degrees != before {
+            let [x, y, z] = degrees.map(f32::to_radians);
+            locator.rotation = Quat::from_euler(EulerRot::XYZ, x, y, z).to_array();
+        }
+        vec3_row(ui, "Scale", &mut locator.scale, 0.01, 3, Some(0.001));
+    });
+
+    prop_row(ui, "Preview", |ui, width| {
+        let mut preview = locator.preview.clone();
+        egui::ComboBox::from_id_salt("locator_preview")
             .width(width - 8.0)
-            .selected_text(joint.as_deref().unwrap_or("None (model space)"))
+            .selected_text(preview.as_deref().unwrap_or("None"))
             .show_ui(ui, |ui| {
-                ui.selectable_value(&mut joint, None, "None (model space)");
-                for name in joints {
-                    ui.selectable_value(&mut joint, Some(name.clone()), name);
+                ui.selectable_value(&mut preview, None, "None");
+                for model in models {
+                    ui.selectable_value(&mut preview, Some(model.clone()), model);
                 }
             });
-    });
-    if joint != locator.joint {
-        // Kept in place in the view, at the pose shown.
-        if let Some(frames) = frames
-            && let (Some(from), Some(to)) = (
-                frames.parent(locator.joint.as_deref()),
-                frames.parent(joint.as_deref()),
-            )
-        {
-            gizmo::set_local(locator, to.inverse() * from * gizmo::local(locator));
+        if preview != locator.preview {
+            locator.preview = preview;
         }
-        locator.joint = joint;
-    }
-
-    vec3_row(ui, "Position", &mut locator.translation, 0.001, 3, None);
-    let rotation = Quat::from_array(locator.rotation);
-    let rotation = if rotation.length_squared() > 0.0 {
-        rotation.normalize()
-    } else {
-        Quat::IDENTITY
-    };
-    let (x, y, z) = rotation.to_euler(EulerRot::XYZ);
-    // Rounding noise would show as −0.0.
-    let mut degrees = [x, y, z].map(|a| {
-        let d = a.to_degrees();
-        if d.abs() < 1e-3 { 0.0 } else { d }
     });
-    let before = degrees;
-    vec3_row(ui, "Rotation", &mut degrees, 0.5, 1, None);
-    if degrees != before {
-        let [x, y, z] = degrees.map(f32::to_radians);
-        locator.rotation = Quat::from_euler(EulerRot::XYZ, x, y, z).to_array();
+
+    let mirrorable = !animating && frames.is_some() && gizmo::mirror_name(&locator.name).is_some();
+    let mut mirror = false;
+    prop_row(ui, "Mirror", |ui, _| {
+        mirror = icon_button(ui, Icon::FlipHorizontal2, "Mirror", mirrorable).clicked();
+        ui.add_enabled_ui(!animating, |ui| {
+            egui::ComboBox::from_id_salt("mirror_axis")
+                .width(48.0)
+                .selected_text(["X", "Y", "Z"][*mirror_axis])
+                .show_ui(ui, |ui| {
+                    for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
+                        ui.selectable_value(mirror_axis, axis, label);
+                    }
+                });
+        });
+    });
+    if mirror && let Some(frames) = frames {
+        mirror_locator(edit, i, joints, frames, *mirror_axis);
     }
-    vec3_row(ui, "Scale", &mut locator.scale, 0.01, 3, Some(0.001));
 }
 
 /// Three drag fields side by side.
@@ -5368,6 +5598,8 @@ struct MeshView {
     display: MeshDisplay,
     /// Bounds drawn over the mesh, by index in [`MeshOverlay::ALL`].
     overlays: [bool; 6],
+    /// The file's locators are not drawn; see docs/features/locators.md#compiled-mesh-preview.
+    hide_locators: bool,
 }
 
 /// The Color vision group: at most one on; see docs/features/canvas.md#color-vision.

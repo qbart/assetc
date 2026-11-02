@@ -57,6 +57,8 @@ pub struct Inspection {
     pub animations: Vec<(String, f32)>,
     /// A model's first skin's named joints, for its locators.
     pub joints: Vec<String>,
+    /// The other glTF models of the input, input-relative and sorted, for locator previews.
+    pub models: Vec<String>,
 }
 
 /// A file's data as a table, for the canvas; see docs/features/inspector.md#data-tables.
@@ -458,6 +460,29 @@ fn compiled_font(
     Ok(())
 }
 
+/// Every glTF model under `input`, input-relative with `/`, sorted.
+fn input_models(input: &Path) -> Vec<String> {
+    fn walk(dir: &Path, input: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, input, out);
+            } else if model::is_model(&path)
+                && let Ok(rel) = crate::build::relative(input, &path)
+            {
+                out.push(rel);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(input, input, &mut out);
+    out.sort();
+    out
+}
+
 fn model_rows(
     project: &Project,
     file: &Path,
@@ -469,6 +494,10 @@ fn model_rows(
     out.animations = model::animations(&data)?;
     out.joints = model::joint_names(&data)?;
     out.model = true;
+    if let Some(input) = project.input_dir() {
+        out.models = input_models(&input);
+        out.models.retain(|m| m != rel);
+    }
     // Compiled to an `.amesh` and more, see docs/features/models.md#build.
     match mesh_options(project, file, rel) {
         Ok(options) => {
