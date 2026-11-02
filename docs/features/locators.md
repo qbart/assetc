@@ -101,7 +101,11 @@ it when it exists:
   `LeftHand` ↔ `RightHand`). A name without such a token cannot be mirrored
   (the button is disabled).
 - **Joint**: the joint's name with its tokens swapped the same way, when the
-  skin has a joint with that name; otherwise the same joint (e.g. the spine).
+  skin has a joint with that name; failing that, the first joint whose name
+  equals it once a trailing number (digits, and a `_`, `.` or `-` before
+  them) is left out of both, as skeletons often number each side apart
+  (`b_LeftForeArm_010` → `b_RightForeArm_07`); otherwise the same joint
+  (e.g. the spine).
   Model space stays model space.
 - **Transform**: the locator's transform in model space, at the pose shown,
   reflected across the chosen plane through the origin (`S · T · S`, with `S`
