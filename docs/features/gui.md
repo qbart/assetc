@@ -181,7 +181,7 @@ embedded in the binary. Their `currentColor` stroke is rendered white and
 tinted per use. In use: `info` (inspector tabs), `refresh-cw`
 (rescan), `hammer` (build), `files` (Inspector Assets tab), `film` (Inspector Animations tab), `images` (Inspector Mipmaps tab),
 `bring-to-front` (Inspector Levels of detail tab), `map-pin` (Inspector
-Locators tab, canvas locator toggle), `move-3d`, `rotate-3d` (canvas locator
+Locators tab, compiled mesh locator toggle), `move-3d`, `rotate-3d` (locator
 gizmo modes), `crosshair` (placing locators on the surface),
 `flip-horizontal-2` (mirroring locators), `plus`, `trash-2`, `refresh-cw`
 (adding, deleting and reverting locators), `check` (menu

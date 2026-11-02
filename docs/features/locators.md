@@ -22,6 +22,7 @@ in the Inspector's [Locators tab](#locators-tab) and directly in the
 | Rotation    | Unit quaternion `x y z w` relative to the parent. The Inspector edits it as Euler angles in degrees (X, then Y, then Z). |
 | Scale       | Per axis, relative to the parent.                                        |
 | Preview     | Another glTF model of the Input tree shown at the locator in the [3D view](#attachment-preview), e.g. the sword in the hand; for assetc only, not compiled. |
+| Color       | The color of its marker in the [3D view](#3d-view), as a hint of what it is (e.g. weapons red, effects blue); for assetc only, not compiled. |
 
 - **Model space** is the space of the default scene's root nodes, which is
   the space of a static model's `.amesh` vertices (see
@@ -88,10 +89,9 @@ Inspector lists, the 3D view draws and the build compiles.
 
 ### Editing inherited locators
 
-- In the [Locators tab](#locators-tab), an inherited locator's row shows
-  where it comes from after its parent: `b_Head · file` or
-  `b_Head · hero.glb` (the preset's model file name), and `, changed` when
-  the sidecar replaces it.
+- In the [Locators tab](#locators-tab), an inherited locator's card says
+  where it comes from: `From the file` or `From hero.glb` (the preset's
+  model file name), and `, changed here` when the sidecar replaces it.
 - Its name cannot be edited (the field is disabled).
 - Any other change (fields, gizmo, Place, being the target of Mirror) writes
   the whole locator into the sidecar, which then replaces the inherited one.
@@ -104,28 +104,53 @@ Inspector lists, the 3D view draws and the build compiles.
 ## Locators tab
 
 The Inspector's **Locators** tab (`map-pin`) is shown for a model in the
-Input tree (`*.gltf`, `*.glb`). It lists and edits the model's locators, in
-the [property editor](gui.md#property-editor) look, inside 8 px margins.
+Input tree (`*.gltf`, `*.glb`). Locators are managed here only; the 3D view
+draws them and their gizmo. In the
+[property editor](gui.md#property-editor) look, inside 8 px margins, from
+the top:
 
-- A list of the locators, rows like the
-  [Animations tab](models.md#animations-tab)'s (28 px, hover `BG_HEADER`,
-  chosen `ACCENT` at 25%): the name (14 px, `TEXT`) and, right-aligned, its
-  joint's name or `model` (13 px, `TEXT_WEAK`). Clicking a row chooses the
-  locator, in the tab and in the 3D view. With no locators: weak
-  `No locators`.
-- Below the list, a row of buttons: **Add** (`plus`) adds a locator named
-  `locator`, or `locator_<n>` (the smallest `n` from 2 that is free), in model
-  space at the origin with no rotation and scale 1, after the others, and
-  chooses it; **Delete** (`trash-2`, enabled with a locator chosen) removes the
-  chosen one and chooses the one after it (or before, when it was last).
-- With a locator chosen, a **Locator** section (not folding) with:
+- **Add** (`plus` and text) adds a locator named `locator`, or
+  `locator_<n>` (the smallest `n` from 2 that is free), in model space at
+  the origin with no rotation and scale 1, after the others, and unfolds it.
+- **Place on surface** (`crosshair` and text, key `S`): the next click on
+  the model adds a locator there, see [Place on surface](#place-on-surface).
+  While armed the button is filled with `ACCENT` at 25%; clicking it again or
+  `Escape` disarms it.
+- With no locators, nothing else (a weak `No locators` line).
+- The **list**: one card per locator, in the model's order, like the
+  [gradient cards](gradients.md#gradients-tab). The list is an
+  **accordion**: at most one card is unfolded, its locator is the *chosen*
+  one (in the tab and in the 3D view); unfolding a card folds the others,
+  and folding it chooses none. All are folded to start with.
+- **Card header**: the chevron, a 10 px dot in the locator's color (`TEXT`
+  without one), the name (a click on it or the chevron folds and unfolds),
+  and on the right:
+  - **Visible** (a checkbox, on to start with): off hides the locator's
+    marker, gizmo and preview in the 3D view, and markers that are hidden
+    cannot be clicked. It is not saved: it lasts for the session, per model
+    and locator name.
+  - **Move** (`move-3d`) and **Rotate** (`rotate-3d`): turn the
+    [gizmo](#3d-view) on this locator on in that mode (choosing and
+    unfolding it), or off when it already is; the button showing the gizmo's
+    mode on the chosen locator is filled with `ACCENT`. Disabled while an
+    animation plays or the locator is hidden.
+  - Unfolded only: **Delete** (`trash-2`), or **Revert** / disabled Delete for
+    an [inherited](#editing-inherited-locators) locator. Deleting chooses
+    none.
+- **Card body** (unfolded):
+  - A weak line for an inherited locator: `From the file` / `From <file>`,
+    and `, changed here` when the sidecar replaces it.
   - **Name**: a text field. When it loses focus empty or equal to another
     locator's name, it gets the old name back.
+  - **Color**: a row of swatches (18 px squares, 4 px corners): **none**
+    (a `TEXT_WEAK` outline with a diagonal line) and eight colors (`#ef4444`,
+    `#f97316`, `#eab308`, `#22c55e`, `#06b6d4`, `#3b82f6`, `#a855f7`,
+    `#ec4899`); the locator's one has a 2 px `TEXT` border. A color written
+    by hand in the sidecar that is not one of them shows as an extra swatch.
   - **Joint**: a dropdown with `None (model space)` and the first skin's named
-    joints in skin order. Choosing another keeps the locator where it is in
-    the 3D view (its transform is converted to the new parent's space, at the
-    pose shown), when the view has the model; otherwise the values are kept as
-    they are.
+    joints in skin order. Choosing one puts the locator **on** it: position
+    and rotation are reset (0 and none) relative to the new parent, so it
+    sits at the joint (or the model's origin); scale is kept.
   - **Position** X, Y, Z (drag fields, 0.001 per point, three decimals),
     **Rotation** X, Y, Z (drag fields, degrees, 0.5 per point, one decimal)
     and **Scale** X, Y, Z (drag fields, 0.01 per point, three decimals, at
@@ -138,12 +163,11 @@ the [property editor](gui.md#property-editor) look, inside 8 px margins.
   - **Mirror**: a **Mirror** button (`flip-horizontal-2`) and a dropdown of the
     plane to mirror across: `X` (the default), `Y` or `Z`, in model space
     (the dropdown's choice lasts for the session). See [Mirroring](#mirroring).
-- While an [animation plays](#animations), Joint, Position, Rotation, Scale
-  and Mirror are disabled, and a weak line under the section says
-  `Transforms are locked while an animation plays. Choose Rest pose to edit
-  them.`
-- A weak hint at the bottom: `Click a locator in the view to choose it. Drag
-  its gizmo to move (W) or rotate (E) it, or click the model to place it (S).`
+  - While an [animation plays](#animations), Joint, Position, Rotation, Scale
+    and Mirror are disabled, and a weak line ends the body:
+    `Transforms are locked while an animation plays. Choose Rest pose to
+    edit them.`
+- A weak hint at the bottom: `Click a locator in the view to choose it.`
 - The chosen locator (by index) is remembered while the file is the
   inspected one; it is cleared when another file is inspected.
 
@@ -189,19 +213,25 @@ it when it exists:
 
 ## 3D view
 
-The model's [preview](models.md#preview) draws its locators over the model,
-on top of it (they are never hidden by faces, so locators inside the mesh can
-be seen and picked), following their joints in the shown pose and animation.
+The model's [preview](models.md#preview) draws its visible locators over
+the model, on top of it (they are never hidden by faces, so locators inside
+the mesh can be seen and picked), following their joints in the shown pose
+and animation. The canvas has no locator buttons: they are in the
+[Locators tab](#locators-tab).
 
-- **Markers**: each locator is a 5 px dot with three 16 px lines along its
-  X, Y and Z axes (`CHANNEL_R`, `CHANNEL_G`, `CHANNEL_B`) and its name to the
-  right of the dot (12 px, `TEXT` on a `BG_BAR` 70% plate). The chosen one's
-  dot is `ACCENT` and 7 px; the others' are `TEXT`.
-- **Choosing**: clicking within 8 px of a dot chooses that locator (the
-  nearest one) and shows the Locators tab; clicking elsewhere (without
-  dragging) clears the choice. Dragging still orbits the camera.
-- **Gizmo** on the chosen locator, in its own (local) axes, in one of two
-  modes:
+- **Markers**: each locator is a dot in its color (`TEXT` without one), 5 px
+  across, with three 16 px lines along its X, Y and Z axes (`CHANNEL_R`,
+  `CHANNEL_G`, `CHANNEL_B`) and its name to the right of the dot (12 px,
+  `TEXT` on a `BG_BAR` 70% plate). The chosen one's dot is 7 px with a 2 px
+  `ACCENT` ring.
+- **Choosing**: clicking within 8 px of a visible dot chooses that locator
+  (the nearest one), unfolds its card and shows the Locators tab; clicking
+  elsewhere (without dragging, and not placing) chooses none. Dragging still
+  orbits the camera.
+- **Gizmo** on the chosen locator, in its own (local) axes, when turned on
+  with its card's **Move** or **Rotate** button (or `W` / `E`); off to start
+  with, and turned off by choosing another locator through the list's
+  chevron, by `Escape`, or by its button again:
 
   | Mode   | Draws | Dragging |
   |--------|-------|----------|
@@ -216,38 +246,30 @@ be seen and picked), following their joints in the shown pose and animation.
     15% of 80 px) is not drawn and cannot be dragged.
   - Sizes are on screen: the gizmo stays the same size when the camera moves
     closer or farther.
-- **Toolbar**: a group above the Color vision group:
-
-  | Button     | Icon        | Action |
-  |------------|-------------|--------|
-  | Move       | `move-3d`   | gizmo in Move mode (the default) |
-  | Rotate     | `rotate-3d` | gizmo in Rotate mode |
-  | Locators   | `map-pin`   | toggle: show markers and the gizmo (on to start with); off hides them and ignores clicks on them |
-  | Add locator | `plus`     | adds a locator, as the tab's Add button, and shows the Locators tab |
-
-  The mode and the toggle last for the session, for every model.
+  - The gizmo's mode lasts for the session; choosing another locator in the
+    3D view keeps it on, in that mode, for the new one.
 - **Keys** (pointer over the canvas, no text field focused): `W` Move, `E`
-  Rotate, `S` Place; see [`KEYS.md`](../../KEYS.md#canvas-3d).
+  Rotate (on the chosen locator, or off when already in that mode), `S` arms
+  Place on surface, `Escape` turns the gizmo off and disarms Place; see
+  [`KEYS.md`](../../KEYS.md#canvas-3d).
 
 ### Place on surface
 
-The toolbar's **Place** mode (`crosshair`, key `S`) puts a locator on the
-model's surface:
+**Place on surface** in the tab (or `S`) arms placing; then:
 
-- Clicking within 8 px of a marker still chooses it. Clicking the model
-  elsewhere places the chosen locator where the pointer's ray first hits a
-  triangle, or adds a new locator there (as **Add**) when none is chosen.
-  Clicking empty space does nothing; dragging orbits.
+- Clicking within 8 px of a visible marker still chooses it. Clicking the
+  model elsewhere **adds a locator** (as **Add**) where the pointer's ray
+  first hits a triangle, unfolds it, and disarms. Clicking empty space does
+  nothing; dragging orbits.
 - The locator's position is the hit point; its rotation turns its **Y** axis
   along the surface's normal (the triangle's, facing the camera), keeping X
-  and Z as the shortest turn from the model's; its scale is kept.
-- A locator without a joint on a skinned model is attached to the joint
-  that weighs most on the hit triangle (the sum of its three vertices'
-  weights), when that joint has a name; a locator with a joint keeps it.
+  and Z as the shortest turn from the model's.
+- On a skinned model it is attached to the joint that weighs most on the hit
+  triangle (the sum of its three vertices' weights), when that joint has a
+  name; otherwise it is in model space.
 - The ray is cast against the triangles as drawn: skinned meshes in the pose
   shown, through their joints (Bevy's mesh ray cast ignores skinning, so
   assetc casts its own).
-- No gizmo is drawn in this mode; the chosen marker shows as usual.
 
 ### Animations
 
@@ -255,10 +277,12 @@ While the [Animations tab](models.md#animations-tab) plays an animation,
 locators follow their joints, but their transforms cannot be changed: they
 are relative to the joint at rest, and the pose shown moves every frame.
 
-- The gizmo is not drawn; Move, Rotate and Place are disabled in the
-  toolbar; markers can still be clicked to choose them.
-- The Locators tab disables what moves a locator (see
-  [Locators tab](#locators-tab)); Add, Delete, Name and Preview still work.
+- The gizmo is not drawn; Place on surface and the cards' Move and Rotate
+  are disabled (placing is disarmed); markers can still be clicked to choose
+  them.
+- The cards disable what moves a locator (see
+  [Locators tab](#locators-tab)); Add, Delete, Name, Color, Visible and
+  Preview still work.
 - Choosing **Rest pose** unlocks them.
 
 ### Attachment preview
@@ -271,7 +295,7 @@ socket can be checked with what it will hold:
   (joint or model) and scaled with the shown model's fit, so it keeps its
   units relative to the model; it follows joints and animations. Its own
   animations do not play.
-- It is shown only while the Locators toggle is on and the shown model is
+- It is shown only while the locator is visible and the shown model is
   fitted; a file that does not load shows nothing.
 - It is not compiled: the game attaches what it wants.
 

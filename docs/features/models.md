@@ -63,8 +63,8 @@ Selecting a model shows it in the canvas' [3D view](canvas.md#3d) instead of
 a shape.
 
 - The view bar is empty (no `View` label, no buttons): a model only exists
-  in 3D. The toolbar (Shape, Channels) is not shown; it has the
-  [locator](locators.md#3d-view) group and Color vision.
+  in 3D. The toolbar (Shape, Channels) is not shown; it has only Color
+  vision.
 - The model's [locators](locators.md) are drawn over it and edited there,
   see [`locators.md`](locators.md#3d-view).
 - Loaded with Bevy's glTF loader from an asset source registered at startup
