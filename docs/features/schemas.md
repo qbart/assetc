@@ -178,7 +178,17 @@ in the type's data encoding:
   does: the [curve editor](curves.md#curve-editor) (320 px wide) or the
   [gradient editor](gradients.md#gradient-editor) (320 px wide); clicking
   outside or `Escape` closes it.
-- Anything else (structs, lists, refs): JSON text.
+- A struct: `n of m set` (`TEXT_WEAK`) in the row, and under the row
+  (indented, before the details) the **struct's fields**, one 28 px row each
+  in the struct's field order: the name (monospace, 140 px), the type
+  (monospace, `TEXT_WEAK`, 150 px), a **Set** checkbox and, ticked, the
+  value's editor (any of these, a nested struct's own rows under its row).
+  A struct default is partial ([§3](../aschema.md#3-type-expressions)): an
+  unticked field is left out and falls back to the struct's own default.
+  Ticking one starts from that field's own default, else its type's
+  implicit default. A struct already being shown higher up (an embedding
+  loop, itself a problem) is edited as JSON text instead.
+- Lists and refs: JSON text.
 
 A default that does not encode as the type is kept as typed and reported as
 a problem.
