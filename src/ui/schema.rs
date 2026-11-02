@@ -341,12 +341,12 @@ fn type_header(ui: &mut Ui, edit: &mut SchemaEdit, ti: usize) {
 }
 
 /// Column widths of the fields table: name, type, default, min/max/step, group, label.
-const NAME_W: f32 = 120.0;
-const TYPE_W: f32 = 150.0;
-const DEFAULT_W: f32 = 140.0;
-const NUMBER_W: f32 = 56.0;
-const TEXT_W: f32 = 90.0;
-const DOC_W: f32 = 160.0;
+const NAME_W: f32 = 110.0;
+const TYPE_W: f32 = 130.0;
+const DEFAULT_W: f32 = 130.0;
+const NUMBER_W: f32 = 50.0;
+const TEXT_W: f32 = 80.0;
+const DOC_W: f32 = 100.0;
 
 /// The fields table, groups and Add buttons of struct `ti`; see
 /// docs/features/schemas.md#struct.
@@ -376,7 +376,7 @@ fn struct_editor(
         head(ui, "Step", NUMBER_W);
         head(ui, "Group", TEXT_W);
         head(ui, "Label", TEXT_W);
-        head(ui, "Doc", DOC_W);
+        head(ui, "Doc", (ui.available_width() - 60.0).max(DOC_W));
     });
     let dragging = Cell::new(None);
     let dropped = Cell::new(None);
@@ -435,7 +435,9 @@ fn struct_editor(
                     };
                     text(ui, &mut field.group, TEXT_W);
                     text(ui, &mut field.label, TEXT_W);
-                    text(ui, &mut field.doc, DOC_W);
+                    // Doc takes what the two buttons leave.
+                    let doc = (ui.available_width() - 2.0 * 30.0).max(DOC_W);
+                    text(ui, &mut field.doc, doc);
                     let chevron = if open {
                         Icon::ChevronDown
                     } else {
@@ -543,7 +545,8 @@ fn type_cell(ui: &mut Ui, field: &mut Field, schema: &Schema, parses: bool) {
         .font(egui::TextStyle::Monospace)
         .text_color(color);
     ui.add_sized(vec2(TYPE_W, 22.0), edit);
-    ui.menu_button("▾", |ui| {
+    let button = egui::Button::image(Icon::ChevronDown.image(12.0, TEXT_WEAK)).frame(false);
+    egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
         let current = field.ty.clone();
         let mut pick = |ui: &mut Ui, text: String| {
             if menu_item(ui, &text, None).clicked() {
@@ -1070,7 +1073,7 @@ fn curve_editor(ui: &mut Ui, value: &mut Value, state: &mut CurveState) {
                 .map(|p| {
                     Value::Array(
                         p.iter()
-                            .map(|&n| aschema::json_number((f64::from(n) * 1e4).round() / 1e4))
+                            .map(|&n| aschema::json_f32((n * 1e4).round() / 1e4))
                             .collect(),
                     )
                 })

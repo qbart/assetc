@@ -619,7 +619,7 @@ fn canonical(ty: &Ty, value: &Value) -> Value {
             Ok(points) => Value::Array(
                 points
                     .iter()
-                    .map(|p| Value::Array(p.iter().map(|&n| json_number(f64::from(n))).collect()))
+                    .map(|p| Value::Array(p.iter().map(|&n| json_f32(n)).collect()))
                     .collect(),
             ),
             Err(_) => v.clone(),
@@ -643,6 +643,11 @@ fn canonical(ty: &Ty, value: &Value) -> Value {
         (Ty::Optional(t), v) if !v.is_null() => canonical(t, v),
         _ => value.clone(),
     }
+}
+
+/// An `f32` as JSON in its shortest decimal form (`0.2`, not `0.20000000298`).
+pub fn json_f32(n: f32) -> Value {
+    json_number(n.to_string().parse::<f64>().unwrap_or(0.0))
 }
 
 /// A number as JSON: an integer when it is one.
@@ -974,6 +979,7 @@ mod tests {
         // Colours lower-cased, curve points in full, unknown keys kept in place.
         assert!(text.contains("\"default\": \"#c8c8c8\""));
         assert!(text.contains("-1.5,\n"));
+        assert!(text.contains("0.2,\n"));
         assert!(text.contains("\"editor_note\": \"keep me\""));
         assert!(text.contains("\"color_hint\": 3"));
         assert!(text.contains("\"x_tool\""));
