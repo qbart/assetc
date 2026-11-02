@@ -7484,16 +7484,16 @@ struct Timeline {
     flashes: HashMap<usize, Instant>,
 }
 
-/// The previous (or next) multiple of 0.01 s strictly before (after) `t`.
-fn step_time(t: f32, forward: bool) -> f32 {
-    const STEP: f32 = 0.01;
-    const SLACK: f32 = 1e-4;
+/// The previous (or next) multiple of `step` strictly before (after) `t`; a time within a
+/// hundredth of a step of a multiple counts as on it.
+fn step_time(t: f32, step: f32, forward: bool) -> f32 {
+    let slack = step / 100.0;
     let k = if forward {
-        ((t + SLACK) / STEP).floor() + 1.0
+        ((t + slack) / step).floor() + 1.0
     } else {
-        ((t - SLACK) / STEP).ceil() - 1.0
+        ((t - slack) / step).ceil() - 1.0
     };
-    k * STEP
+    k * step
 }
 
 /// `0.5 s`, `1 s`, `0.25 s`: seconds without trailing zeros.
@@ -7559,19 +7559,24 @@ fn timeline(
     {
         state.paused = !state.paused;
     }
-    // `,` and `.` step to the previous / next hundredth of a second, paused.
+    // `,` and `.` step to the previous / next hundredth of a second (thousandth with Shift),
+    // paused; `E` toggles an event at the playhead.
+    let mut toggle = false;
     if !ui.ctx().egui_wants_keyboard_input() {
-        let (back, forward) = ui.input(|i| {
+        let (back, forward, fine) = ui.input(|i| {
             (
                 i.key_pressed(egui::Key::Comma),
                 i.key_pressed(egui::Key::Period),
+                i.modifiers.shift,
             )
         });
         if back || forward {
-            now = step_time(now, forward).clamp(0.0, duration);
+            let step = if fine { 0.001 } else { 0.01 };
+            now = step_time(now, step, forward).clamp(0.0, duration);
             preview.animation_seek = Some(now);
             state.paused = true;
         }
+        toggle = ui.input(|i| i.key_pressed(egui::Key::E) && i.modifiers.is_none());
     }
 
     // Header.
@@ -7694,6 +7699,26 @@ fn timeline(
                 }
             }
             _ => state.drag = None,
+        }
+    }
+    if toggle {
+        let at = edit
+            .edit
+            .events
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.animation == name)
+            .map(|(i, e)| (i, (e.time - now).abs()))
+            .filter(|(_, d)| *d <= 0.0005)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .map(|(i, _)| i);
+        match at {
+            Some(i) => {
+                edit.edit.events.remove(i);
+                edit.event = None;
+                state.flashes.clear();
+            }
+            None => add = true,
         }
     }
     if add {
@@ -8945,12 +8970,16 @@ mod tests {
     #[test]
     fn steps_land_on_hundredths() {
         let close = |a: f32, b: f32| (a - b).abs() < 1e-5;
-        assert!(close(step_time(0.304, false), 0.30));
-        assert!(close(step_time(0.304, true), 0.31));
-        assert!(close(step_time(0.30, false), 0.29));
-        assert!(close(step_time(0.30, true), 0.31));
+        assert!(close(step_time(0.304, 0.01, false), 0.30));
+        assert!(close(step_time(0.304, 0.01, true), 0.31));
+        assert!(close(step_time(0.30, 0.01, false), 0.29));
+        assert!(close(step_time(0.30, 0.01, true), 0.31));
         // A time a hair under a hundredth counts as on it.
-        assert!(close(step_time(0.29999, false), 0.29));
-        assert!(close(step_time(0.29999, true), 0.31));
+        assert!(close(step_time(0.29999, 0.01, false), 0.29));
+        assert!(close(step_time(0.29999, 0.01, true), 0.31));
+        // Thousandths with Shift.
+        assert!(close(step_time(0.3045, 0.001, false), 0.304));
+        assert!(close(step_time(0.3045, 0.001, true), 0.305));
+        assert!(close(step_time(0.305, 0.001, true), 0.306));
     }
 }
