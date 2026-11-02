@@ -67,12 +67,13 @@ pub enum Icon {
     Torus,
     Trash2,
     Type,
+    Workflow,
     Wrench,
     X,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 64] = [
+const SVGS: [(&str, &str); 65] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -183,6 +184,7 @@ const SVGS: [(&str, &str); 64] = [
     ("torus", include_str!("../assets/icons/torus.svg")),
     ("trash-2", include_str!("../assets/icons/trash-2.svg")),
     ("type", include_str!("../assets/icons/type.svg")),
+    ("workflow", include_str!("../assets/icons/workflow.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
     ("x", include_str!("../assets/icons/x.svg")),
 ];

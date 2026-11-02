@@ -1,4 +1,5 @@
 mod aanim;
+mod agraph;
 mod amesh;
 mod amod;
 mod aschema;

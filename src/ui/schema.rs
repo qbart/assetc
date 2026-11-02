@@ -43,7 +43,7 @@ fn schema_commit(ui: &Ui, edit: &mut SchemaEdit) -> Option<Schema> {
 }
 
 /// A text field whose edits apply when it loses focus: the new text then, when it changed.
-fn commit_field(
+pub(super) fn commit_field(
     ui: &mut Ui,
     salt: impl std::hash::Hash + std::fmt::Debug,
     current: &str,

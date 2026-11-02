@@ -41,6 +41,15 @@ pub fn create_schema(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Creates `graph.agraph` (or `graph 2.agraph`, …) in `dir`; see
+/// docs/features/graphs.md#creating.
+pub fn create_graph(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "graph", ".agraph");
+    fs::write(&path, crate::agraph::Graph::new().to_json()).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Creates `palette.palette` (or `palette 2.palette`, …) in `dir`; see
 /// docs/features/palettes.md#creating.
 pub fn create_palette(input: &Path, dir: &Path) -> Result<PathBuf, String> {
@@ -162,6 +171,10 @@ mod tests {
         assert_eq!(schema, input.join("schema.aschema"));
         let parsed = crate::aschema::Schema::parse(&fs::read_to_string(&schema).unwrap()).unwrap();
         assert_eq!(parsed, crate::aschema::Schema::new());
+        let graph = create_graph(&input, &input).unwrap();
+        assert_eq!(graph, input.join("graph.agraph"));
+        let parsed = crate::agraph::Graph::parse(&fs::read_to_string(&graph).unwrap()).unwrap();
+        assert_eq!(parsed, crate::agraph::Graph::new());
     }
 
     #[test]

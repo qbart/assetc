@@ -45,9 +45,12 @@ use crate::theme::{
 use crate::tree::{FileTrees, Listing, Node};
 use crate::vertex_colors;
 
+mod graph;
 mod schema;
+use crate::agraph::Graph;
 use crate::vision::Vision;
 use crate::{chart, preview3d};
+use graph::{GraphEdit, GraphView, canvas_graph, graph_tab};
 use schema::{SchemaEdit, canvas_schema, types_tab};
 
 pub struct UiPlugin;
@@ -101,6 +104,8 @@ struct UiState {
     mesh_colors: HashMap<PathBuf, Option<usize>>,
     /// The type each schema's editor shows, by path; see docs/features/schemas.md#types-tab.
     schema_types: HashMap<PathBuf, usize>,
+    /// Each graph's view, by path; see docs/features/graphs.md#canvas.
+    graph_views: HashMap<PathBuf, GraphView>,
     /// The animation timeline under a model; see docs/features/animation-events.md#timeline.
     timeline: Timeline,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
@@ -259,6 +264,8 @@ struct Inspected {
     palette: Option<Result<PaletteEdit, String>>,
     /// An `.aschema` file being edited, or why it can't be read and its text.
     schema: Option<Result<SchemaEdit, (String, String)>>,
+    /// An `.agraph` file being edited, or why it can't be read.
+    graph: Option<Result<GraphEdit, String>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
     mesh: Option<Result<MeshEdit, String>>,
     /// An image's `.amod` (its modifiers) being edited, or why it can't be read.
@@ -439,6 +446,7 @@ impl Default for UiState {
             lod_levels: HashMap::new(),
             mesh_colors: HashMap::new(),
             schema_types: HashMap::new(),
+            graph_views: HashMap::new(),
             timeline: Timeline::default(),
             mesh_in_3d: true,
             font_atlas: true,
@@ -490,6 +498,7 @@ enum InspectorTab {
     Gradients,
     Colors,
     Types,
+    Graph,
     Animations,
     Mipmaps,
     Lods,
@@ -497,7 +506,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -510,6 +519,7 @@ impl InspectorTab {
         Self::Gradients,
         Self::Colors,
         Self::Types,
+        Self::Graph,
         Self::Animations,
         Self::Mipmaps,
         Self::Lods,
@@ -529,6 +539,7 @@ impl InspectorTab {
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
             Self::Types => Icon::Braces,
+            Self::Graph => Icon::Workflow,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
             Self::Lods => Icon::BringToFront,
@@ -550,6 +561,7 @@ impl InspectorTab {
             Self::Gradients => "Gradients",
             Self::Colors => "Colors",
             Self::Types => "Types",
+            Self::Graph => "Graph",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
             Self::Lods => "Levels of detail",
@@ -600,6 +612,11 @@ impl InspectorTab {
             }),
             Self::Colors => selection.is_some_and(|s| {
                 s.location == Location::Input && palette::is_palette(&s.path) && s.path.is_file()
+            }),
+            Self::Graph => selection.is_some_and(|s| {
+                s.location == Location::Input
+                    && crate::agraph::is_graph(&s.path)
+                    && s.path.is_file()
             }),
             Self::Types => selection.is_some_and(|s| {
                 s.location == Location::Input
@@ -741,7 +758,12 @@ fn shell(
         Shown::Environment | Shown::Model => true,
         Shown::CompiledMesh => state.mesh_in_3d,
         Shown::Lut => state.lut.view == LutView::Cube,
-        Shown::Specimen | Shown::CompiledFont | Shown::Data | Shown::Schema | Shown::Other => false,
+        Shown::Specimen
+        | Shown::CompiledFont
+        | Shown::Data
+        | Shown::Schema
+        | Shown::Graph
+        | Shown::Other => false,
     };
     let fill = if show_3d {
         egui::Color32::TRANSPARENT
@@ -777,7 +799,8 @@ fn shell(
                 | Shown::Specimen
                 | Shown::Model
                 | Shown::Data
-                | Shown::Schema => (&[], None, false),
+                | Shown::Schema
+                | Shown::Graph => (&[], None, false),
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -916,6 +939,17 @@ fn shell(
                         }
                     }
                 }
+                (Shown::Graph, _) => {
+                    if let Some(inspected) = state.inspected.as_mut()
+                        && let Some(graph) =
+                            canvas_graph(ui, rect, inspected, &mut state.graph_views)
+                    {
+                        match std::fs::write(&inspected.path, graph.to_json()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (Shown::Data, _) => {
                     if let Some(table) = state
                         .inspected
@@ -991,6 +1025,7 @@ struct Prepared {
     gradient: Option<Result<Gradients, String>>,
     palette: Option<Result<Palette, String>>,
     schema: Option<Result<Schema, (String, String)>>,
+    graph: Option<Result<Graph, String>>,
     /// A model's sidecar (with every locator the model has), the meshlet limits the project
     /// gives it, and the locators it inherits.
     mesh: Option<Result<PreparedMesh, String>>,
@@ -1075,6 +1110,12 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
         Ok(text) => Schema::parse(&text).map_err(|e| (e, text)),
         Err(e) => Err((e.to_string(), String::new())),
     });
+    let graph = (selection.location == Location::Input && crate::agraph::is_graph(&selection.path))
+        .then(|| {
+            std::fs::read_to_string(&selection.path)
+                .map_err(|e| e.to_string())
+                .and_then(|text| Graph::parse(&text))
+        });
     let mesh =
         (selection.location == Location::Input && model::is_model(&selection.path)).then(|| {
             let settings = MeshSettings::new(&project.config.meshes)
@@ -1110,6 +1151,7 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
         gradient,
         palette,
         schema,
+        graph,
         mesh,
         model,
         pixels: inspection
@@ -1190,8 +1232,8 @@ fn inspected(
     prepared: Prepared,
     previous: Option<Inspected>,
 ) -> Inspected {
-    let (kept, kept_gradient, kept_palette, kept_mesh, kept_sidecar, kept_schema) = previous
-        .map_or((None, None, None, None, None, None), |p| {
+    let (kept, kept_gradient, kept_palette, kept_mesh, kept_sidecar, kept_schema, kept_graph) =
+        previous.map_or((None, None, None, None, None, None, None), |p| {
             (
                 p.noise.and_then(Result::ok),
                 p.gradient.and_then(Result::ok),
@@ -1199,8 +1241,16 @@ fn inspected(
                 p.mesh.and_then(Result::ok),
                 p.sidecar.and_then(Result::ok),
                 p.schema.and_then(Result::ok),
+                p.graph.and_then(Result::ok),
             )
         });
+    let graph = prepared.graph.map(|parsed| {
+        parsed.map(|graph| match kept_graph {
+            Some(edit) if edit.saved == graph => edit,
+            Some(edit) => GraphEdit::new(graph, edit),
+            None => GraphEdit::new(graph, GraphEdit::default()),
+        })
+    });
     let schema = prepared.schema.map(|parsed| {
         parsed.map(|schema| match kept_schema {
             Some(edit) if edit.saved == schema => edit,
@@ -1304,6 +1354,7 @@ fn inspected(
         gradient,
         palette,
         schema,
+        graph,
         mesh,
         sidecar,
         compiled_mesh: prepared.compiled_mesh,
@@ -1812,6 +1863,7 @@ enum FileOp {
     NewGradient(PathBuf),
     NewPalette(PathBuf),
     NewSchema(PathBuf),
+    NewGraph(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -1876,6 +1928,10 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
             *action = Some(TreeAction::Op(FileOp::NewSchema(dir.to_path_buf())));
             ui.close();
         }
+        if menu_item(ui, "Directed Graph", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewGraph(dir.to_path_buf())));
+            ui.close();
+        }
     });
 }
 
@@ -1902,6 +1958,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "gradient" => Icon::SwatchBook,
         "palette" => Icon::Palette,
         "aschema" => Icon::Braces,
+        "agraph" => Icon::Workflow,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
@@ -2087,6 +2144,9 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             .map(|path| (dir, path)),
         FileOp::NewSchema(dir) => fileops::create_schema(&input, &dir)
             .map_err(|e| ("New Schema", e))
+            .map(|path| (dir, path)),
+        FileOp::NewGraph(dir) => fileops::create_graph(&input, &dir)
+            .map_err(|e| ("New Directed Graph", e))
             .map(|path| (dir, path)),
         FileOp::Rename(path) => {
             let text = path
@@ -2402,6 +2462,15 @@ fn right_sidebar(
                 }
                 (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
                 (InspectorTab::Colors, Some(_), Some(_)) => placeholder(ui, "No colors"),
+                (InspectorTab::Graph, Some(inspected), Some(_)) => {
+                    let view = state.graph_views.entry(inspected.path.clone()).or_default();
+                    if let Some(graph) = graph_tab(ui, inspected, view) {
+                        match std::fs::write(&inspected.path, graph.to_json()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
                 (InspectorTab::Types, Some(inspected), Some(_)) => {
                     let chosen = state
                         .schema_types
@@ -4422,6 +4491,8 @@ enum Shown {
     Data,
     /// An `.aschema`'s type editor.
     Schema,
+    /// An `.agraph`'s grid of nodes and edges.
+    Graph,
     Other,
 }
 
@@ -4436,6 +4507,7 @@ impl Shown {
             Some(i) if i.inspection.specimen && i.preview.is_some() => Self::Specimen,
             Some(i) if i.preview.is_some() && i.pixels.is_some() => Self::Image,
             Some(i) if i.schema.is_some() => Self::Schema,
+            Some(i) if i.graph.is_some() => Self::Graph,
             Some(i) if i.inspection.data.is_some() => Self::Data,
             _ => Self::Other,
         }

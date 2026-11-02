@@ -98,6 +98,7 @@ enum Kind {
     Gradient,
     Palette,
     Schema,
+    Graph,
     MaterialSource,
     ColorLut,
     Font,
@@ -120,6 +121,7 @@ impl Kind {
             Self::Gradient => "Gradient",
             Self::Palette => "Palette",
             Self::Schema => "Schema",
+            Self::Graph => "Graph",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
@@ -185,6 +187,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if is_gradient(file) => Kind::Gradient,
         Location::Input if is_palette(file) => Kind::Palette,
         Location::Input if crate::aschema::is_schema(file) => Kind::Schema,
+        Location::Input if crate::agraph::is_graph(file) => Kind::Graph,
         Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if model::is_model(file) => Kind::Model,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
@@ -212,6 +215,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::Palette => palette_rows(file, &mut out)
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::Schema => schema_rows(file, &mut out),
+        Kind::Graph => graph_rows(file, &mut out),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
         Kind::Font => font_rows(project, file, &rel, &mut out),
@@ -381,6 +385,26 @@ fn gradient_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     out.rows
         .push(("Gradients", gradients.gradients.len().to_string()));
     grid_rows(&gradients, out);
+    Ok(())
+}
+
+/// See docs/features/graphs.md#info-tab.
+fn graph_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    use crate::agraph::{DIALECT, Graph};
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let graph = Graph::parse(&text)?;
+    out.rows.push(("Dialect", DIALECT.into()));
+    out.rows.push(("Nodes", graph.nodes.len().to_string()));
+    out.rows.push(("Edges", graph.edges.len().to_string()));
+    let problems = graph.check().len();
+    out.rows.push((
+        "Problems",
+        match problems {
+            0 => "none".into(),
+            1 => "1 error".into(),
+            n => format!("{n} errors"),
+        },
+    ));
     Ok(())
 }
 
