@@ -194,6 +194,10 @@ pub struct Preview3d {
     pub animation_time: Option<f32>,
     /// A compiled mesh to show instead of the shape, taken by [`sync_compiled`].
     pub compiled: Option<CompiledUpload>,
+    /// New positions and normals for the last compiled mesh uploaded (a posed skin), per
+    /// corner of its level, taken by [`sync_compiled`]; see
+    /// docs/features/models.md#compiled-animation-preview.
+    pub compiled_pose: Option<Pose>,
     /// Show the last compiled mesh uploaded.
     pub compiled_shown: bool,
     pub display: MeshDisplay,
@@ -363,6 +367,9 @@ pub struct CompiledUpload {
     pub meshlet_boxes: Vec<[[f32; 3]; 2]>,
 }
 
+/// Positions and normals per corner of a compiled mesh's level.
+pub type Pose = (Vec<[f32; 3]>, Vec<[f32; 3]>);
+
 /// Bounds drawn over a compiled mesh; see docs/features/models.md#compiled-mesh-preview.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum MeshOverlay {
@@ -462,6 +469,11 @@ struct CompiledOverlay(usize);
 struct CompiledScene {
     colored: [Handle<Mesh>; 4],
     wire: Handle<Mesh>,
+    /// The fit (center and scale), and each material part's mesh and corners, for poses.
+    center: Vec3,
+    scale: f32,
+    part_meshes: Vec<Handle<Mesh>>,
+    part_corners: Vec<Vec<usize>>,
     parts: Vec<Entity>,
     overlays: Vec<Entity>,
     meshes: Vec<Handle<Mesh>>,
@@ -917,6 +929,42 @@ fn sync_compiled(
             &mut images,
         ));
     }
+    // A pose: the same corners moved, nothing rebuilt.
+    if let (Some((positions, normals)), Some(compiled)) =
+        (preview.compiled_pose.take(), scene.compiled.as_ref())
+    {
+        let placed: Vec<[f32; 3]> = positions
+            .iter()
+            .map(|p| ((Vec3::from(*p) - compiled.center) * compiled.scale).to_array())
+            .collect();
+        for handle in &compiled.colored {
+            if let Some(mut mesh) = meshes.get_mut(handle) {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, placed.clone());
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.clone());
+            }
+        }
+        if let Some(mut mesh) = meshes.get_mut(&compiled.wire) {
+            let lines: Vec<[f32; 3]> = placed
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .flat_map(|[a, b, c]| [*a, *b, *b, *c, *c, *a])
+                .collect();
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, lines);
+        }
+        for (handle, corners) in compiled.part_meshes.iter().zip(&compiled.part_corners) {
+            if let Some(mut mesh) = meshes.get_mut(handle) {
+                let pick = |values: &[[f32; 3]]| -> Vec<[f32; 3]> {
+                    corners
+                        .iter()
+                        .filter_map(|&c| values.get(c).copied())
+                        .collect()
+                };
+                mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, pick(&placed));
+                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, pick(&normals));
+            }
+        }
+    }
     let visible = |shown: bool| {
         if shown {
             Visibility::Inherited
@@ -1094,6 +1142,7 @@ fn build_compiled(
     slots.sort();
     slots.dedup();
     let (mut parts, mut owned_materials, mut owned_images) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut part_meshes, mut part_corners) = (Vec::new(), Vec::new());
     for slot in slots {
         let corners: Vec<usize> = (0..p.material_slots.len())
             .filter(|&t| p.material_slots[t] == slot)
@@ -1168,6 +1217,8 @@ fn build_compiled(
             }
         };
         let mesh = meshes.add(mesh);
+        part_meshes.push(mesh.clone());
+        part_corners.push(corners);
         let material = materials.add(material);
         owned_meshes.push(mesh.clone());
         owned_materials.push(material.clone());
@@ -1271,6 +1322,10 @@ fn build_compiled(
     CompiledScene {
         colored,
         wire,
+        center,
+        scale,
+        part_meshes,
+        part_corners,
         parts,
         overlays,
         meshes: owned_meshes,

@@ -51,6 +51,9 @@ pub struct Inspection {
     pub compiled_materials: Vec<Option<MaterialPreview>>,
     /// `compiled_bytes` is an `.afont`, and `preview` its atlas (if found).
     pub compiled_font: bool,
+    /// A compiled animation read back, to play on its companion mesh (`compiled_mesh`), or
+    /// why there is no mesh to play it on; see docs/features/models.md#compiled-animation-preview.
+    pub compiled_animation: Option<(crate::aanim::Decoded, Option<String>)>,
     /// The file's data as a table, for files without a preview (manifest, `.amat`).
     pub data: Option<DataTable>,
     /// A model's animations: name and duration in seconds.
@@ -242,10 +245,36 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             }),
         Kind::CompiledAnimation => fs::read(file)
             .map_err(|e| e.to_string())
-            .and_then(|bytes| aanim::rows(&bytes))
-            .map(|rows| {
+            .and_then(|bytes| Ok((aanim::rows(&bytes)?, aanim::decode(&bytes)?)))
+            .map(|(rows, decoded)| {
                 out.rows.extend(rows);
                 asset_rows(&rel, &mut out);
+                // The companion mesh, next to it.
+                let mesh_path = file.with_extension("amesh");
+                let name = mesh_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                let mesh = fs::read(&mesh_path)
+                    .ok()
+                    .and_then(|bytes| amesh::preview(&bytes).ok());
+                let missing = match &mesh {
+                    Some(m) if m.skeleton.is_empty() => {
+                        Some(format!("No skinned {name} to play on"))
+                    }
+                    Some(m) if m.skeleton.len() != decoded.joint_count as usize => Some(format!(
+                        "{name} has {} joints, the animation {}",
+                        m.skeleton.len(),
+                        decoded.joint_count
+                    )),
+                    Some(_) => None,
+                    None => Some(format!("No skinned {name} to play on")),
+                };
+                if let Some(mesh) = mesh.filter(|_| missing.is_none()) {
+                    out.compiled_materials = compiled_materials(project, &mesh.materials);
+                    out.compiled_mesh = Some(mesh);
+                }
+                out.compiled_animation = Some((decoded, missing));
             }),
         Kind::CompiledFont => compiled_font(project, file, &rel, &mut out),
         Kind::Manifest => manifest(file, &mut out),

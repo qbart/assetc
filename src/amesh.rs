@@ -1016,6 +1016,83 @@ pub struct Level {
     pub material_slots: Vec<Option<u32>>,
     /// Every submesh reused the level before (it made no progress).
     pub same_as_previous: bool,
+    /// Per corner, its joints and weights (`SKIN`); empty without a skeleton.
+    pub skin: Vec<([u16; 4], [f32; 4])>,
+}
+
+/// A joint of a compiled mesh's skeleton (`SKELETON`).
+#[derive(Clone, Debug)]
+pub struct SkeletonJoint {
+    /// Column-major, mesh space to the joint's bind space.
+    pub inverse_bind: [f32; 16],
+    pub rest: crate::aanim::Local,
+    /// `-1` for a root.
+    pub parent: i32,
+}
+
+/// Positions and normals of `level`'s corners skinned by joints at `locals` (one local
+/// transform per joint); see docs/features/models.md#compiled-animation-preview.
+pub fn posed(
+    level: &Level,
+    skeleton: &[SkeletonJoint],
+    locals: &[crate::aanim::Local],
+) -> (Vec<[f32; 3]>, Vec<[f32; 3]>) {
+    use bevy::math::{Mat4, Quat, Vec3};
+    // Each joint's model-space transform, through its parents.
+    let mut globals: Vec<Option<Mat4>> = vec![None; skeleton.len()];
+    fn global(
+        j: usize,
+        skeleton: &[SkeletonJoint],
+        locals: &[crate::aanim::Local],
+        globals: &mut [Option<Mat4>],
+        depth: usize,
+    ) -> Mat4 {
+        if let Some(m) = globals[j] {
+            return m;
+        }
+        let (t, r, s) = locals.get(j).copied().unwrap_or(skeleton[j].rest);
+        let local = Mat4::from_scale_rotation_translation(
+            Vec3::from(s),
+            Quat::from_array(r).normalize(),
+            Vec3::from(t),
+        );
+        let parent = skeleton[j].parent;
+        let m = if parent >= 0 && (parent as usize) < skeleton.len() && depth < skeleton.len() {
+            global(parent as usize, skeleton, locals, globals, depth + 1) * local
+        } else {
+            local
+        };
+        globals[j] = Some(m);
+        m
+    }
+    let skins: Vec<Mat4> = (0..skeleton.len())
+        .map(|j| {
+            global(j, skeleton, locals, &mut globals, 0)
+                * Mat4::from_cols_array(&skeleton[j].inverse_bind)
+        })
+        .collect();
+    let mut positions = Vec::with_capacity(level.positions.len());
+    let mut normals = Vec::with_capacity(level.normals.len());
+    for (c, (p, n)) in level.positions.iter().zip(&level.normals).enumerate() {
+        let Some((joints, weights)) = level.skin.get(c) else {
+            positions.push(*p);
+            normals.push(*n);
+            continue;
+        };
+        let mut m = Mat4::ZERO;
+        for (j, w) in joints.iter().zip(weights) {
+            if let Some(skin) = skins.get(*j as usize) {
+                m += *skin * *w;
+            }
+        }
+        positions.push(m.transform_point3(Vec3::from(*p)).to_array());
+        normals.push(
+            m.transform_vector3(Vec3::from(*n))
+                .normalize_or_zero()
+                .to_array(),
+        );
+    }
+    (positions, normals)
 }
 
 impl Level {
@@ -1040,6 +1117,8 @@ pub struct Preview {
     /// Each locator's name and transform in mesh space, joints at their bind pose; see
     /// docs/features/locators.md#compiled-mesh-preview.
     pub locators: Vec<(String, bevy::math::Affine3A)>,
+    /// The skeleton (`SKELETON`); empty for a mesh without one.
+    pub skeleton: Vec<SkeletonJoint>,
 }
 
 /// The locators of a compiled mesh, placed in mesh space.
@@ -1140,7 +1219,18 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
                 .unwrap_or_default()
         })
         .collect();
+    let skin = reader.chunk("SKIN");
     let corner = |level: &mut Level, i: usize| -> Option<()> {
+        if let Some(skin) = skin {
+            let raw = skin.get(i * 24..i * 24 + 24)?;
+            let joints = std::array::from_fn(|k| {
+                u16::from_le_bytes(raw[k * 2..k * 2 + 2].try_into().unwrap())
+            });
+            let weights = std::array::from_fn(|k| {
+                f32::from_le_bytes(raw[8 + k * 4..12 + k * 4].try_into().unwrap())
+            });
+            level.skin.push((joints, weights));
+        }
         level.colors.resize(set_colors.len(), Vec::new());
         for (colors, out) in set_colors.iter().zip(&mut level.colors) {
             let c = colors.get(i * 4..i * 4 + 4)?;
@@ -1244,8 +1334,28 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
     }
     let mesh_bounds = reader.require("BOUNDS")?;
     let meshlet_bounds = reader.require("MLBOUNDS")?;
+    let skeleton = reader
+        .chunk("SKELETON")
+        .unwrap_or_default()
+        .as_chunks::<112>()
+        .0
+        .iter()
+        .map(|j| {
+            let f = |at: usize| f32::from_le_bytes(j[at..at + 4].try_into().unwrap());
+            SkeletonJoint {
+                inverse_bind: std::array::from_fn(|k| f(k * 4)),
+                rest: (
+                    [f(64), f(68), f(72)],
+                    [f(76), f(80), f(84), f(88)],
+                    [f(92), f(96), f(100)],
+                ),
+                parent: i32::from_le_bytes(j[104..108].try_into().unwrap()),
+            }
+        })
+        .collect();
     Ok(Preview {
         color_sets,
+        skeleton,
         locators: preview_locators(&reader),
         levels,
         bounds: Bounds::read(mesh_bounds, 0).ok_or_else(bad)?,

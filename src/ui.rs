@@ -45,6 +45,7 @@ use crate::theme::{
 use crate::tree::{FileTrees, Listing, Node};
 use crate::vertex_colors;
 
+mod anim;
 mod curve;
 mod data;
 mod graph;
@@ -52,6 +53,7 @@ mod schema;
 use crate::agraph::Graph;
 use crate::vision::Vision;
 use crate::{chart, preview3d};
+use anim::{AnimPlayer, canvas_compiled_animation};
 use data::{DataEdit, PreparedData, canvas_data, instances_tab};
 use graph::{GraphEdit, GraphView, canvas_graph, graph_tab};
 use schema::{SchemaEdit, canvas_schema, types_tab};
@@ -304,6 +306,8 @@ struct Inspected {
     schema: Option<Result<SchemaEdit, (String, String)>>,
     /// An `.agraph` file being edited, or why it can't be read.
     graph: Option<Result<GraphEdit, String>>,
+    /// A compiled animation's playback; see docs/features/models.md#compiled-animation-preview.
+    anim_player: AnimPlayer,
     /// An `.adata` file being edited with its schema, or why it can't be read and its text.
     data: Option<Result<DataEdit, (String, String)>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
@@ -813,6 +817,10 @@ fn shell(
         Shown::Image => state.mode == ViewMode::ThreeD,
         Shown::Environment | Shown::Model => true,
         Shown::CompiledMesh => state.mesh_in_3d,
+        Shown::CompiledAnimation => state
+            .inspected
+            .as_ref()
+            .is_some_and(|i| i.compiled_mesh.is_some()),
         Shown::Lut => state.lut.view == LutView::Cube,
         Shown::Specimen
         | Shown::CompiledFont
@@ -859,7 +867,8 @@ fn shell(
                 | Shown::Data
                 | Shown::Schema
                 | Shown::Graph
-                | Shown::Instances => (&[], None, false),
+                | Shown::Instances
+                | Shown::CompiledAnimation => (&[], None, false),
                 Shown::Other => (&modes, None, false),
             };
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
@@ -899,6 +908,18 @@ fn shell(
                         .and_then(|i| i.compiled_bytes.as_deref())
                     {
                         chunks_view(ui, rect, bytes, &mut state.mesh_chunk);
+                    }
+                }
+                (Shown::CompiledAnimation, _) => {
+                    if let Some(inspected) = state.inspected.as_mut() {
+                        canvas_compiled_animation(
+                            ui,
+                            rect,
+                            inspected,
+                            &mut preview3d,
+                            &mut state.mesh_view,
+                            &mut state.vision,
+                        );
                     }
                 }
                 (Shown::CompiledMesh, _) => {
@@ -1476,6 +1497,7 @@ fn inspected(
         compiled_mesh: prepared.compiled_mesh,
         compiled_materials: prepared.compiled_materials,
         uploaded_lod: None,
+        anim_player: AnimPlayer::default(),
         compiled_bytes: prepared.compiled_bytes,
         geometry: prepared.geometry,
         hulls: HashMap::new(),
@@ -4661,6 +4683,8 @@ enum Shown {
     Model,
     /// An `.amesh` from the Output tree, with its meshlets.
     CompiledMesh,
+    /// An `.aanim` from the Output tree, played on its companion mesh.
+    CompiledAnimation,
     /// An `.afont` from the Output tree: its atlas (like a specimen) or its chunks.
     CompiledFont,
     Lut,
@@ -4680,6 +4704,7 @@ impl Shown {
         match inspected {
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.model.is_some() => Self::Model,
+            Some(i) if i.inspection.compiled_animation.is_some() => Self::CompiledAnimation,
             Some(i) if i.compiled_mesh.is_some() => Self::CompiledMesh,
             Some(i) if i.inspection.compiled_font => Self::CompiledFont,
             Some(i) if i.lut.is_some() => Self::Lut,
