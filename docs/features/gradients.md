@@ -9,8 +9,9 @@ can fill material slots.
 
 ## Creating
 
-In the Input tree's context menu, **New Gradient** (a plain item after New
-Pattern, see [`file-operations.md`](file-operations.md)) creates
+In the Input tree's context menu, **New Color ▸ Gradient** (New Color is a
+submenu after New Pattern, see [`file-operations.md`](file-operations.md))
+creates
 `gradient.gradient` (`gradient 2.gradient`, … if taken) with a 256 × 256
 image of 16 × 64 cells (16 columns × 4 rows, room for 64 gradients) and one
 gradient named `Gradient 1`, black (`#000000`) at

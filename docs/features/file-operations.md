@@ -15,8 +15,8 @@ Right-clicking an Input row, or the empty area below the last row (the
 | New Folder           | inside the folder, or the file's folder   | always             |
 | New Noise ▸ (the `noise/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
 | New Pattern ▸ (the `pattern/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
-| New Gradient         | as New Folder, see [`gradients.md`](gradients.md#creating) | always |
-| New Palette          | as New Folder, see [`palettes.md`](palettes.md#creating) | always |
+| New Color ▸ Gradient | as New Folder, see [`gradients.md`](gradients.md#creating) | always |
+| New Color ▸ Palette  | as New Folder, see [`palettes.md`](palettes.md#creating) | always |
 | New Data ▸ Schema    | as New Folder, see [`schemas.md`](schemas.md#creating) | always |
 | New Data ▸ Directed Graph | as New Folder, see [`graphs.md`](graphs.md#creating) | always |
 | New Data ▸ Instance  | as New Folder, see [`instances.md`](instances.md#creating) | always |

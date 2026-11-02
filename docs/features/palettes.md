@@ -9,8 +9,8 @@ texture sources, the build turns them into `.ktx2`, the canvas previews them
 
 ## Creating
 
-In the Input tree's context menu, **New Palette** (a plain item after New
-Gradient, see [`file-operations.md`](file-operations.md)) creates
+In the Input tree's context menu, **New Color ▸ Palette** (after Gradient,
+see [`file-operations.md`](file-operations.md)) creates
 `palette.palette` (`palette 2.palette`, … if taken) with a 128 × 128 image of
 16 × 16 cells (8 columns × 8 rows, room for 64 colors) and two colors,
 `Black` (`#000000`) and `White` (`#ffffff`). It then selects it and starts

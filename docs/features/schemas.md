@@ -12,9 +12,9 @@ The file format is [`docs/aschema.md`](../aschema.md); what assetc writes is
 ## Creating
 
 In the Input tree's context menu, **New Data ▸** (a submenu after New
-Palette) has **Schema**, which creates `schema.aschema` (`schema 2.aschema`,
+Color) has **Schema**, which creates `schema.aschema` (`schema 2.aschema`,
 … if taken) holding one struct `Item` with one field `name` of type
-`string`, selects it and starts renaming it, as **New Gradient** does (see
+`string`, selects it and starts renaming it, as **New Color ▸ Gradient** does (see
 [`file-operations.md`](file-operations.md)).
 
 The file tree shows `.aschema` files with the `braces` icon.
