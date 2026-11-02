@@ -60,6 +60,8 @@ pub enum Job {
     Model {
         source: String,
         options: MeshOptions,
+        /// From the model's `.amod`; see docs/features/locators.md#build.
+        locators: Vec<crate::amod::Locator>,
     },
     /// Another output of a model, written by its [`Job::Model`].
     ModelPart { source: String },
@@ -124,7 +126,13 @@ struct Group {
 }
 
 /// The assets of one glTF model; see docs/features/models.md#build.
-fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs, options: MeshOptions) {
+fn model_assets(
+    plan: &mut Plan,
+    source: &str,
+    outputs: &model::Outputs,
+    options: MeshOptions,
+    locators: Vec<crate::amod::Locator>,
+) {
     let p = strip_extension(source);
     let mut push = |kind: Kind, asset_path: String, job: Job| {
         plan.assets.push(Asset {
@@ -144,6 +152,7 @@ fn model_assets(plan: &mut Plan, source: &str, outputs: &model::Outputs, options
         Job::Model {
             source: source.to_owned(),
             options,
+            locators,
         },
     );
     if outputs.animation {
@@ -209,15 +218,18 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             sources.push(rel);
         } else if model::is_model(file) {
             let options = crate::amod::read(file).and_then(|amod| {
-                meshes
+                let options = meshes
                     .options_with(&rel, amod.as_ref())
-                    .map_err(|e| format!("{}.amod: {e}", split_dir(&rel).1))
+                    .map_err(|e| format!("{}.amod: {e}", split_dir(&rel).1))?;
+                Ok((options, amod.map(|a| a.locators).unwrap_or_default()))
             });
-            match options.and_then(|options| {
+            match options.and_then(|(options, locators)| {
                 let data = fs::read(file).map_err(|e| e.to_string())?;
-                Ok((model::outputs(&data)?, options))
+                Ok((model::outputs(&data)?, options, locators))
             }) {
-                Ok((outputs, options)) => model_assets(&mut plan, &rel, &outputs, options),
+                Ok((outputs, options, locators)) => {
+                    model_assets(&mut plan, &rel, &outputs, options, locators)
+                }
                 Err(message) => plan.failures.push(Failure {
                     source: rel,
                     message,

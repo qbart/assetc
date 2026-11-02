@@ -226,6 +226,17 @@ pub struct Joint {
     pub parent: i32,
 }
 
+/// A locator ready to write; see docs/spec/amesh.md#locators.
+pub struct Locator {
+    pub name: String,
+    /// Index into the skeleton; `-1` is mesh space.
+    pub joint: i32,
+    pub translation: [f32; 3],
+    /// Unit quaternion `x y z w`.
+    pub rotation: [f32; 4],
+    pub scale: [f32; 3],
+}
+
 /// What a compiled mesh holds, for build output.
 #[derive(Debug, Default, PartialEq)]
 pub struct Summary {
@@ -323,6 +334,7 @@ pub fn encode(
     primitives: &[Primitive],
     materials: &[u64],
     skeleton: Option<&[Joint]>,
+    locators: &[Locator],
     tangents: bool,
     options: &MeshOptions,
 ) -> (Vec<u8>, Summary) {
@@ -539,6 +551,24 @@ pub fn encode(
         writer
             .chunk("SKIN", skin.take())
             .chunk("SKELETON", bones.take());
+    }
+    if !locators.is_empty() {
+        let (mut records, mut names) = (Bytes::default(), Vec::new());
+        for l in locators {
+            records
+                .u64(crate::hash::fnv1a64(l.name.as_bytes()))
+                .u32(names.len() as u32)
+                .u32(l.name.len() as u32)
+                .i32(l.joint)
+                .f32s(&l.translation)
+                .f32s(&l.rotation)
+                .f32s(&l.scale)
+                .u32(0);
+            names.extend_from_slice(l.name.as_bytes());
+        }
+        writer
+            .chunk("LOCATORS", records.take())
+            .chunk("LOCNAMES", names);
     }
     let summary = Summary {
         vertices: vertices.len(),
@@ -782,6 +812,7 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     let bounds = reader.require("BOUNDS")?;
     let f = |i: usize| chunks::f32_at(bounds, 0, 40, i * 4).unwrap_or(0.0);
     let joints = reader.chunk("SKELETON").map_or(0, |s| s.len() / 112);
+    let locators = reader.chunk("LOCATORS").map_or(0, |l| l.len() / 64);
     let lods = reader
         .chunk("LODTABLE")
         .and_then(|t| chunks::u32_at(t, 0, 8, 0))
@@ -820,6 +851,14 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             "Skin",
             if flags & 2 != 0 {
                 format!("{joints} {}", if joints == 1 { "joint" } else { "joints" })
+            } else {
+                "none".into()
+            },
+        ),
+        (
+            "Locators",
+            if locators > 0 {
+                locators.to_string()
             } else {
                 "none".into()
             },
@@ -872,6 +911,8 @@ pub fn describe(name: &str) -> &'static str {
         "LODTABLE" => "LOD table",
         "SKIN" => "Skin weights",
         "SKELETON" => "Skeleton",
+        "LOCATORS" => "Locators",
+        "LOCNAMES" => "Locator names",
         _ => "Unknown chunk",
     }
 }
@@ -950,6 +991,10 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
         },
         "SKIN" => array(vec!["Joints", "Weights"], 24),
         "SKELETON" => array(vec!["Parent", "Translation", "Rotation", "Scale"], 112),
+        "LOCATORS" => array(
+            vec!["Name", "Hash", "Joint", "Translation", "Rotation", "Scale"],
+            64,
+        ),
         _ => Table {
             columns: vec!["Offset", "Bytes"],
             rows: payload.len().div_ceil(16),
@@ -1090,6 +1135,28 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
             2 => vector(&floats(row, 112, 76, 4)),
             _ => vector(&floats(row, 112, 92, 3)),
         },
+        "LOCATORS" => match column {
+            0 => {
+                let (at, len) = (u32_at(row, 64, 8) as usize, u32_at(row, 64, 12) as usize);
+                reader
+                    .chunk("LOCNAMES")
+                    .and_then(|names| names.get(at..at + len))
+                    .map(|name| String::from_utf8_lossy(name).into_owned())
+                    .unwrap_or_default()
+            }
+            1 => format!(
+                "{:#018x}",
+                p.get(row * 64..row * 64 + 8)
+                    .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
+            ),
+            2 => match u32_at(row, 64, 16) as i32 {
+                -1 => "—".into(),
+                joint => joint.to_string(),
+            },
+            3 => vector(&floats(row, 64, 20, 3)),
+            4 => vector(&floats(row, 64, 32, 4)),
+            _ => vector(&floats(row, 64, 48, 3)),
+        },
         _ => {
             let bytes = p.get(row * 16..(row * 16 + 16).min(p.len())).unwrap_or(&[]);
             if column == 0 {
@@ -1145,6 +1212,7 @@ mod tests {
             &[grid(16), second],
             &[7],
             None,
+            &[],
             true,
             &MeshOptions::default(),
         );
@@ -1212,7 +1280,7 @@ mod tests {
 
     #[test]
     fn chunk_tables_and_info() {
-        let (bytes, summary) = encode(&[grid(4)], &[9], None, true, &MeshOptions::default());
+        let (bytes, summary) = encode(&[grid(4)], &[9], None, &[], true, &MeshOptions::default());
         let desc = table(&bytes, "DESC").unwrap();
         assert!(!desc.numbered);
         assert_eq!(desc.rows, 10);
@@ -1260,6 +1328,7 @@ mod tests {
             &[grid(16), grid(2)],
             &[42],
             None,
+            &[],
             true,
             &MeshOptions::default(),
         );
@@ -1347,7 +1416,7 @@ meshlet_max_triangles = 64
             lod_ratios: Vec::new(),
             ..Default::default()
         };
-        let (bytes, summary) = encode(&[grid(16)], &[], None, true, &options);
+        let (bytes, summary) = encode(&[grid(16)], &[], None, &[], true, &options);
         let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
         let desc = reader.require("DESC").unwrap();
         assert_eq!(chunks::u32_at(desc, 0, 32, 24), Some(16));
@@ -1389,6 +1458,13 @@ meshlet_max_triangles = 64
             &[grid(2)],
             &[],
             Some(&[joint]),
+            &[Locator {
+                name: "hand".into(),
+                joint: 0,
+                translation: [1.0, 2.0, 3.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0; 3],
+            }],
             false,
             &MeshOptions::default(),
         );
@@ -1397,5 +1473,17 @@ meshlet_max_triangles = 64
         assert_eq!(reader.require("SKELETON").unwrap().len(), 112);
         assert_eq!(reader.require("DESC").unwrap()[23], 0b110);
         assert!(rows(&bytes).unwrap().contains(&("Skin", "1 joint".into())));
+
+        // Locators: a record and its name; see docs/spec/amesh.md#locators.
+        let locators = reader.require("LOCATORS").unwrap();
+        assert_eq!(locators.len(), 64);
+        assert_eq!(&locators[..8], crate::hash::fnv1a64(b"hand").to_le_bytes());
+        assert_eq!(chunks::u32_at(locators, 0, 64, 16), Some(0));
+        assert_eq!(chunks::f32_at(locators, 0, 64, 28), Some(3.0));
+        assert_eq!(reader.require("LOCNAMES").unwrap(), b"hand");
+        assert!(rows(&bytes).unwrap().contains(&("Locators", "1".into())));
+        assert_eq!(cell(&bytes, "LOCATORS", 0, 1), "hand");
+        assert_eq!(cell(&bytes, "LOCATORS", 0, 3), "0");
+        assert_eq!(cell(&bytes, "LOCATORS", 0, 4), "1.000, 2.000, 3.000");
     }
 }

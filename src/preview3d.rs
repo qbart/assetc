@@ -30,6 +30,8 @@ use crate::vision::Vision;
 
 /// Asset source for the project's input directory, registered at startup; models load from it.
 pub const INPUT_SOURCE: &str = "input";
+/// Vertical field of view of the preview camera.
+pub const FOV_DEGREES: f32 = 45.0;
 /// Longest side of a fitted model's bounding box, in units.
 const MODEL_SIZE: f32 = 1.5;
 
@@ -52,7 +54,9 @@ impl Plugin for Preview3dPlugin {
                     (sync_compiled, sync, sync_model, sync_vision)
                         .chain()
                         .before(TransformSystems::Propagate),
-                    fit_model.after(TransformSystems::Propagate),
+                    (fit_model, report_frames)
+                        .chain()
+                        .after(TransformSystems::Propagate),
                 ),
             );
     }
@@ -173,6 +177,32 @@ pub struct Preview3d {
     pub overlays: [bool; 6],
     /// The color vision the view simulates; `None` is normal vision.
     pub vision: Option<Vision>,
+    /// Where the shown model's locators hang, once it is fitted; written by [`report_frames`].
+    pub frames: Option<ModelFrames>,
+}
+
+/// World transforms of a shown model's spaces, as posed this frame; see
+/// docs/features/locators.md#3d-view.
+#[derive(Clone, Debug)]
+pub struct ModelFrames {
+    /// Model space: the scene's root, as fitted.
+    pub model: Affine3A,
+    /// The first skin's joints, by name, in skin order.
+    pub joints: Vec<(String, Affine3A)>,
+}
+
+impl ModelFrames {
+    /// The world transform of `joint`'s space (the first with that name), or the model's.
+    pub fn parent(&self, joint: Option<&str>) -> Option<Affine3A> {
+        match joint {
+            None => Some(self.model),
+            Some(name) => self
+                .joints
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, frame)| *frame),
+        }
+    }
 }
 
 /// The color vision simulation pass on the preview camera; see
@@ -527,7 +557,7 @@ fn setup(
             // Colors as stored, like the 2D view.
             bevy::render::view::Tonemapping::None,
             Projection::Perspective(PerspectiveProjection {
-                fov: 45f32.to_radians(),
+                fov: FOV_DEGREES.to_radians(),
                 ..default()
             }),
             Orbit::default().transform(),
@@ -1377,6 +1407,37 @@ fn fit_model(
         *transform = fitted;
     }
     model.fitted = Some(fitted);
+}
+
+/// Writes [`Preview3d::frames`] for the shown model, `None` while there is none or it is not
+/// fitted yet.
+fn report_frames(
+    loaded: Res<LoadedModel>,
+    mut preview: ResMut<Preview3d>,
+    children: Query<&Children>,
+    skins: Query<&SkinnedMesh>,
+    nodes: Query<(&GlobalTransform, Option<&Name>)>,
+) {
+    preview.frames = loaded.0.as_ref().and_then(|model| {
+        model.fitted?;
+        let (fit, _) = nodes.get(model.fit).ok()?;
+        let skin = children
+            .iter_descendants(model.fit)
+            .find_map(|entity| skins.get(entity).ok());
+        let joints = skin.map_or_else(Vec::new, |skin| {
+            skin.joints
+                .iter()
+                .filter_map(|&joint| {
+                    let (global, name) = nodes.get(joint).ok()?;
+                    Some((name?.to_string(), global.affine()))
+                })
+                .collect()
+        });
+        Some(ModelFrames {
+            model: fit.affine(),
+            joints,
+        })
+    });
 }
 
 #[cfg(test)]

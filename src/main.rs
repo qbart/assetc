@@ -9,6 +9,7 @@ mod color_picker;
 mod config;
 mod fileops;
 mod font;
+mod gizmo;
 mod gradient;
 mod hash;
 mod icons;

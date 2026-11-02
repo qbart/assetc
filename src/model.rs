@@ -88,6 +88,54 @@ pub fn animations(data: &[u8]) -> Result<Vec<(String, f32)>, String> {
         .collect())
 }
 
+/// The first skin's named joints, in skin order; see docs/features/locators.md#locator.
+pub fn joint_names(data: &[u8]) -> Result<Vec<String>, String> {
+    let gltf = parse(data)?;
+    Ok(gltf
+        .skins()
+        .next()
+        .map(|skin| {
+            skin.joints()
+                .filter_map(|j| j.name().filter(|n| !n.is_empty()).map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// The sidecar's locators with their joints as skeleton indices; see
+/// docs/features/locators.md#build. `joints` are the skeleton's node names, if it has one.
+fn resolve_locators(
+    locators: &[crate::amod::Locator],
+    joints: Option<&[Option<&str>]>,
+) -> Result<Vec<amesh::Locator>, String> {
+    locators
+        .iter()
+        .map(|l| {
+            let fail = |problem: String| format!("locator {:?}: {problem}", l.name);
+            let joint = match (&l.joint, joints) {
+                (None, _) => -1,
+                (Some(name), None) => return Err(fail(format!("no skeleton for joint {name:?}"))),
+                (Some(name), Some(joints)) => joints
+                    .iter()
+                    .position(|j| *j == Some(name.as_str()))
+                    .ok_or_else(|| fail(format!("no joint {name:?}")))?
+                    as i32,
+            };
+            let rotation = bevy::math::Quat::from_array(l.rotation);
+            if rotation.length_squared() == 0.0 {
+                return Err(fail("zero rotation".into()));
+            }
+            Ok(amesh::Locator {
+                name: l.name.clone(),
+                joint,
+                translation: l.translation,
+                rotation: rotation.normalize().to_array(),
+                scale: l.scale,
+            })
+        })
+        .collect()
+}
+
 /// A name usable as a file name: the glTF name when non-empty, unique among `names` and free
 /// of path separators; otherwise `<prefix>_<index>`. See docs/features/models.md#names.
 fn leaves(names: &[Option<&str>], prefix: &str) -> Vec<String> {
@@ -260,11 +308,13 @@ fn load_uri(uri: &str, dir: &Path) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("{uri}: {e}"))
 }
 
-/// Compiles the model in `file`, whose asset path is `asset_path` (`P`).
+/// Compiles the model in `file`, whose asset path is `asset_path` (`P`), with the locators of
+/// its sidecar.
 pub fn compile(
     file: &Path,
     asset_path: &str,
     options: &amesh::MeshOptions,
+    locators: &[crate::amod::Locator],
 ) -> Result<Compiled, String> {
     let data = std::fs::read(file).map_err(|e| e.to_string())?;
     let gltf = parse(&data)?;
@@ -332,6 +382,14 @@ pub fn compile(
         .then(|| document.skins().next())
         .flatten()
         .map(|skin| skeleton(document, &skin, &read));
+    let skin_joints: Option<Vec<Option<&str>>> = skeleton.as_ref().and_then(|_| {
+        let skin = document.skins().next()?;
+        Some(skin.joints().map(|j| j.name()).collect())
+    });
+    let locators = resolve_locators(locators, skin_joints.as_deref()).map_err(|e| {
+        let name = file.file_name().unwrap_or_default().to_string_lossy();
+        format!("{name}.amod: {e}")
+    })?;
     let material_ids: Vec<u64> = outputs
         .materials
         .iter()
@@ -341,6 +399,7 @@ pub fn compile(
         &primitives,
         &material_ids,
         skeleton.as_deref(),
+        &locators,
         tangents,
         options,
     );
@@ -843,7 +902,7 @@ mod tests {
         assert_eq!(outputs.materials, [(0, "Paint".to_owned())]);
         assert!(!outputs.animation);
 
-        let compiled = compile(&file, "props/tri", &amesh::MeshOptions::default()).unwrap();
+        let compiled = compile(&file, "props/tri", &amesh::MeshOptions::default(), &[]).unwrap();
         assert!(compiled.animation.is_none());
         assert_eq!(compiled.materials[0].0, "Paint");
         assert_eq!(compiled.materials[0].1.base_color, [1.0, 0.0, 0.0, 1.0]);
@@ -864,6 +923,53 @@ mod tests {
             compiled
                 .detail
                 .starts_with("3 vertices, 1 triangle, 1 submesh, 1 meshlet")
+        );
+    }
+
+    #[test]
+    fn locators_resolve_joints_by_name() {
+        use crate::amod::Locator;
+        let mut hand = Locator::new("hand".into());
+        hand.joint = Some("b".into());
+        hand.rotation = [0.0, 0.0, 0.0, 2.0];
+        let joints = [Some("a"), None, Some("b"), Some("b")];
+        let resolved =
+            resolve_locators(&[hand.clone(), Locator::new("root".into())], Some(&joints)).unwrap();
+        assert_eq!(resolved[0].joint, 2, "the first joint with the name");
+        assert_eq!(resolved[0].rotation, [0.0, 0.0, 0.0, 1.0], "normalized");
+        assert_eq!(resolved[1].joint, -1);
+
+        hand.joint = Some("c".into());
+        let err = resolve_locators(std::slice::from_ref(&hand), Some(&joints)).err();
+        assert_eq!(err.as_deref(), Some(r#"locator "hand": no joint "c""#));
+        let err = resolve_locators(std::slice::from_ref(&hand), None).err();
+        assert_eq!(
+            err.as_deref(),
+            Some(r#"locator "hand": no skeleton for joint "c""#)
+        );
+        let mut zero = Locator::new("z".into());
+        zero.rotation = [0.0; 4];
+        assert!(resolve_locators(&[zero], None).is_err());
+
+        // The Fox's joints, by name.
+        let names = joint_names(FOX).unwrap();
+        assert_eq!(names.len(), 24);
+        hand.joint = Some(names[5].clone());
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Fox.glb");
+        std::fs::write(&file, FOX).unwrap();
+        let compiled = compile(&file, "Fox", &amesh::MeshOptions::default(), &[hand]).unwrap();
+        let reader = crate::chunks::Reader::parse(&compiled.mesh, "AMESH").unwrap();
+        let locators = reader.require("LOCATORS").unwrap();
+        assert_eq!(crate::chunks::u32_at(locators, 0, 64, 16), Some(5));
+        let mut static_hand = Locator::new("hand".into());
+        static_hand.joint = Some("x".into());
+        let tri = dir.path().join("tri.gltf");
+        std::fs::write(&tri, static_triangle()).unwrap();
+        let err = compile(&tri, "tri", &amesh::MeshOptions::default(), &[static_hand]).err();
+        assert_eq!(
+            err.as_deref(),
+            Some(r#"tri.gltf.amod: locator "hand": no skeleton for joint "x""#)
         );
     }
 

@@ -146,7 +146,11 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
                 .map(|levels| levels_detail(*color, levels)),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
-            Job::Model { source, options } => compile_model(input, source, output, options),
+            Job::Model {
+                source,
+                options,
+                locators,
+            } => compile_model(input, source, output, options, locators),
             // Written with its model or font.
             Job::ModelPart { .. } | Job::FontPart { .. } => continue,
             Job::Font { source } => compile_font(input, source, output),
@@ -392,9 +396,10 @@ fn compile_model(
     source: &str,
     output: &Path,
     options: &crate::amesh::MeshOptions,
+    locators: &[crate::amod::Locator],
 ) -> Result<String, String> {
     let p = strip_extension(source);
-    let model = crate::model::compile(&input.join(source), p, options)?;
+    let model = crate::model::compile(&input.join(source), p, options, locators)?;
     write(&output.join(format!("{p}.amesh")), &model.mesh)?;
     if let Some(animation) = &model.animation {
         write(&output.join(format!("{p}.aanim")), animation)?;

@@ -99,7 +99,8 @@ be seen and picked), following their joints in the shown pose and animation.
   | Move   | an 80 px arrow per axis (2 px line, a 6 px triangle head) in the axis color, and a 7 px `ACCENT` center dot | an arrow: moves the locator along that axis, following the pointer along the arrow on screen; the center dot: moves it in the plane facing the camera |
   | Rotate | a 70 px circle per axis, in the plane across that axis (48 segments, 2 px, the axis color) | a circle: turns the locator around that axis by the angle the pointer turns around the gizmo's center |
 
-  - Hovering a handle (within 6 px) draws it 1 px thicker, its color mixed
+  - Hovering a handle (within 6 px of a line, within 9 px of the center
+    dot's center, which wins) draws it 1 px thicker, its color mixed
     halfway to white; a drag that starts on a handle moves or turns the
     locator instead of orbiting the camera.
   - An arrow whose axis points nearly at the camera (its screen length under

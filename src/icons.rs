@@ -39,9 +39,12 @@ pub enum Icon {
     Info,
     LayoutGrid,
     Loader,
+    MapPin,
+    Move3d,
     Palette,
     Plus,
     RefreshCw,
+    Rotate3d,
     Scan,
     Settings2,
     SlidersVertical,
@@ -55,7 +58,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 47] = [
+const SVGS: [(&str, &str); 50] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -123,9 +126,12 @@ const SVGS: [(&str, &str); 47] = [
         include_str!("../assets/icons/layout-grid.svg"),
     ),
     ("loader", include_str!("../assets/icons/loader.svg")),
+    ("map-pin", include_str!("../assets/icons/map-pin.svg")),
+    ("move-3d", include_str!("../assets/icons/move-3d.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
+    ("rotate-3d", include_str!("../assets/icons/rotate-3d.svg")),
     ("scan", include_str!("../assets/icons/scan.svg")),
     ("settings-2", include_str!("../assets/icons/settings-2.svg")),
     (

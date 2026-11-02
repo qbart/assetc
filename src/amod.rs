@@ -13,8 +13,56 @@ use crate::noise::{self, Modifier};
 pub struct Amod {
     /// `[mesh]`: meshoptimizer settings of a glTF model.
     pub mesh: MeshPatch,
+    /// `[[locators]]`: a glTF model's locators, see docs/features/locators.md.
+    pub locators: Vec<Locator>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
     pub modifiers: Vec<Modifier>,
+}
+
+/// A named transform on a model, in its joint's space or the model's.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Locator {
+    pub name: String,
+    /// The first skin's joint, by node name; `None` is model space.
+    #[serde(default)]
+    pub joint: Option<String>,
+    #[serde(default)]
+    pub translation: [f32; 3],
+    #[serde(default = "identity")]
+    pub rotation: [f32; 4],
+    #[serde(default = "unit")]
+    pub scale: [f32; 3],
+}
+
+fn identity() -> [f32; 4] {
+    [0.0, 0.0, 0.0, 1.0]
+}
+
+fn unit() -> [f32; 3] {
+    [1.0; 3]
+}
+
+impl Locator {
+    /// At the model's origin, unrotated, scale 1.
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            joint: None,
+            translation: [0.0; 3],
+            rotation: identity(),
+            scale: unit(),
+        }
+    }
+}
+
+/// `locator`, or `locator_<n>` with the smallest free `n` from 2.
+pub fn free_locator_name(locators: &[Locator]) -> String {
+    let taken = |name: &str| locators.iter().any(|l| l.name == name);
+    std::iter::once("locator".to_owned())
+        .chain((2..).map(|n| format!("locator_{n}")))
+        .find(|name| !taken(name))
+        .expect("a free name")
 }
 
 /// The tables read with serde.
@@ -22,11 +70,12 @@ pub struct Amod {
 #[serde(default, deny_unknown_fields)]
 struct Tables {
     mesh: MeshPatch,
+    locators: Vec<Locator>,
 }
 
 impl Amod {
     pub fn is_empty(&self) -> bool {
-        self.mesh.is_empty() && self.modifiers.is_empty()
+        self.mesh.is_empty() && self.locators.is_empty() && self.modifiers.is_empty()
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -37,10 +86,22 @@ impl Amod {
             None => Vec::new(),
             Some(value) => noise::parse_modifiers(value)?,
         };
-        let Tables { mesh } = toml::Value::Table(table)
+        let Tables { mesh, locators } = toml::Value::Table(table)
             .try_into()
             .map_err(|e: toml::de::Error| e.message().to_owned())?;
-        Ok(Self { mesh, modifiers })
+        for (i, locator) in locators.iter().enumerate() {
+            if locator.name.is_empty() {
+                return Err(format!("locator {}: empty name", i + 1));
+            }
+            if locators[..i].iter().any(|l| l.name == locator.name) {
+                return Err(format!("locator {:?}: name used twice", locator.name));
+            }
+        }
+        Ok(Self {
+            mesh,
+            locators,
+            modifiers,
+        })
     }
 
     /// The written form, see docs/spec/amod.md#written-form.
@@ -49,6 +110,20 @@ impl Amod {
         if !self.mesh.is_empty() {
             out += "[mesh]\n";
             out += &self.mesh.to_toml();
+        }
+        for locator in &self.locators {
+            let floats = |values: &[f32]| {
+                let items: Vec<String> = values.iter().map(|v| format!("{v:?}")).collect();
+                format!("[{}]", items.join(", "))
+            };
+            out += "\n[[locators]]\n";
+            out += &format!("name = {}\n", toml::Value::from(locator.name.as_str()));
+            if let Some(joint) = &locator.joint {
+                out += &format!("joint = {}\n", toml::Value::from(joint.as_str()));
+            }
+            out += &format!("translation = {}\n", floats(&locator.translation));
+            out += &format!("rotation = {}\n", floats(&locator.rotation));
+            out += &format!("scale = {}\n", floats(&locator.scale));
         }
         noise::write_modifiers(&self.modifiers, &mut out);
         // Each table after a blank line, but not the first.
@@ -137,6 +212,48 @@ mod tests {
         };
         assert!(only.to_toml().starts_with("[[modifiers]]"));
         assert!(Amod::parse("[[modifiers]]\ntype = \"sharpen\"\n").is_err());
+    }
+
+    #[test]
+    fn locators_round_trip() {
+        let mut hand = Locator::new("hand \"r\"".into());
+        hand.joint = Some("RightHand".into());
+        hand.translation = [0.02, 0.08, 0.0];
+        hand.rotation = [0.0, 0.0, 0.70710677, 0.70710677];
+        let amod = Amod {
+            mesh: MeshPatch {
+                meshlet_max_vertices: Some(128),
+                ..Default::default()
+            },
+            locators: vec![hand, Locator::new("muzzle".into())],
+            modifiers: Vec::new(),
+        };
+        let text = amod.to_toml();
+        assert!(text.contains(
+            "\n\n[[locators]]\nname = 'hand \"r\"'\njoint = \"RightHand\"\ntranslation = [0.02, 0.08, 0.0]\nrotation = [0.0, 0.0, 0.70710677, 0.70710677]\nscale = [1.0, 1.0, 1.0]\n"
+        ), "{text}");
+        assert!(text.ends_with("\n\n[[locators]]\nname = \"muzzle\"\ntranslation = [0.0, 0.0, 0.0]\nrotation = [0.0, 0.0, 0.0, 1.0]\nscale = [1.0, 1.0, 1.0]\n"));
+        assert_eq!(Amod::parse(&text).unwrap(), amod);
+
+        // Defaults, and what is rejected.
+        let only = Amod::parse("[[locators]]\nname = \"a\"\n").unwrap();
+        assert_eq!(only.locators, [Locator::new("a".into())]);
+        assert!(only.to_toml().starts_with("[[locators]]"));
+        assert!(Amod::parse("[[locators]]\njoint = \"a\"\n").is_err());
+        assert!(Amod::parse("[[locators]]\nname = \"\"\n").is_err());
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\n[[locators]]\nname = \"a\"\n").is_err());
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\nscale = [1.0]\n").is_err());
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\nkind = \"x\"\n").is_err());
+    }
+
+    #[test]
+    fn free_names_count_from_two() {
+        assert_eq!(free_locator_name(&[]), "locator");
+        let taken = [
+            Locator::new("locator".into()),
+            Locator::new("locator_2".into()),
+        ];
+        assert_eq!(free_locator_name(&taken), "locator_3");
     }
 
     #[test]

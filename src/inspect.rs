@@ -55,6 +55,8 @@ pub struct Inspection {
     pub data: Option<DataTable>,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
+    /// A model's first skin's named joints, for its locators.
+    pub joints: Vec<String>,
 }
 
 /// A file's data as a table, for the canvas; see docs/features/inspector.md#data-tables.
@@ -465,6 +467,7 @@ fn model_rows(
     let data = fs::read(file).map_err(|e| e.to_string())?;
     out.rows.extend(model::rows(&data)?);
     out.animations = model::animations(&data)?;
+    out.joints = model::joint_names(&data)?;
     out.model = true;
     // Compiled to an `.amesh` and more, see docs/features/models.md#build.
     match mesh_options(project, file, rel) {
@@ -491,6 +494,18 @@ fn model_rows(
             ));
         }
         Err(e) => out.rows.push(("Mesh settings", e)),
+    }
+    // See docs/features/locators.md#inspector-info; a bad sidecar shows as Mesh settings.
+    if let Ok(amod) = crate::amod::read(file) {
+        let count = amod.map_or(0, |a| a.locators.len());
+        out.rows.push((
+            "Locators",
+            if count > 0 {
+                count.to_string()
+            } else {
+                "none".into()
+            },
+        ));
     }
     let mesh = format!("{}.amesh", strip_extension(rel));
     out.rows.push(("Asset path", mesh.clone()));
