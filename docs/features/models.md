@@ -258,6 +258,43 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   level chosen, the Meshlets mode shows it in light gray.
 - A file that does not read shows its error as the canvas message.
 
+## Compiled animation preview
+
+Selecting a compiled animation (`*.aanim` in the Output tree) plays it, to
+check what the build kept: its clips, read from the file, on its companion
+mesh, `P.amesh` next to it (same folder and name).
+
+- **3D view**: the mesh as the [compiled mesh preview](#compiled-mesh-preview)
+  shows LOD 0 (its display modes and overlays, centered and scaled by its
+  bind pose's bounds), **posed** from the file's own data on every frame:
+  - each joint's local transform comes from the clip's channels at the
+    playhead: a `step` channel takes the key at or before it, a `linear`
+    one interpolates between the keys around it (translation and scale
+    linearly, rotation by spherical interpolation); before the first key
+    and after the last the end key holds; a joint without a channel keeps
+    its bind transform;
+  - joints are placed through their parents, and each vertex follows its
+    `SkinVertex` joints and weights through their `inverse_bind`
+    matrices, as a game would skin it.
+- Without a companion (no such file, a mesh without a skeleton, or one
+  whose joint count is not the animation's `joint_count`), the 3D view
+  shows a weak `No skinned P.amesh to play on` (or `P.amesh has 24 joints,
+  the animation 25`); the timeline still shows.
+- A **timeline** panel under the 3D view, as a model's
+  [timeline](animation-events.md#timeline), read only:
+  1. **Header**: Play / Pause, the time `0.420 / 1.250 s`, and a **Clip**
+     dropdown (the clips by name, in file order).
+  2. **Ruler** with the playhead; pressing or dragging on it moves the
+     playhead (and pauses).
+  3. **Track**: the clip's events as markers (a 10 px diamond in `TEXT`,
+     the name in 11 px `TEXT_WEAK`), flashing `ACCENT` for 0.25 s when the
+     playhead passes them while playing. Hovering a marker shows its name,
+     time and properties (`key = value`, one per line).
+  4. A weak line: `<n> channels · <m> keys · <k> events`.
+- The first clip plays when the file is selected, looping; choosing a
+  clip plays it from its start. `Space` (pointer over the panel), `,` /
+  `.` and `Shift` + `,` / `.` work as on a model's timeline.
+
 ## Chunks view
 
 The **Chunks** view shows the data inside the `.amesh`

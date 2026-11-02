@@ -153,6 +153,15 @@ On a tree (see [`docs/features/trees.md`](docs/features/trees.md#canvas)), as on
 | Double-click on empty grid             | Add a child of the chosen node (or the root) |
 | `Delete` / `X`                         | Remove the chosen node and what is under it  |
 
+On a compiled animation's timeline (see [`docs/features/models.md`](docs/features/models.md#compiled-animation-preview)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| `Space` (pointer over the timeline)    | Play / pause                                 |
+| `,` / `.`                              | Pause and step back / forward to the previous / next 0.01 s |
+| `Shift` + `,` / `.`                    | The same by 0.001 s                          |
+| Left press / drag on the ruler         | Move the playhead there (pauses)             |
+
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
 
 | Input                                  | Action                                       |
