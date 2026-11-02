@@ -158,6 +158,7 @@ The icon follows the entry's type, by extension (any case):
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `noise`                      | `image-play`              |
 | gradient: `gradient`                          | `swatch-book`             |
+| schema: `aschema`                             | `braces`                  |
 | palette: `palette`                            | `palette`                 |
 | mesh: `gltf`, `glb`, `obj`, `amesh`          | `torus`                   |
 | animation: `aanim`                            | `film`                    |

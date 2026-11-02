@@ -26,7 +26,9 @@ For a schema in the Input tree: **Kind** `Schema`, **Dialect** `a/1`,
 **Types** (`2 structs, 1 enum`; `none`), **Fields** (all structs' fields
 together) and **Problems** (`none`, or `<n> errors`). A file that cannot be
 read as a schema (invalid JSON, a missing or unknown `$dialect`, a newer
-major version, no `types`) has an **Error** row instead of the last four.
+major version, no `types` object, or a type whose `kind`, `fields`,
+`values` or `groups` do not have the shape of [§2](../aschema.md#2-schema-file-aschema))
+has an **Error** row instead of the last four.
 
 ### Types tab
 
@@ -153,8 +155,7 @@ its width), flat before the first point and after the last:
 
 Every schema error of [§5](../aschema.md#5-validation) is checked whenever
 the file changes: names (identifiers, no `$`, no shadowing of primitives or
-generics, unique), kinds, struct `fields`, enum `values` (non-empty,
-unique), type expressions (parse, known names, `ref<T>` only of structs, no
+generics, unique), enum `values` (non-empty, unique), type expressions (parse, known names, `ref<T>` only of structs, no
 `optional<optional<T>>`), direct embedding recursion, defaults that do not
 encode as their type, `min` / `max` / `step` on non-numeric fields,
 conditions naming no sibling or ordering against a non-number, and widgets
