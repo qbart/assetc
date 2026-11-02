@@ -56,16 +56,23 @@ On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)
 | `W`                                    | Gizmo: Move (again: off); with the Paths tab, on the chosen path point |
 | `E`                                    | Gizmo: Rotate (again: off); nothing with the Paths tab |
 | `S`                                    | Arm Place on surface                         |
-| `Escape`                               | Gizmo off, disarm Place on surface, stop painting, stop drawing path points |
+| `Escape`                               | Gizmo off, disarm Place on surface, stop painting or erasing, stop drawing path points |
 | Left click on a path point             | Choose that path and point (unfolds its card) |
-| Left click on the model while drawing a path | Add a point there, after the chosen one |
 
 While a region paints (see [`docs/features/regions.md`](docs/features/regions.md#painting)):
 
 | Input                                  | Action                                       |
 |----------------------------------------|----------------------------------------------|
-| Left drag / click on the model         | Paint triangles into the region              |
-| `Shift` + left drag / click            | Erase triangles from the region              |
+| Left drag / click on the model         | Paint (Paint on) or erase (Erase on) triangles |
+| `Shift` + left drag / click            | The other one: erase while painting, paint while erasing |
+| Right drag                             | Orbit the camera                             |
+
+While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left click on the model                | Add a point there, after the chosen one      |
+| Left drag on the model                 | Add a point every 24 px along the stroke     |
 | Right drag                             | Orbit the camera                             |
 
 ## Canvas (color LUT)

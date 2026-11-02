@@ -75,9 +75,9 @@ tree. It works like the [Shapes tab](shapes.md#shapes-tab):
     or, after the last point of an open path, the last point moved on by
     the previous segment's offset. The new point is chosen.
   - **Draw** (`pen-line` and text, a toggle filled with `ACCENT` at 25%
-    while on): each click on the model adds a point where the click hits
-    its surface, after the chosen point, and chooses it. `Escape` (pointer
-    over the canvas) or choosing another path turns it off.
+    while on): drawing on the model adds points where it hits the surface,
+    see [Drawing](#drawing). `Escape` (pointer over the canvas), choosing
+    another path or leaving the Paths tab turns it off.
   - **Properties**: the [property editor](properties.md#properties-tab).
 - While an animation plays, Gizmo, Joint, the points, Add point and Draw are
   disabled, as for locators.
@@ -100,6 +100,19 @@ like locator markers), following their joints:
   parent axes. `E` does nothing there.
 - The toolbar's [Show](models.md#show) **Paths** button hides them all;
   **Add path**, **Add point** and **Draw** turn it back on.
+
+### Drawing
+
+While the chosen path's **Draw** is on:
+
+- **Left press** on the model adds a point where the pointer hits its
+  surface, after the chosen point, and chooses it; so clicking adds one
+  point.
+- **Left drag** keeps adding points along the stroke: one each time the
+  pointer has moved 24 px on screen from where the last point was asked
+  for, where it hits the model (misses add nothing).
+- **Right drag** still orbits the camera; the wheel still zooms.
+- Points and locator markers cannot be clicked, and the gizmo is not drawn.
 
 ## Build
 

@@ -191,7 +191,7 @@ Locators tab, compiled mesh locator toggle), `move-3d`, `rotate-3d` (locator
 gizmo modes), `crosshair` (placing locators on the surface),
 `flip-horizontal-2` (mirroring locators), `plus`, `trash-2`, `refresh-cw`
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
-`paint-bucket` (Inspector Regions tab), `paintbrush` (painting regions),
+`paint-bucket` (Inspector Regions tab), `paintbrush`, `eraser` (painting and erasing regions),
 `spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
 points), `x` (removing a path point),
 `database` (Inspector Properties tab), `check` (menu

@@ -61,12 +61,15 @@ Input tree. It works like the [Locators tab](locators.md#locators-tab):
     (`mesh_<index>` when it has none) and `<primitive>` the primitive's
     index in it; hover shows its material (`no material`) and triangle
     count.
-  - **Painted**: `<n> triangles`, then a **Paint** toggle button
-    (`paintbrush` and text, filled with `ACCENT` at 25% while on), a
-    **Brush** slider (2–64 px, 12 to start with, for the session) and a
-    **Clear** button (enabled with painted triangles) that removes them all.
-  - A weak hint: `Paint: drag on the model. Shift + drag erases. Right drag
-    orbits.`
+  - **Painted**: `<n> triangles`, then two toggle buttons, at most one
+    on (filled with `ACCENT` at 25% while on; clicking the one that is on
+    turns it off, the other turns it on and this one off): **Paint**
+    (`paintbrush` and text) and **Erase** (`eraser` and text, the rubber);
+    then a **Brush** slider (2–64 px, 12 to start with, for the session) and
+    a **Clear** button (enabled with painted triangles) that removes them
+    all.
+  - A weak hint: `Drag on the model to paint or erase. Shift + drag does
+    the other. Right drag orbits.`
 - Edits are saved like the locators'; a stroke is saved when the pointer is
   released.
 
@@ -86,22 +89,26 @@ materials, following the pose and animation:
   of the model, without depth; triangles facing away from the camera are
   left out).
 - A primitive with morph targets keeps its materials.
-- Turning Show **Regions** off also turns Paint off; Paint turns it back
-  on.
+- Turning Show **Regions** off also turns Paint and Erase off; either
+  turns it back on.
 
 ### Painting
 
-While the chosen region's **Paint** is on (only one region paints at a
-time; choosing another turns it off):
+While the chosen region's **Paint** or **Erase** is on (only one region
+paints at a time; choosing another region, or leaving the Regions tab,
+turns them off):
 
-- **Left drag** on the model adds triangles to the region: every frame, the
-  triangle under the pointer and the triangles whose center lies within the
-  brush's radius of the point hit (the brush's size on screen, at the
-  model's center), and that face the camera. **Shift + left drag** removes
-  them instead. Clicking paints once.
+- **Left drag** on the model paints: every frame, the triangle under the
+  pointer and the triangles whose center lies within the brush's radius of
+  the point hit (the brush's size on screen, at the model's center), and
+  that face the camera, are added to the region (Paint) or removed from it
+  (Erase). **Shift + left drag** does the other one. Clicking paints once.
+- The brush is shown at the pointer while it is over the canvas: a circle
+  of its radius, 1 px, in the region's color for painting and `TEXT` for
+  erasing (following Shift).
 - **Right drag** still orbits the camera; the wheel still zooms.
 - Locator markers cannot be clicked, and the gizmo is not drawn.
-- `Escape` (pointer over the canvas) turns Paint off.
+- `Escape` (pointer over the canvas) turns Paint and Erase off.
 
 ## Build
 
