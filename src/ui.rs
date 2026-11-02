@@ -5299,15 +5299,23 @@ fn canvas_model(
 
     // Regions: ask for their triangles, draw last frame's; see docs/features/regions.md#3d-view.
     preview.region_wants.clear();
+    preview.region_view = false;
+    preview.region_outline = None;
     if let (Some(edit), Some(geometry)) = (&edit, geometry) {
+        preview.region_view = show_regions && !edit.edit.regions.is_empty();
         for (r, region) in edit.edit.regions.iter().enumerate() {
             if !show_regions || hidden_regions.contains(&region.name) {
                 continue;
             }
+            if edit.region == Some(r) {
+                preview.region_outline = Some(r);
+            }
+            let color = hex_color32(&region.color).unwrap_or(TEXT);
             for (mesh, primitive, material, _) in &geometry.primitives {
                 let whole = material
                     .as_ref()
-                    .is_some_and(|m| region.materials.contains(m));
+                    .is_some_and(|m| region.materials.contains(m))
+                    || region.submeshes.contains(&(*mesh, *primitive));
                 let painted: Vec<u32> = region
                     .triangles
                     .range((*mesh, *primitive, 0)..=(*mesh, *primitive, u32::MAX))
@@ -5316,6 +5324,7 @@ fn canvas_model(
                 if whole || !painted.is_empty() {
                     preview.region_wants.push(preview3d::RegionWant {
                         region: r,
+                        color: [color.r(), color.g(), color.b()],
                         mesh: *mesh,
                         primitive: *primitive,
                         triangles: (!whole).then_some(painted),
@@ -5326,9 +5335,8 @@ fn canvas_model(
     }
     let painter = ui.painter_at(rect);
     if let Some(edit) = &edit {
-        // One mesh without anti-aliasing: feathering spikes at sliver triangles.
+        // The chosen region's outline; the colors are drawn by the 3D view.
         let eye = camera.position();
-        let mut fill = egui::Mesh::default();
         let mut outlines = Vec::new();
         for (r, corners) in &preview.region_triangles {
             let Some(region) = edit.edit.regions.get(*r) else {
@@ -5346,16 +5354,8 @@ fn canvas_model(
                 continue;
             };
             let color = hex_color32(&region.color).unwrap_or(TEXT);
-            let first = fill.vertices.len() as u32;
-            for p in &points {
-                fill.colored_vertex(*p, color.gamma_multiply(0.3));
-            }
-            fill.add_triangle(first, first + 1, first + 2);
-            if edit.region == Some(*r) {
-                outlines.extend((0..3).map(|k| ([points[k], points[(k + 1) % 3]], color)));
-            }
+            outlines.extend((0..3).map(|k| ([points[k], points[(k + 1) % 3]], color)));
         }
-        painter.add(egui::Shape::mesh(fill));
         for (line, color) in outlines {
             painter.line_segment(line, Stroke::new(1.0, color));
         }
@@ -6546,10 +6546,10 @@ fn shape_fields(
 
 /// The Regions tab; see docs/features/regions.md#regions-tab.
 fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools) -> Option<Amod> {
-    let materials: Vec<String> = inspected
+    let parts = inspected
         .geometry
         .as_ref()
-        .map(|g| g.materials.clone())
+        .map(RegionParts::new)
         .unwrap_or_default();
     let LocatorTools {
         hidden_regions,
@@ -6585,6 +6585,7 @@ fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools)
                         tags: Vec::new(),
                         color: (*color).to_owned(),
                         materials: Vec::new(),
+                        submeshes: Default::default(),
                         triangles: Default::default(),
                     });
                     edit.region = Some(regions.len() - 1);
@@ -6612,7 +6613,7 @@ fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools)
                                     delete = open
                                         && icon_button(ui, Icon::Trash2, "Delete", true).clicked();
                                 },
-                                |ui| region_fields(ui, edit, i, &materials, paint, brush, armed),
+                                |ui| region_fields(ui, edit, i, &parts, paint, brush, armed),
                             )
                         })
                         .inner;
@@ -6643,12 +6644,50 @@ fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools)
     mesh_commit(ui, edit)
 }
 
+/// What a region can cover whole: the model's materials and submeshes.
+#[derive(Default)]
+struct RegionParts {
+    materials: Vec<String>,
+    /// glTF mesh and primitive, label and hover text.
+    submeshes: Vec<((u32, u32), String, String)>,
+}
+
+impl RegionParts {
+    fn new(geometry: &crate::model::ModelGeometry) -> Self {
+        let submeshes = geometry
+            .primitives
+            .iter()
+            .map(|(mesh, primitive, material, triangles)| {
+                let name = geometry
+                    .mesh_names
+                    .get(*mesh as usize)
+                    .cloned()
+                    .unwrap_or_else(|| format!("mesh_{mesh}"));
+                let hover = format!(
+                    "{}, {}",
+                    material.as_deref().unwrap_or("no material"),
+                    if *triangles == 1 {
+                        "1 triangle".to_owned()
+                    } else {
+                        format!("{triangles} triangles")
+                    }
+                );
+                ((*mesh, *primitive), format!("{name} / {primitive}"), hover)
+            })
+            .collect();
+        Self {
+            materials: geometry.materials.clone(),
+            submeshes,
+        }
+    }
+}
+
 /// The body of region `i`'s card.
 fn region_fields(
     ui: &mut Ui,
     edit: &mut MeshEdit,
     i: usize,
-    materials: &[String],
+    parts: &RegionParts,
     paint: &mut bool,
     brush: &mut f32,
     armed: &mut bool,
@@ -6673,16 +6712,33 @@ fn region_fields(
     }
     prop_row(ui, "Materials", |ui, _| {
         ui.vertical(|ui| {
-            if materials.is_empty() {
+            if parts.materials.is_empty() {
                 ui.weak("None");
             }
-            for material in materials {
+            for material in &parts.materials {
                 let mut on = region.materials.contains(material);
                 if ui.checkbox(&mut on, material).changed() {
                     if on {
                         region.materials.push(material.clone());
                     } else {
                         region.materials.retain(|m| m != material);
+                    }
+                }
+            }
+        });
+    });
+    prop_row(ui, "Submeshes", |ui, _| {
+        ui.vertical(|ui| {
+            if parts.submeshes.is_empty() {
+                ui.weak("None");
+            }
+            for (id, label, hover) in &parts.submeshes {
+                let mut on = region.submeshes.contains(id);
+                if ui.checkbox(&mut on, label).on_hover_text(hover).changed() {
+                    if on {
+                        region.submeshes.insert(*id);
+                    } else {
+                        region.submeshes.remove(id);
                     }
                 }
             }

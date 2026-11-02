@@ -532,6 +532,8 @@ pub struct ModelGeometry {
     pub materials: Vec<String>,
     /// Each triangle primitive: glTF mesh, primitive, material name and triangle count.
     pub primitives: Vec<(u32, u32, Option<String>, usize)>,
+    /// Each glTF mesh's name, `mesh_<index>` when it has none (or a duplicate).
+    pub mesh_names: Vec<String>,
     /// Largest side of the points' bounding box.
     pub extent: f32,
 }
@@ -593,10 +595,12 @@ impl ModelGeometry {
                 ));
             }
         }
+        let mesh_names: Vec<_> = document.meshes().map(|m| m.name()).collect();
         Self {
             points,
             joints,
             primitives,
+            mesh_names: leaves(&mesh_names, "mesh"),
             materials: used.into_iter().map(|i| names[i].clone()).collect(),
             extent: if min.cmple(max).all() {
                 (max - min).max_element()
@@ -693,6 +697,7 @@ pub fn compile(
                         .enumerate()
                         .filter(|(_, r)| {
                             material.is_some_and(|m| r.materials.iter().any(|n| n == m))
+                                || r.submeshes.contains(&(part.mesh, part.index))
                                 || r.triangles.contains(&(part.mesh, part.index, t))
                         })
                         .fold(0u32, |mask, (i, _)| mask | 1 << i)
@@ -1340,6 +1345,11 @@ materials = ["fox_material"]
 name = "spot"
 color = "#22c55e"
 triangles = [[0, 0, 5, 1], [9, 9, 0, 3]]
+
+[[regions]]
+name = "body"
+color = "#3b82f6"
+submeshes = [[0, 0], [3, 1]]
 "##,
         )
         .unwrap();
@@ -1353,6 +1363,7 @@ triangles = [[0, 0, 5, 1], [9, 9, 0, 3]]
         assert!(head.len() > 10 && head.len() < geometry.points.len());
         assert!(geometry.hull_points(Some("nope")).is_none());
         assert_eq!(geometry.materials, ["fox_material"]);
+        assert_eq!(geometry.mesh_names, ["fox1"]);
         assert!(geometry.extent > 0.0);
 
         let compiled = compile(&file, "Fox", &amesh::MeshOptions::default(), &amod).unwrap();
@@ -1370,6 +1381,8 @@ triangles = [[0, 0, 5, 1], [9, 9, 0, 3]]
         assert_eq!(masks.len(), 576);
         assert!(masks.iter().all(|m| m & 1 == 1));
         assert_eq!(masks.iter().filter(|m| **m & 2 != 0).count(), 1);
+        // The one submesh is the body (a missing one is ignored).
+        assert!(masks.iter().all(|m| m & 4 != 0));
 
         let bad = crate::amod::Amod::parse(
             "[[shapes]]\nname = \"x\"\ntype = \"box\"\njoint = \"nope\"\n",

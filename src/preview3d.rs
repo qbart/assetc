@@ -54,7 +54,7 @@ impl Plugin for Preview3dPlugin {
                     (sync_compiled, sync, sync_model, sync_vision)
                         .chain()
                         .before(TransformSystems::Propagate),
-                    sync_attachments
+                    (sync_attachments, sync_region_view)
                         .after(sync_model)
                         .before(TransformSystems::Propagate),
                     (fit_model, report_frames, cast_surface, report_regions)
@@ -189,10 +189,14 @@ pub struct Preview3d {
     pub surface_hit: Option<Option<SurfaceHit>>,
     /// Models shown at the shown model's locators, written by the UI every frame.
     pub attachments: Vec<Attachment>,
-    /// Triangles of the shown model to report, written by the UI every frame; see
+    /// The visible regions' triangles, written by the UI every frame; see
     /// docs/features/regions.md#3d-view.
     pub region_wants: Vec<RegionWant>,
-    /// The wanted triangles as posed this frame: region and corners; written by
+    /// Draw the model in its regions' colors (from `region_wants`) instead of its materials.
+    pub region_view: bool,
+    /// The region whose triangles to report in `region_triangles`.
+    pub region_outline: Option<usize>,
+    /// The outlined region's triangles as posed this frame: region and corners; written by
     /// [`report_regions`].
     pub region_triangles: Vec<(usize, [Vec3; 3])>,
 }
@@ -214,6 +218,8 @@ pub type TriangleId = (u32, u32, u32);
 #[derive(Clone, Debug)]
 pub struct RegionWant {
     pub region: usize,
+    /// The region's color, sRGB.
+    pub color: [u8; 3],
     pub mesh: u32,
     pub primitive: u32,
     pub triangles: Option<Vec<u32>>,
@@ -1631,6 +1637,161 @@ struct PosedMesh<'a> {
 }
 
 /// The glTF mesh and primitive of a mesh loaded from a glTF (`Mesh<m>/Primitive<p>`).
+/// A copy of one of the shown model's meshes drawn in its regions' colors, beside the mesh
+/// it stands in for; see docs/features/regions.md#3d-view.
+#[derive(Component)]
+struct RegionOverlay {
+    source: Entity,
+    /// Each triangle's color, as uploaded.
+    colors: Vec<[u8; 3]>,
+}
+
+/// Triangles in no visible region.
+const NO_REGION: [u8; 3] = [0x80, 0x80, 0x80];
+
+/// Each triangle's color of glTF primitive `id` with `count` triangles: the last wanted
+/// region covering it.
+fn region_colors(wants: &[RegionWant], id: (u32, u32), count: usize) -> Vec<[u8; 3]> {
+    let mut colors = vec![NO_REGION; count];
+    let mut wants: Vec<&RegionWant> = wants
+        .iter()
+        .filter(|w| (w.mesh, w.primitive) == id)
+        .collect();
+    wants.sort_by_key(|w| w.region);
+    for want in wants {
+        match &want.triangles {
+            None => colors.fill(want.color),
+            Some(some) => {
+                for &t in some {
+                    if let Some(c) = colors.get_mut(t as usize) {
+                        *c = want.color;
+                    }
+                }
+            }
+        }
+    }
+    colors
+}
+
+/// Three vertex colors (linear) per triangle.
+fn color_attribute(colors: &[[u8; 3]]) -> Vec<[f32; 4]> {
+    colors
+        .iter()
+        .flat_map(|&[r, g, b]| {
+            let linear = Color::srgb_u8(r, g, b).to_linear().to_f32_array();
+            [linear; 3]
+        })
+        .collect()
+}
+
+/// Shows [`RegionOverlay`]s in place of the shown model's meshes while
+/// [`Preview3d::region_view`] is on, and the meshes again when it is off.
+#[allow(clippy::too_many_arguments)]
+fn sync_region_view(
+    mut commands: Commands,
+    preview: Res<Preview3d>,
+    loaded: Res<LoadedModel>,
+    children: Query<&Children>,
+    roots: Query<Entity, With<AttachmentRoot>>,
+    sources: Query<(&Mesh3d, &Transform, &ChildOf, Option<&SkinnedMesh>), Without<RegionOverlay>>,
+    mut overlays: Query<(Entity, &mut RegionOverlay, &Mesh3d, &mut Transform)>,
+    mut visibilities: Query<&mut Visibility>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut material: Local<Option<Handle<StandardMaterial>>>,
+) {
+    let model = loaded
+        .0
+        .as_ref()
+        .filter(|m| m.ready && m.fitted.is_some() && preview.region_view);
+    // Overlays no longer wanted, or whose mesh is gone.
+    for (entity, overlay, _, _) in &overlays {
+        if model.is_none() || !sources.contains(overlay.source) {
+            commands.entity(entity).despawn();
+            if let Ok(mut visibility) = visibilities.get_mut(overlay.source) {
+                *visibility = Visibility::Inherited;
+            }
+        }
+    }
+    let Some(model) = model else {
+        return;
+    };
+    let material = material
+        .get_or_insert_with(|| {
+            materials.add(StandardMaterial {
+                perceptual_roughness: 0.9,
+                ..default()
+            })
+        })
+        .clone();
+    let attached: std::collections::HashSet<Entity> = roots
+        .iter()
+        .flat_map(|root| std::iter::once(root).chain(children.iter_descendants(root)))
+        .collect();
+    for entity in children.iter_descendants(model.fit) {
+        if attached.contains(&entity) {
+            continue;
+        }
+        let Ok((mesh3d, transform, parent, skin)) = sources.get(entity) else {
+            continue;
+        };
+        let Some(id) = primitive_id(&mesh3d.0) else {
+            continue;
+        };
+        let existing = overlays
+            .iter_mut()
+            .find(|(_, overlay, _, _)| overlay.source == entity);
+        match existing {
+            Some((_, mut overlay, overlay_mesh, mut overlay_transform)) => {
+                if *overlay_transform != *transform {
+                    *overlay_transform = *transform;
+                }
+                let colors = region_colors(&preview.region_wants, id, overlay.colors.len());
+                if colors != overlay.colors
+                    && let Some(mut mesh) = meshes.get_mut(&overlay_mesh.0)
+                {
+                    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_attribute(&colors));
+                    overlay.colors = colors;
+                }
+            }
+            None => {
+                let Some(source) = meshes.get(&mesh3d.0) else {
+                    continue;
+                };
+                if source.has_morph_targets()
+                    || source.primitive_topology() != PrimitiveTopology::TriangleList
+                {
+                    continue;
+                }
+                let mut mesh = source.clone();
+                mesh.duplicate_vertices();
+                mesh.remove_indices();
+                mesh.remove_attribute(Mesh::ATTRIBUTE_TANGENT);
+                mesh.compute_flat_normals();
+                let count = mesh.count_vertices() / 3;
+                let colors = region_colors(&preview.region_wants, id, count);
+                mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, color_attribute(&colors));
+                let mut overlay = commands.spawn((
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(material.clone()),
+                    *transform,
+                    ChildOf(parent.parent()),
+                    RegionOverlay {
+                        source: entity,
+                        colors,
+                    },
+                ));
+                if let Some(skin) = skin {
+                    overlay.insert((skin.clone(), bevy::camera::visibility::NoFrustumCulling));
+                }
+                if let Ok(mut visibility) = visibilities.get_mut(entity) {
+                    *visibility = Visibility::Hidden;
+                }
+            }
+        }
+    }
+}
+
 fn primitive_id(mesh: &Handle<Mesh>) -> Option<(u32, u32)> {
     let label = mesh.path()?.label()?;
     let (m, p) = label.strip_prefix("Mesh")?.split_once("/Primitive")?;
@@ -1644,6 +1805,7 @@ type MeshQuery<'w, 's> = Query<
         &'static Mesh3d,
         &'static GlobalTransform,
         Option<&'static SkinnedMesh>,
+        Has<RegionOverlay>,
     ),
 >;
 
@@ -1669,7 +1831,7 @@ fn posed_meshes<'a>(
         if attached.contains(&entity) {
             continue;
         }
-        let Ok((mesh3d, global, skin)) = mesh_entities.get(entity) else {
+        let Ok((mesh3d, global, skin, false)) = mesh_entities.get(entity) else {
             continue;
         };
         let id = primitive_id(&mesh3d.0);
@@ -1859,9 +2021,13 @@ fn report_regions(
     let mut out = Vec::new();
     if let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some())
         && preview.model_status == ModelStatus::Ready
-        && !preview.region_wants.is_empty()
+        && let Some(outline) = preview.region_outline
     {
-        let wants = &preview.region_wants;
+        let wants: Vec<&RegionWant> = preview
+            .region_wants
+            .iter()
+            .filter(|w| w.region == outline)
+            .collect();
         posed_meshes(
             model.fit,
             &children,

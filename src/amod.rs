@@ -409,6 +409,7 @@ name = "armor"
 tags = ["metal"]
 color = "#3b82f6"
 materials = ["Steel"]
+submeshes = [[0, 2], [1, 0]]
 triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
 "##;
         let amod = Amod::parse(text).unwrap();
@@ -427,6 +428,7 @@ triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
         assert_eq!(amod.shapes[0].properties["damage"], PropValue::Float(2.0));
         assert_eq!(amod.shapes[1].shape, ShapeType::Hull);
         assert_eq!(amod.regions[0].triangles.len(), 52);
+        assert!(amod.regions[0].submeshes.contains(&(1, 0)));
         assert_eq!(amod.to_toml(), text);
         assert_eq!(Amod::parse(&amod.to_toml()).unwrap(), amod);
 
@@ -440,6 +442,8 @@ triangles = [[0, 0, 120, 40], [0, 1, 0, 12]]
             "[[shapes]]\nname = \"a\"\ntype = \"box\"\nmass = 1\n",
             "[[regions]]\nname = \"a\"\n",
             "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\ntriangles = [[0, 0, 1, 0]]\n",
+            "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\nsubmeshes = [[0]]\n",
+            "[[regions]]\nname = \"a\"\ncolor = \"#000000\"\nsubmeshes = [[0, 1], [0, 1]]\n",
         ] {
             assert!(Amod::parse(bad).is_err(), "{bad}");
         }

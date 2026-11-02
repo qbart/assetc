@@ -450,6 +450,8 @@ pub struct Region {
     pub tags: Vec<String>,
     pub color: String,
     pub materials: Vec<String>,
+    /// Whole glTF primitives: mesh and primitive index.
+    pub submeshes: BTreeSet<(u32, u32)>,
     pub triangles: BTreeSet<TriangleId>,
 }
 
@@ -488,6 +490,29 @@ pub fn parse_regions(value: toml::Value) -> Result<Vec<Region>, String> {
                     materials.push(material);
                 }
             }
+            let mut submeshes = BTreeSet::new();
+            if let Some(v) = table.remove("submeshes") {
+                let items = v
+                    .as_array()
+                    .ok_or_else(|| fail("submeshes is not an array of pairs".into()))?;
+                for item in items {
+                    let pair: Option<Vec<u32>> =
+                        item.as_array().filter(|r| r.len() == 2).and_then(|r| {
+                            r.iter()
+                                .map(|n| n.as_integer().and_then(|n| u32::try_from(n).ok()))
+                                .collect()
+                        });
+                    let Some([mesh, primitive]) = pair.and_then(|n| <[u32; 2]>::try_from(n).ok())
+                    else {
+                        return Err(fail("a submesh is not [mesh, primitive]".into()));
+                    };
+                    if !submeshes.insert((mesh, primitive)) {
+                        return Err(fail(format!(
+                            "submesh [{mesh}, {primitive}] is listed twice"
+                        )));
+                    }
+                }
+            }
             let mut triangles = BTreeSet::new();
             if let Some(v) = table.remove("triangles") {
                 let runs = v
@@ -524,6 +549,7 @@ pub fn parse_regions(value: toml::Value) -> Result<Vec<Region>, String> {
                 tags,
                 color,
                 materials,
+                submeshes,
                 triangles,
             })
         })
@@ -554,6 +580,14 @@ pub fn write_regions(regions: &[Region], out: &mut String) {
         *out += &format!("color = {}\n", toml::Value::from(region.color.as_str()));
         if !region.materials.is_empty() {
             *out += &format!("materials = {}\n", write_strings(&region.materials));
+        }
+        if !region.submeshes.is_empty() {
+            let pairs: Vec<String> = region
+                .submeshes
+                .iter()
+                .map(|(m, p)| format!("[{m}, {p}]"))
+                .collect();
+            *out += &format!("submeshes = [{}]\n", pairs.join(", "));
         }
         let runs = triangle_runs(&region.triangles);
         if !runs.is_empty() {
