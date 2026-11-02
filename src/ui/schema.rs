@@ -440,66 +440,72 @@ fn struct_editor(
     let mut rename = None;
     let mut declare = false;
     for (gi, name) in names.iter().enumerate() {
-        let card = Frame::new()
-            .fill(BG_PANEL)
-            .corner_radius(6)
-            .inner_margin(Margin::same(8))
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.push_id(("group", name), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        let grip = drag_handle(ui);
-                        if grip.dragged() {
-                            dragging.set(Some(gi));
-                        }
-                        if grip.drag_stopped() {
-                            dropped.set(Some(gi));
-                        }
-                        if let Some(new) = commit_field(ui, "name", name, NAME_W, "Group")
-                            && !new.is_empty()
-                            && !names.contains(&new)
-                        {
-                            rename = Some((name.clone(), new));
-                        }
-                        let Body::Struct { fields, groups } = &mut edit.edit.types[ti].body else {
-                            return;
-                        };
-                        let count = fields.iter().filter(|f| f.group == *name).count();
-                        let entry = groups.iter_mut().find(|g| g.name == *name);
-                        let mut group = entry.as_deref().cloned().unwrap_or_else(|| Group {
-                            name: name.clone(),
-                            ..Group::default()
-                        });
-                        ui.checkbox(&mut group.collapsed, "Collapsed");
-                        let doc = egui::TextEdit::singleline(&mut group.doc).hint_text("Doc");
-                        ui.add_sized(vec2((ui.available_width() - 110.0).max(80.0), 22.0), doc);
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if icon_button(ui, Icon::X, "Remove group", true).clicked() {
-                                remove = Some(name.clone());
+        // Ids from the group's name, not the place: they stay while fields fold.
+        let card = ui
+            .push_id(("group", name), |ui| {
+                Frame::new()
+                    .fill(BG_PANEL)
+                    .corner_radius(6)
+                    .inner_margin(Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            let id = egui::Id::new(("schema_group_grip", ti, name));
+                            let grip = drag_handle_with_id(ui, id);
+                            if grip.dragged() {
+                                dragging.set(Some(gi));
                             }
-                            let plural = if count == 1 { "" } else { "s" };
-                            ui.label(
-                                RichText::new(format!("{count} field{plural}")).color(TEXT_WEAK),
-                            );
-                        });
-                        match entry {
-                            Some(entry) => *entry = group,
-                            None if group.collapsed || !group.doc.is_empty() => {
-                                groups.push(group);
-                                declare = true;
+                            if grip.drag_stopped() {
+                                dropped.set(Some(gi));
                             }
-                            None => {}
+                            if let Some(new) = commit_field(ui, "name", name, NAME_W, "Group")
+                                && !new.is_empty()
+                                && !names.contains(&new)
+                            {
+                                rename = Some((name.clone(), new));
+                            }
+                            let Body::Struct { fields, groups } = &mut edit.edit.types[ti].body
+                            else {
+                                return;
+                            };
+                            let count = fields.iter().filter(|f| f.group == *name).count();
+                            let entry = groups.iter_mut().find(|g| g.name == *name);
+                            let mut group = entry.as_deref().cloned().unwrap_or_else(|| Group {
+                                name: name.clone(),
+                                ..Group::default()
+                            });
+                            ui.checkbox(&mut group.collapsed, "Collapsed");
+                            let doc = egui::TextEdit::singleline(&mut group.doc).hint_text("Doc");
+                            ui.add_sized(vec2((ui.available_width() - 110.0).max(80.0), 22.0), doc);
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if icon_button(ui, Icon::X, "Remove group", true).clicked() {
+                                    remove = Some(name.clone());
+                                }
+                                let plural = if count == 1 { "" } else { "s" };
+                                ui.label(
+                                    RichText::new(format!("{count} field{plural}"))
+                                        .color(TEXT_WEAK),
+                                );
+                            });
+                            match entry {
+                                Some(entry) => *entry = group,
+                                None if group.collapsed || !group.doc.is_empty() => {
+                                    groups.push(group);
+                                    declare = true;
+                                }
+                                None => {}
+                            }
+                        });
+                        if !folded {
+                            ui.add_space(4.0);
+                            field_rows(ui, edit, snapshot, ti, name, &names, problems);
                         }
-                    });
-                    if !folded {
-                        ui.add_space(4.0);
-                        field_rows(ui, edit, snapshot, ti, name, &names, problems);
-                    }
-                });
+                    })
+                    .response
+                    .rect
             })
-            .response
-            .rect;
+            .inner;
         rects.push(card);
         ui.add_space(8.0);
     }
@@ -746,9 +752,13 @@ fn default_cell(
         let hint = ty
             .map(|t| aschema::implicit_default(schema, t))
             .unwrap_or_default();
-        ui.add_sized(
+        ui.allocate_ui_with_layout(
             vec2(DEFAULT_W, 22.0),
-            egui::Label::new(RichText::new(hint).monospace().color(TEXT_WEAK)).truncate(),
+            Layout::left_to_right(Align::Center),
+            |ui| {
+                let hint = RichText::new(hint).monospace().color(TEXT_WEAK);
+                ui.add(egui::Label::new(hint).truncate());
+            },
         );
         return false;
     };
@@ -855,6 +865,7 @@ fn default_cell(
 
 fn curve_preview(painter: &egui::Painter, rect: Rect, value: &Value) {
     painter.rect_filled(rect, 3, BG_PANEL);
+    painter.rect_stroke(rect, 3, Stroke::new(1.0, STROKE), StrokeKind::Inside);
     let Ok(points) = aschema::curve_points(value) else {
         return;
     };

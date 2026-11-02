@@ -126,12 +126,12 @@ fn edge_shape(a: egui::Pos2, b: egui::Pos2, r: f32, slot: usize, bend: f32) -> E
     let (curve, t0, t1) = if (b - a).length() < 1e-3 {
         // A loop over the node, larger for each further one.
         let at = |deg: f32, d: f32| a + vec2(deg.to_radians().cos(), deg.to_radians().sin()) * d;
-        let h = r * (1.6 + 0.8 * n);
+        let h = r * (1.8 + 0.9 * n);
         let curve = [
-            at(-120.0, r),
-            at(-140.0, r + h),
-            at(-40.0, r + h),
-            at(-60.0, r),
+            at(-115.0, r),
+            at(-125.0, r + h),
+            at(-55.0, r + h),
+            at(-65.0, r),
         ];
         (curve, 0.0, 1.0)
     } else {

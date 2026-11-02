@@ -1831,6 +1831,17 @@ fn icon_button(ui: &mut Ui, icon: Icon, tooltip: &str, enabled: bool) -> Respons
 /// The grip a modifier card is dragged by, see docs/features/noise.md#modifiers-tab.
 fn drag_handle(ui: &mut Ui) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::drag());
+    paint_drag_handle(ui, rect, response)
+}
+
+/// [`drag_handle`] with its own `id`, for grips whose place in the Ui changes mid-drag.
+fn drag_handle_with_id(ui: &mut Ui, id: egui::Id) -> Response {
+    let (rect, _) = ui.allocate_exact_size(vec2(24.0, 24.0), Sense::hover());
+    let response = ui.interact(rect, id, Sense::drag());
+    paint_drag_handle(ui, rect, response)
+}
+
+fn paint_drag_handle(ui: &Ui, rect: Rect, response: Response) -> Response {
     let color = if response.hovered() || response.dragged() {
         TEXT
     } else {
