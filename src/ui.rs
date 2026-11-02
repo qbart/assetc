@@ -5281,28 +5281,6 @@ enum CardEvent {
     Revert(usize),
 }
 
-/// A 24 px icon button filled with `ACCENT` while `on`.
-fn icon_toggle(ui: &mut Ui, icon: Icon, tooltip: &str, on: bool, enabled: bool) -> Response {
-    let sense = if enabled {
-        Sense::click()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(vec2(24.0, 24.0), sense);
-    let color = match (enabled, on, response.hovered()) {
-        (false, _, _) => TEXT_WEAK.gamma_multiply(0.5),
-        (true, true, _) => BG_BAR,
-        (true, false, true) => TEXT,
-        (true, false, false) => TEXT_WEAK,
-    };
-    if on && enabled {
-        ui.painter().rect_filled(rect, 4, ACCENT);
-    }
-    icon.image(16.0, color)
-        .paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
-    response.on_hover_text(tooltip)
-}
-
 /// The Locators tab; returns the sidecar to write. See docs/features/locators.md#locators-tab.
 fn locators_tab(
     ui: &mut Ui,
@@ -5364,6 +5342,7 @@ fn locators_tab(
                     let mut visible = !hidden.contains(&name);
                     let gizmo = tools.gizmo.filter(|_| open);
                     let movable = !animating && visible;
+                    let mut gizmo_click = None;
                     let (_, folded) = ui
                         .push_id(("locator", i), |ui| {
                             card(
@@ -5371,6 +5350,17 @@ fn locators_tab(
                                 Some(open),
                                 RichText::new(&name),
                                 |ui| {
+                                    let (icon, tint) = if visible {
+                                        (Icon::Eye, TEXT)
+                                    } else {
+                                        (Icon::EyeOff, TEXT_WEAK)
+                                    };
+                                    let (rect, eye) =
+                                        ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+                                    icon.image(14.0, tint).paint_at(ui, rect.shrink(1.0));
+                                    if eye.on_hover_text("Visible").clicked() {
+                                        visible = !visible;
+                                    }
                                     let (rect, _) =
                                         ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
                                     ui.painter().circle_filled(rect.center(), 5.0, dot);
@@ -5399,16 +5389,6 @@ fn locators_tab(
                                             }
                                         }
                                     }
-                                    for (icon, tip, mode) in [
-                                        (Icon::Rotate3d, "Rotate (E)", gizmo::Mode::Rotate),
-                                        (Icon::Move3d, "Move (W)", gizmo::Mode::Move),
-                                    ] {
-                                        let on = gizmo == Some(mode);
-                                        if icon_toggle(ui, icon, tip, on, movable).clicked() {
-                                            event = Some(CardEvent::Gizmo(i, mode));
-                                        }
-                                    }
-                                    ui.checkbox(&mut visible, "").on_hover_text("Visible");
                                 },
                                 |ui| {
                                     let fields = LocatorFields {
@@ -5416,14 +5396,25 @@ fn locators_tab(
                                         models,
                                         frames,
                                         animating,
+                                        gizmo,
+                                        movable,
                                     };
-                                    locator_fields(ui, edit, i, &fields, &mut tools.mirror_axis);
+                                    gizmo_click = locator_fields(
+                                        ui,
+                                        edit,
+                                        i,
+                                        &fields,
+                                        &mut tools.mirror_axis,
+                                    );
                                 },
                             )
                         })
                         .inner;
                     if folded {
                         event = Some(CardEvent::Fold(i));
+                    }
+                    if let Some(mode) = gizmo_click {
+                        event = Some(CardEvent::Gizmo(i, mode));
                     }
                     if visible == hidden.contains(&name) {
                         if visible {
@@ -5469,23 +5460,29 @@ struct LocatorFields<'a> {
     frames: Option<&'a ModelFrames>,
     /// An animation plays: transforms are locked.
     animating: bool,
+    /// The gizmo on this locator, when on.
+    gizmo: Option<gizmo::Mode>,
+    /// Its gizmo can be turned on: not animating, and visible.
+    movable: bool,
 }
 
-/// The body of locator `i`'s card: where it comes from, name, color, joint, transform,
-/// preview and mirroring.
+/// The body of locator `i`'s card: where it comes from, gizmo, name, color, joint, transform,
+/// preview and mirroring. Returns the gizmo button clicked.
 fn locator_fields(
     ui: &mut Ui,
     edit: &mut MeshEdit,
     i: usize,
     fields: &LocatorFields,
     mirror_axis: &mut usize,
-) {
+) -> Option<gizmo::Mode> {
     use bevy::math::{EulerRot, Quat};
     let LocatorFields {
         joints,
         models,
         frames,
         animating,
+        gizmo,
+        movable,
     } = *fields;
     let saved_name = edit.saved.locators.get(i).map(|l| l.name.clone());
     // An inherited locator is found by its name.
@@ -5500,6 +5497,15 @@ fn locator_fields(
         let changed = if *changed { ", changed here" } else { "" };
         ui.weak(format!("{from}{changed}"));
     }
+    let mut clicked = None;
+    prop_row(ui, "Gizmo", |ui, _| {
+        let modes = [
+            (Icon::Move3d, "Move (W)", gizmo::Mode::Move),
+            (Icon::Rotate3d, "Rotate (E)", gizmo::Mode::Rotate),
+        ];
+        let buttons = modes.map(|(icon, tip, mode)| (icon, tip, gizmo == Some(mode)));
+        clicked = button_group(ui, &buttons, movable).map(|b| modes[b].2);
+    });
     let locators = &mut edit.edit.locators;
     let mut renamed = false;
     prop_row(ui, "Name", |ui, width| {
@@ -5601,6 +5607,62 @@ fn locator_fields(
     if mirror && let Some(frames) = frames {
         mirror_locator(edit, i, joints, frames, *mirror_axis);
     }
+    clicked
+}
+
+/// Icon buttons joined in a row like the canvas toolbar's groups, 32 × 24 px each, `ACCENT`
+/// while on; returns the clicked one.
+fn button_group(ui: &mut Ui, buttons: &[(Icon, &str, bool)], enabled: bool) -> Option<usize> {
+    const BUTTON: Vec2 = vec2(32.0, 24.0);
+    const RADIUS: u8 = 6;
+    let (bar, _) = ui.allocate_exact_size(
+        vec2(BUTTON.x * buttons.len() as f32, BUTTON.y),
+        Sense::hover(),
+    );
+    let painter = ui.painter();
+    painter.rect_filled(bar, RADIUS, BG_BAR);
+    let last = buttons.len() - 1;
+    let mut clicked = None;
+    for (i, (icon, tip, on)) in buttons.iter().enumerate() {
+        let rect = Rect::from_min_size(bar.min + vec2(BUTTON.x * i as f32, 0.0), BUTTON);
+        let sense = if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let response = ui
+            .interact(rect, ui.id().with(("button_group", i)), sense)
+            .on_hover_text(*tip);
+        let outer = |edge: bool| if edge { RADIUS } else { 0 };
+        let radius = egui::CornerRadius {
+            nw: outer(i == 0),
+            sw: outer(i == 0),
+            ne: outer(i == last),
+            se: outer(i == last),
+        };
+        let tint = match (enabled, *on, response.hovered()) {
+            (false, _, _) => TEXT_WEAK.gamma_multiply(0.5),
+            (true, true, _) => {
+                ui.painter().rect_filled(rect, radius, ACCENT);
+                BG_BAR
+            }
+            (true, false, true) => {
+                ui.painter().rect_filled(rect, radius, BG_HEADER);
+                TEXT
+            }
+            (true, false, false) => TEXT_WEAK,
+        };
+        if i > 0 {
+            ui.painter()
+                .vline(rect.left(), rect.y_range(), Stroke::new(1.0, STROKE));
+        }
+        icon.image(16.0, tint)
+            .paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+        if response.clicked() {
+            clicked = Some(i);
+        }
+    }
+    clicked
 }
 
 /// The marker color swatches: none, the offered colors, and a color set by hand.
