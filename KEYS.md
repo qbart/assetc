@@ -96,6 +96,7 @@ In a schema's editor (see [`docs/features/schemas.md`](docs/features/schemas.md#
 | Double-click on a gradient default's preview | Open the gradient editor               |
 | Left drag on a group's handle          | Move the group (fields fold meanwhile)       |
 | Left drag on a field's handle          | Move the field within its group              |
+| Left drag on a list item's handle      | Move the item within a list default          |
 
 In a curve editor (see [`docs/features/curves.md`](docs/features/curves.md#editing)); keys
 act while the pointer is over the editor:
