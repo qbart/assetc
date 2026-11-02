@@ -5510,9 +5510,20 @@ fn vec3_row(
         // Room for the spacing, so long values never widen the panel.
         let each = ((width - 16.0) / 3.0).max(20.0);
         for value in values {
+            // One decimal less from 10, two from 100, so long values fit the field.
+            let digits = match value.abs() {
+                v if v >= 100.0 => 2,
+                v if v >= 10.0 => 1,
+                _ => 0,
+            };
+            let shown = if decimals > 1 {
+                decimals.saturating_sub(digits).max(1)
+            } else {
+                decimals
+            };
             let mut field = egui::DragValue::new(value)
                 .speed(speed)
-                .fixed_decimals(decimals);
+                .fixed_decimals(shown);
             if let Some(min) = min {
                 field = field.range(min..=f32::MAX);
             }
