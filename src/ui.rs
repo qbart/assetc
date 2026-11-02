@@ -5245,16 +5245,20 @@ fn canvas_model(
         (None, Some(handles), Some(p)) if rect.contains(p) => handles.hit(p),
         _ => None,
     };
+    let mut pressed = false;
     if tools.drag.is_none()
         && ui.input(|i| i.pointer.primary_pressed())
         && let (Some(handle), Some(handles), Some(p)) = (hovered, &handles, pointer)
     {
         tools.drag = Some(gizmo::Drag::start(handle, handles, p));
+        pressed = true;
     }
     let grabbing = tools.drag.is_some();
     let response = view_3d(ui, rect, preview, !grabbing && !painting);
     if let Some(drag) = &mut tools.drag {
         let (down, delta) = ui.input(|i| (i.pointer.primary_down(), i.pointer.delta()));
+        // The press's frame moves nothing: its delta led the pointer to the handle.
+        let delta = if pressed { egui::Vec2::ZERO } else { delta };
         if !down {
             tools.drag = None;
         } else if let (Some(edit), Some(frames), Some(p)) = (&mut edit, &frames, pointer) {
@@ -6885,10 +6889,13 @@ fn path_fields(
     prop_row(ui, "Closed", |ui, _| {
         ui.checkbox(&mut path.closed, "");
     });
-    prop_row(ui, "Tension", |ui, _| {
+    // Sliders sized to the row, so they never widen the panel.
+    prop_row(ui, "Tension", |ui, width| {
+        ui.spacing_mut().slider_width = (width - 64.0).max(40.0);
         ui.add(egui::Slider::new(&mut path.tension, 0.0..=1.0).fixed_decimals(2));
     });
-    prop_row(ui, "Alpha", |ui, _| {
+    prop_row(ui, "Alpha", |ui, width| {
+        ui.spacing_mut().slider_width = (width - 64.0).max(40.0);
         ui.add(egui::Slider::new(&mut path.alpha, 0.0..=1.0).fixed_decimals(2))
             .on_hover_text("0 uniform, 0.5 centripetal, 1 chordal");
     });
@@ -6928,7 +6935,8 @@ fn path_fields(
                     if response.clicked() {
                         *chosen = Some(k);
                     }
-                    let each = ((ui.available_width() - 34.0) / 3.0).max(20.0);
+                    // Three gaps and the 24 px remove button, with room to spare.
+                    let each = ((ui.available_width() - 40.0) / 3.0).max(20.0);
                     for value in point.iter_mut() {
                         let field = egui::DragValue::new(value).speed(0.001).fixed_decimals(3);
                         if ui.add_sized(vec2(each, 22.0), field).gained_focus() {
