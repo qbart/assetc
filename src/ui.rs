@@ -17,6 +17,7 @@ use crate::assets::Assets;
 use crate::build::{self, Outcome};
 use crate::color_picker::{self, Picker};
 use crate::config::Project;
+use crate::enrich::{self, PropValue, Properties, Region, ShapeType};
 use crate::fileops;
 use crate::gizmo;
 use crate::gradient::{
@@ -108,10 +109,10 @@ struct UiState {
     licenses: bool,
 }
 
-/// The model preview's locator tools, for the session; see docs/features/locators.md#3d-view.
-#[derive(Default)]
+/// The model preview's locator, shape and region tools, for the session; see
+/// docs/features/locators.md#3d-view and docs/features/regions.md#painting.
 struct LocatorTools {
-    /// The gizmo on the chosen locator, when on.
+    /// The gizmo on the chosen locator (or shape), when on.
     gizmo: Option<gizmo::Mode>,
     /// A gizmo handle being dragged.
     drag: Option<gizmo::Drag>,
@@ -119,10 +120,37 @@ struct LocatorTools {
     armed: bool,
     /// A Place click waits for its surface hit.
     awaiting: bool,
-    /// Locators hidden in the 3D view, by model path and name.
+    /// Locators, shapes and regions hidden in the 3D view, by model path and name.
     hidden: HashMap<PathBuf, HashSet<String>>,
+    hidden_shapes: HashMap<PathBuf, HashSet<String>>,
+    hidden_regions: HashMap<PathBuf, HashSet<String>>,
     /// The plane Mirror reflects across: 0 X, 1 Y, 2 Z.
     mirror_axis: usize,
+    /// The chosen region paints; a stroke's ray waits for its hit; it erases.
+    paint: bool,
+    paint_awaiting: bool,
+    erase: bool,
+    /// The paint brush's radius on screen, in points.
+    brush: f32,
+}
+
+impl Default for LocatorTools {
+    fn default() -> Self {
+        Self {
+            gizmo: None,
+            drag: None,
+            armed: false,
+            awaiting: false,
+            hidden: HashMap::new(),
+            hidden_shapes: HashMap::new(),
+            hidden_regions: HashMap::new(),
+            mirror_axis: 0,
+            paint: false,
+            paint_awaiting: false,
+            erase: false,
+            brush: 12.0,
+        }
+    }
 }
 
 impl LocatorTools {
@@ -204,6 +232,10 @@ struct Inspected {
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
     uploaded_lod: Option<usize>,
     compiled_bytes: Option<Vec<u8>>,
+    /// A model's geometry, for hulls, shape sizes and region materials.
+    geometry: Option<model::ModelGeometry>,
+    /// Convex hulls computed for shapes, by joint (`None` for model space).
+    hulls: HashMap<Option<String>, Option<crate::hull::Hull>>,
 }
 
 /// Before / after textures of the LUT compare view for one source image.
@@ -405,6 +437,9 @@ enum InspectorTab {
     Info,
     Parameters,
     Locators,
+    Shapes,
+    Regions,
+    Properties,
     Modifiers,
     Gradients,
     Colors,
@@ -415,10 +450,13 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 13] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
+        Self::Shapes,
+        Self::Regions,
+        Self::Properties,
         Self::Modifiers,
         Self::Gradients,
         Self::Colors,
@@ -433,6 +471,9 @@ impl InspectorTab {
             Self::Info => Icon::Info,
             Self::Parameters => Icon::SlidersVertical,
             Self::Locators => Icon::MapPin,
+            Self::Shapes => Icon::Shapes,
+            Self::Regions => Icon::PaintBucket,
+            Self::Properties => Icon::List,
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
             Self::Animations => Icon::Film,
@@ -447,6 +488,9 @@ impl InspectorTab {
             Self::Info => "Info",
             Self::Parameters => "Parameters",
             Self::Locators => "Locators",
+            Self::Shapes => "Shapes",
+            Self::Regions => "Regions",
+            Self::Properties => "Properties",
             Self::Modifiers => "Modifiers",
             Self::Gradients => "Gradients",
             Self::Colors => "Colors",
@@ -475,9 +519,10 @@ impl InspectorTab {
                         || model::is_model(&s.path))
                     && s.path.is_file()
             }),
-            Self::Locators => selection.is_some_and(|s| {
-                s.location == Location::Input && model::is_model(&s.path) && s.path.is_file()
-            }),
+            Self::Locators | Self::Shapes | Self::Regions | Self::Properties => selection
+                .is_some_and(|s| {
+                    s.location == Location::Input && model::is_model(&s.path) && s.path.is_file()
+                }),
             Self::Modifiers => selection.is_some_and(|s| {
                 s.location == Location::Input
                     && (build::is_noise(&s.path) || build::is_image(&s.path))
@@ -723,6 +768,7 @@ fn shell(
                         &mut preview3d,
                         &mut state.vision,
                         &mut state.locators,
+                        state.inspector_tab == InspectorTab::Shapes,
                     );
                     if out.show_tab {
                         state.inspector_tab = InspectorTab::Locators;
@@ -826,6 +872,7 @@ struct Prepared {
     mesh: Option<Result<PreparedMesh, String>>,
     sidecar: Option<Result<Amod, String>>,
     model: Option<(PathBuf, u64)>,
+    geometry: Option<model::ModelGeometry>,
     compiled_mesh: Option<crate::amesh::Preview>,
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
     compiled_bytes: Option<Vec<u8>>,
@@ -921,8 +968,12 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
     // Images carry modifiers in their sidecar; see docs/features/textures.md#modifiers.
     let sidecar = (selection.location == Location::Input && build::is_image(&selection.path))
         .then(|| Ok(amod::read(&selection.path)?.unwrap_or_default()));
+    let geometry = (selection.location == Location::Input && model::is_model(&selection.path))
+        .then(|| model::geometry(&selection.path).ok())
+        .flatten();
     Prepared {
         sidecar,
+        geometry,
         compiled_mesh: inspection.compiled_mesh.take(),
         compiled_materials: std::mem::take(&mut inspection.compiled_materials),
         compiled_bytes: inspection.compiled_bytes.take(),
@@ -1056,6 +1107,8 @@ fn inspected(
                 saved: amod,
                 project,
                 locator: None,
+                shape: None,
+                region: None,
                 inherited,
             },
         })
@@ -1111,6 +1164,8 @@ fn inspected(
         compiled_materials: prepared.compiled_materials,
         uploaded_lod: None,
         compiled_bytes: prepared.compiled_bytes,
+        geometry: prepared.geometry,
+        hulls: HashMap::new(),
         lut_compare: None,
         uploaded_color_cube: false,
         model: prepared.model,
@@ -2073,16 +2128,28 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                         }
                     }
                 }
-                (InspectorTab::Locators, Some(inspected), Some(_)) => {
+                (
+                    tab @ (InspectorTab::Locators
+                    | InspectorTab::Shapes
+                    | InspectorTab::Regions
+                    | InspectorTab::Properties),
+                    Some(inspected),
+                    Some(_),
+                ) => {
                     let animating = state
                         .animations
                         .get(&inspected.path)
                         .copied()
                         .flatten()
                         .is_some();
-                    if let Some(amod) =
-                        locators_tab(ui, inspected, frames, &mut state.locators, animating)
-                    {
+                    let tools = &mut state.locators;
+                    let save = match tab {
+                        InspectorTab::Shapes => shapes_tab(ui, inspected, tools, animating),
+                        InspectorTab::Regions => regions_tab(ui, inspected, tools),
+                        InspectorTab::Properties => properties_tab(ui, inspected),
+                        _ => locators_tab(ui, inspected, frames, tools, animating),
+                    };
+                    if let Some(amod) = save {
                         match amod::write(&inspected.path, &amod) {
                             Ok(()) => {
                                 state.reinspect = true;
@@ -2485,8 +2552,11 @@ struct MeshEdit {
     saved: Amod,
     /// What `assetc.toml` gives the model, shown where the sidecar sets nothing.
     project: MeshOptions,
-    /// The chosen locator, by index; see docs/features/locators.md#locators-tab.
+    /// The chosen locator, shape and region, by index; see
+    /// docs/features/locators.md#locators-tab.
     locator: Option<usize>,
+    shape: Option<usize>,
+    region: Option<usize>,
     /// The locators the model has without its sidecar; `edit` and `saved` hold every locator,
     /// and only what differs from these is written.
     inherited: Vec<Inherited>,
@@ -2786,11 +2856,16 @@ fn mesh_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
 /// locator's name is empty or taken (while it is being typed).
 fn mesh_commit(ui: &Ui, edit: &mut MeshEdit) -> Option<Amod> {
     let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
-    let locators = &edit.edit.locators;
-    let named = locators
-        .iter()
-        .enumerate()
-        .all(|(i, l)| !l.name.is_empty() && locators[..i].iter().all(|other| other.name != l.name));
+    // Names in the making (empty or taken) wait.
+    fn unique<'a>(names: impl Iterator<Item = &'a String> + Clone) -> bool {
+        names
+            .clone()
+            .enumerate()
+            .all(|(i, n)| !n.is_empty() && names.clone().take(i).all(|other| other != n))
+    }
+    let named = unique(edit.edit.locators.iter().map(|l| &l.name))
+        && unique(edit.edit.shapes.iter().map(|s| &s.name))
+        && unique(edit.edit.regions.iter().map(|r| &r.name));
     (!busy && named && edit.edit != edit.saved).then(|| {
         edit.saved = edit.edit.clone();
         Amod {
@@ -4939,7 +5014,9 @@ fn canvas_model(
     preview: &mut Preview3d,
     vision: &mut Option<Vision>,
     tools: &mut LocatorTools,
+    shapes_active: bool,
 ) -> ModelCanvas {
+    use bevy::math::{Affine3A, Quat, Vec3};
     let mut out = ModelCanvas::default();
     let Some(inspected) = inspected else {
         return out;
@@ -4949,11 +5026,20 @@ fn canvas_model(
     };
     preview.model = Some(model);
     let joints = &inspected.inspection.joints;
-    let hidden = tools
-        .hidden
+    let empty = HashSet::new();
+    let hidden = tools.hidden.get(&inspected.path).unwrap_or(&empty).clone();
+    let hidden_shapes = tools
+        .hidden_shapes
         .get(&inspected.path)
-        .cloned()
-        .unwrap_or_default();
+        .unwrap_or(&empty)
+        .clone();
+    let hidden_regions = tools
+        .hidden_regions
+        .get(&inspected.path)
+        .unwrap_or(&empty)
+        .clone();
+    let geometry = inspected.geometry.as_ref();
+    let hulls = &mut inspected.hulls;
     let mut edit = match &mut inspected.mesh {
         Some(Ok(edit)) => Some(edit),
         _ => None,
@@ -4963,30 +5049,45 @@ fn canvas_model(
     if locked {
         tools.armed = false;
     }
+    let painting = tools.paint && edit.as_ref().is_some_and(|e| e.region.is_some());
     let camera = gizmo::ViewCamera::new(rect, &preview.orbit);
     let frames = preview.frames.clone();
 
-    // The answer to a Place click: a new locator there; see
-    // docs/features/locators.md#place-on-surface.
-    if let Some(hit) = preview.surface_hit.take()
-        && std::mem::take(&mut tools.awaiting)
-        && let (Some(hit), Some(edit), Some(frames)) = (hit, &mut edit, &frames)
-        && !locked
-    {
-        add_locator(edit);
-        let i = edit.edit.locators.len() - 1;
-        let locator = &mut edit.edit.locators[i];
-        locator.joint = hit.joint.filter(|j| joints.contains(j));
-        if let Some(parent) = frames.parent(locator.joint.as_deref()) {
-            gizmo::place(locator, parent, hit.point, hit.normal);
+    // The answer to a ray: a stroke of paint, or a new locator; see
+    // docs/features/regions.md#painting and docs/features/locators.md#place-on-surface.
+    if let Some(hit) = preview.surface_hit.take() {
+        let paint = std::mem::take(&mut tools.paint_awaiting);
+        let place = std::mem::take(&mut tools.awaiting);
+        if paint
+            && let (Some(hit), Some(edit)) = (&hit, &mut edit)
+            && let Some(region) = edit.region.and_then(|r| edit.edit.regions.get_mut(r))
+        {
+            for id in &hit.brush {
+                if tools.erase {
+                    region.triangles.remove(id);
+                } else {
+                    region.triangles.insert(*id);
+                }
+            }
+        } else if place
+            && let (Some(hit), Some(edit), Some(frames)) = (hit, &mut edit, &frames)
+            && !locked
+        {
+            add_locator(edit);
+            let i = edit.edit.locators.len() - 1;
+            let locator = &mut edit.edit.locators[i];
+            locator.joint = hit.joint.filter(|j| joints.contains(j));
+            if let Some(parent) = frames.parent(locator.joint.as_deref()) {
+                gizmo::place(locator, parent, hit.point, hit.normal);
+            }
+            tools.armed = false;
+            out.show_tab = true;
         }
-        tools.armed = false;
-        out.show_tab = true;
     }
 
     // Each visible locator's world transform in the pose shown; `None` when hidden or its joint
     // is not found.
-    let worlds: Vec<Option<bevy::math::Affine3A>> = match (&edit, &frames) {
+    let worlds: Vec<Option<Affine3A>> = match (&edit, &frames) {
         (Some(edit), Some(frames)) => edit
             .edit
             .locators
@@ -4998,13 +5099,56 @@ fn canvas_model(
             .collect(),
         _ => Vec::new(),
     };
+    // The same for shapes (without scale); hulls are in their parent's space.
+    let shape_local = |s: &enrich::Shape| {
+        let rotation = Quat::from_array(s.rotation);
+        let rotation = if rotation.length_squared() > 0.0 {
+            rotation.normalize()
+        } else {
+            Quat::IDENTITY
+        };
+        Affine3A::from_rotation_translation(rotation, Vec3::from(s.translation))
+    };
+    let shape_worlds: Vec<Option<Affine3A>> = match (&edit, &frames) {
+        (Some(edit), Some(frames)) => edit
+            .edit
+            .shapes
+            .iter()
+            .map(|s| {
+                let parent = frames.parent(s.joint.as_deref())?;
+                let local = if s.shape == ShapeType::Hull {
+                    Affine3A::IDENTITY
+                } else {
+                    shape_local(s)
+                };
+                (!hidden_shapes.contains(&s.name)).then(|| parent * local)
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
     let chosen = edit
         .as_ref()
         .and_then(|e| e.locator)
         .filter(|&i| worlds.get(i).copied().flatten().is_some());
-    let handles = match (chosen, tools.gizmo) {
-        (Some(i), Some(mode)) if !locked => {
-            worlds[i].and_then(|world| gizmo::Gizmo::new(&camera, world, mode))
+    let chosen_shape = edit
+        .as_ref()
+        .and_then(|e| e.shape)
+        .filter(|&i| shape_worlds.get(i).copied().flatten().is_some());
+    // The gizmo acts on the chosen shape while the Shapes tab shows; see
+    // docs/features/shapes.md#3d-view.
+    let target = if shapes_active {
+        chosen_shape
+            .filter(|&i| {
+                edit.as_ref()
+                    .is_some_and(|e| e.edit.shapes[i].shape != ShapeType::Hull)
+            })
+            .and_then(|i| shape_worlds[i])
+    } else {
+        chosen.and_then(|i| worlds[i])
+    };
+    let handles = match (target, tools.gizmo) {
+        (Some(world), Some(mode)) if !locked && !painting => {
+            gizmo::Gizmo::new(&camera, world, mode)
         }
         _ => None,
     };
@@ -5012,7 +5156,7 @@ fn canvas_model(
         tools.drag = None;
     }
 
-    // A press on a handle drags it instead of orbiting the camera.
+    // A press on a handle drags it instead of orbiting the camera; so does painting.
     let pointer = ui.input(|i| i.pointer.latest_pos());
     let hovered = match (&tools.drag, &handles, pointer) {
         (Some(drag), _, _) => Some(drag.handle),
@@ -5026,20 +5170,51 @@ fn canvas_model(
         tools.drag = Some(gizmo::Drag::start(handle, handles, p));
     }
     let grabbing = tools.drag.is_some();
-    let response = view_3d(ui, rect, preview, !grabbing);
+    let response = view_3d(ui, rect, preview, !grabbing && !painting);
     if let Some(drag) = &mut tools.drag {
         let (down, delta) = ui.input(|i| (i.pointer.primary_down(), i.pointer.delta()));
         if !down {
             tools.drag = None;
-        } else if let (Some(edit), Some(i), Some(frames), Some(p)) =
-            (&mut edit, chosen, &frames, pointer)
-        {
-            let locator = &mut edit.edit.locators[i];
-            if let Some(parent) = frames.parent(locator.joint.as_deref()) {
+        } else if let (Some(edit), Some(frames), Some(p)) = (&mut edit, &frames, pointer) {
+            if shapes_active {
+                if let Some(shape) = chosen_shape.map(|i| &mut edit.edit.shapes[i])
+                    && let Some(parent) = frames.parent(shape.joint.as_deref())
+                {
+                    // Through a locator, which has the same position and rotation.
+                    let mut moved = amod::Locator {
+                        translation: shape.translation,
+                        rotation: shape.rotation,
+                        ..amod::Locator::new(String::new())
+                    };
+                    drag.apply(&mut moved, parent, &camera, p, delta);
+                    (shape.translation, shape.rotation) = (moved.translation, moved.rotation);
+                }
+            } else if let Some(locator) = chosen.map(|i| &mut edit.edit.locators[i])
+                && let Some(parent) = frames.parent(locator.joint.as_deref())
+            {
                 drag.apply(locator, parent, &camera, p, delta);
-                ui.ctx().request_repaint();
             }
+            ui.ctx().request_repaint();
         }
+    }
+
+    // Painting: a ray each frame while the left button is down; see
+    // docs/features/regions.md#painting.
+    if painting
+        && !tools.paint_awaiting
+        && let Some(p) = pointer.filter(|p| rect.contains(*p))
+        && ui.input(|i| i.pointer.primary_down())
+        && response.is_pointer_button_down_on()
+    {
+        let (origin, dir) = camera.ray(p);
+        preview.surface_ray = Some(preview3d::SurfaceRay {
+            origin,
+            dir,
+            brush: tools.brush * camera.world_per_point(Vec3::ZERO),
+        });
+        tools.paint_awaiting = true;
+        tools.erase = ui.input(|i| i.modifiers.shift);
+        ui.ctx().request_repaint();
     }
 
     // Markers, nearest within reach picked by a click; see docs/features/locators.md#3d-view.
@@ -5050,6 +5225,7 @@ fn canvas_model(
         .collect();
     if response.clicked()
         && !grabbing
+        && !painting
         && let Some(edit) = &mut edit
         && frames.is_some()
         && let Some(at) = response.interact_pointer_pos()
@@ -5064,7 +5240,12 @@ fn canvas_model(
             edit.locator = picked;
             out.show_tab = true;
         } else if tools.armed {
-            preview.surface_ray = Some(camera.ray(at));
+            let (origin, dir) = camera.ray(at);
+            preview.surface_ray = Some(preview3d::SurfaceRay {
+                origin,
+                dir,
+                brush: 0.0,
+            });
             tools.awaiting = true;
             ui.ctx().request_repaint();
         } else {
@@ -5076,6 +5257,7 @@ fn canvas_model(
             if i.key_pressed(egui::Key::Escape) {
                 tools.gizmo = None;
                 tools.armed = false;
+                tools.paint = false;
             } else if locked {
             } else if i.key_pressed(egui::Key::W) {
                 tools.toggle_gizmo(gizmo::Mode::Move);
@@ -5102,7 +5284,104 @@ fn canvas_model(
         }
     }
 
+    // Regions: ask for their triangles, draw last frame's; see docs/features/regions.md#3d-view.
+    preview.region_wants.clear();
+    if let (Some(edit), Some(geometry)) = (&edit, geometry) {
+        for (r, region) in edit.edit.regions.iter().enumerate() {
+            if hidden_regions.contains(&region.name) {
+                continue;
+            }
+            for (mesh, primitive, material, _) in &geometry.primitives {
+                let whole = material
+                    .as_ref()
+                    .is_some_and(|m| region.materials.contains(m));
+                let painted: Vec<u32> = region
+                    .triangles
+                    .range((*mesh, *primitive, 0)..=(*mesh, *primitive, u32::MAX))
+                    .map(|(_, _, t)| *t)
+                    .collect();
+                if whole || !painted.is_empty() {
+                    preview.region_wants.push(preview3d::RegionWant {
+                        region: r,
+                        mesh: *mesh,
+                        primitive: *primitive,
+                        triangles: (!whole).then_some(painted),
+                    });
+                }
+            }
+        }
+    }
     let painter = ui.painter_at(rect);
+    if let Some(edit) = &edit {
+        let eye = camera.position();
+        for (r, corners) in &preview.region_triangles {
+            let Some(region) = edit.edit.regions.get(*r) else {
+                continue;
+            };
+            let [a, b, c] = *corners;
+            if (b - a).cross(c - a).dot(eye - a) <= 0.0 {
+                continue;
+            }
+            let Some(points) = corners
+                .iter()
+                .map(|p| camera.project(*p))
+                .collect::<Option<Vec<_>>>()
+            else {
+                continue;
+            };
+            let color = hex_color32(&region.color).unwrap_or(TEXT);
+            let outline = if edit.region == Some(*r) {
+                Stroke::new(1.0, color)
+            } else {
+                Stroke::NONE
+            };
+            painter.add(egui::Shape::convex_polygon(
+                points,
+                color.gamma_multiply(0.3),
+                outline,
+            ));
+        }
+    }
+
+    // Shapes as wireframes; see docs/features/shapes.md#3d-view.
+    if let Some(edit) = &edit {
+        for (i, shape) in edit.edit.shapes.iter().enumerate() {
+            let Some(world) = shape_worlds.get(i).copied().flatten() else {
+                continue;
+            };
+            let segments = match shape.shape {
+                ShapeType::Hull => {
+                    let hull = hulls.entry(shape.joint.clone()).or_insert_with(|| {
+                        geometry
+                            .and_then(|g| g.hull_points(shape.joint.as_deref()))
+                            .and_then(|p| crate::hull::hull(&p))
+                    });
+                    hull.as_ref().map_or_else(Vec::new, |h| {
+                        h.edges()
+                            .into_iter()
+                            .map(|[a, b]| [h.points[a], h.points[b]])
+                            .collect()
+                    })
+                }
+                other => shape_segments(other),
+            };
+            let color = locator_color32_of(shape.color.as_deref()).unwrap_or(TEXT_WEAK);
+            let stroke = if chosen_shape == Some(i) {
+                Stroke::new(2.0, color.lerp_to_gamma(egui::Color32::WHITE, 0.5))
+            } else {
+                Stroke::new(1.0, color)
+            };
+            for [a, b] in segments {
+                if let (Some(a), Some(b)) = (
+                    camera.project(world.transform_point3(a)),
+                    camera.project(world.transform_point3(b)),
+                ) {
+                    painter.line_segment([a, b], stroke);
+                }
+            }
+        }
+    }
+
     if let Some(edit) = &edit {
         for (i, (dot, ends)) in &markers {
             let locator = &edit.edit.locators[*i];
@@ -5169,7 +5448,67 @@ fn canvas_model(
             TEXT_WEAK,
         );
     }
+    if painting || !preview.region_wants.is_empty() {
+        ui.ctx().request_repaint();
+    }
     out.save = edit.and_then(|edit| mesh_commit(ui, edit));
+    out
+}
+
+/// The lines of a box, sphere or capsule in its own space; see docs/features/shapes.md#3d-view.
+fn shape_segments(shape: ShapeType) -> Vec<[bevy::math::Vec3; 2]> {
+    use bevy::math::Vec3;
+    use std::f32::consts::{PI, TAU};
+    let mut out = Vec::new();
+    /// `segments` pieces of the arc from `from` to `to` radians, in the plane of `u` and `v`.
+    fn arc(out: &mut Vec<[Vec3; 2]>, at: Vec3, u: Vec3, v: Vec3, to: f32, segments: usize) {
+        let point = |k: usize| {
+            let t = to * k as f32 / segments as f32;
+            at + u * t.cos() + v * t.sin()
+        };
+        for k in 0..segments {
+            out.push([point(k), point(k + 1)]);
+        }
+    }
+    match shape {
+        ShapeType::Box { size } => {
+            let h = Vec3::from(size) / 2.0;
+            let corner = |i: usize| {
+                Vec3::new(
+                    if i & 1 == 0 { -h.x } else { h.x },
+                    if i & 2 == 0 { -h.y } else { h.y },
+                    if i & 4 == 0 { -h.z } else { h.z },
+                )
+            };
+            for i in 0..8 {
+                for bit in [1, 2, 4] {
+                    if i & bit == 0 {
+                        out.push([corner(i), corner(i | bit)]);
+                    }
+                }
+            }
+        }
+        ShapeType::Sphere { radius } => {
+            let r = radius;
+            arc(&mut out, Vec3::ZERO, Vec3::Y * r, Vec3::Z * r, TAU, 48);
+            arc(&mut out, Vec3::ZERO, Vec3::Z * r, Vec3::X * r, TAU, 48);
+            arc(&mut out, Vec3::ZERO, Vec3::X * r, Vec3::Y * r, TAU, 48);
+        }
+        ShapeType::Capsule { radius: r, height } => {
+            let top = Vec3::Y * height / 2.0;
+            for end in [top, -top] {
+                arc(&mut out, end, Vec3::X * r, Vec3::Z * r, TAU, 48);
+            }
+            for side in [Vec3::X * r, -Vec3::X * r, Vec3::Z * r, -Vec3::Z * r] {
+                out.push([top + side, -top + side]);
+            }
+            for u in [Vec3::X * r, Vec3::Z * r] {
+                arc(&mut out, top, u, Vec3::Y * r, PI, 24);
+                arc(&mut out, -top, u, -Vec3::Y * r, PI, 24);
+            }
+        }
+        ShapeType::Hull => {}
+    }
     out
 }
 
@@ -5183,6 +5522,11 @@ const LOCATOR_COLORS: [&str; 8] = [
 
 fn hex_color32(text: &str) -> Option<egui::Color32> {
     amod::locator_color(text).map(|[r, g, b]| egui::Color32::from_rgb(r, g, b))
+}
+
+/// The color of a `#rrggbb` setting, when set.
+fn locator_color32_of(color: Option<&str>) -> Option<egui::Color32> {
+    hex_color32(color?)
 }
 
 /// A locator's marker color, when it has one.
@@ -5543,7 +5887,7 @@ fn locator_fields(
             ui.data_mut(|d| d.remove::<String>(id));
         }
     });
-    color_row(ui, &mut locator.color);
+    color_row(ui, &mut locator.color, true);
     ui.add_enabled_ui(!animating, |ui| {
         let mut joint = locator.joint.clone();
         prop_row(ui, "Joint", |ui, width| {
@@ -5683,10 +6027,12 @@ fn button_group(ui: &mut Ui, buttons: &[(Icon, &str, bool)], enabled: bool) -> O
 }
 
 /// The marker color swatches: none, the offered colors, and a color set by hand.
-fn color_row(ui: &mut Ui, color: &mut Option<String>) {
+fn color_row(ui: &mut Ui, color: &mut Option<String>, none: bool) {
     prop_row(ui, "Color", |ui, width| {
         ui.spacing_mut().item_spacing.x = 3.0;
-        let mut options: Vec<Option<String>> = std::iter::once(None)
+        let mut options: Vec<Option<String>> = none
+            .then_some(None)
+            .into_iter()
             .chain(LOCATOR_COLORS.map(|c| Some(c.to_owned())))
             .collect();
         if let Some(own) = color
@@ -5722,6 +6068,592 @@ fn color_row(ui: &mut Ui, color: &mut Option<String>) {
             }
         }
     });
+}
+
+/// The eye toggle and color dot that start an enrichment card's header.
+fn eye_and_dot(ui: &mut Ui, visible: &mut bool, dot: egui::Color32) {
+    let (icon, tint) = if *visible {
+        (Icon::Eye, TEXT)
+    } else {
+        (Icon::EyeOff, TEXT_WEAK)
+    };
+    let (rect, eye) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::click());
+    icon.image(14.0, tint).paint_at(ui, rect.shrink(1.0));
+    if eye.on_hover_text("Visible").clicked() {
+        *visible = !*visible;
+    }
+    let (rect, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
+    ui.painter().circle_filled(rect.center(), 5.0, dot);
+}
+
+/// Shows `name` as visible or hidden in `hidden`, as `visible` says.
+fn set_visible(hidden: &mut HashSet<String>, name: String, visible: bool) {
+    if visible {
+        hidden.remove(&name);
+    } else {
+        hidden.insert(name);
+    }
+}
+
+/// A name field; when it loses focus empty or equal to one of `others`, it gets `saved` back
+/// (or a free name from `base`).
+fn name_row(ui: &mut Ui, name: &mut String, saved: Option<&str>, others: &[&str], base: &str) {
+    let mut done = false;
+    prop_row(ui, "Name", |ui, width| {
+        done = ui
+            .add_sized(vec2(width, 22.0), egui::TextEdit::singleline(name))
+            .lost_focus();
+    });
+    if done && (name.is_empty() || others.contains(&name.as_str())) {
+        *name = saved
+            .filter(|old| !others.contains(old))
+            .map(str::to_owned)
+            .unwrap_or_else(|| enrich::free_name(base, |n| others.contains(&n)));
+    }
+}
+
+/// A text field of comma-separated tags, split when it loses focus.
+fn tags_row(ui: &mut Ui, tags: &mut Vec<String>) {
+    prop_row(ui, "Tags", |ui, width| {
+        let id = ui.id().with("tags");
+        let mut text = ui
+            .data(|d| d.get_temp::<String>(id))
+            .unwrap_or_else(|| tags.join(", "));
+        let field = egui::TextEdit::singleline(&mut text).hint_text("metal, breakable");
+        let response = ui.add_sized(vec2(width, 22.0), field);
+        if response.has_focus() {
+            ui.data_mut(|d| d.insert_temp(id, text));
+        } else {
+            if response.lost_focus() {
+                *tags = amod::parse_tags(&text);
+            }
+            ui.data_mut(|d| d.remove::<String>(id));
+        }
+    });
+}
+
+/// A rotation as Euler angles in degrees (X, then Y, then Z).
+fn rotation_row(ui: &mut Ui, rotation: &mut [f32; 4]) {
+    use bevy::math::{EulerRot, Quat};
+    let q = Quat::from_array(*rotation);
+    let q = if q.length_squared() > 0.0 {
+        q.normalize()
+    } else {
+        Quat::IDENTITY
+    };
+    let (x, y, z) = q.to_euler(EulerRot::XYZ);
+    // Rounding noise would show as −0.0.
+    let mut degrees = [x, y, z].map(|a| {
+        let d = a.to_degrees();
+        if d.abs() < 1e-3 { 0.0 } else { d }
+    });
+    let before = degrees;
+    vec3_row(ui, "Rotation", &mut degrees, 0.5, 1, None);
+    if degrees != before {
+        let [x, y, z] = degrees.map(f32::to_radians);
+        *rotation = Quat::from_euler(EulerRot::XYZ, x, y, z).to_array();
+    }
+}
+
+/// One positive length.
+fn length_row(ui: &mut Ui, label: &str, value: &mut f32) {
+    prop_row(ui, label, |ui, width| {
+        let field = egui::DragValue::new(value)
+            .speed(0.01)
+            .fixed_decimals(3)
+            .range(0.001..=f32::MAX);
+        ui.add_sized(vec2(width.min(120.0), 22.0), field);
+    });
+}
+
+/// Edits `properties`; see docs/features/properties.md#properties-tab.
+fn properties_editor(ui: &mut Ui, properties: &mut Properties) {
+    let keys: Vec<String> = properties.keys().cloned().collect();
+    let (mut remove, mut rename) = (None, None);
+    for (i, key) in keys.iter().enumerate() {
+        let Some(value) = properties.get_mut(key) else {
+            continue;
+        };
+        ui.push_id(("property", i), |ui| {
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), 26.0),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let width = ui.available_width();
+                    let key_width = ((width - 64.0 - 24.0 - 12.0) * 0.5).max(40.0);
+                    // The key, applied when its field loses focus.
+                    let id = ui.id().with("key");
+                    let mut text = ui
+                        .data(|d| d.get_temp::<String>(id))
+                        .unwrap_or_else(|| key.clone());
+                    let field =
+                        ui.add_sized(vec2(key_width, 22.0), egui::TextEdit::singleline(&mut text));
+                    if field.has_focus() {
+                        ui.data_mut(|d| d.insert_temp(id, text));
+                    } else {
+                        if field.lost_focus() {
+                            let new = text.trim().to_owned();
+                            if !new.is_empty() && new != *key && !keys.contains(&new) {
+                                rename = Some((key.clone(), new));
+                            }
+                        }
+                        ui.data_mut(|d| d.remove::<String>(id));
+                    }
+                    let mut kind = value.type_index();
+                    egui::ComboBox::from_id_salt("type")
+                        .width(56.0)
+                        .selected_text(PropValue::TYPES[kind])
+                        .show_ui(ui, |ui| {
+                            for (k, name) in PropValue::TYPES.into_iter().enumerate() {
+                                ui.selectable_value(&mut kind, k, name);
+                            }
+                        });
+                    if kind != value.type_index() {
+                        *value = value.converted(kind);
+                    }
+                    let rest = (ui.available_width() - 28.0).max(30.0);
+                    match value {
+                        PropValue::Bool(b) => {
+                            ui.add_sized(vec2(rest, 22.0), egui::Checkbox::without_text(b));
+                        }
+                        PropValue::Int(n) => {
+                            ui.add_sized(vec2(rest, 22.0), egui::DragValue::new(n));
+                        }
+                        PropValue::Float(f) => {
+                            let field = egui::DragValue::new(f).speed(0.01).fixed_decimals(3);
+                            ui.add_sized(vec2(rest, 22.0), field);
+                        }
+                        PropValue::Text(t) => {
+                            ui.add_sized(vec2(rest, 22.0), egui::TextEdit::singleline(t));
+                        }
+                    }
+                    if icon_button(ui, Icon::Trash2, "Delete", true).clicked() {
+                        remove = Some(key.clone());
+                    }
+                },
+            );
+        });
+    }
+    if let Some(key) = remove {
+        properties.remove(&key);
+    }
+    if let Some((old, new)) = rename
+        && let Some(value) = properties.remove(&old)
+    {
+        properties.insert(new, value);
+    }
+    if properties.is_empty() {
+        ui.weak("No properties");
+        ui.add_space(4.0);
+    }
+    let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add property");
+    if ui.add(add).clicked() {
+        let key = enrich::free_name("property", |k| properties.contains_key(k));
+        properties.insert(key, PropValue::Float(0.0));
+    }
+}
+
+/// The Properties tab; see docs/features/properties.md#properties-tab.
+fn properties_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
+    let Some(Ok(edit)) = &mut inspected.mesh else {
+        placeholder(ui, "No properties");
+        return None;
+    };
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                properties_editor(ui, &mut edit.edit.properties);
+            });
+        });
+    mesh_commit(ui, edit)
+}
+
+/// The Shapes tab; see docs/features/shapes.md#shapes-tab.
+fn shapes_tab(
+    ui: &mut Ui,
+    inspected: &mut Inspected,
+    tools: &mut LocatorTools,
+    animating: bool,
+) -> Option<Amod> {
+    let joints = &inspected.inspection.joints;
+    let geometry = inspected.geometry.as_ref();
+    let extent = geometry.map_or(1.0, |g| g.extent);
+    let hulls = &mut inspected.hulls;
+    let hidden = tools
+        .hidden_shapes
+        .entry(inspected.path.clone())
+        .or_default();
+    let Some(Ok(edit)) = &mut inspected.mesh else {
+        placeholder(ui, "No shapes");
+        return None;
+    };
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add shape");
+                if ui.add(add).clicked() {
+                    let shapes = &mut edit.edit.shapes;
+                    let name = enrich::free_name("shape", |n| shapes.iter().any(|s| s.name == n));
+                    shapes.push(enrich::Shape::new(name, extent));
+                    edit.shape = Some(shapes.len() - 1);
+                }
+                ui.add_space(8.0);
+                if edit.edit.shapes.is_empty() {
+                    ui.weak("No shapes");
+                }
+                let mut event = None;
+                for i in 0..edit.edit.shapes.len() {
+                    let open = edit.shape == Some(i);
+                    let name = edit.edit.shapes[i].name.clone();
+                    let dot = locator_color32_of(edit.edit.shapes[i].color.as_deref())
+                        .unwrap_or(TEXT_WEAK);
+                    let mut visible = !hidden.contains(&name);
+                    let gizmo = tools.gizmo.filter(|_| open);
+                    let movable = !animating && visible;
+                    let mut gizmo_click = None;
+                    let mut delete = false;
+                    let (_, folded) = ui
+                        .push_id(("shape", i), |ui| {
+                            card(
+                                ui,
+                                Some(open),
+                                RichText::new(&name),
+                                |ui| eye_and_dot(ui, &mut visible, dot),
+                                |ui, open| {
+                                    delete = open
+                                        && icon_button(ui, Icon::Trash2, "Delete", true).clicked();
+                                },
+                                |ui| {
+                                    gizmo_click = shape_fields(
+                                        ui, edit, i, joints, extent, hulls, geometry, gizmo,
+                                        movable, animating,
+                                    );
+                                },
+                            )
+                        })
+                        .inner;
+                    if folded {
+                        event = Some(CardEvent::Fold(i));
+                    }
+                    if let Some(mode) = gizmo_click {
+                        event = Some(CardEvent::Gizmo(i, mode));
+                    }
+                    if delete {
+                        event = Some(CardEvent::Delete(i));
+                    }
+                    if visible == hidden.contains(&name) {
+                        set_visible(hidden, name, visible);
+                    }
+                }
+                match event {
+                    Some(CardEvent::Fold(i)) => edit.shape = (edit.shape != Some(i)).then_some(i),
+                    Some(CardEvent::Gizmo(i, mode)) => {
+                        if edit.shape == Some(i) && tools.gizmo == Some(mode) {
+                            tools.gizmo = None;
+                        } else {
+                            edit.shape = Some(i);
+                            tools.gizmo = Some(mode);
+                        }
+                    }
+                    Some(CardEvent::Delete(i)) => {
+                        edit.edit.shapes.remove(i);
+                        edit.shape = None;
+                    }
+                    Some(CardEvent::Revert(_)) | None => {}
+                }
+            });
+        });
+    mesh_commit(ui, edit)
+}
+
+/// The body of shape `i`'s card; returns the gizmo button clicked.
+#[allow(clippy::too_many_arguments)]
+fn shape_fields(
+    ui: &mut Ui,
+    edit: &mut MeshEdit,
+    i: usize,
+    joints: &[String],
+    extent: f32,
+    hulls: &mut HashMap<Option<String>, Option<crate::hull::Hull>>,
+    geometry: Option<&model::ModelGeometry>,
+    gizmo: Option<gizmo::Mode>,
+    movable: bool,
+    animating: bool,
+) -> Option<gizmo::Mode> {
+    let saved = edit.saved.shapes.get(i).map(|s| s.name.clone());
+    let others: Vec<String> = edit
+        .edit
+        .shapes
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| *k != i)
+        .map(|(_, s)| s.name.clone())
+        .collect();
+    let others: Vec<&str> = others.iter().map(String::as_str).collect();
+    let shape = &mut edit.edit.shapes[i];
+    let mut clicked = None;
+    if shape.shape != ShapeType::Hull {
+        prop_row(ui, "Gizmo", |ui, _| {
+            let modes = [
+                (Icon::Move3d, "Move (W)", gizmo::Mode::Move),
+                (Icon::Rotate3d, "Rotate (E)", gizmo::Mode::Rotate),
+            ];
+            let buttons = modes.map(|(icon, tip, mode)| (icon, tip, gizmo == Some(mode)));
+            clicked = button_group(ui, &buttons, movable).map(|b| modes[b].2);
+        });
+    }
+    name_row(ui, &mut shape.name, saved.as_deref(), &others, "shape");
+    prop_row(ui, "Kind", |ui, width| {
+        let field = egui::TextEdit::singleline(&mut shape.kind).hint_text("hitbox");
+        ui.add_sized(vec2(width, 22.0), field);
+    });
+    ui.add_enabled_ui(!animating, |ui| {
+        prop_row(ui, "Type", |ui, width| {
+            let mut index = shape.shape.index();
+            egui::ComboBox::from_id_salt("shape_type")
+                .width(width - 8.0)
+                .selected_text(ShapeType::NAMES[index])
+                .show_ui(ui, |ui| {
+                    for (k, name) in ShapeType::NAMES.into_iter().enumerate() {
+                        ui.selectable_value(&mut index, k, name);
+                    }
+                });
+            if index != shape.shape.index() {
+                shape.shape = shape.shape.with_index(index, extent);
+            }
+        });
+    });
+    color_row(ui, &mut shape.color, true);
+    ui.add_enabled_ui(!animating, |ui| {
+        let mut joint = shape.joint.clone();
+        prop_row(ui, "Joint", |ui, width| {
+            egui::ComboBox::from_id_salt("shape_joint")
+                .width(width - 8.0)
+                .selected_text(joint.as_deref().unwrap_or("None (model space)"))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut joint, None, "None (model space)");
+                    for name in joints {
+                        ui.selectable_value(&mut joint, Some(name.clone()), name);
+                    }
+                });
+        });
+        if joint != shape.joint {
+            // Onto the new parent, as locators.
+            shape.joint = joint;
+            shape.translation = [0.0; 3];
+            shape.rotation = [0.0, 0.0, 0.0, 1.0];
+        }
+        match &mut shape.shape {
+            ShapeType::Hull => {}
+            other => {
+                vec3_row(ui, "Position", &mut shape.translation, 0.001, 3, None);
+                rotation_row(ui, &mut shape.rotation);
+                match other {
+                    ShapeType::Box { size } => vec3_row(ui, "Size", size, 0.01, 3, Some(0.001)),
+                    ShapeType::Sphere { radius } => length_row(ui, "Radius", radius),
+                    ShapeType::Capsule { radius, height } => {
+                        length_row(ui, "Radius", radius);
+                        length_row(ui, "Height", height);
+                    }
+                    ShapeType::Hull => {}
+                }
+            }
+        }
+    });
+    if shape.shape == ShapeType::Hull {
+        let hull = hulls.entry(shape.joint.clone()).or_insert_with(|| {
+            geometry
+                .and_then(|g| g.hull_points(shape.joint.as_deref()))
+                .and_then(|p| crate::hull::hull(&p))
+        });
+        let around = shape
+            .joint
+            .as_deref()
+            .map_or("the model".to_owned(), str::to_owned);
+        ui.weak(match hull {
+            Some(hull) => format!("{} points around {around}", hull.points.len()),
+            None => format!("No hull around {around}"),
+        });
+    }
+    if animating {
+        ui.weak("Transforms are locked while an animation plays. Choose Rest pose to edit them.");
+    }
+    ui.add_space(6.0);
+    ui.label(RichText::new("Properties").size(13.0).color(TEXT_WEAK));
+    properties_editor(ui, &mut shape.properties);
+    clicked
+}
+
+/// The Regions tab; see docs/features/regions.md#regions-tab.
+fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools) -> Option<Amod> {
+    let materials: Vec<String> = inspected
+        .geometry
+        .as_ref()
+        .map(|g| g.materials.clone())
+        .unwrap_or_default();
+    let LocatorTools {
+        hidden_regions,
+        paint,
+        brush,
+        armed,
+        ..
+    } = tools;
+    let hidden = hidden_regions.entry(inspected.path.clone()).or_default();
+    let Some(Ok(edit)) = &mut inspected.mesh else {
+        placeholder(ui, "No regions");
+        return None;
+    };
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let room = edit.edit.regions.len() < enrich::MAX_REGIONS;
+                let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add region");
+                let add = ui
+                    .add_enabled(room, add)
+                    .on_disabled_hover_text("A model has at most 32 regions");
+                if add.clicked() {
+                    let regions = &mut edit.edit.regions;
+                    let name = enrich::free_name("region", |n| regions.iter().any(|r| r.name == n));
+                    let color = LOCATOR_COLORS
+                        .iter()
+                        .find(|c| regions.iter().all(|r| r.color != **c))
+                        .unwrap_or(&LOCATOR_COLORS[0]);
+                    regions.push(Region {
+                        name,
+                        tags: Vec::new(),
+                        color: (*color).to_owned(),
+                        materials: Vec::new(),
+                        triangles: Default::default(),
+                    });
+                    edit.region = Some(regions.len() - 1);
+                    *paint = false;
+                }
+                ui.add_space(8.0);
+                if edit.edit.regions.is_empty() {
+                    ui.weak("No regions");
+                }
+                let mut event = None;
+                for i in 0..edit.edit.regions.len() {
+                    let open = edit.region == Some(i);
+                    let name = edit.edit.regions[i].name.clone();
+                    let dot = hex_color32(&edit.edit.regions[i].color).unwrap_or(TEXT);
+                    let mut visible = !hidden.contains(&name);
+                    let mut delete = false;
+                    let (_, folded) = ui
+                        .push_id(("region", i), |ui| {
+                            card(
+                                ui,
+                                Some(open),
+                                RichText::new(&name),
+                                |ui| eye_and_dot(ui, &mut visible, dot),
+                                |ui, open| {
+                                    delete = open
+                                        && icon_button(ui, Icon::Trash2, "Delete", true).clicked();
+                                },
+                                |ui| region_fields(ui, edit, i, &materials, paint, brush, armed),
+                            )
+                        })
+                        .inner;
+                    if folded {
+                        event = Some(CardEvent::Fold(i));
+                    }
+                    if delete {
+                        event = Some(CardEvent::Delete(i));
+                    }
+                    if visible == hidden.contains(&name) {
+                        set_visible(hidden, name, visible);
+                    }
+                }
+                match event {
+                    Some(CardEvent::Fold(i)) => {
+                        edit.region = (edit.region != Some(i)).then_some(i);
+                        *paint = false;
+                    }
+                    Some(CardEvent::Delete(i)) => {
+                        edit.edit.regions.remove(i);
+                        edit.region = None;
+                        *paint = false;
+                    }
+                    _ => {}
+                }
+            });
+        });
+    mesh_commit(ui, edit)
+}
+
+/// The body of region `i`'s card.
+fn region_fields(
+    ui: &mut Ui,
+    edit: &mut MeshEdit,
+    i: usize,
+    materials: &[String],
+    paint: &mut bool,
+    brush: &mut f32,
+    armed: &mut bool,
+) {
+    let saved = edit.saved.regions.get(i).map(|r| r.name.clone());
+    let others: Vec<String> = edit
+        .edit
+        .regions
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| *k != i)
+        .map(|(_, r)| r.name.clone())
+        .collect();
+    let others: Vec<&str> = others.iter().map(String::as_str).collect();
+    let region = &mut edit.edit.regions[i];
+    name_row(ui, &mut region.name, saved.as_deref(), &others, "region");
+    tags_row(ui, &mut region.tags);
+    let mut color = Some(region.color.clone());
+    color_row(ui, &mut color, false);
+    if let Some(color) = color {
+        region.color = color;
+    }
+    prop_row(ui, "Materials", |ui, _| {
+        ui.vertical(|ui| {
+            if materials.is_empty() {
+                ui.weak("None");
+            }
+            for material in materials {
+                let mut on = region.materials.contains(material);
+                if ui.checkbox(&mut on, material).changed() {
+                    if on {
+                        region.materials.push(material.clone());
+                    } else {
+                        region.materials.retain(|m| m != material);
+                    }
+                }
+            }
+        });
+    });
+    prop_row(ui, "Painted", |ui, _| {
+        ui.label(format!("{} triangles", region.triangles.len()));
+    });
+    ui.horizontal(|ui| {
+        let on = &mut *paint;
+        let mut button = egui::Button::image_and_text(Icon::Paintbrush.image(14.0, TEXT), "Paint");
+        if *on {
+            button = button.fill(ACCENT.gamma_multiply(0.25));
+        }
+        if ui.add(button).clicked() {
+            *on = !*on;
+            *armed = false;
+        }
+        ui.add(egui::Slider::new(brush, 2.0..=64.0).text("px"))
+            .on_hover_text("Brush");
+        let clear = ui.add_enabled(!region.triangles.is_empty(), egui::Button::new("Clear"));
+        if clear.clicked() {
+            region.triangles.clear();
+        }
+    });
+    ui.weak("Paint: drag on the model. Shift + drag erases. Right drag orbits.");
 }
 
 /// Three drag fields side by side.
@@ -5760,8 +6692,8 @@ fn vec3_row(
     });
 }
 
-/// Shows the 3D preview in `rect` and handles orbit input (unless `orbit` is off, while
-/// something else takes the drag); see docs/features/canvas.md#3d-controls.
+/// Shows the 3D preview in `rect` and handles orbit input; `orbit` off leaves left drags to
+/// something else (right drags still orbit). See docs/features/canvas.md#3d-controls.
 fn view_3d(ui: &mut Ui, rect: Rect, preview: &mut Preview3d, orbit: bool) -> Response {
     let ppp = ui.ctx().pixels_per_point();
     let min = (rect.min.to_vec2() * ppp).round();
@@ -5774,9 +6706,8 @@ fn view_3d(ui: &mut Ui, rect: Rect, preview: &mut Preview3d, orbit: bool) -> Res
     let response = ui.interact(rect, ui.id().with("canvas_3d"), Sense::click_and_drag());
     if response.double_clicked() {
         preview.orbit = Orbit::default();
-    } else if orbit
-        && (response.dragged_by(PointerButton::Primary)
-            || response.dragged_by(PointerButton::Secondary))
+    } else if (orbit && response.dragged_by(PointerButton::Primary))
+        || response.dragged_by(PointerButton::Secondary)
     {
         let delta = response.drag_delta();
         preview.orbit.drag(bevy::math::Vec2::new(delta.x, delta.y));

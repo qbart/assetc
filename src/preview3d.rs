@@ -57,7 +57,7 @@ impl Plugin for Preview3dPlugin {
                     sync_attachments
                         .after(sync_model)
                         .before(TransformSystems::Propagate),
-                    (fit_model, report_frames, cast_surface)
+                    (fit_model, report_frames, cast_surface, report_regions)
                         .chain()
                         .after(TransformSystems::Propagate),
                 ),
@@ -184,11 +184,39 @@ pub struct Preview3d {
     pub frames: Option<ModelFrames>,
     /// A ray (origin, unit direction) to cast against the shown model, taken by
     /// [`cast_surface`], which answers in `surface_hit`.
-    pub surface_ray: Option<(Vec3, Vec3)>,
+    pub surface_ray: Option<SurfaceRay>,
     /// The answer to the last `surface_ray`, for the UI to take: `Some(None)` is a miss.
     pub surface_hit: Option<Option<SurfaceHit>>,
     /// Models shown at the shown model's locators, written by the UI every frame.
     pub attachments: Vec<Attachment>,
+    /// Triangles of the shown model to report, written by the UI every frame; see
+    /// docs/features/regions.md#3d-view.
+    pub region_wants: Vec<RegionWant>,
+    /// The wanted triangles as posed this frame: region and corners; written by
+    /// [`report_regions`].
+    pub region_triangles: Vec<(usize, [Vec3; 3])>,
+}
+
+/// A ray to cast against the shown model.
+#[derive(Clone, Copy, Debug)]
+pub struct SurfaceRay {
+    pub origin: Vec3,
+    /// Unit length.
+    pub dir: Vec3,
+    /// Triangles whose center lies this close to the hit are reported too (painting).
+    pub brush: f32,
+}
+
+/// A glTF triangle: mesh, primitive and index in the primitive.
+pub type TriangleId = (u32, u32, u32);
+
+/// Triangles of one glTF primitive wanted for a region: all of them, or some.
+#[derive(Clone, Debug)]
+pub struct RegionWant {
+    pub region: usize,
+    pub mesh: u32,
+    pub primitive: u32,
+    pub triangles: Option<Vec<u32>>,
 }
 
 /// Where a ray hit the shown model; see docs/features/locators.md#place-on-surface.
@@ -199,6 +227,8 @@ pub struct SurfaceHit {
     pub normal: Vec3,
     /// The named joint weighing most on the triangle, for skinned meshes.
     pub joint: Option<String>,
+    /// The triangles in the ray's brush facing the ray, the hit one first.
+    pub brush: Vec<TriangleId>,
 }
 
 /// A model shown at a locator; see docs/features/locators.md#attachment-preview.
@@ -1584,39 +1614,67 @@ fn sync_attachments(
     *spawned = kept;
 }
 
-/// Answers [`Preview3d::surface_ray`] with the nearest triangle of the shown model (not its
-/// attachments), skinned meshes as posed; see docs/features/locators.md#place-on-surface.
+/// A skinned mesh's skin and each vertex's joints and weights.
+type PosedSkin<'a> = (&'a SkinnedMesh, &'a [[u16; 4]], &'a [[f32; 4]]);
+
+/// A mesh of the shown model as posed this frame.
+struct PosedMesh<'a> {
+    /// Its glTF mesh and primitive.
+    id: Option<(u32, u32)>,
+    world: Vec<Vec3>,
+    /// Triangle lists, as indices into `world`.
+    indices: Vec<usize>,
+    /// The skin, with each vertex's joints and weights.
+    skin: Option<PosedSkin<'a>>,
+}
+
+/// The glTF mesh and primitive of a mesh loaded from a glTF (`Mesh<m>/Primitive<p>`).
+fn primitive_id(mesh: &Handle<Mesh>) -> Option<(u32, u32)> {
+    let label = mesh.path()?.label()?;
+    let (m, p) = label.strip_prefix("Mesh")?.split_once("/Primitive")?;
+    Some((m.parse().ok()?, p.parse().ok()?))
+}
+
+type MeshQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Mesh3d,
+        &'static GlobalTransform,
+        Option<&'static SkinnedMesh>,
+    ),
+>;
+
+/// Calls `visit` with each mesh of the shown model (not its attachments) that `wanted`
+/// accepts by its glTF id, skinned ones through their joints.
 #[allow(clippy::too_many_arguments)]
-fn cast_surface(
-    loaded: Res<LoadedModel>,
-    mut preview: ResMut<Preview3d>,
-    children: Query<&Children>,
-    mesh_entities: Query<(&Mesh3d, &GlobalTransform, Option<&SkinnedMesh>)>,
-    nodes: Query<(&GlobalTransform, Option<&Name>)>,
-    roots: Query<Entity, With<AttachmentRoot>>,
-    meshes: Res<Assets<Mesh>>,
-    bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+fn posed_meshes<'a>(
+    fit: Entity,
+    children: &Query<&Children>,
+    mesh_entities: &'a MeshQuery,
+    nodes: &Query<(&GlobalTransform, Option<&Name>)>,
+    roots: &Query<Entity, With<AttachmentRoot>>,
+    meshes: &'a Assets<Mesh>,
+    bindposes: &Assets<SkinnedMeshInverseBindposes>,
+    wanted: impl Fn(Option<(u32, u32)>) -> bool,
+    mut visit: impl FnMut(PosedMesh<'a>),
 ) {
-    let Some((origin, dir)) = preview.surface_ray.take() else {
-        return;
-    };
-    let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some()) else {
-        preview.surface_hit = Some(None);
-        return;
-    };
     let attached: std::collections::HashSet<Entity> = roots
         .iter()
         .flat_map(|root| std::iter::once(root).chain(children.iter_descendants(root)))
         .collect();
-    let mut best: Option<(f32, SurfaceHit)> = None;
-    for entity in children.iter_descendants(model.fit) {
+    for entity in children.iter_descendants(fit) {
         if attached.contains(&entity) {
             continue;
         }
-        let Ok((mesh, global, skin)) = mesh_entities.get(entity) else {
+        let Ok((mesh3d, global, skin)) = mesh_entities.get(entity) else {
             continue;
         };
-        let Some(mesh) = meshes.get(&mesh.0) else {
+        let id = primitive_id(&mesh3d.0);
+        if !wanted(id) {
+            continue;
+        }
+        let Some(mesh) = meshes.get(&mesh3d.0) else {
             continue;
         };
         let Some(positions) = mesh
@@ -1626,20 +1684,19 @@ fn cast_surface(
             continue;
         };
         let joint_indices = match mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX) {
-            Some(bevy::mesh::VertexAttributeValues::Uint16x4(v)) => Some(v),
+            Some(bevy::mesh::VertexAttributeValues::Uint16x4(v)) => Some(v.as_slice()),
             _ => None,
         };
         let joint_weights = match mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT) {
-            Some(bevy::mesh::VertexAttributeValues::Float32x4(v)) => Some(v),
+            Some(bevy::mesh::VertexAttributeValues::Float32x4(v)) => Some(v.as_slice()),
             _ => None,
         };
+        let skin = skin.zip(joint_indices.zip(joint_weights));
         // Joint matrices of a skinned mesh: joint world × inverse bind.
-        let skinning = skin
-            .zip(joint_indices.zip(joint_weights))
-            .and_then(|(skin, weights)| {
-                let binds = bindposes.get(&skin.inverse_bindposes)?;
-                let matrices: Vec<Mat4> = skin
-                    .joints
+        let matrices: Option<Vec<Mat4>> = skin.and_then(|(skin, _)| {
+            let binds = bindposes.get(&skin.inverse_bindposes)?;
+            Some(
+                skin.joints
                     .iter()
                     .zip(binds.iter())
                     .map(|(&joint, bind)| {
@@ -1647,74 +1704,191 @@ fn cast_surface(
                             .get(joint)
                             .map_or(Mat4::IDENTITY, |(g, _)| g.to_matrix() * *bind)
                     })
-                    .collect();
-                Some((skin, matrices, weights))
-            });
-        let world: Vec<Vec3> = positions
+                    .collect(),
+            )
+        });
+        let world = positions
             .iter()
             .enumerate()
             .map(|(i, p)| {
                 let p = Vec3::from(*p);
-                match &skinning {
-                    Some((_, matrices, (indices, weights))) => (0..4)
+                match (&matrices, skin) {
+                    (Some(matrices), Some((_, (indices, weights)))) => (0..4)
                         .map(|k| {
                             let m = matrices.get(indices[i][k] as usize).copied();
                             m.unwrap_or(Mat4::IDENTITY).transform_point3(p) * weights[i][k]
                         })
                         .sum(),
-                    None => global.transform_point(p),
+                    _ => global.transform_point(p),
                 }
             })
-            .collect();
+            .collect::<Vec<Vec3>>();
         let indices: Vec<usize> = match mesh.indices() {
             Some(indices) => indices.iter().collect(),
             None => (0..world.len()).collect(),
         };
-        for triangle in indices.as_chunks::<3>().0 {
-            let (Some(&a), Some(&b), Some(&c)) = (
-                world.get(triangle[0]),
-                world.get(triangle[1]),
-                world.get(triangle[2]),
-            ) else {
-                continue;
-            };
-            let Some(t) = ray_triangle(origin, dir, a, b, c) else {
-                continue;
-            };
-            if best.as_ref().is_some_and(|(d, _)| *d <= t) {
-                continue;
+        visit(PosedMesh {
+            id,
+            world,
+            indices,
+            skin: skin
+                .filter(|_| matrices.is_some())
+                .map(|(skin, (ji, jw))| (skin, ji, jw)),
+        });
+    }
+}
+
+/// Answers [`Preview3d::surface_ray`] with the nearest triangle of the shown model (not its
+/// attachments), skinned meshes as posed; see docs/features/locators.md#place-on-surface and
+/// docs/features/regions.md#painting.
+#[allow(clippy::too_many_arguments)]
+fn cast_surface(
+    loaded: Res<LoadedModel>,
+    mut preview: ResMut<Preview3d>,
+    children: Query<&Children>,
+    mesh_entities: MeshQuery,
+    nodes: Query<(&GlobalTransform, Option<&Name>)>,
+    roots: Query<Entity, With<AttachmentRoot>>,
+    meshes: Res<Assets<Mesh>>,
+    bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+) {
+    let Some(ray) = preview.surface_ray.take() else {
+        return;
+    };
+    let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some()) else {
+        preview.surface_hit = Some(None);
+        return;
+    };
+    let mut posed = Vec::new();
+    posed_meshes(
+        model.fit,
+        &children,
+        &mesh_entities,
+        &nodes,
+        &roots,
+        &meshes,
+        &bindposes,
+        |_| true,
+        |mesh| posed.push(mesh),
+    );
+    // The nearest hit: mesh, triangle, distance.
+    let mut best: Option<(usize, usize, f32)> = None;
+    for (m, mesh) in posed.iter().enumerate() {
+        for (t, triangle) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+            let [a, b, c] = triangle.map(|i| mesh.world.get(i).copied().unwrap_or(Vec3::NAN));
+            if let Some(d) = ray_triangle(ray.origin, ray.dir, a, b, c)
+                && best.is_none_or(|(_, _, nearest)| d < nearest)
+            {
+                best = Some((m, t, d));
             }
-            let mut normal = (b - a).cross(c - a).normalize_or_zero();
-            if normal.dot(dir) > 0.0 {
-                normal = -normal;
-            }
-            // The named joint weighing most on the triangle.
-            let joint = skinning.as_ref().and_then(|(skin, _, (ji, jw))| {
-                let mut sums: Vec<(u16, f32)> = Vec::new();
-                for &v in triangle {
-                    for k in 0..4 {
-                        let (j, w) = (ji[v][k], jw[v][k]);
-                        match sums.iter_mut().find(|(sj, _)| *sj == j) {
-                            Some((_, sw)) => *sw += w,
-                            None => sums.push((j, w)),
-                        }
-                    }
-                }
-                let (j, _) = sums.into_iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
-                let (_, name) = nodes.get(*skin.joints.get(j as usize)?).ok()?;
-                Some(name?.to_string())
-            });
-            best = Some((
-                t,
-                SurfaceHit {
-                    point: origin + dir * t,
-                    normal,
-                    joint,
-                },
-            ));
         }
     }
-    preview.surface_hit = Some(best.map(|(_, hit)| hit));
+    let corners = |mesh: &PosedMesh, t: usize| {
+        let triangle = mesh.indices.as_chunks::<3>().0[t];
+        triangle.map(|i| mesh.world.get(i).copied().unwrap_or(Vec3::NAN))
+    };
+    preview.surface_hit = Some(best.map(|(m, t, d)| {
+        let mesh = &posed[m];
+        let point = ray.origin + ray.dir * d;
+        let [a, b, c] = corners(mesh, t);
+        let mut normal = (b - a).cross(c - a).normalize_or_zero();
+        if normal.dot(ray.dir) > 0.0 {
+            normal = -normal;
+        }
+        // The named joint weighing most on the triangle.
+        let joint = mesh.skin.and_then(|(skin, ji, jw)| {
+            let mut sums: Vec<(u16, f32)> = Vec::new();
+            for &v in &mesh.indices.as_chunks::<3>().0[t] {
+                for k in 0..4 {
+                    let (j, w) = (ji[v][k], jw[v][k]);
+                    match sums.iter_mut().find(|(sj, _)| *sj == j) {
+                        Some((_, sw)) => *sw += w,
+                        None => sums.push((j, w)),
+                    }
+                }
+            }
+            let (j, _) = sums.into_iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
+            let (_, name) = nodes.get(*skin.joints.get(j as usize)?).ok()?;
+            Some(name?.to_string())
+        });
+        let triangle = mesh.id.map(|(m, p)| (m, p, t as u32));
+        // The brush: centers within reach of the hit, on triangles facing the ray.
+        let mut brush: Vec<TriangleId> = triangle.into_iter().collect();
+        if ray.brush > 0.0 {
+            for other in &posed {
+                let Some((m, p)) = other.id else {
+                    continue;
+                };
+                for u in 0..other.indices.len() / 3 {
+                    let [a, b, c] = corners(other, u);
+                    let facing = (b - a).cross(c - a).dot(ray.dir) < 0.0;
+                    let id = (m, p, u as u32);
+                    if facing
+                        && ((a + b + c) / 3.0).distance(point) <= ray.brush
+                        && Some(id) != triangle
+                    {
+                        brush.push(id);
+                    }
+                }
+            }
+        }
+        SurfaceHit {
+            point,
+            normal,
+            joint,
+            brush,
+        }
+    }));
+}
+
+/// Answers [`Preview3d::region_wants`] with the wanted triangles as posed; see
+/// docs/features/regions.md#3d-view.
+#[allow(clippy::too_many_arguments)]
+fn report_regions(
+    loaded: Res<LoadedModel>,
+    mut preview: ResMut<Preview3d>,
+    children: Query<&Children>,
+    mesh_entities: MeshQuery,
+    nodes: Query<(&GlobalTransform, Option<&Name>)>,
+    roots: Query<Entity, With<AttachmentRoot>>,
+    meshes: Res<Assets<Mesh>>,
+    bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+) {
+    let mut out = Vec::new();
+    if let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some())
+        && !preview.region_wants.is_empty()
+    {
+        let wants = &preview.region_wants;
+        posed_meshes(
+            model.fit,
+            &children,
+            &mesh_entities,
+            &nodes,
+            &roots,
+            &meshes,
+            &bindposes,
+            |id| id.is_some_and(|(m, p)| wants.iter().any(|w| w.mesh == m && w.primitive == p)),
+            |mesh| {
+                let Some((m, p)) = mesh.id else {
+                    return;
+                };
+                let triangles = mesh.indices.as_chunks::<3>().0;
+                let corners =
+                    |t: &[usize; 3]| t.map(|i| mesh.world.get(i).copied().unwrap_or(Vec3::NAN));
+                for want in wants.iter().filter(|w| w.mesh == m && w.primitive == p) {
+                    match &want.triangles {
+                        None => out.extend(triangles.iter().map(|t| (want.region, corners(t)))),
+                        Some(some) => out.extend(
+                            some.iter()
+                                .filter_map(|&t| triangles.get(t as usize))
+                                .map(|t| (want.region, corners(t))),
+                        ),
+                    }
+                }
+            },
+        );
+    }
+    preview.region_triangles = out;
 }
 
 /// Distance along the ray to triangle `a b c` (either side), Möller–Trumbore.

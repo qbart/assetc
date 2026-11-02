@@ -530,6 +530,8 @@ pub struct ModelGeometry {
     pub joints: Vec<(Option<String>, Mat4)>,
     /// Names of the materials triangles use, in file order.
     pub materials: Vec<String>,
+    /// Each triangle primitive: glTF mesh, primitive, material name and triangle count.
+    pub primitives: Vec<(u32, u32, Option<String>, usize)>,
     /// Largest side of the points' bounding box.
     pub extent: f32,
 }
@@ -577,9 +579,24 @@ impl ModelGeometry {
         let mut used: Vec<usize> = parts.iter().filter_map(|p| p.material).collect();
         used.sort_unstable();
         used.dedup();
+        let mut primitives: Vec<(u32, u32, Option<String>, usize)> = Vec::new();
+        for part in parts {
+            if !primitives
+                .iter()
+                .any(|(m, p, _, _)| (*m, *p) == (part.mesh, part.index))
+            {
+                primitives.push((
+                    part.mesh,
+                    part.index,
+                    part.material.map(|i| names[i].clone()),
+                    part.primitive.indices.len() / 3,
+                ));
+            }
+        }
         Self {
             points,
             joints,
+            primitives,
             materials: used.into_iter().map(|i| names[i].clone()).collect(),
             extent: if min.cmple(max).all() {
                 (max - min).max_element()

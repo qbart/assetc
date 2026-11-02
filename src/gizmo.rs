@@ -88,6 +88,11 @@ impl ViewCamera {
         )
     }
 
+    /// Where the camera is, in world space.
+    pub fn position(&self) -> Vec3 {
+        self.camera.translation
+    }
+
     /// World units per canvas point across the view at `p`'s depth.
     pub fn world_per_point(&self, p: Vec3) -> f32 {
         let depth = -self.to_view.transform_point3(p).z;

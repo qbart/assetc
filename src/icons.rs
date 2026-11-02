@@ -39,16 +39,20 @@ pub enum Icon {
     ImagePlay,
     Images,
     Info,
+    List,
     LayoutGrid,
     Loader,
     MapPin,
     Move3d,
+    PaintBucket,
+    Paintbrush,
     Palette,
     Plus,
     RefreshCw,
     Rotate3d,
     Scan,
     Settings2,
+    Shapes,
     SlidersVertical,
     SquaresUnite,
     SunMedium,
@@ -60,7 +64,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 52] = [
+const SVGS: [(&str, &str); 56] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -128,6 +132,7 @@ const SVGS: [(&str, &str); 52] = [
     ("image-play", include_str!("../assets/icons/image-play.svg")),
     ("images", include_str!("../assets/icons/images.svg")),
     ("info", include_str!("../assets/icons/info.svg")),
+    ("list", include_str!("../assets/icons/list.svg")),
     (
         "layout-grid",
         include_str!("../assets/icons/layout-grid.svg"),
@@ -135,12 +140,18 @@ const SVGS: [(&str, &str); 52] = [
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("map-pin", include_str!("../assets/icons/map-pin.svg")),
     ("move-3d", include_str!("../assets/icons/move-3d.svg")),
+    (
+        "paint-bucket",
+        include_str!("../assets/icons/paint-bucket.svg"),
+    ),
+    ("paintbrush", include_str!("../assets/icons/paintbrush.svg")),
     ("palette", include_str!("../assets/icons/palette.svg")),
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("rotate-3d", include_str!("../assets/icons/rotate-3d.svg")),
     ("scan", include_str!("../assets/icons/scan.svg")),
     ("settings-2", include_str!("../assets/icons/settings-2.svg")),
+    ("shapes", include_str!("../assets/icons/shapes.svg")),
     (
         "sliders-vertical",
         include_str!("../assets/icons/sliders-vertical.svg"),
