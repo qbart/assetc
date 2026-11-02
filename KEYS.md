@@ -56,7 +56,15 @@ On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)
 | `W`                                    | Gizmo: Move (again: off)                     |
 | `E`                                    | Gizmo: Rotate (again: off)                   |
 | `S`                                    | Arm Place on surface                         |
-| `Escape`                               | Gizmo off, disarm Place on surface           |
+| `Escape`                               | Gizmo off, disarm Place on surface, stop painting |
+
+While a region paints (see [`docs/features/regions.md`](docs/features/regions.md#painting)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left drag / click on the model         | Paint triangles into the region              |
+| `Shift` + left drag / click            | Erase triangles from the region              |
+| Right drag                             | Orbit the camera                             |
 
 ## Canvas (color LUT)
 

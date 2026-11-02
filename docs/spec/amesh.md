@@ -30,11 +30,23 @@ width are in `DESC`.
 | `LOCATORS` | no       | [`Locator`](#locator-64-bytes)`[]` (payload size / 64), see [Locators](#locators) |
 | `LOCNAMES` | no       | `u8[]`: the locators' names and tags, UTF-8, back to back         |
 | `LOCTAGS`  | no       | [`LocatorTag`](#locatortag-16-bytes)`[]` (payload size / 16), the locators' tags |
+| `STRINGS`  | no       | `u8[]`: UTF-8 text of properties, shapes and regions, back to back, see [Strings](#strings) |
+| `PROPS`    | no       | [`Property`](#property-32-bytes)`[]`: the model's properties, sorted by key |
+| `SHAPES`   | no       | [`Shape`](#shape-96-bytes)`[]`, see [Shapes](#shapes) |
+| `SHAPEPTS` | no       | `f32[3][]`: the hulls' points |
+| `SHAPEPRP` | no       | [`Property`](#property-32-bytes)`[]`: the shapes' properties |
+| `REGIONS`  | no       | [`Region`](#region-32-bytes)`[]`, see [Regions](#regions) |
+| `REGTAGS`  | no       | [`Tag`](#tag-16-bytes)`[]`: the regions' tags |
+| `TRIREGN`  | no       | `u32[index_count / 3]`: per triangle of `INDICES`, its regions as bits |
 
 assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
 together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
 `LOCATORS` and `LOCNAMES` (only for models with locators); `LOCTAGS`
-follows them when a locator has tags.
+follows them when a locator has tags. `STRINGS` comes when properties,
+shapes or regions do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
+and `SHAPEPRP` (with shapes; `SHAPEPTS` only with a hull, `SHAPEPRP` only
+when a shape has properties), `REGIONS`, `REGTAGS` (when a region has tags)
+and `TRIREGN` (with regions).
 
 ## MeshDesc (32 bytes)
 
@@ -217,3 +229,89 @@ sidecar lists them. A tag used by several locators appears once per locator.
 |      0 |    8 | `hash`        | u64, FNV-1a-64 of the tag's UTF-8 text                      |
 |      8 |    4 | `name_offset` | u32, byte offset of the text in `LOCNAMES`                  |
 |     12 |    4 | `name_len`    | u32, byte length of the text                                |
+
+## Strings
+
+`STRINGS` holds the text of properties (keys and Text values), shapes
+(names and kinds) and regions (names and tags), UTF-8, back to back, without
+terminators. Records point into it with a byte offset and length. Locators
+keep theirs in `LOCNAMES`.
+
+## Tag (16 bytes)
+
+| Offset | Size | Field         | Notes                                           |
+|-------:|-----:|---------------|-------------------------------------------------|
+|      0 |    8 | `hash`        | u64, FNV-1a-64 of the tag's UTF-8 text           |
+|      8 |    4 | `text_offset` | u32, byte offset of the text in `STRINGS`        |
+|     12 |    4 | `text_len`    | u32, byte length of the text                     |
+
+## Properties
+
+Key / value pairs, see
+[`docs/features/properties.md`](../features/properties.md). `PROPS` holds the
+model's, sorted by key; `SHAPEPRP` the shapes', each shape's run sorted by
+key. Look one up by `key_hash`, the FNV-1a-64 of its UTF-8 key.
+
+### Property (32 bytes)
+
+| Offset | Size | Field        | Notes                                                      |
+|-------:|-----:|--------------|------------------------------------------------------------|
+|      0 |    8 | `key_hash`   | u64, FNV-1a-64 of the key                                  |
+|      8 |    4 | `key_offset` | u32, byte offset of the key in `STRINGS`                    |
+|     12 |    4 | `key_len`    | u32, byte length of the key                                |
+|     16 |    4 | `type`       | u32: `0` Bool, `1` Int, `2` Float, `3` Text                 |
+|     20 |    4 | `reserved`   | u32, `0`                                                   |
+|     24 |    8 | `value`      | Bool: u64 `0` or `1`; Int: i64; Float: f64; Text: u32 byte offset in `STRINGS`, then u32 byte length |
+
+## Shapes
+
+Simple volumes, see [`docs/features/shapes.md`](../features/shapes.md).
+`SHAPES` holds one record per shape in the sidecar's order. A shape's
+transform is `T · R` relative to its parent, the joint (`joint ≥ 0`) or the
+mesh's own space, as for [locators](#locators). A hull's points are in the
+parent's space, without `T · R`.
+
+### Shape (96 bytes)
+
+| Offset | Size | Field            | Notes                                                       |
+|-------:|-----:|------------------|-------------------------------------------------------------|
+|      0 |    8 | `name_hash`      | u64, FNV-1a-64 of the name                                  |
+|      8 |    4 | `name_offset`    | u32, in `STRINGS`                                           |
+|     12 |    4 | `name_len`       | u32                                                         |
+|     16 |    8 | `kind_hash`      | u64, FNV-1a-64 of the kind (of the empty text when none)    |
+|     24 |    4 | `kind_offset`    | u32, in `STRINGS`                                           |
+|     28 |    4 | `kind_len`       | u32, `0` when none                                          |
+|     32 |    4 | `joint`          | i32, index into `SKELETON`; `−1`: mesh space                 |
+|     36 |    4 | `type`           | u32: `0` box, `1` sphere, `2` capsule, `3` hull              |
+|     40 |   12 | `translation`    | f32 × 3 (zero for a hull)                                   |
+|     52 |   16 | `rotation`       | f32 × 4, unit quaternion `x y z w` (identity for a hull)    |
+|     68 |   12 | `size`           | f32 × 3: box: full size along X, Y, Z; sphere: radius, 0, 0; capsule: radius, height, 0; hull: 0, 0, 0 |
+|     80 |    4 | `first_point`    | u32, index of its first point in `SHAPEPTS` (`0` but a hull) |
+|     84 |    4 | `point_count`    | u32, its points (hull only)                                 |
+|     88 |    4 | `first_property` | u32, index of its first property in `SHAPEPRP`               |
+|     92 |    4 | `property_count` | u32                                                         |
+
+A capsule's `height` is the distance between the centers of its two
+half-spheres, along its local Y axis; its full length is `height + 2 ·
+radius`.
+
+## Regions
+
+Named sets of triangles, see
+[`docs/features/regions.md`](../features/regions.md). `REGIONS` holds at
+most 32 records, in the sidecar's order; region `i` is bit `i` (`1 << i`) of
+`TRIREGN`, whose entry `t` is triangle `t` of `INDICES` (indices `3t` to
+`3t + 2`, across submeshes). Reduced levels of detail (`LODIDX`) have no
+regions.
+
+### Region (32 bytes)
+
+| Offset | Size | Field            | Notes                                                    |
+|-------:|-----:|------------------|----------------------------------------------------------|
+|      0 |    8 | `name_hash`      | u64, FNV-1a-64 of the name                               |
+|      8 |    4 | `name_offset`    | u32, in `STRINGS`                                        |
+|     12 |    4 | `name_len`       | u32                                                      |
+|     16 |    2 | `first_tag`      | u16, index of its first tag in `REGTAGS` (`0` without tags) |
+|     18 |    2 | `tag_count`      | u16                                                      |
+|     20 |    4 | `triangle_count` | u32, triangles of `INDICES` in it                         |
+|     24 |    8 | `reserved`       | `0`                                                      |

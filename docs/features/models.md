@@ -249,6 +249,14 @@ The **Chunks** view shows the data inside the `.amesh`
   | `SKELETON` | Skeleton            | Parent (or `—`), Translation, Rotation, Scale          |
   | `LOCATORS` | Locators            | Name, Hash (`0x` + 16 hex digits), Joint (or `—`), Translation, Rotation, Scale, Tags (joined with `, `) |
   | `LOCTAGS`  | Locator tags        | Name, Hash                                             |
+  | `STRINGS`  | Strings             | Offset, Bytes (16 per row, hex)                        |
+  | `PROPS`    | Properties          | Key, Type, Value                                       |
+  | `SHAPES`   | Shapes              | Name, Kind, Joint (or `—`), Type, Translation, Rotation, Size, Points, Properties |
+  | `SHAPEPTS` | Hull points         | Point                                                  |
+  | `SHAPEPRP` | Shape properties    | Key, Type, Value                                       |
+  | `REGIONS`  | Regions             | Name, Tags, Triangles                                  |
+  | `REGTAGS`  | Region tags         | Name, Hash                                             |
+  | `TRIREGN`  | Triangle regions    | Regions (the names of its bits, `, `-joined, or `—`)   |
   | `LOCNAMES` | Locator names       | Offset, Bytes (16 per row, hex)                        |
   | other      | Unknown chunk       | Offset, Bytes (16 per row, hex)                        |
 
@@ -309,7 +317,9 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 | `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
 | `P.aanim`                   | animation  | `P.aanim`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.md)) |
 
-The `.amesh` also carries the model's [locators](locators.md#build): its
+The `.amesh` also carries the model's [properties](properties.md),
+[shapes](shapes.md) and [regions](regions.md), and its
+[locators](locators.md#build): its
 sidecar's, its file's `SOCKET_*` nodes and presets' (see
 [Inherited locators](locators.md#inherited-locators)).
 

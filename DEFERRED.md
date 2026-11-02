@@ -70,12 +70,6 @@ Open:
 top of a model. Others share their storage (`.amod` tables), joint
 attachment by name, `.amesh` chunks and 3D editing:
 
-- **Shapes**: boxes, spheres, capsules and convex hulls on a joint or the
-  model, with a kind and properties (hitboxes with a damage factor, physics
-  colliders, ragdoll parts, triggers).
-- **Regions**: triangles or whole material slots tagged with a surface type
-  (footsteps, impacts), breakable parts or tint masks.
 - **Paths**: polylines or splines in model space (ropes, rails, ladders).
 - **Animation events**: named times on a clip (footsteps, hit frames,
   sounds), in a new `.aanim` chunk, with a clip timeline to place them.
-- **Properties**: key / value pairs on the model (mass, tags).
