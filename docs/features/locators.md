@@ -230,8 +230,7 @@ and animation. The canvas has no locator buttons: they are in the
   orbits the camera.
 - **Gizmo** on the chosen locator, in its own (local) axes, when turned on
   with its card's **Move** or **Rotate** button (or `W` / `E`); off to start
-  with, and turned off by choosing another locator through the list's
-  chevron, by `Escape`, or by its button again:
+  with, and turned off by the same button again or `Escape`:
 
   | Mode   | Draws | Dragging |
   |--------|-------|----------|
@@ -246,8 +245,8 @@ and animation. The canvas has no locator buttons: they are in the
     15% of 80 px) is not drawn and cannot be dragged.
   - Sizes are on screen: the gizmo stays the same size when the camera moves
     closer or farther.
-  - The gizmo's mode lasts for the session; choosing another locator in the
-    3D view keeps it on, in that mode, for the new one.
+  - The gizmo's mode lasts for the session; choosing another locator keeps
+    it on, in that mode, for the new one.
 - **Keys** (pointer over the canvas, no text field focused): `W` Move, `E`
   Rotate (on the chosen locator, or off when already in that mode), `S` arms
   Place on surface, `Escape` turns the gizmo off and disarms Place; see
