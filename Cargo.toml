@@ -7,6 +7,8 @@ description = "Compiles source assets into runtime-friendly binary formats for v
 [dependencies]
 ab_glyph = "0.2.32"
 base64 = "0.23.1"
+# Only to turn on `pure`: Bevy's copy is then built without C or assembly.
+blake3 = { version = "1.8.7", features = ["pure"] }
 bevy_egui = "0.43.1"
 clap = { version = "4.6.7", features = ["derive"] }
 egui_extras = { version = "0.36.2", default-features = false, features = ["svg"] }

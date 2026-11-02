@@ -22,7 +22,7 @@ const fn project(
     }
 }
 
-pub const PROJECTS: [Project; 21] = [
+pub const PROJECTS: [Project; 22] = [
     project("Lucide", "icons", "ISC", "lucide.dev"),
     project(
         "Ubuntu",
@@ -138,6 +138,12 @@ pub const PROJECTS: [Project; 21] = [
         "opening links",
         "MIT or Apache-2.0",
         "github.com/amodm/webbrowser-rs",
+    ),
+    project(
+        "BLAKE3",
+        "hashing in Bevy, pure Rust",
+        "CC0-1.0 or Apache-2.0",
+        "github.com/BLAKE3-team/BLAKE3",
     ),
 ];
 
