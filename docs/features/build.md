@@ -141,6 +141,9 @@ when stale outputs were removed:
   `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat`),
   meshes (`.amesh`), animations (`.aanim`), fonts (`.afont`); singular nouns
   for 1 (`1 mesh`, `2 meshes`). `nothing` when nothing was built.
+- Outputs written along with a model or font count too (a model's `.aanim`,
+  `.amat`s and textures, a font's atlas), though the CLI prints one line for
+  the model or font only.
 - Example: `Built 12 textures, 1 material, 1 mesh, 1 animation, 1 font (1 skipped)`.
 
 ## GUI
