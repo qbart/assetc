@@ -110,11 +110,14 @@ fn open() -> Result<(), Box<dyn std::error::Error>> {
             AssetSourceBuilder::platform_default(&input.to_string_lossy(), None),
         );
     }
+    // Opens maximized; see docs/features/gui.md.
+    let mut window = Window {
+        title: "assetc".into(),
+        ..default()
+    };
+    window.set_maximized(true);
     app.add_plugins(DefaultPlugins.set(WindowPlugin {
-        primary_window: Some(Window {
-            title: "assetc".into(),
-            ..default()
-        }),
+        primary_window: Some(window),
         ..default()
     }))
     .add_plugins(EguiPlugin::default())
