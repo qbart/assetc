@@ -22,7 +22,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 Fifteen icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient`, `.palette` and model files,
 **Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
-(`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`blend`) and
+(`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`swatch-book`) and
 **Properties** (`database`) for model files (see
 [`locators.md`](locators.md#locators-tab), [`shapes.md`](shapes.md#shapes-tab),
 [`regions.md`](regions.md#regions-tab), [`paths.md`](paths.md#paths-tab),

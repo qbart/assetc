@@ -193,7 +193,7 @@ gizmo modes), `crosshair` (placing locators on the surface),
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
 `paint-bucket` (Inspector Regions tab), `paintbrush`, `eraser` (painting and erasing regions),
 `spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
-points), `x` (removing a path point), `blend` (Inspector Vertex colors tab),
+points), `x` (removing a path point), `link-2` (blended color sets),
 `database` (Inspector Properties tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after, locator visibility),
@@ -201,7 +201,7 @@ toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `bo
 `grip-horizontal`, `trash-2`, `plus` (Inspector Modifiers tab),
 `grip-vertical` (LUT compare divider), `box-checker`, `box-shaded`, `box`, `squares-unite`, `image`, `boxes` (compiled mesh display modes), `loader`
 (status bar), `folder`, `folder-open`, `file`, `sun-medium`, `type`,
-`aperture`, `image-play`, `swatch-book`, `image`, `torus`, `settings-2`, `chevron-right`, `chevron-down` (file tree,
+`aperture`, `image-play`, `swatch-book` (also the Inspector Vertex colors tab), `image`, `torus`, `settings-2`, `chevron-right`, `chevron-down` (file tree,
 see [Tree icons](#tree-icons)), `image` (texture assets). Two icons are assetc's own, drawn
 on Lucide's `box` (same outline, stroke and license): `box-checker` (each
 visible face split 2 × 2 with two opposite cells filled solid in the

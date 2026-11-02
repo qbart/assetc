@@ -120,32 +120,25 @@ One table per path:
 Fewer than 2 points (3 when closed) are allowed in the sidecar while
 editing; the build fails for such a path.
 
-## `[color_names]`
-
-For glTF models; see
-[`docs/features/vertex-colors.md`](../features/vertex-colors.md#renaming).
-New names of the model's glTF color sets: each key is an attribute
-(`COLOR_0`, `COLOR_1`, …), its value (a non-empty string) the set's name.
-
-```toml
-[color_names]
-COLOR_0 = "tint"
-```
-
 ## `[[colors]]`
 
 For glTF models; see
-[`docs/features/vertex-colors.md`](../features/vertex-colors.md#authored-sets).
-One table per authored color set:
+[`docs/features/vertex-colors.md`](../features/vertex-colors.md). One table
+per color set, in the order the sets are written (after the model's glTF
+sets that are not listed, see [Order](../features/vertex-colors.md#order)).
+A table with `gltf` is one of the model's glTF sets (to rename it or give it
+a place); any other is an authored set.
 
 | Key     | Type                     | Default    | Meaning |
 |---------|--------------------------|------------|---------|
 | `name`  | string                   | (required) | non-empty, unique among the file's color sets |
+| `gltf`  | string                   | (none)     | `COLOR_<n>` (`n` without leading zeros): this entry is that glTF set; then only `name` may be given besides, and no two entries have the same `gltf` |
 | `fill`  | string                   | `"linear"` | `"solid"`, `"linear"` or `"radial"` |
 | `color` | string                   | `"#ffffff"` | solid: `#rrggbb` or `#rrggbbaa`, sRGB |
 | `from`  | array of 3 floats        | `[0, 0, 0]` | linear and radial: start (linear) or center (radial), model space |
 | `to`    | array of 3 floats        | `[0, 1, 0]` | linear and radial: end (linear) or a point on the edge (radial), model space |
 | `stops` | array of tables          | black at 0 to white at 1 | linear and radial: at least two `{ at = <0–1>, color = "#rrggbb[aa]" }`, as in [`.gradient` files](gradient.md) |
+| `blend` | inline table             | (none)     | authored sets: `{ with = "<set name>", mode = "<mode>", amount = <0–1> }`, see [Blending](../features/vertex-colors.md#blending); `mode` is `"mix"` (the default), `"multiply"`, `"screen"`, `"overlay"` or `"add"`; `amount` defaults to `1.0` |
 
 Keys a fill does not use are ignored when read.
 
@@ -173,11 +166,11 @@ table (`name`, `tags` when there are any, `color`, `materials`,
 `submeshes` and `triangles` when there are any), then each path as a
 `[[paths]]` table (`name`, `kind` when not empty, `joint` when set,
 `points`, one point per line, `closed`, `tension`, `alpha`, `color` when
-set, then its `[paths.properties]` when it has any), then `[color_names]`
-(sorted by attribute) when there are any, then each authored color set as a
-`[[colors]]` table (`name`, `fill`, then `color` for a solid set or `from`,
-`to` and `stops`, one stop per line, ordered by `at`, for a gradient), then
-each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
+set, then its `[paths.properties]` when it has any), then each color set
+as a `[[colors]]` table (`name`, then `gltf` for a glTF set; for an
+authored one `fill`, then `color` for a solid set or `from`, `to` and
+`stops`, one stop per line, ordered by `at`, for a gradient, then `blend`
+when set, with all three keys), then each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
 parameter, as `.noise` files write them), each table preceded by a blank line
 except the first:
 
@@ -234,8 +227,9 @@ alpha = 0.5
 [paths.properties]
 stiffness = 0.8
 
-[color_names]
-COLOR_0 = "tint"
+[[colors]]
+name = "tint"
+gltf = "COLOR_0"
 
 [[colors]]
 name = "height"
@@ -246,6 +240,7 @@ stops = [
     { at = 0.0, color = "#1e3a8a" },
     { at = 1.0, color = "#fde68a" },
 ]
+blend = { with = "tint", mode = "multiply", amount = 1.0 }
 
 [[modifiers]]
 type = "levels"
