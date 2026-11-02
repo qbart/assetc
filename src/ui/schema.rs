@@ -1138,7 +1138,15 @@ fn list_value(
                     text_cell(ui, &format!("[{i}]"), NAME_W, TEXT);
                     text_cell(ui, &item_text, TYPE_W + 30.0, TEXT_WEAK);
                     let ty = (!looped).then_some(item);
-                    value_editor(ui, editors, v, schema, ty, &path);
+                    // A fixed width, so the Remove buttons line up.
+                    ui.allocate_ui_with_layout(
+                        vec2(DEFAULT_W, 22.0),
+                        Layout::left_to_right(Align::Center),
+                        |ui| {
+                            ui.set_min_width(DEFAULT_W);
+                            value_editor(ui, editors, v, schema, ty, &path);
+                        },
+                    );
                     if icon_button(ui, Icon::X, "Remove item", true).clicked() {
                         remove = Some(i);
                     }
