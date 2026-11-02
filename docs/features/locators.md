@@ -129,7 +129,9 @@ the [property editor](gui.md#property-editor) look, inside 8 px margins.
   - **Position** X, Y, Z (drag fields, 0.001 per point, three decimals),
     **Rotation** X, Y, Z (drag fields, degrees, 0.5 per point, one decimal)
     and **Scale** X, Y, Z (drag fields, 0.01 per point, three decimals, at
-    least 0.001).
+    least 0.001). Position and Scale show one decimal less from 10 and two
+    less from 100 (at least one), so long values fit the field; the value
+    itself keeps its precision.
   - **Preview**: a dropdown with `None` and every glTF model in the Input
     tree (input-relative paths, sorted, without the model itself); see
     [Attachment preview](#attachment-preview).
