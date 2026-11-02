@@ -99,7 +99,7 @@ unknown keys).
   [resolved](#values) values of its sibling fields, as
   [§2.4](../aschema.md#24-conditions-show_if--hide_if) says.
 - **A row** (28 px): the field's **label** (its `label`, else its name; 160
-  px, cut to fit; `TEXT` when this instance sets the field, `TEXT_WEAK`
+  px less the row's indent, so values line up in one column; cut to fit; `TEXT` when this instance sets the field, `TEXT_WEAK`
   when it inherits it; hovering shows `name: type` and the field's `doc`),
   then, for an optional field, a checkbox (ticked: it has a value;
   unticked: `null`, and no editor), then the value's
@@ -130,7 +130,8 @@ rules:
 
 - `bool`: a checkbox.
 - An enum: a dropdown of its values; with `"widget": "toggle"`, a row of
-  buttons, one per value, the current one `ACCENT`.
+  buttons, one per value, the current one filled `ACCENT` with `BG_BAR`
+  text.
 - Integers: a drag field of whole numbers, kept within the type's range and
   `min` / `max`, moving by `step` (else 1) per 4 px dragged.
 - Floats: a drag field (three decimals), kept within `min` / `max`, moving
