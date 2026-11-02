@@ -74,6 +74,10 @@ impl Outcome {
                         Kind::Mesh => ("mesh", "meshes"),
                         Kind::Animation => ("animation", "animations"),
                         Kind::Font => ("font", "fonts"),
+                        Kind::Schema => ("schema", "schemas"),
+                        Kind::Data => ("data file", "data files"),
+                        Kind::Graph => ("graph", "graphs"),
+                        Kind::Tree => ("tree", "trees"),
                     };
                     (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
                 })
@@ -169,6 +173,7 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
                 continue;
             }
             Job::Font { source } => compile_font(input, source, output),
+            Job::Data { source, kind } => compile_data(&input.join(source), &dest, *kind),
             Job::Lut { source, volume } => {
                 compile_lut(&input.join(source), &dest, *volume).map(|size| {
                     let layout = if *volume { "volume" } else { "strip" };
@@ -443,6 +448,65 @@ fn compile_model(
         write_texture(image, &dest, ColorSpace::Srgb, false)?;
     }
     Ok(model.detail)
+}
+
+/// The first problem, and how many more there are.
+fn first_problem(problems: &[String]) -> Result<(), String> {
+    match problems {
+        [] => Ok(()),
+        [one] => Err(one.clone()),
+        [one, rest @ ..] => Err(format!("{one} (and {} more)", rest.len())),
+    }
+}
+
+/// Writes a schema, data file (resolved), graph or tree to the same path; see
+/// docs/features/build.md#inputs.
+fn compile_data(source: &Path, dest: &Path, kind: Kind) -> Result<String, String> {
+    let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
+    let (written, detail) = match kind {
+        Kind::Schema => {
+            let schema = crate::aschema::Schema::parse(&text)?;
+            let problems: Vec<String> = schema
+                .check()
+                .into_iter()
+                .map(|p| format!("{}: {}", p.path, p.message))
+                .collect();
+            first_problem(&problems)?;
+            (schema.to_json(), format!("{} types", schema.types.len()))
+        }
+        Kind::Data => {
+            let data = crate::adata::DataFile::parse(&text)?;
+            let (path, schema) = crate::adata::load_schema(source, &data);
+            let schema = schema.map_err(|e| format!("schema {}: {e}", path.display()))?;
+            let errors: Vec<String> = data
+                .check(&schema)
+                .into_iter()
+                .filter(|p| !p.warning)
+                .map(|p| p.message)
+                .collect();
+            first_problem(&errors)?;
+            let n = data.instances.len();
+            (data.resolved_json(&schema), format!("{n} instances"))
+        }
+        Kind::Graph => {
+            let graph = crate::agraph::Graph::parse(&text)?;
+            first_problem(&graph.check())?;
+            let detail = format!("{} nodes, {} edges", graph.nodes.len(), graph.edges.len());
+            (graph.to_json(), detail)
+        }
+        _ => {
+            let tree = crate::atree::parse(&text)?;
+            first_problem(&tree.check())?;
+            let detail = format!(
+                "{} nodes, depth {}",
+                tree.nodes.len(),
+                crate::atree::depth(&tree)
+            );
+            (crate::atree::to_json(&tree), detail)
+        }
+    };
+    write(dest, written.as_bytes())?;
+    Ok(detail)
 }
 
 /// Writes a font's `.afont` and SDF atlas; see docs/features/fonts.md#build.

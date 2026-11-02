@@ -71,6 +71,9 @@ pub enum Job {
     Font { source: String },
     /// The atlas of a font, written by its [`Job::Font`].
     FontPart { source: String },
+    /// A schema, data file, graph or tree (relative to `input`), written to the same path;
+    /// see docs/features/build.md#inputs.
+    Data { source: String, kind: Kind },
     Material {
         /// `<name>.mat.toml`, or `<name>.*` without one.
         source: String,
@@ -101,7 +104,8 @@ impl Asset {
             | Job::Model { source, .. }
             | Job::ModelPart { source }
             | Job::Font { source }
-            | Job::FontPart { source } => source.clone(),
+            | Job::FontPart { source }
+            | Job::Data { source, .. } => source.clone(),
         }
     }
 }
@@ -179,6 +183,21 @@ fn model_assets(
     }
 }
 
+/// The asset kind of a schema, data file, graph or tree.
+fn data_kind(file: &Path) -> Option<Kind> {
+    if crate::aschema::is_schema(file) {
+        Some(Kind::Schema)
+    } else if crate::adata::is_data(file) {
+        Some(Kind::Data)
+    } else if crate::agraph::is_graph(file) {
+        Some(Kind::Graph)
+    } else if crate::atree::is_tree(file) {
+        Some(Kind::Tree)
+    } else {
+        None
+    }
+}
+
 /// How a texture source is compiled when a material slot uses it.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Claim {
@@ -251,6 +270,18 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                     message,
                 }),
             }
+        } else if let Some(kind) = data_kind(file) {
+            // Written to the same path; see docs/features/build.md#inputs.
+            plan.assets.push(Asset {
+                id: fnv1a64(rel.as_bytes()),
+                kind,
+                output: kind.output_path(&rel),
+                asset_path: rel.clone(),
+                job: Job::Data {
+                    source: rel.clone(),
+                    kind,
+                },
+            });
         } else if crate::font::is_font(file) {
             let p = strip_extension(&rel).to_owned();
             for (kind, asset_path, job) in [

@@ -4572,6 +4572,10 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
                             Kind::Mesh => Icon::Torus,
                             Kind::Animation => Icon::Film,
                             Kind::Font => Icon::Type,
+                            Kind::Schema => Icon::Braces,
+                            Kind::Data => Icon::Package,
+                            Kind::Graph => Icon::GraphStar,
+                            Kind::Tree => Icon::ListTree,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {

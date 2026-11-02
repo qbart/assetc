@@ -357,6 +357,93 @@ fn sparse_items(schema: &Schema, ty: &Ty, v: &Value) -> Value {
     )
 }
 
+/// Every field of struct `si`: what `values` sets, else what it inherits (`outer`: the
+/// enclosing default's values); nested structs and struct list items likewise. Keys that are
+/// not fields are left out. See docs/spec/adata.md#built-form.
+pub fn resolve(
+    schema: &Schema,
+    si: usize,
+    values: &Map<String, Value>,
+    outer: Option<&Map<String, Value>>,
+) -> Map<String, Value> {
+    let Body::Struct { fields, .. } = &schema.types[si].body else {
+        return Map::new();
+    };
+    let mut out = Map::new();
+    for f in fields {
+        let from = inherited(schema, f, outer);
+        let set = values.get(&f.name);
+        let Ok(ty) = parse_type(&f.ty) else {
+            out.insert(f.name.clone(), set.cloned().unwrap_or(from));
+            continue;
+        };
+        let inner = match &ty {
+            Ty::Named(n) => struct_index(schema, n),
+            _ => None,
+        };
+        let value = match (inner, set) {
+            (_, Some(Value::Null)) => Value::Null,
+            (Some(inner), Some(Value::Object(o))) => {
+                Value::Object(resolve(schema, inner, o, from.as_object()))
+            }
+            (Some(inner), None) if from.is_object() => {
+                Value::Object(resolve(schema, inner, &Map::new(), from.as_object()))
+            }
+            (_, Some(v)) => resolve_items(schema, &ty, v),
+            (_, None) => resolve_items(schema, &ty, &from),
+        };
+        out.insert(f.name.clone(), written(&ty, &value));
+    }
+    out
+}
+
+/// A list's struct items resolved against their struct's defaults; anything else as it is.
+fn resolve_items(schema: &Schema, ty: &Ty, v: &Value) -> Value {
+    let (Ty::List(item), Value::Array(items)) = (ty, v) else {
+        return v.clone();
+    };
+    let inner = match &**item {
+        Ty::Named(n) => struct_index(schema, n),
+        _ => None,
+    };
+    Value::Array(
+        items
+            .iter()
+            .map(|v| match (inner, v) {
+                (Some(si), Value::Object(o)) => Value::Object(resolve(schema, si, o, None)),
+                _ => resolve_items(schema, item, v),
+            })
+            .collect(),
+    )
+}
+
+impl DataFile {
+    /// The built form: every instance with every field resolved; see
+    /// docs/spec/adata.md#built-form.
+    pub fn resolved_json(&self, schema: &Schema) -> String {
+        let mut top = Map::new();
+        top.insert("$dialect".into(), DIALECT.into());
+        top.insert("$schema".into(), self.schema.clone().into());
+        let instances = self
+            .instances
+            .iter()
+            .map(|inst| {
+                let mut o = Map::new();
+                o.insert("$type".into(), inst.ty.clone().into());
+                o.insert("$id".into(), inst.id.clone().into());
+                if let Some(si) = struct_index(schema, &inst.ty) {
+                    o.extend(resolve(schema, si, &inst.values, None));
+                }
+                Value::Object(o)
+            })
+            .collect();
+        top.insert("instances".into(), Value::Array(instances));
+        let mut text = serde_json::to_string_pretty(&Value::Object(top)).unwrap_or_default();
+        text.push('\n');
+        text
+    }
+}
+
 /// Problems of a struct value: `(top-level field, message, warning)`.
 type Found = Vec<(Option<String>, String, bool)>;
 
@@ -575,6 +662,35 @@ mod tests {
         assert_eq!(
             back["instances"][0]["members"],
             serde_json::json!([{ "name": "A" }, {}])
+        );
+    }
+
+    #[test]
+    fn built_data_is_resolved() {
+        let text = r##"{
+          "$dialect": "a/1", "$schema": "game.aschema",
+          "instances": [
+            { "$type": "Weapon", "$id": "sword", "x_old": 1, "offset": { "y": 2 }, "notes": null }
+          ]
+        }"##;
+        let out = DataFile::parse(text).unwrap().resolved_json(&schema());
+        let back: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            back["instances"][0],
+            serde_json::json!({
+                "$type": "Weapon", "$id": "sword", "name": "", "damage": 10,
+                "offset": { "x": 0.5, "y": 2 }, "tint": "#000000", "notes": null
+            })
+        );
+        let keys: Vec<&str> = back["instances"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            ["$type", "$id", "name", "damage", "offset", "tint", "notes"]
         );
     }
 

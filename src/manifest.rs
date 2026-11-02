@@ -18,15 +18,23 @@ pub enum Kind {
     Mesh = 2,
     Animation = 3,
     Font = 4,
+    Schema = 5,
+    Data = 6,
+    Graph = 7,
+    Tree = 8,
 }
 
 impl Kind {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 9] = [
         Self::Texture,
         Self::Material,
         Self::Mesh,
         Self::Animation,
         Self::Font,
+        Self::Schema,
+        Self::Data,
+        Self::Graph,
+        Self::Tree,
     ];
 
     /// Extension of the files assets of this kind are written to.
@@ -37,6 +45,10 @@ impl Kind {
             Self::Mesh => "amesh",
             Self::Animation => "aanim",
             Self::Font => "afont",
+            Self::Schema => "aschema",
+            Self::Data => "adata",
+            Self::Graph => "agraph",
+            Self::Tree => "atree",
         }
     }
 
@@ -47,15 +59,19 @@ impl Kind {
             Self::Mesh => "Mesh",
             Self::Animation => "Animation",
             Self::Font => "Font",
+            Self::Schema => "Schema",
+            Self::Data => "Data",
+            Self::Graph => "Graph",
+            Self::Tree => "Tree",
         }
     }
 
     /// Output path (relative to `output`) of an asset; asset paths of every kind but textures
-    /// already end in their extension (`.amat`, `.amesh`, `.aanim`, `.afont`).
+    /// already end in their extension (`.amat`, `.amesh`, `.aanim`, `.afont`, `.aschema`, …).
     pub fn output_path(self, asset_path: &str) -> String {
         match self {
             Self::Texture => format!("{asset_path}.{}", self.extension()),
-            Self::Material | Self::Mesh | Self::Animation | Self::Font => asset_path.to_owned(),
+            _ => asset_path.to_owned(),
         }
     }
 
@@ -63,7 +79,7 @@ impl Kind {
     pub fn asset_path(self, output: &str) -> &str {
         match self {
             Self::Texture => output.strip_suffix(".ktx2").unwrap_or(output),
-            Self::Material | Self::Mesh | Self::Animation | Self::Font => output,
+            _ => output,
         }
     }
 }
@@ -148,6 +164,10 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, DecodeError> {
             2 => Kind::Mesh,
             3 => Kind::Animation,
             4 => Kind::Font,
+            5 => Kind::Schema,
+            6 => Kind::Data,
+            7 => Kind::Graph,
+            8 => Kind::Tree,
             _ => continue,
         };
         entries.push(Entry {
