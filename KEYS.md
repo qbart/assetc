@@ -85,6 +85,14 @@ On the animation timeline (see [`docs/features/animation-events.md`](docs/featur
 | Double-click on the track              | Add an event there                           |
 | Double-click on an event marker        | Delete the event                             |
 
+In a schema's editor (see [`docs/features/schemas.md`](docs/features/schemas.md#defaults)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Double-click on a colour default's swatch | Open the color picker                     |
+| Left drag on a group's handle          | Move the group (fields fold meanwhile)       |
+| Left drag on a field's handle          | Move the field within its group              |
+
 In a schema's curve editor (see [`docs/features/schemas.md`](docs/features/schemas.md#curve-editor)):
 
 | Input                                  | Action                                       |
@@ -104,7 +112,9 @@ On a directed graph (see [`docs/features/graphs.md`](docs/features/graphs.md#can
 | Right double-click                     | Fit the graph                                |
 | Left press / drag on a node            | Choose it / move it                          |
 | `Shift` while moving or adding a node  | Snap its center to 0.25                      |
-| Left drag from a port onto a node      | Add an edge                                  |
+| Left drag from a node's rim onto a node | Add an edge (onto the same node: a loop)    |
+| Double-click on a node                 | Edit its label in place                      |
+| `Enter` / `Escape` while editing a label | Keep / drop the new label                  |
 | Left click on an edge                  | Choose it                                    |
 | Left click on empty grid               | Choose nothing                               |
 | Double-click on empty grid             | Add a node there                             |

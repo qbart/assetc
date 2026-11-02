@@ -10,7 +10,7 @@ The file format is [`docs/aschema.md`](../aschema.md); what assetc writes is
 
 ## Creating
 
-In the Input tree's context menu, **New data ▸** (a submenu after New
+In the Input tree's context menu, **New Data ▸** (a submenu after New
 Palette) has **Schema**, which creates `schema.aschema` (`schema 2.aschema`,
 … if taken) holding one struct `Item` with one field `name` of type
 `string`, selects it and starts renaming it, as **New Gradient** does (see
@@ -42,7 +42,7 @@ to choose the one the [canvas](#canvas) edits:
   (`grip-horizontal`) that reorders the types (their order in the file),
   the kind (`struct` / `enum`, 11 px, `TEXT_WEAK`, 44 px wide), the name, and
   right-aligned in `TEXT_WEAK` its size (`3 fields`, `1 value`); a type with
-  problems has a 6 px dot in `CHANNEL_R` before its size. Hovering fills the
+  problems has a [problem icon](#problems) before its size. Hovering fills the
   row with `BG_HEADER`; the chosen row is filled with `ACCENT` at 25%.
   Clicking a row chooses it. The chosen row has **Delete** (`trash-2`) on
   its right; fields of other types that use it then show errors.
@@ -62,7 +62,9 @@ Selecting a schema in the Input tree shows its **editor** in the canvas
 The chosen type:
 
 - **Header**: the kind (`struct` / `enum`, `TEXT_WEAK`), **Name** (text,
-  monospace) and **Doc** (text, the rest of the row).
+  monospace), **Doc** (text, the rest of the row), and the
+  [problem icon](#problems) when the type itself has problems (its name,
+  its enum values).
   - A new name that is not an identifier (`[A-Za-z_][A-Za-z0-9_]*`),
     shadows a primitive or generic, or is another type's name reverts when
     the field loses focus. Renaming rewrites every type expression of the
@@ -70,37 +72,69 @@ The chosen type:
 
 ### Struct
 
-**Fields**: a table, one row per field in file order, under a header row
-(12 px, `TEXT_WEAK`):
+A struct is edited as **groups holding fields**: groups are defined first,
+fields live inside them.
 
-| Column  | Editor |
-|---------|--------|
-| (grip)  | drag handle: reorders the fields |
-| Name    | text, monospace; an invalid or taken name reverts when it loses focus |
-| Type    | text, monospace, `CHANNEL_R` while it does not parse or names an unknown type; its `▾` button lists the primitives, the file's types, and `list<…>`, `optional<…>`, `ref<…>` around the current type |
-| Default | depends on the type, see [Defaults](#defaults); empty when the field has none, its hint the implicit default |
-| Min, Max, Step | numbers; only for integer and float types (disabled otherwise) |
-| Group   | text (`Stats/Combat` nests) |
-| Label   | text |
-| Doc     | text, the rest of the row |
-| (more)  | chevron: unfolds the row's layout keys |
-| (delete)| `x`: removes the field |
+**Sections**, top to bottom:
 
-An unfolded row shows, under it: **Order** (number, empty for none),
-**Readonly** (checkbox), **Show if** and **Hide if** (text, see
-[conditions](../aschema.md#24-conditions-show_if--hide_if)) and **Widget**
-(dropdown: none, `toggle` for enum fields, `inline` for struct fields), and
-the default's own editor when it has one (curves, gradients).
+- **Ungrouped**: the fields without a `group`; a header (`Ungrouped`, 14 px,
+  `TEXT_WEAK`) that cannot be moved or removed, its fields and **Add field**.
+- One **group card** per group (`BG_PANEL`, 6 px corners, 8 px padding, 8 px
+  apart): the groups of the struct's `groups` in order, then names fields
+  use without an entry there, in the order fields first use them. Its
+  header row (28 px): a **drag handle** (`grip-horizontal`), **Name** (text;
+  renaming moves its fields along; an empty or taken name reverts),
+  **Collapsed** (checkbox: editors start the group folded), **Doc** (text,
+  the rest of the row), the field count (`TEXT_WEAK`), and **Remove**
+  (`x`; its fields become ungrouped). Under it, its fields and **Add
+  field**. A name with `/` (`Stats/Combat`) is one group, shown with its
+  full name.
+- **Add group** (`plus` and text): adds an empty group `Group` (`Group2`, …)
+  at the end, as an entry of `groups`.
 
-The field's problems are listed under its row in `CHANNEL_R`, 12 px.
+**Arranging**: dragging a group's handle moves the group among the groups
+(the Ungrouped section stays first); while a group is dragged every card
+shows only its header row. Dragging a field's handle moves the field within
+its group; **Group** in the field's details moves it to another group (to
+that group's end). Arranging keeps the fields array in the order shown:
+ungrouped fields, then each group's fields, group by group; and gives every
+shown group an entry in `groups`, in the order shown. Neither changes data
+([§6](../aschema.md#6-versioning-and-refactoring)).
 
-**Add field** (`plus` and text) appends `field` (`field2`, …) of type
-`string`.
+**A field** is a row (28 px; hovering fills it `BG_HEADER`), then its
+details when unfolded:
 
-**Groups**: one row per entry of the struct's `groups`: name (text),
-**Collapsed** (checkbox), **Doc** (text) and remove (`x`); **Add group**
-adds `Group` (`Group2`, …). Groups that fields name without an entry need
-none.
+| Row part | Editor |
+|----------|--------|
+| (grip)   | drag handle: moves the field within its group |
+| (fold)   | `chevron-right` / `chevron-down`: folds or unfolds the details |
+| Name     | text, monospace, 140 px; an invalid or taken name reverts when it loses focus |
+| Type     | text, monospace, 150 px, `CHANNEL_R` while it does not parse or names an unknown type; its `chevron-down` button lists the primitives, the file's types, and `list<…>`, `optional<…>`, `ref<…>` around the current type |
+| Default  | a **Default** checkbox, then, ticked, the default's value editor (see [Defaults](#defaults)); unticked, the implicit default in `TEXT_WEAK` (`0`, `""`, `linear`, …) |
+| (problems) | the [problem icon](#problems), right-aligned, when the field has problems |
+| (remove) | `x`: removes the field |
+
+The details (indented under the row, in the [property
+editor](gui.md#property-editor) look) show only what the field's type can
+use:
+
+- **Label** and **Doc** (text), every field.
+- **Min**, **Max**, **Step** (numbers, empty for none): integer and float
+  fields only.
+- **Widget** (dropdown `—` / `toggle`): enum fields only; (`—` / `inline`):
+  struct fields only. A widget the type cannot use is still shown, as a
+  problem, until set to `—`.
+- **Group** (dropdown: `—` for none, then the struct's groups).
+- **Order** (number, empty for none), **Readonly** (checkbox), **Show if**
+  and **Hide if** (text, see
+  [conditions](../aschema.md#24-conditions-show_if--hide_if)), every field.
+- **Curve** and **gradient** fields with a default: the default's editor,
+  the [curve editor](#curve-editor) or the
+  [gradient editor](gradients.md#gradient-editor), as wide as the details
+  (at most 560 px).
+
+**Add field** (`plus` and text, in each section) appends `field` (`field2`,
+…) of type `string`, without a default, to that section.
 
 ### Enum
 
@@ -110,19 +144,23 @@ the last value). **Add value** appends `value` (`value2`, …).
 
 ### Defaults
 
-The Default cell edits the field's `default` in its type's data encoding:
+Ticking a field's **Default** sets its `default` to the type's implicit
+default (`false`, `0`, `""`, `#000000`, `#000000ff`, a linear curve, black
+to white, the enum's first value, `[]`, `null`, `{}` for a struct, `""` for
+a reference) and shows its editor; unticking removes `default`. The editors,
+in the type's data encoding:
 
-- `bool`: dropdown `—` (none), `false`, `true`.
-- An enum: dropdown `—` and its values.
-- Integers and floats: a number field (empty for none).
-- `string`, `rgb`, `rgba`: text, unquoted (`#c8c8c8` for colours, with a
-  swatch before the field when it is a colour).
-- `curve`: a 60 × 18 px preview of the curve (or `—`) that unfolds the row;
-  the unfolded row has **Default** with **Set** (a linear curve) or the
-  [curve editor](#curve-editor) and **Clear**.
-- `gradient`: a 60 × 18 px preview (or `—`) that unfolds the row; the
-  unfolded row has **Set** (black to white) or the
-  [gradient editor](gradients.md#gradient-editor) and **Clear**.
+- `bool`: a checkbox.
+- An enum: a dropdown of its values.
+- Integers and floats: a number field (applied when it loses focus; text
+  that is not a number reverts).
+- `string`: text.
+- `rgb`, `rgba`: a 16 px swatch (the colour over a checkerboard) and the
+  hex text (`#c8c8c8`). **Double-clicking the swatch** opens a color picker
+  under it (the [gradients' picker](gradients.md#selected-stop), 240 px
+  wide; alpha is kept opaque for `rgb`); clicking outside closes it.
+- `curve`, `gradient`: a 60 × 18 px preview; clicking it unfolds the
+  field's details, which hold the editor.
 - Anything else (structs, lists, optionals, refs): JSON text.
 
 A default that does not encode as the type is kept as typed and reported as
@@ -162,9 +200,11 @@ conditions naming no sibling or ordering against a non-number, and widgets
 on types they do not fit. Each problem has a path (`Weapon/damage`) and a
 message.
 
-Below the editor, **Problems** lists all of the file's problems (path and
-message, `CHANNEL_R`); clicking one chooses its type. Problems never block
-saving.
+Problems are shown where they are, as the **problem icon**: `bug`, 16 px,
+`CHANNEL_R`; hovering it lists the messages (one per line). It marks a
+field's row (that field's problems), the type header (problems of the type
+itself), and the type's row in the Types tab (all of its problems).
+Problems never block saving.
 
 ## Saving
 

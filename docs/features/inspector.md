@@ -33,7 +33,7 @@ shown for compiled meshes with color sets (see
 **Modifiers** (`wrench`) for `.noise` files and images (`.png`, `.jpg`,
 `.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and
 **Colors** (`palette`) for `.palette` files, **Types** (`braces`) for
-`.aschema` files, **Graph** (`workflow`) for `.agraph` files, all six only
+`.aschema` files, **Graph** (`graph-star`) for `.agraph` files, all six only
 in the Input tree
 (see [`noise.md`](noise.md#parameters-tab),
 [`gradients.md`](gradients.md#parameters-tab),

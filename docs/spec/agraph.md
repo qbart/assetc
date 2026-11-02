@@ -27,11 +27,16 @@ Other top-level keys are kept, after these.
 
 ## Edge
 
-| Key    | Required | Value |
-|--------|----------|-------|
-| `from` | yes      | The id of the node it leaves |
-| `to`   | yes      | The id of the node it enters; not `from`, and no other edge has the same `from` and `to` |
-| `data` | no       | Object of [values](#data); written only when not empty |
+| Key      | Required | Value |
+|----------|----------|-------|
+| `from`   | yes      | The id of the node it leaves |
+| `to`     | yes      | The id of the node it enters; may be `from` (a loop) |
+| `label`  | no       | String; `""` when missing; always written |
+| `weight` | no       | Integer from −2147483648 to 2147483647 (`i32`); `1` when missing; always written |
+| `data`   | no       | Object of [values](#data); written only when not empty |
+
+Edges are told apart by their place in `edges`: any number of edges may
+have the same `from` and `to`.
 
 ## Data
 
@@ -70,7 +75,9 @@ without a decimal point (`2`, `1.25`).
   "edges": [
     {
       "from": "start",
-      "to": "dash"
+      "to": "dash",
+      "label": "unlock",
+      "weight": 1
     }
   ]
 }
