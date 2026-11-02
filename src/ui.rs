@@ -5313,7 +5313,10 @@ fn canvas_model(
     }
     let painter = ui.painter_at(rect);
     if let Some(edit) = &edit {
+        // One mesh without anti-aliasing: feathering spikes at sliver triangles.
         let eye = camera.position();
+        let mut fill = egui::Mesh::default();
+        let mut outlines = Vec::new();
         for (r, corners) in &preview.region_triangles {
             let Some(region) = edit.edit.regions.get(*r) else {
                 continue;
@@ -5330,16 +5333,18 @@ fn canvas_model(
                 continue;
             };
             let color = hex_color32(&region.color).unwrap_or(TEXT);
-            let outline = if edit.region == Some(*r) {
-                Stroke::new(1.0, color)
-            } else {
-                Stroke::NONE
-            };
-            painter.add(egui::Shape::convex_polygon(
-                points,
-                color.gamma_multiply(0.3),
-                outline,
-            ));
+            let first = fill.vertices.len() as u32;
+            for p in &points {
+                fill.colored_vertex(*p, color.gamma_multiply(0.3));
+            }
+            fill.add_triangle(first, first + 1, first + 2);
+            if edit.region == Some(*r) {
+                outlines.extend((0..3).map(|k| ([points[k], points[(k + 1) % 3]], color)));
+            }
+        }
+        painter.add(egui::Shape::mesh(fill));
+        for (line, color) in outlines {
+            painter.line_segment(line, Stroke::new(1.0, color));
         }
     }
 
@@ -6646,8 +6651,13 @@ fn region_fields(
             *on = !*on;
             *armed = false;
         }
-        ui.add(egui::Slider::new(brush, 2.0..=64.0).text("px"))
-            .on_hover_text("Brush");
+        ui.spacing_mut().slider_width = 60.0;
+        ui.add(
+            egui::Slider::new(brush, 2.0..=64.0)
+                .fixed_decimals(0)
+                .text("px"),
+        )
+        .on_hover_text("Brush");
         let clear = ui.add_enabled(!region.triangles.is_empty(), egui::Button::new("Clear"));
         if clear.clicked() {
             region.triangles.clear();

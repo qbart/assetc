@@ -526,7 +526,8 @@ fn model_rows(
     }
     // See docs/features/locators.md#inspector-info; a bad sidecar shows as Mesh settings.
     if let Ok(amod) = crate::amod::read(file) {
-        let sidecar = amod.map(|a| a.locators).unwrap_or_default();
+        let amod = amod.unwrap_or_default();
+        let sidecar = amod.locators.clone();
         let inherited = project.input_dir().map_or(Ok(Vec::new()), |input| {
             crate::presets::inherited(&project.config.locators, &input, rel, &data)
         });
@@ -549,6 +550,11 @@ fn model_rows(
                 }
             },
         ));
+        // See docs/features/properties.md#inspector-info and the shapes' and regions'.
+        let count = |n: usize| if n > 0 { n.to_string() } else { "none".into() };
+        out.rows.push(("Properties", count(amod.properties.len())));
+        out.rows.push(("Shapes", count(amod.shapes.len())));
+        out.rows.push(("Regions", count(amod.regions.len())));
     }
     let mesh = format!("{}.amesh", strip_extension(rel));
     out.rows.push(("Asset path", mesh.clone()));

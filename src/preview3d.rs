@@ -1479,7 +1479,9 @@ fn report_frames(
     skins: Query<&SkinnedMesh>,
     nodes: Query<(&GlobalTransform, Option<&Name>)>,
 ) {
-    preview.frames = loaded.0.as_ref().and_then(|model| {
+    // Once shown: the frame it is fitted, joints are not placed by the fit yet.
+    let shown = preview.model_status == ModelStatus::Ready;
+    preview.frames = loaded.0.as_ref().filter(|_| shown).and_then(|model| {
         model.fitted?;
         let (fit, _) = nodes.get(model.fit).ok()?;
         let skin = children
@@ -1856,6 +1858,7 @@ fn report_regions(
 ) {
     let mut out = Vec::new();
     if let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some())
+        && preview.model_status == ModelStatus::Ready
         && !preview.region_wants.is_empty()
     {
         let wants = &preview.region_wants;
