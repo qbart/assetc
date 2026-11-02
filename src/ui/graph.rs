@@ -55,10 +55,21 @@ pub(super) struct GraphEdit {
 impl GraphEdit {
     /// `graph` as read (a tree when `tree`), keeping `previous`'s choice.
     pub(super) fn new(graph: Graph, tree: bool, previous: GraphEdit) -> Self {
+        // The chosen node by id: a tree is read back depth first, so its places change.
+        let chosen = match previous.chosen {
+            Some(Chosen::Node(i)) => previous
+                .edit
+                .nodes
+                .get(i)
+                .and_then(|n| graph.node_index(&n.id))
+                .map(Chosen::Node),
+            other => other,
+        };
         Self {
             edit: graph.clone(),
             saved: graph,
             tree,
+            chosen,
             ..previous
         }
     }
