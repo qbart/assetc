@@ -29,6 +29,7 @@ pub struct Event {
     pub clip: u32,
     pub time: f32,
     pub name: String,
+    pub properties: crate::enrich::Properties,
 }
 
 impl Clip {
@@ -98,19 +99,27 @@ pub fn encode(clips: &[Clip], events: &[Event], joint_count: u32, mesh: u64) -> 
         // By clip, then time; ties keep their order.
         let mut sorted: Vec<&Event> = events.iter().collect();
         sorted.sort_by(|a, b| a.clip.cmp(&b.clip).then(a.time.total_cmp(&b.time)));
-        let (mut records, mut names) = (Bytes::default(), Vec::new());
+        let (mut records, mut properties) = (Bytes::default(), Bytes::default());
+        let mut text = crate::amesh::Strings(Vec::new());
+        let mut property_count = 0;
         for event in sorted {
+            let (at, len) = text.add(&event.name);
             records
                 .u32(event.clip)
                 .f32s(&[event.time])
                 .u64(crate::hash::fnv1a64(event.name.as_bytes()))
-                .u32(names.len() as u32)
-                .u32(event.name.len() as u32);
-            names.extend_from_slice(event.name.as_bytes());
+                .u32(at)
+                .u32(len)
+                .u32(property_count)
+                .u32(event.properties.len() as u32);
+            crate::amesh::put_properties(&mut properties, &mut text, &event.properties);
+            property_count += event.properties.len() as u32;
         }
-        writer
-            .chunk("EVENTS", records.take())
-            .chunk("EVNAMES", names);
+        writer.chunk("EVENTS", records.take());
+        if property_count > 0 {
+            writer.chunk("EVPROPS", properties.take());
+        }
+        writer.chunk("EVTEXT", text.0);
     }
     writer.finish()
 }
@@ -136,7 +145,7 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             format!("{name} ({duration:.2} s)")
         })
         .collect();
-    let events = reader.chunk("EVENTS").map_or(0, |e| e.len() / 24);
+    let events = reader.chunk("EVENTS").map_or(0, |e| e.len() / 32);
     Ok(vec![
         ("Clips", listed.join(", ")),
         ("Channels", field(4)?.to_string()),
@@ -183,12 +192,12 @@ mod tests {
             clip,
             time,
             name: name.into(),
+            properties: Default::default(),
         };
-        let events = [
-            event(1, 1.0, "hit"),
-            event(0, 0.5, "step"),
-            event(0, 0.25, "step"),
-        ];
+        let mut hit = event(1, 1.0, "hit");
+        hit.properties
+            .insert("damage".into(), crate::enrich::PropValue::Int(3));
+        let events = [hit, event(0, 0.5, "step"), event(0, 0.25, "step")];
         let bytes = encode(&[clip("Walk", 0.75), clip("Run", 1.25)], &events, 2, 7);
         let reader = chunks::Reader::parse(&bytes, FORMAT).unwrap();
         let desc = reader.require("DESC").unwrap();
@@ -206,12 +215,19 @@ mod tests {
 
         // Events by clip, then time.
         let records = reader.require("EVENTS").unwrap();
-        assert_eq!(records.len(), 3 * 24);
-        assert_eq!(chunks::f32_at(records, 0, 24, 4), Some(0.25));
-        assert_eq!(chunks::u32_at(records, 2, 24, 0), Some(1));
-        assert_eq!(chunks::u32_at(records, 2, 24, 16), Some(8));
+        assert_eq!(records.len(), 3 * 32);
+        assert_eq!(chunks::f32_at(records, 0, 32, 4), Some(0.25));
+        assert_eq!(chunks::u32_at(records, 2, 32, 0), Some(1));
+        assert_eq!(chunks::u32_at(records, 2, 32, 16), Some(8));
         assert_eq!(records[8..16], crate::hash::fnv1a64(b"step").to_le_bytes());
-        assert_eq!(reader.require("EVNAMES").unwrap(), b"stepstephit");
+        // The hit's one property: first 0, count 1; its key after its name.
+        assert_eq!(chunks::u32_at(records, 2, 32, 24), Some(0));
+        assert_eq!(chunks::u32_at(records, 2, 32, 28), Some(1));
+        let props = reader.require("EVPROPS").unwrap();
+        assert_eq!(props.len(), 32);
+        assert_eq!(chunks::u32_at(props, 0, 32, 8), Some(11));
+        assert_eq!(props[24..32], 3i64.to_le_bytes());
+        assert_eq!(reader.require("EVTEXT").unwrap(), b"stepstephitdamage");
 
         let rows = rows(&bytes).unwrap();
         assert_eq!(rows[0], ("Clips", "Walk (0.75 s), Run (1.25 s)".into()));

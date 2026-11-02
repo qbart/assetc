@@ -681,7 +681,13 @@ fn shell(
             .min_size(220.0)
             .frame(Frame::new().fill(BG_PANEL))
             .show(&mut root, |ui| {
-                right_sidebar(ui, &mut state, &assets, preview3d.frames.as_ref())
+                right_sidebar(
+                    ui,
+                    &mut state,
+                    &assets,
+                    preview3d.frames.as_ref(),
+                    preview3d.animation_time,
+                )
             });
     }
 
@@ -2168,7 +2174,13 @@ fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
     }
 }
 
-fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Option<&ModelFrames>) {
+fn right_sidebar(
+    ui: &mut Ui,
+    state: &mut UiState,
+    assets: &Assets,
+    frames: Option<&ModelFrames>,
+    playhead: Option<f32>,
+) {
     section_header(ui, "Inspector");
     // Only applicable tabs are shown; fall back to Info when the active one does not apply to
     // the inspected file (a selection still loading keeps it).
@@ -2343,7 +2355,17 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                 }
                 (InspectorTab::Animations, Some(inspected), Some(_)) => {
                     let choice = state.animations.entry(inspected.path.clone()).or_default();
-                    animations_tab(ui, &inspected.inspection.animations, choice);
+                    let playhead = playhead.unwrap_or(0.0);
+                    if let Some(amod) = animations_tab(ui, inspected, choice, playhead) {
+                        match amod::write(&inspected.path, &amod) {
+                            Ok(()) => {
+                                state.reinspect = true;
+                                state.rescan = true;
+                                state.keep_model = true;
+                            }
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
                 }
                 (InspectorTab::Info, Some(inspected), _) => info(ui, &inspected.inspection),
                 (InspectorTab::Assets, _, Some(selection)) => {
@@ -3917,19 +3939,159 @@ fn info(ui: &mut Ui, inspection: &Inspection) {
         });
 }
 
-/// Rest pose and the model's animations, one chosen; see docs/features/models.md#animations-tab.
-fn animations_tab(ui: &mut Ui, animations: &[(String, f32)], choice: &mut Option<usize>) {
-    let rows: Vec<_> = std::iter::once(("Rest pose".to_owned(), String::new()))
-        .chain(
-            animations
-                .iter()
-                .map(|(name, duration)| (name.clone(), format!("{duration:.2} s"))),
-        )
+/// One card per animation, the unfolded one playing, with its events; returns the sidecar to
+/// write. See docs/features/models.md#animations-tab.
+fn animations_tab(
+    ui: &mut Ui,
+    inspected: &mut Inspected,
+    choice: &mut Option<usize>,
+    playhead: f32,
+) -> Option<Amod> {
+    let animations = inspected.inspection.animations.clone();
+    let mut edit = match &mut inspected.mesh {
+        Some(Ok(edit)) => Some(edit),
+        _ => None,
+    };
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let mut fold = None;
+                for (a, (name, duration)) in animations.iter().enumerate() {
+                    let count = edit.as_ref().map_or(0, |e| {
+                        e.edit
+                            .events
+                            .iter()
+                            .filter(|v| v.animation == *name)
+                            .count()
+                    });
+                    let detail = match count {
+                        0 => format!("{duration:.2} s"),
+                        1 => format!("1 event · {duration:.2} s"),
+                        n => format!("{n} events · {duration:.2} s"),
+                    };
+                    let (_, folded) = ui
+                        .push_id(("animation", a), |ui| {
+                            card(
+                                ui,
+                                Some(*choice == Some(a)),
+                                RichText::new(name),
+                                |_| {},
+                                |ui, _| {
+                                    ui.add_space(4.0);
+                                    ui.label(RichText::new(&detail).size(13.0).color(TEXT_WEAK));
+                                },
+                                |ui| match &mut edit {
+                                    Some(edit) => event_list(ui, edit, name, *duration, playhead),
+                                    None => {
+                                        ui.weak("No events");
+                                    }
+                                },
+                            )
+                        })
+                        .inner;
+                    if folded {
+                        fold = Some(a);
+                    }
+                }
+                if let Some(a) = fold {
+                    *choice = (*choice != Some(a)).then_some(a);
+                }
+            });
+        });
+    let edit = edit?;
+    mesh_commit(ui, edit)
+}
+
+/// An animation's events, by time, the chosen one's fields under its row; see
+/// docs/features/animation-events.md#event-list.
+fn event_list(ui: &mut Ui, edit: &mut MeshEdit, animation: &str, duration: f32, playhead: f32) {
+    let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add event");
+    if ui.add(add).clicked() {
+        edit.edit.events.push(enrich::Event {
+            animation: animation.to_owned(),
+            name: "event".into(),
+            time: (playhead.min(duration) * 1000.0).round() / 1000.0,
+            properties: Properties::new(),
+        });
+        edit.event = Some(edit.edit.events.len() - 1);
+    }
+    ui.add_space(4.0);
+    let mut rows: Vec<usize> = (0..edit.edit.events.len())
+        .filter(|&i| edit.edit.events[i].animation == animation)
         .collect();
-    // Row 0 is the rest pose, row `i + 1` animation `i`.
-    let chosen = choice.map_or(0, |i| i + 1);
-    if let Some(row) = choice_list(ui, &rows, chosen) {
-        *choice = row.checked_sub(1);
+    rows.sort_by(|&a, &b| {
+        let (ta, tb) = (edit.edit.events[a].time, edit.edit.events[b].time);
+        ta.total_cmp(&tb).then(a.cmp(&b))
+    });
+    if rows.is_empty() {
+        ui.weak("No events");
+    }
+    let mut delete = None;
+    for i in rows {
+        let chosen = edit.event == Some(i);
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
+        let fill = if chosen {
+            ACCENT.gamma_multiply(0.25)
+        } else if response.hovered() {
+            BG_HEADER
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        ui.painter().rect_filled(rect, 4, fill);
+        let event = &mut edit.edit.events[i];
+        ui.painter().text(
+            pos2(rect.left() + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            format!("{:.3} s", event.time),
+            FontId::monospace(12.0),
+            TEXT_WEAK,
+        );
+        ui.painter().text(
+            pos2(rect.left() + 76.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            &event.name,
+            FontId::proportional(14.0),
+            TEXT,
+        );
+        if response.clicked() {
+            edit.event = (!chosen).then_some(i);
+        }
+        if !chosen {
+            continue;
+        }
+        ui.push_id(("event", i), |ui| {
+            prop_row(ui, "Name", |ui, width| {
+                ui.add_sized(
+                    vec2(width, 22.0),
+                    egui::TextEdit::singleline(&mut event.name),
+                );
+            });
+            prop_row(ui, "Time", |ui, width| {
+                let field = egui::DragValue::new(&mut event.time)
+                    .range(0.0..=duration)
+                    .speed(0.01)
+                    .fixed_decimals(3)
+                    .suffix(" s");
+                ui.add_sized(vec2(width, 22.0), field);
+            });
+            ui.add_space(4.0);
+            ui.label(RichText::new("Properties").size(13.0).color(TEXT_WEAK));
+            properties_editor(ui, &mut event.properties);
+            ui.add_space(4.0);
+            let button =
+                egui::Button::image_and_text(Icon::Trash2.image(14.0, TEXT), "Delete event");
+            if ui.add(button).clicked() {
+                delete = Some(i);
+            }
+            ui.add_space(8.0);
+        });
+    }
+    if let Some(i) = delete {
+        edit.edit.events.remove(i);
+        edit.event = None;
     }
 }
 
@@ -7509,6 +7671,7 @@ fn timeline(
                     animation: name.clone(),
                     name: "event".into(),
                     time: time_of(p.x),
+                    properties: Properties::new(),
                 });
                 edit.event = Some(edit.edit.events.len() - 1);
             }
@@ -7538,6 +7701,7 @@ fn timeline(
             animation: name.clone(),
             name: "event".into(),
             time: (now * 1000.0).round() / 1000.0,
+            properties: Properties::new(),
         });
         edit.event = Some(edit.edit.events.len() - 1);
     }

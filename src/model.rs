@@ -239,6 +239,7 @@ fn resolve_events(
                 clip: clip as u32,
                 time: e.time.min(duration),
                 name: e.name.clone(),
+                properties: e.properties.clone(),
             })
         })
         .collect()
@@ -1804,6 +1805,7 @@ submeshes = [[0, 0], [3, 1]]
             animation: animation.into(),
             name: name.into(),
             time,
+            properties: Default::default(),
         };
         let mut amod = crate::amod::Amod {
             events: vec![event(&names[1], "step", 0.5), event(&names[0], "look", 0.1)],
@@ -1815,9 +1817,9 @@ submeshes = [[0, 0], [3, 1]]
         let reader = crate::chunks::Reader::parse(&anim, aanim::FORMAT).unwrap();
         let records = reader.require("EVENTS").unwrap();
         // Sorted by clip: the first animation's event first.
-        assert_eq!(crate::chunks::u32_at(records, 0, 24, 0), Some(0));
-        assert_eq!(crate::chunks::u32_at(records, 1, 24, 0), Some(1));
-        assert_eq!(reader.require("EVNAMES").unwrap(), b"lookstep");
+        assert_eq!(crate::chunks::u32_at(records, 0, 32, 0), Some(0));
+        assert_eq!(crate::chunks::u32_at(records, 1, 32, 0), Some(1));
+        assert_eq!(reader.require("EVTEXT").unwrap(), b"lookstep");
 
         amod.events = vec![event("Dance", "x", 0.0)];
         let err = compile(&file, "Fox", &options, &amod).err().unwrap();

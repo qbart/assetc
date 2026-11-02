@@ -267,11 +267,11 @@ pub struct Extras {
 
 /// The `STRINGS` chunk being built: text back to back.
 #[derive(Default)]
-struct Strings(Vec<u8>);
+pub(crate) struct Strings(pub Vec<u8>);
 
 impl Strings {
     /// Adds `text`; returns its offset and length.
-    fn add(&mut self, text: &str) -> (u32, u32) {
+    pub fn add(&mut self, text: &str) -> (u32, u32) {
         let at = self.0.len() as u32;
         self.0.extend_from_slice(text.as_bytes());
         (at, text.len() as u32)
@@ -279,7 +279,11 @@ impl Strings {
 }
 
 /// Writes `properties` as [`Property`](docs/spec/amesh.md#property-32-bytes) records.
-fn put_properties(out: &mut Bytes, strings: &mut Strings, properties: &crate::enrich::Properties) {
+pub(crate) fn put_properties(
+    out: &mut Bytes,
+    strings: &mut Strings,
+    properties: &crate::enrich::Properties,
+) {
     use crate::enrich::PropValue;
     for (key, value) in properties {
         let (at, len) = strings.add(key);

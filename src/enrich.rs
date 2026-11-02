@@ -1043,6 +1043,7 @@ pub struct Event {
     pub name: String,
     /// Seconds from the animation's start.
     pub time: f32,
+    pub properties: Properties,
 }
 
 pub fn parse_events(value: toml::Value) -> Result<Vec<Event>, String> {
@@ -1062,6 +1063,12 @@ pub fn parse_events(value: toml::Value) -> Result<Vec<Event>, String> {
             let animation = text("animation", &required("animation")?).map_err(fail)?;
             let name = text("name", &required("name")?).map_err(fail)?;
             let time = float("time", &required("time")?).map_err(fail)?;
+            let properties = table
+                .remove("properties")
+                .map(parse_properties)
+                .transpose()
+                .map_err(fail)?
+                .unwrap_or_default();
             if name.is_empty() {
                 return Err(fail("empty name".into()));
             }
@@ -1075,6 +1082,7 @@ pub fn parse_events(value: toml::Value) -> Result<Vec<Event>, String> {
                 animation,
                 name,
                 time,
+                properties,
             })
         })
         .collect()
@@ -1087,6 +1095,7 @@ pub fn write_events(events: &[Event], out: &mut String) {
         *out += &format!("animation = {}\n", string(&event.animation));
         *out += &format!("name = {}\n", string(&event.name));
         *out += &format!("time = {:?}\n", event.time);
+        write_properties("events.properties", &event.properties, out);
     }
 }
 

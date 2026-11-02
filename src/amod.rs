@@ -490,6 +490,9 @@ color = "#ff000080"
 animation = "Walk"
 name = "footstep"
 time = 0.25
+
+[events.properties]
+sound = "step_grass"
 "##;
         let amod = Amod::parse(text).unwrap();
         assert_eq!(amod.properties["lives"], PropValue::Int(3));
@@ -519,6 +522,10 @@ time = 0.25
         assert_eq!(amod.colors[2].fill, crate::enrich::ColorFill::Solid);
         assert_eq!(amod.colors[2].color, [255, 0, 0, 0x80]);
         assert_eq!(amod.events[0].time, 0.25);
+        assert_eq!(
+            amod.events[0].properties["sound"],
+            PropValue::Text("step_grass".into())
+        );
         assert_eq!(amod.to_toml(), text);
         assert_eq!(Amod::parse(&amod.to_toml()).unwrap(), amod);
 
