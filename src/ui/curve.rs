@@ -27,24 +27,14 @@ const MAX_ANGLE: f32 = 89.0;
 const PASS: f64 = 2.0;
 pub(super) const WIDTH: f32 = 320.0;
 
-/// Steps, playback and rotation mode, for the session; never in the data.
+/// Playback, for the session; never in the data.
 pub(super) struct CurveSettings {
-    x_step: f32,
-    y_step: f32,
-    angle_step: f32,
     playing: bool,
-    rotate: bool,
 }
 
 impl Default for CurveSettings {
     fn default() -> Self {
-        Self {
-            x_step: 0.1,
-            y_step: 0.1,
-            angle_step: 5.0,
-            playing: true,
-            rotate: false,
-        }
+        Self { playing: true }
     }
 }
 
@@ -55,8 +45,6 @@ pub(super) struct CurveState {
     drag: Option<CurveDrag>,
     /// The chosen point is marked split while its slopes are still equal.
     split: bool,
-    /// The active slope of a split point is `in`, else `out`.
-    active_in: bool,
     /// The playhead's `x`, and when it last moved.
     phase: f32,
     last: Option<f64>,
@@ -110,9 +98,11 @@ fn joined(p: &[f32; 4]) -> bool {
     (p[2] * 1000.0).round() == (p[3] * 1000.0).round()
 }
 
-/// `slope` turned by `degrees` (counter-clockwise), within ±89°.
-fn rotate(slope: f32, degrees: f32) -> f32 {
-    (slope.atan().to_degrees() + degrees)
+/// `slope` within ±89°.
+fn clamp_slope(slope: f32) -> f32 {
+    slope
+        .atan()
+        .to_degrees()
         .clamp(-MAX_ANGLE, MAX_ANGLE)
         .to_radians()
         .tan()
@@ -189,7 +179,6 @@ pub(super) fn curve_editor(
     let choose = |state: &mut CurveState, point: Option<usize>| {
         if state.point != point {
             state.split = false;
-            state.active_in = false;
         }
         state.point = point;
     };
@@ -308,7 +297,6 @@ pub(super) fn curve_editor(
             if ui.input(|i| i.modifiers.shift) {
                 state.split = true;
             }
-            state.active_in = !out;
             state.drag = Some(CurveDrag::Handle(k, out));
         } else {
             let point = near_point(&points, at);
@@ -325,7 +313,7 @@ pub(super) fn curve_editor(
             let v = at - to_screen(points[k][0], points[k][1]);
             // Toward its own side; straight up or down is the steepest slope, not infinite.
             let dx = if out { v.x.max(1e-3) } else { v.x.min(-1e-3) };
-            let slope = rotate(-v.y / dx, 0.0);
+            let slope = clamp_slope(-v.y / dx);
             let split = is_split(state, &points, k);
             set_slope(&mut points[k], slope, out, split);
         }
@@ -337,25 +325,10 @@ pub(super) fn curve_editor(
         .area
         .is_some_and(|area| ui.rect_contains_pointer(area));
     if hovered && !ui.ctx().egui_wants_keyboard_input() {
-        // Presses this frame, repeats included; quick presses can share a frame.
-        let presses = |key: egui::Key| {
-            ui.input(|i| {
-                i.events
-                    .iter()
-                    .filter(|e| {
-                        matches!(e, egui::Event::Key { key: k, pressed: true, modifiers, .. }
-                            if *k == key && modifiers.is_none())
-                    })
-                    .count()
-            })
-        };
-        let pressed = |key: egui::Key| presses(key) > 0;
+        let pressed = |key: egui::Key| ui.input(|i| i.key_pressed(key));
         let n = points.len();
         if pressed(egui::Key::Space) {
             settings.playing = !settings.playing;
-        }
-        if pressed(egui::Key::R) {
-            settings.rotate = !settings.rotate;
         }
         match state.point {
             None => {
@@ -366,20 +339,10 @@ pub(super) fn curve_editor(
                 }
             }
             Some(k) => {
-                let split = is_split(state, &points, k);
                 if pressed(egui::Key::CloseBracket) {
-                    if settings.rotate && split && !state.active_in {
-                        state.active_in = true;
-                    } else {
-                        choose(state, Some((k + 1) % n));
-                    }
+                    choose(state, Some((k + 1) % n));
                 } else if pressed(egui::Key::OpenBracket) {
-                    if settings.rotate && split && state.active_in {
-                        state.active_in = false;
-                    } else {
-                        choose(state, Some((k + n - 1) % n));
-                        state.active_in = settings.rotate;
-                    }
+                    choose(state, Some((k + n - 1) % n));
                 } else if pressed(egui::Key::Home) {
                     choose(state, Some(0));
                 } else if pressed(egui::Key::End) {
@@ -389,39 +352,11 @@ pub(super) fn curve_editor(
                 } else if pressed(egui::Key::A) {
                     let k = add_point_after(&mut points, k);
                     choose(state, Some(k));
-                } else if pressed(egui::Key::Delete) || pressed(egui::Key::X) {
-                    if deletable(&points, k) {
-                        points.remove(k);
-                        choose(state, None);
-                    }
-                } else {
-                    let arrows = [
-                        (egui::Key::ArrowLeft, -1.0, 0.0),
-                        (egui::Key::ArrowRight, 1.0, 0.0),
-                        (egui::Key::ArrowUp, 0.0, 1.0),
-                        (egui::Key::ArrowDown, 0.0, -1.0),
-                    ];
-                    for (key, dx, dy) in arrows {
-                        for _ in 0..presses(key) {
-                            if settings.rotate {
-                                // Up / left: counter-clockwise.
-                                let turn = if dx < 0.0 || dy > 0.0 { 1.0 } else { -1.0 };
-                                let out = !(split && state.active_in);
-                                let p = points[k];
-                                let slope =
-                                    rotate(p[if out { 3 } else { 2 }], turn * settings.angle_step);
-                                set_slope(&mut points[k], slope, out, split);
-                            } else {
-                                let p = points[k];
-                                move_point(
-                                    &mut points,
-                                    k,
-                                    p[0] + dx * settings.x_step,
-                                    p[1] + dy * settings.y_step,
-                                );
-                            }
-                        }
-                    }
+                } else if (pressed(egui::Key::Delete) || pressed(egui::Key::X))
+                    && deletable(&points, k)
+                {
+                    points.remove(k);
+                    choose(state, None);
                 }
             }
         }
@@ -518,7 +453,11 @@ pub(super) fn curve_editor(
     painter.circle_filled(pos2(lane.center().x, y), 5.0, ACCENT);
 
     // Points, and the chosen one's handles.
-    let rotating = settings.rotate || matches!(state.drag, Some(CurveDrag::Handle(..)));
+    // The handle being dragged: its point and whether it is `out`.
+    let dragged = match state.drag {
+        Some(CurveDrag::Handle(k, out)) => Some((k, out)),
+        _ => None,
+    };
     for (k, p) in points.iter().enumerate() {
         let at = to_screen(p[0], p[1]);
         if state.point != Some(k) {
@@ -526,11 +465,11 @@ pub(super) fn curve_editor(
             continue;
         }
         let split = is_split(state, &points, k);
-        if rotating {
+        if dragged.is_some() {
             clip.circle_stroke(at, 9.0, Stroke::new(1.0, ACCENT));
         }
         for out in [false, true] {
-            let active = rotating && (!split || out != state.active_in);
+            let active = dragged.is_some_and(|(_, o)| !split || o == out);
             let (length, color) = match (active, split) {
                 (true, _) => (HANDLE_ACTIVE, ACCENT),
                 (false, true) => (HANDLE, CHANNEL_B),
@@ -548,18 +487,9 @@ pub(super) fn curve_editor(
     if let Some(k) = state.point {
         let split = is_split(state, &points, k);
         let p = points[k];
-        // The slopes rotating: both when joined, else the active one.
-        let active = |is_in: bool| rotating && (!split || state.active_in == is_in);
         let mut text = format!("point {} of {}", k + 1, points.len());
         if split {
             text.push_str(" · split");
-        }
-        if rotating {
-            text.push_str(match (split, state.active_in) {
-                (false, _) => " · rotating both",
-                (true, true) => " · rotating in",
-                (true, false) => " · rotating out",
-            });
         }
         ui.label(RichText::new(text).size(12.0).color(TEXT_WEAK));
         ui.horizontal(|ui| {
@@ -567,12 +497,7 @@ pub(super) fn curve_editor(
             let left = if k > 0 { points[k - 1][0] } else { 0.0 };
             let right = points.get(k + 1).map_or(1.0, |p| p[0]);
             for (i, label) in ["X", "Y", "In", "Out"].into_iter().enumerate() {
-                let color = if i >= 2 && active(i == 2) {
-                    ACCENT
-                } else {
-                    TEXT_WEAK
-                };
-                ui.label(RichText::new(label).color(color));
+                ui.label(RichText::new(label).color(TEXT_WEAK));
                 let mut field = egui::DragValue::new(&mut points[k][i])
                     .speed(0.01)
                     .fixed_decimals(3);
@@ -630,26 +555,6 @@ pub(super) fn curve_editor(
         {
             toggle_split(state, &mut points, k);
         }
-        if icon_toggle(ui, Icon::RotateCw, "Rotation mode (R)", settings.rotate).clicked() {
-            settings.rotate = !settings.rotate;
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(RichText::new("Steps").color(TEXT_WEAK));
-        for (label, value, speed, suffix) in [
-            ("x", &mut settings.x_step, 0.001, ""),
-            ("y", &mut settings.y_step, 0.001, ""),
-            ("angle", &mut settings.angle_step, 0.1, "°"),
-        ] {
-            ui.label(RichText::new(label).color(TEXT_WEAK));
-            let field = egui::DragValue::new(value)
-                .speed(speed)
-                .range(0.001..=90.0)
-                .max_decimals(3)
-                .suffix(suffix);
-            ui.add_sized(vec2(52.0, 22.0), field);
-        }
     });
     state.area = Some(ui.min_rect());
 
@@ -680,11 +585,9 @@ fn set_slope(p: &mut [f32; 4], slope: f32, out: bool, split: bool) {
 fn toggle_split(state: &mut CurveState, points: &mut [[f32; 4]], k: usize) {
     if joined(&points[k]) && !state.split {
         state.split = true;
-        state.active_in = false;
     } else {
         points[k][2] = points[k][3];
         state.split = false;
-        state.active_in = false;
     }
 }
 
@@ -731,11 +634,10 @@ mod tests {
     }
 
     #[test]
-    fn rotation_is_clamped() {
-        assert!((rotate(0.0, 45.0) - 1.0).abs() < 1e-5);
-        assert!((rotate(1.0, -45.0)).abs() < 1e-5);
-        assert!((rotate(50.0, 30.0) - 89f32.to_radians().tan()).abs() < 1e-2);
-        assert!(rotate(-50.0, -30.0) < -57.0);
+    fn slopes_are_clamped() {
+        assert!((clamp_slope(1.0) - 1.0).abs() < 1e-5);
+        assert!((clamp_slope(1e6) - 89f32.to_radians().tan()).abs() < 1e-2);
+        assert!(clamp_slope(-1e6) < -57.0);
     }
 
     #[test]

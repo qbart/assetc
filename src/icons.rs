@@ -58,7 +58,6 @@ pub enum Icon {
     Plus,
     RefreshCw,
     Rotate3d,
-    RotateCw,
     Scan,
     Settings,
     Settings2,
@@ -77,7 +76,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 69] = [
+const SVGS: [(&str, &str); 68] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -170,7 +169,6 @@ const SVGS: [(&str, &str); 69] = [
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("rotate-3d", include_str!("../assets/icons/rotate-3d.svg")),
-    ("rotate-cw", include_str!("../assets/icons/rotate-cw.svg")),
     ("scan", include_str!("../assets/icons/scan.svg")),
     ("settings", include_str!("../assets/icons/settings.svg")),
     ("settings-2", include_str!("../assets/icons/settings-2.svg")),
