@@ -350,9 +350,11 @@ fn check_struct(
         return;
     };
     let top = |out: &mut Found, key: &str, message: String, warning: bool| {
-        // Nested problems are shown on the instance's field they are under.
-        let field = path.split('/').nth(1).unwrap_or(key).to_owned();
-        out.push((Some(field), message, warning));
+        // Nested problems are shown on the instance's field they are under; the instance's
+        // own unknown keys on the instance.
+        let field = path.split('/').nth(1).map(str::to_owned);
+        let _ = key;
+        out.push((field, message, warning));
     };
     for (key, v) in values {
         let at = format!("{path}/{key}");

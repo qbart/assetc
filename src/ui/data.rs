@@ -377,6 +377,7 @@ pub(super) fn canvas_data(
             problems: &mine,
             open,
             instance: i,
+            left: ui.cursor().left(),
             editors: ValueEditors {
                 picker,
                 curves,
@@ -435,6 +436,8 @@ struct Cx<'a> {
     problems: &'a [&'a DataProblem],
     open: &'a mut HashSet<(usize, String)>,
     instance: usize,
+    /// Where labels start at the top level: indented labels are narrower, so values line up.
+    left: f32,
     editors: ValueEditors<'a>,
 }
 
@@ -574,7 +577,9 @@ fn field_row(
                 &f.label
             };
             let color = if set { TEXT } else { TEXT_WEAK };
-            let (rect, response) = ui.allocate_exact_size(vec2(LABEL_W, 22.0), Sense::hover());
+            let indent = ui.cursor().left() - cx.left;
+            let width = (LABEL_W - indent).max(60.0);
+            let (rect, response) = ui.allocate_exact_size(vec2(width, 22.0), Sense::hover());
             ui.painter().with_clip_rect(rect).text(
                 rect.left_center(),
                 Align2::LEFT_CENTER,
@@ -728,7 +733,7 @@ fn data_value(ui: &mut Ui, cx: &mut Cx, f: &Field, ty: Option<&Ty>, value: &mut 
             ui.spacing_mut().item_spacing.x = 2.0;
             for v in values {
                 let on = v == current;
-                let text = RichText::new(&v).color(if on { ACCENT } else { TEXT });
+                let text = RichText::new(&v).color(if on { BG_BAR } else { TEXT });
                 if ui.add(egui::Button::new(text).selected(on)).clicked() {
                     *value = Value::String(v);
                 }

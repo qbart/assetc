@@ -1,0 +1,8 @@
+{
+  "$dialect": "a/1",
+  "$schema": "zz.aschema",
+  "instances": [
+    { "$type": "Weapon", "$id": "sword", "name": "Sword", "damage": 12, "old_key": 3 },
+    { "$type": "Enemy", "$id": "goblin", "weapon": "sword" }
+  ]
+}
