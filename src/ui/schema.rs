@@ -1013,13 +1013,17 @@ fn struct_value(
                         vec2(width, 22.0),
                         Layout::left_to_right(Align::Center),
                         |ui| {
+                            ui.set_min_width(width);
                             let text = RichText::new(text).monospace().color(color);
                             ui.add(egui::Label::new(text).truncate());
                         },
                     );
                 };
+                // Under the field row's grip and settings icon, name and type (and its
+                // menu button).
+                ui.add_space(42.0);
                 cell(ui, &f.name, NAME_W, TEXT);
-                cell(ui, &f.ty, TYPE_W, TEXT_WEAK);
+                cell(ui, &f.ty, TYPE_W + 30.0, TEXT_WEAK);
                 let mut set = object.contains_key(&f.name);
                 if ui.checkbox(&mut set, "Set").changed() {
                     if set {
