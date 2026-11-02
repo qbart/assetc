@@ -811,12 +811,12 @@ fn check_known(schema: &Schema, ty: &Ty) -> bool {
 
 /// The editors a default may open: shared, or kept per type and field path (curves and
 /// gradients, `name` or `name/inner/…` for a nested struct's fields).
-struct ValueEditors<'a> {
-    picker: &'a mut Picker,
-    curves: &'a mut HashMap<(usize, String), CurveState>,
-    curve_settings: &'a mut CurveSettings,
-    gradients: &'a mut HashMap<(usize, String), GradientCard>,
-    ti: usize,
+pub(super) struct ValueEditors<'a> {
+    pub(super) picker: &'a mut Picker,
+    pub(super) curves: &'a mut HashMap<(usize, String), CurveState>,
+    pub(super) curve_settings: &'a mut CurveSettings,
+    pub(super) gradients: &'a mut HashMap<(usize, String), GradientCard>,
+    pub(super) ti: usize,
 }
 
 /// A popover under `response`, opened by double-clicking it, closed by clicking outside.
@@ -854,7 +854,7 @@ fn default_cell(
 }
 
 /// The struct a type names, if it is one.
-fn struct_of<'s>(schema: &'s Schema, ty: Option<&Ty>) -> Option<(usize, &'s [Field])> {
+pub(super) fn struct_of<'s>(schema: &'s Schema, ty: Option<&Ty>) -> Option<(usize, &'s [Field])> {
     let Some(Ty::Named(n)) = ty else {
         return None;
     };
@@ -868,7 +868,7 @@ fn struct_of<'s>(schema: &'s Schema, ty: Option<&Ty>) -> Option<(usize, &'s [Fie
 /// A value's editor in its type's data encoding; `path` keys its curve and gradient
 /// editors. A struct shows how many of its fields are set; its rows are
 /// [`struct_value`]'s.
-fn value_editor(
+pub(super) fn value_editor(
     ui: &mut Ui,
     editors: &mut ValueEditors,
     default: &mut Value,
@@ -1074,7 +1074,7 @@ fn text_cell(ui: &mut Ui, text: &str, width: f32, color: egui::Color32) {
 
 /// What a value shows under its row, indented: a struct's fields (unless that struct is
 /// already shown around it) or a list's items.
-fn nested_value(
+pub(super) fn nested_value(
     ui: &mut Ui,
     editors: &mut ValueEditors,
     value: &mut Value,

@@ -49,6 +49,7 @@ pub enum Icon {
     Loader,
     MapPin,
     Move3d,
+    Package,
     PaintBucket,
     Paintbrush,
     Palette,
@@ -58,6 +59,7 @@ pub enum Icon {
     Plus,
     RefreshCw,
     Rotate3d,
+    RotateCcw,
     Scan,
     Settings,
     Settings2,
@@ -76,7 +78,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 68] = [
+const SVGS: [(&str, &str); 70] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -157,6 +159,7 @@ const SVGS: [(&str, &str); 68] = [
     ("loader", include_str!("../assets/icons/loader.svg")),
     ("map-pin", include_str!("../assets/icons/map-pin.svg")),
     ("move-3d", include_str!("../assets/icons/move-3d.svg")),
+    ("package", include_str!("../assets/icons/package.svg")),
     (
         "paint-bucket",
         include_str!("../assets/icons/paint-bucket.svg"),
@@ -169,6 +172,7 @@ const SVGS: [(&str, &str); 68] = [
     ("plus", include_str!("../assets/icons/plus.svg")),
     ("refresh-cw", include_str!("../assets/icons/refresh-cw.svg")),
     ("rotate-3d", include_str!("../assets/icons/rotate-3d.svg")),
+    ("rotate-ccw", include_str!("../assets/icons/rotate-ccw.svg")),
     ("scan", include_str!("../assets/icons/scan.svg")),
     ("settings", include_str!("../assets/icons/settings.svg")),
     ("settings-2", include_str!("../assets/icons/settings-2.svg")),

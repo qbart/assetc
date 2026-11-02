@@ -136,16 +136,7 @@ impl Schema {
         let Value::Object(mut top) = value else {
             return Err("not a JSON object".into());
         };
-        match top.shift_remove("$dialect") {
-            Some(Value::String(d)) if d == DIALECT => {}
-            Some(Value::String(d)) => match d.strip_prefix("a/").map(str::parse::<u32>) {
-                Some(Ok(major)) if major > 1 => {
-                    return Err(format!("$dialect {d:?} is newer than a/1"));
-                }
-                _ => return Err(format!("unknown $dialect {d:?}")),
-            },
-            _ => return Err("no $dialect".into()),
-        }
+        check_dialect(&mut top)?;
         let Some(Value::Object(types)) = top.shift_remove("types") else {
             return Err("no types object".into());
         };
@@ -275,6 +266,18 @@ impl Schema {
                 }
             }
         }
+    }
+}
+
+/// Takes `$dialect` out of a file's top level; errors unless it is `a/1` (§1).
+pub fn check_dialect(top: &mut Map<String, Value>) -> Result<(), String> {
+    match top.shift_remove("$dialect") {
+        Some(Value::String(d)) if d == DIALECT => Ok(()),
+        Some(Value::String(d)) => match d.strip_prefix("a/").map(str::parse::<u32>) {
+            Some(Ok(major)) if major > 1 => Err(format!("$dialect {d:?} is newer than a/1")),
+            _ => Err(format!("unknown $dialect {d:?}")),
+        },
+        _ => Err("no $dialect".into()),
     }
 }
 
@@ -508,7 +511,7 @@ impl Ty {
 }
 
 /// Integer ranges by type name.
-fn int_range(p: &str) -> (i128, i128) {
+pub fn int_range(p: &str) -> (i128, i128) {
     match p {
         "i8" => (i8::MIN.into(), i8::MAX.into()),
         "i16" => (i16::MIN.into(), i16::MAX.into()),
@@ -521,7 +524,7 @@ fn int_range(p: &str) -> (i128, i128) {
     }
 }
 
-fn is_color(text: &str, alpha: bool) -> bool {
+pub fn is_color(text: &str, alpha: bool) -> bool {
     let Some(hex) = text.strip_prefix('#') else {
         return false;
     };
@@ -639,7 +642,7 @@ pub fn gradient_stops(value: &Value) -> Result<Vec<(f64, [u8; 4])>, String> {
 }
 
 /// A value in the written form: lower-case colours, full curve points.
-fn canonical(ty: &Ty, value: &Value) -> Value {
+pub fn canonical(ty: &Ty, value: &Value) -> Value {
     match (ty, value) {
         (Ty::Prim("rgb"), Value::String(s)) => s.to_lowercase().into(),
         (Ty::Prim("rgba"), Value::String(s)) if is_color(s, true) => {
@@ -935,6 +938,57 @@ fn check_condition(text: &str, fields: &[Field]) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether condition `text` holds, given its sibling fields' resolved values (`None` for
+/// no such sibling); see docs/aschema.md#24-conditions-show_if--hide_if.
+pub fn condition_holds(text: &str, sibling: impl Fn(&str) -> Option<Value>) -> bool {
+    let text = text.trim();
+    let split = ["==", "!=", "<=", ">=", "<", ">"]
+        .into_iter()
+        .find_map(|op| text.split_once(op).map(|(l, r)| (op, l.trim(), r.trim())));
+    let Some((op, left, right)) = split else {
+        let (name, want) = match text.strip_prefix('!') {
+            Some(name) => (name.trim(), false),
+            None => (text, true),
+        };
+        return sibling(name).is_some_and(|v| v == Value::Bool(want));
+    };
+    let Some(value) = sibling(left) else {
+        return false;
+    };
+    let number = right.parse::<f64>().ok().filter(|n| n.is_finite());
+    let expected = match right {
+        "true" => Value::Bool(true),
+        "false" => Value::Bool(false),
+        _ => match number {
+            Some(n) => json_number(n),
+            None => Value::String(
+                right
+                    .strip_prefix('"')
+                    .and_then(|r| r.strip_suffix('"'))
+                    .unwrap_or(right)
+                    .to_owned(),
+            ),
+        },
+    };
+    let equal = match (value.as_f64(), expected.as_f64()) {
+        (Some(a), Some(b)) => a == b,
+        _ => value == expected,
+    };
+    match op {
+        "==" => equal,
+        "!=" => !equal,
+        _ => match (value.as_f64(), number) {
+            (Some(a), Some(b)) => match op {
+                "<" => a < b,
+                "<=" => a <= b,
+                ">" => a > b,
+                _ => a >= b,
+            },
+            _ => false,
+        },
+    }
+}
+
 /// The value a field of type `ty` holds without a default, to start an explicit one from;
 /// see docs/features/schemas.md#defaults.
 pub fn implicit_value(schema: &Schema, ty: &Ty) -> Value {
@@ -1107,6 +1161,21 @@ mod tests {
         assert!(evaluate_curve(&points, 0.25) < 0.25);
         assert_eq!(evaluate_curve(&points, -1.0), 0.0);
         assert_eq!(evaluate_curve(&points, 2.0), 1.0);
+    }
+
+    #[test]
+    fn conditions_hold() {
+        let values = serde_json::json!({ "boss": true, "crit": 0.5, "kind": "ice" });
+        let sibling = |name: &str| values.get(name).cloned();
+        assert!(condition_holds("boss", sibling));
+        assert!(!condition_holds("!boss", sibling));
+        assert!(condition_holds("crit > 0", sibling));
+        assert!(!condition_holds("crit >= 1", sibling));
+        assert!(condition_holds("kind == ice", sibling));
+        assert!(condition_holds("kind == \"ice\"", sibling));
+        assert!(condition_holds("kind != fire", sibling));
+        assert!(!condition_holds("missing", sibling));
+        assert!(!condition_holds("kind > 1", sibling));
     }
 
     #[test]

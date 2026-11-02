@@ -50,6 +50,23 @@ pub fn create_graph(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Creates `data.adata` (or `data 2.adata`, …) in `dir`, naming the first schema of `dir`,
+/// else of `input`; see docs/features/instances.md#creating.
+pub fn create_data(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    use crate::adata::{DataFile, relative, schemas_in};
+    check_inside(input, dir, true)?;
+    let all = schemas_in(input);
+    let schema = all
+        .iter()
+        .find(|p| p.parent() == Some(dir))
+        .or(all.first())
+        .map(|p| relative(dir, p))
+        .unwrap_or_default();
+    let path = unique(dir, "data", ".adata");
+    fs::write(&path, DataFile::new(schema).to_json(None)).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Creates `palette.palette` (or `palette 2.palette`, …) in `dir`; see
 /// docs/features/palettes.md#creating.
 pub fn create_palette(input: &Path, dir: &Path) -> Result<PathBuf, String> {
@@ -175,6 +192,23 @@ mod tests {
         assert_eq!(graph, input.join("graph.agraph"));
         let parsed = crate::agraph::Graph::parse(&fs::read_to_string(&graph).unwrap()).unwrap();
         assert_eq!(parsed, crate::agraph::Graph::new());
+    }
+
+    #[test]
+    fn data_files_name_the_nearest_schema() {
+        use crate::adata::DataFile;
+        let (_dir, input) = input();
+        let read = |path: &Path| DataFile::parse(&fs::read_to_string(path).unwrap()).unwrap();
+        let none = create_data(&input, &input).unwrap();
+        assert_eq!(none, input.join("data.adata"));
+        assert_eq!(read(&none).schema, "");
+        create_schema(&input, &input).unwrap();
+        let data = create_data(&input, &input.join("sub")).unwrap();
+        assert_eq!(read(&data).schema, "../schema.aschema");
+        create_schema(&input, &input.join("sub")).unwrap();
+        let data = create_data(&input, &input.join("sub")).unwrap();
+        assert_eq!(data, input.join("sub/data 2.adata"));
+        assert_eq!(read(&data).schema, "schema.aschema");
     }
 
     #[test]

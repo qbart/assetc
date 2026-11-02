@@ -99,6 +99,7 @@ enum Kind {
     Palette,
     Schema,
     Graph,
+    Data,
     MaterialSource,
     ColorLut,
     Font,
@@ -122,6 +123,7 @@ impl Kind {
             Self::Palette => "Palette",
             Self::Schema => "Schema",
             Self::Graph => "Graph",
+            Self::Data => "Data",
             Self::MaterialSource => "Material source",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
@@ -188,6 +190,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Input if is_palette(file) => Kind::Palette,
         Location::Input if crate::aschema::is_schema(file) => Kind::Schema,
         Location::Input if crate::agraph::is_graph(file) => Kind::Graph,
+        Location::Input if crate::adata::is_data(file) => Kind::Data,
         Location::Input if font::is_font(file) => Kind::Font,
         Location::Input if model::is_model(file) => Kind::Model,
         Location::Input if is_texture_source(file) => Kind::SourceTexture,
@@ -216,6 +219,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
             .and_then(|()| source_texture(project, file, &rel, &mut out)),
         Kind::Schema => schema_rows(file, &mut out),
         Kind::Graph => graph_rows(file, &mut out),
+        Kind::Data => data_rows(file, &mut out),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
         Kind::Font => font_rows(project, file, &rel, &mut out),
@@ -403,6 +407,39 @@ fn graph_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
             0 => "none".into(),
             1 => "1 error".into(),
             n => format!("{n} errors"),
+        },
+    ));
+    Ok(())
+}
+
+/// See docs/features/instances.md#info-tab.
+fn data_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
+    use crate::adata::{DataFile, load_schema};
+    let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
+    let data = DataFile::parse(&text)?;
+    out.rows.push(("Dialect", crate::aschema::DIALECT.into()));
+    let (_, schema) = load_schema(file, &data);
+    let shown = if data.schema.is_empty() {
+        "—".into()
+    } else if schema.is_err() {
+        format!("{} (not found)", data.schema)
+    } else {
+        data.schema.clone()
+    };
+    out.rows.push(("Schema", shown));
+    out.rows
+        .push(("Instances", data.instances.len().to_string()));
+    let problems = schema.map(|s| data.check(&s)).unwrap_or_default();
+    let warnings = problems.iter().filter(|p| p.warning).count();
+    let errors = problems.len() - warnings;
+    let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+    out.rows.push((
+        "Problems",
+        match (errors, warnings) {
+            (0, 0) => "none".into(),
+            (e, 0) => plural(e, "error"),
+            (0, w) => plural(w, "warning"),
+            (e, w) => format!("{}, {}", plural(e, "error"), plural(w, "warning")),
         },
     ));
     Ok(())
