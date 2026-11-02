@@ -63,3 +63,26 @@ Open:
   cells.
 - Whether modifiers apply to alpha, and how blur treats cell edges (clamp
   inside the cell).
+
+## More enrichments
+
+[Locators](docs/features/locators.md) are the first kind of data authored on
+top of a model. Others share their storage (`.amod` tables), joint
+attachment by name, `.amesh` chunks and 3D editing:
+
+- **Shapes**: boxes, spheres, capsules and convex hulls on a joint or the
+  model, with a kind and properties (hitboxes with a damage factor, physics
+  colliders, ragdoll parts, triggers).
+- **Regions**: triangles or whole material slots tagged with a surface type
+  (footsteps, impacts), breakable parts or tint masks.
+- **Paths**: polylines or splines in model space (ropes, rails, ladders).
+- **Animation events**: named times on a clip (footsteps, hit frames,
+  sounds), in a new `.aanim` chunk, with a clip timeline to place them.
+- **Properties**: key / value pairs on the model (mass, tags).
+- **Presets** in `assetc.toml` matched by glob or skeleton, so models sharing
+  a skeleton share their locators.
+- For locators: placing on the model's surface (ray cast; Bevy's mesh ray cast
+  ignores skinning, so skinned models need their own), mirroring left / right
+  by name, previewing another model attached to a locator, importing glTF
+  nodes named `SOCKET_*` and glTF `extras`, and showing locators in the
+  compiled mesh preview (joint transforms from `SKELETON`'s bind pose).

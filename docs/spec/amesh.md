@@ -27,9 +27,12 @@ width are in `DESC`.
 | `LODTABLE` | no       | [`LodTable`](#lodtable) header plus ranges into `LODIDX`          |
 | `SKIN`     | no       | [`SkinVertex`](#skinvertex-24-bytes)`[vertex_count]`, parallel to `VERTICES` |
 | `SKELETON` | no       | [`Joint`](#joint-112-bytes)`[joint_count]`                        |
+| `LOCATORS` | no       | [`Locator`](#locator-64-bytes)`[]` (payload size / 64), see [Locators](#locators) |
+| `LOCNAMES` | no       | `u8[]`: the locators' names, UTF-8, back to back                  |
 
 assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
-together, as do `SKIN` and `SKELETON` (only for skinned meshes).
+together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
+`LOCATORS` and `LOCNAMES` (only for models with locators).
 
 ## MeshDesc (32 bytes)
 
@@ -167,3 +170,32 @@ mesh) is bound rigidly to joint 0 (weights `1, 0, 0, 0`).
 
 Joints are in the order of the glTF skin's `joints`, so `SkinVertex.joints`
 and animation channels index them directly.
+
+## Locators
+
+Named transforms authored in the model's
+[`.amod`](amod.md#locators), see
+[`docs/features/locators.md`](../features/locators.md). `LOCATORS` holds one
+record per locator in the sidecar's order; `LOCNAMES` holds their names.
+
+A locator's transform is `T · R · S` (translation, rotation, scale) relative
+to its parent: the joint's current transform (as animations pose it,
+`SKELETON` space) when `joint ≥ 0`, otherwise the mesh's own space (that of
+`VERTICES`). Its world transform is the parent's world transform × that.
+
+Look a locator up by `name_hash`, the FNV-1a-64 of its UTF-8 name (the same
+hash as [asset IDs](../features/build.md#asset-ids)); hashes are unique
+within a file. The names are there for tools and debugging.
+
+### Locator (64 bytes)
+
+| Offset | Size | Field         | Notes                                                       |
+|-------:|-----:|---------------|-------------------------------------------------------------|
+|      0 |    8 | `name_hash`   | u64, FNV-1a-64 of the name                                  |
+|      8 |    4 | `name_offset` | u32, byte offset of the name in `LOCNAMES`                   |
+|     12 |    4 | `name_len`    | u32, byte length of the name                                |
+|     16 |    4 | `joint`       | i32, index into `SKELETON`; `−1`: mesh space                 |
+|     20 |   12 | `translation` | f32 × 3                                                     |
+|     32 |   16 | `rotation`    | f32 × 4, unit quaternion `x y z w`                          |
+|     48 |   12 | `scale`       | f32 × 3                                                     |
+|     60 |    4 | `reserved`    | u32, `0`                                                    |

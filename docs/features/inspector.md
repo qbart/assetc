@@ -19,8 +19,10 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Nine icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Ten icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient`, `.palette` and model files,
+**Locators** (`map-pin`) for model files (see
+[`locators.md`](locators.md#locators-tab)),
 **Modifiers** (`wrench`) for `.noise` files and images (`.png`, `.jpg`,
 `.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and
 **Colors** (`palette`) for `.palette` files, all four only in the Input tree

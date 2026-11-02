@@ -46,6 +46,16 @@ Active while the pointer is over the canvas (see
 | Scroll wheel, pinch                    | Move the camera closer / farther |
 | Double-click                           | Reset the camera                 |
 
+On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left click on a locator                | Choose it                                    |
+| Left click elsewhere (no drag)         | Clear the chosen locator                     |
+| Left drag on a gizmo handle            | Move / rotate the chosen locator             |
+| `W`                                    | Gizmo: Move                                  |
+| `E`                                    | Gizmo: Rotate                                |
+
 ## Canvas (color LUT)
 
 See [`docs/features/lut.md`](docs/features/lut.md#views).

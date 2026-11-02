@@ -29,6 +29,23 @@ A key set here wins over [`assetc.toml`](assetc.toml.md#meshes) (its
 defaults and `[[meshes.overrides]]`); a key left out keeps the project's
 value.
 
+## `[[locators]]`
+
+For glTF models; see [`docs/features/locators.md`](../features/locators.md).
+A list of locators, one table each:
+
+| Key           | Type              | Default        | Meaning                                           |
+|---------------|-------------------|----------------|---------------------------------------------------|
+| `name`        | string            | (required)     | non-empty, unique among the file's locators       |
+| `joint`       | string            | (none)         | name of a joint of the model's first skin; left out: model space |
+| `translation` | array of 3 floats | `[0, 0, 0]`    | in the parent's (joint's or model's) space        |
+| `rotation`    | array of 4 floats | `[0, 0, 0, 1]` | quaternion `x y z w`, normalized when built; not all zero |
+| `scale`       | array of 3 floats | `[1, 1, 1]`    | per axis                                          |
+
+An empty or repeated `name`, a missing one, a wrong array length or an
+unknown key is an error. Whether `joint` exists is checked when the model
+builds.
+
 ## `[[modifiers]]`
 
 For images (`*.png`, `*.jpg`, `*.jpeg`, `*.tga`); see
@@ -41,14 +58,23 @@ whenever assetc loads it.
 ## Written form
 
 assetc writes the `[mesh]` keys that are set, in the order listed, then each
-modifier as a `[[modifiers]]` table (`type`, `enabled`, then every parameter,
-as `.noise` files write them), each table preceded by a blank line except
-the first:
+locator as a `[[locators]]` table (`name`, `joint` when set, `translation`,
+`rotation`, `scale`, always all three, floats in Rust's shortest form), then
+each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
+parameter, as `.noise` files write them), each table preceded by a blank line
+except the first:
 
 ```toml
 [mesh]
 meshlet_max_vertices = 128
 meshlet_max_triangles = 256
+
+[[locators]]
+name = "hand_r.weapon"
+joint = "RightHand"
+translation = [0.02, 0.08, 0.0]
+rotation = [0.0, 0.0, 0.70710677, 0.70710677]
+scale = [1.0, 1.0, 1.0]
 
 [[modifiers]]
 type = "levels"

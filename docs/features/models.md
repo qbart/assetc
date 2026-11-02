@@ -37,7 +37,8 @@ Counts are per mesh, not per instance: a mesh used by two nodes counts once.
 After them, **Meshlet limits** (`64 vertices, 124 triangles`) and **Levels
 of detail** (`50%, 25%`, or `none`): what this model builds with, from
 `[meshes]` and its `.amod` (a **Mesh settings** row with the error instead
-when either is invalid), then **Asset path** and
+when either is invalid), **Locators** (their count in the `.amod`, or
+`none`; see [`locators.md`](locators.md)), then **Asset path** and
 **Output** (the `.amesh`; `(not built)` appended when it does not exist), as
 for source textures.
 
@@ -48,7 +49,8 @@ Compiled files in the Output tree:
   (`1728 (u16)`), Triangles, Submeshes, Meshlets, Meshlet limits
   (`64 vertices, 124 triangles`), Materials, Flags (`0x07 (tangents,
   skinned, levels of detail)`, or `0x00 (none)`), Levels of detail (`2` or
-  `none`), Skin (`<n> joints` or `none`), Bounds (`min – max`), Asset path,
+  `none`), Skin (`<n> joints` or `none`), Locators (`<n>` or `none`, see
+  [`locators.md`](locators.md#inspector-info)), Bounds (`min – max`), Asset path,
   Asset ID. A file that does not read shows an Error row.
 - **Compiled animation** (`*.aanim`): Clips (names with durations), Channels,
   Keys, Asset path, Asset ID.
@@ -61,7 +63,10 @@ Selecting a model shows it in the canvas' [3D view](canvas.md#3d) instead of
 a shape.
 
 - The view bar is empty (no `View` label, no buttons): a model only exists
-  in 3D. The toolbar (Shape, Channels) is not shown.
+  in 3D. The toolbar (Shape, Channels) is not shown; it has the
+  [locator](locators.md#3d-view) group and Color vision.
+- The model's [locators](locators.md) are drawn over it and edited there,
+  see [`locators.md`](locators.md#3d-view).
 - Loaded with Bevy's glTF loader from an asset source registered at startup
   for the project's `input` directory, so the model's own meshes, materials
   and textures (embedded or next to the file) are used, as Bevy renders them.
@@ -241,6 +246,8 @@ The **Chunks** view shows the data inside the `.amesh`
   | `LODTABLE` | LOD table           | Submesh, Level, First index, Index count (the header's counts in the header line) |
   | `SKIN`     | Skin weights        | Joints, Weights                                       |
   | `SKELETON` | Skeleton            | Parent (or `—`), Translation, Rotation, Scale          |
+  | `LOCATORS` | Locators            | Name, Hash (`0x` + 16 hex digits), Joint (or `—`), Translation, Rotation, Scale |
+  | `LOCNAMES` | Locator names       | Offset, Bytes (16 per row, hex)                        |
   | other      | Unknown chunk       | Offset, Bytes (16 per row, hex)                        |
 
   Normals and tangents are decoded from their octahedral encoding. Floats
@@ -299,6 +306,8 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 | `P/<image>.ktx2`            | texture    | `P/<image>`       | per image used as base color, normal or emissive texture |
 | `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
 | `P.aanim`                   | animation  | `P.aanim`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.md)) |
+
+The `.amesh` also carries the model's [locators](locators.md#build).
 
 Like other assets, each gets the FNV-1a-64 of its asset path as ID and a
 manifest entry; collisions are build errors as usual. The build prints one
