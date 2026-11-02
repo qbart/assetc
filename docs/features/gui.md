@@ -99,10 +99,12 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | clap                 | command line           | MIT or Apache-2.0           | github.com/clap-rs/clap |
 | base64               | embedded glTF data     | MIT or Apache-2.0           | github.com/marshallpierce/rust-base64 |
 | webbrowser           | opening links          | MIT or Apache-2.0           | github.com/amodm/webbrowser-rs |
+| BLAKE3               | hashing in Bevy, pure Rust | CC0-1.0 or Apache-2.0   | github.com/BLAKE3-team/BLAKE3 |
 
 Links open `https://` + the site shown. The list names direct dependencies
 and the fonts and icons shipped in the binary; keep it in step with
-`Cargo.toml`.
+`Cargo.toml`. `blake3` is a direct dependency only to turn on its `pure`
+feature, so Bevy's copy is built without C or assembly.
 
 ## File browser
 
