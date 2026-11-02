@@ -199,8 +199,9 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   applied (the 3D view's material has no such settings). Textures are read from their
   `.ktx2` (level 0). A material or texture that cannot be found or read is
   replaced by the defaults (white, roughness 1, no texture), and a submesh
-  without a material is light gray. The `COLOR_0` [color set](vertex-colors.md)
-  multiplies the base color, as in glTF.
+  without a material is light gray. The [color set](vertex-colors.md#compiled-meshes)
+  chosen in the Vertex colors tab, if any, multiplies the base color, as in
+  glTF; it also colors **Shaded** mode.
 - **Colors** of the ID modes: index `i` (meshlet, material slot or submesh)
   has hue `i × 0.618034` (fractional part, the golden ratio, so neighbours
   differ), saturation 0.65, value 0.9. Triangles are lit as usual (the

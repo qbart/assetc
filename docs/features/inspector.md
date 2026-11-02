@@ -27,7 +27,9 @@ Fifteen icon tabs, top to bottom: **Info** (`info`), **Parameters**
 [`locators.md`](locators.md#locators-tab), [`shapes.md`](shapes.md#shapes-tab),
 [`regions.md`](regions.md#regions-tab), [`paths.md`](paths.md#paths-tab),
 [`vertex-colors.md`](vertex-colors.md#vertex-colors-tab),
-[`properties.md`](properties.md#properties-tab)),
+[`properties.md`](properties.md#properties-tab)); Vertex colors is also
+shown for compiled meshes with color sets (see
+[`vertex-colors.md`](vertex-colors.md#compiled-meshes)),
 **Modifiers** (`wrench`) for `.noise` files and images (`.png`, `.jpg`,
 `.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and
 **Colors** (`palette`) for `.palette` files, all four only in the Input tree

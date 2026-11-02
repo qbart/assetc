@@ -226,9 +226,23 @@ by several nodes (the build computes each instance's own).
 
 - The model's [preview](models.md#preview) shows `COLOR_0` as Bevy's glTF
   loader does: multiplied with the base color.
-- The [compiled mesh preview](models.md#compiled-mesh-preview)'s
-  **Material** mode does the same with the first set whose `source` is glTF
-  (whatever its name) when the mesh has one.
+
+### Compiled meshes
+
+A compiled mesh with color sets (in the Output tree) has a **Vertex colors**
+tab (`swatch-book`) to pick the set its
+[preview](models.md#compiled-mesh-preview) shows:
+
+- A list of rows like the [Animations tab](models.md#animations-tab)'s:
+  first **None**, then the mesh's sets in file order, each with its name
+  and, right-aligned and weak, its source (`glTF` or `assetc`).
+- **None** (the default) shows the mesh without vertex colors.
+- A set: in **Material** mode it multiplies the base color, as a glTF
+  renderer does with `COLOR_0`; in **Shaded** mode the mesh is drawn in the
+  set's colors instead of light gray. Wireframe and the ID modes are
+  unchanged. Alpha is not shown.
+- The choice is remembered per mesh (by path) for the session, and applies
+  to every level of detail.
 
 ## Not yet
 
