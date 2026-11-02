@@ -701,7 +701,9 @@ fn type_cell(ui: &mut Ui, field: &mut Field, schema: &Schema, parses: bool) {
         .font(egui::TextStyle::Monospace)
         .text_color(color);
     ui.add_sized(vec2(TYPE_W, 22.0), edit);
-    let button = egui::Button::image(Icon::ChevronDown.image(12.0, TEXT_WEAK)).frame(false);
+    let button = egui::Button::image(Icon::ChevronDown.image(14.0, TEXT_WEAK))
+        .frame_when_inactive(false)
+        .min_size(vec2(24.0, 22.0));
     egui::containers::menu::MenuButton::from_button(button).ui(ui, |ui| {
         let current = field.ty.clone();
         let mut pick = |ui: &mut Ui, text: String| {
