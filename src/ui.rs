@@ -4992,7 +4992,7 @@ fn chunk_table(
     if table.numbered {
         columns.push("#");
     }
-    columns.extend(&table.columns);
+    columns.extend(table.columns.iter().map(String::as_str));
     let text = |s: String| RichText::new(s).monospace().size(12.0);
     let mut builder = TableBuilder::new(ui)
         .id_salt(("chunk_table", &entry.name))

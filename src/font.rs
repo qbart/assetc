@@ -566,8 +566,8 @@ const DESC_FIELDS: [&str; 13] = [
 pub fn table(bytes: &[u8], name: &str) -> Option<crate::amesh::Table> {
     let reader = crate::chunks::Reader::parse(bytes, FORMAT).ok()?;
     let payload = reader.chunk(name)?;
-    let table = |columns: Vec<&'static str>, rows: usize, numbered: bool| crate::amesh::Table {
-        columns,
+    let table = |columns: Vec<&str>, rows: usize, numbered: bool| crate::amesh::Table {
+        columns: columns.into_iter().map(str::to_owned).collect(),
         rows,
         numbered,
     };

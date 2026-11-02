@@ -1056,7 +1056,7 @@ fn build_compiled(
             .flat_map(|t| [t * 3, t * 3 + 1, t * 3 + 2])
             .collect();
         let pick = |values: &[[f32; 3]]| corners.iter().map(|&c| values[c]).collect::<Vec<_>>();
-        let mesh = Mesh::new(
+        let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
         )
@@ -1070,6 +1070,13 @@ fn build_compiled(
             Mesh::ATTRIBUTE_TANGENT,
             corners.iter().map(|&c| p.tangents[c]).collect::<Vec<_>>(),
         );
+        // COLOR_0 multiplies the base color; see docs/features/vertex-colors.md#previews.
+        if !p.colors.is_empty() {
+            mesh.insert_attribute(
+                Mesh::ATTRIBUTE_COLOR,
+                corners.iter().map(|&c| p.colors[c]).collect::<Vec<_>>(),
+            );
+        }
         let found = slot.and_then(|s| upload.materials.get(s as usize).cloned().flatten());
         let mut texture = |image: &Option<crate::texture::Image>, srgb: bool| {
             image.as_ref().map(|i| {

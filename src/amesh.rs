@@ -215,6 +215,8 @@ pub struct Primitive {
     pub material: Option<u32>,
     /// Per triangle of `indices`, its regions as bits; empty without regions.
     pub regions: Vec<u32>,
+    /// Each of [`Extras::color_sets`], one color per vertex.
+    pub colors: Vec<Vec<[u8; 4]>>,
 }
 
 /// A shape ready to write; see docs/spec/amesh.md#shapes.
@@ -258,6 +260,8 @@ pub struct Extras {
     pub shapes: Vec<CompiledShape>,
     pub regions: Vec<(String, Vec<String>)>,
     pub paths: Vec<CompiledPath>,
+    /// The names of the color sets every primitive has; see docs/spec/amesh.md#color-sets.
+    pub color_sets: Vec<String>,
 }
 
 /// The `STRINGS` chunk being built: text back to back.
@@ -442,6 +446,8 @@ pub fn encode(
     .map(|w| w as f32);
     let simplify_options = options.simplify_options();
     let mut vertices: Vec<Vertex> = Vec::new();
+    // Each color set's colors, parallel to `vertices`.
+    let mut colors: Vec<Vec<[u8; 4]>> = vec![Vec::new(); extras.color_sets.len()];
     let mut indices: Vec<u32> = Vec::new();
     let mut submeshes = Bytes::default();
     let mut meshlets = Bytes::default();
@@ -639,6 +645,12 @@ pub fn encode(
         }
         indices.extend(local.iter().map(|i| i + base));
         vertices.extend_from_slice(&primitive.vertices);
+        for (s, set) in colors.iter_mut().enumerate() {
+            match primitive.colors.get(s) {
+                Some(own) if own.len() == primitive.vertices.len() => set.extend_from_slice(own),
+                _ => set.extend(std::iter::repeat_n([255; 4], primitive.vertices.len())),
+            }
+        }
     }
 
     let wide = vertices.len() > 0xFFFF;
@@ -767,8 +779,27 @@ pub fn encode(
             writer.chunk("LOCTAGS", tags.take());
         }
     }
-    // Properties, shapes and regions, their text in STRINGS.
+    // Color sets, properties, shapes, regions and paths, their text in STRINGS.
     let mut strings = Strings::default();
+    if !colors.is_empty() {
+        let mut sets = Bytes::default();
+        let mut data = Bytes::default();
+        for (name, set) in extras.color_sets.iter().zip(&colors) {
+            let (at, len) = strings.add(name);
+            sets.u64(crate::hash::fnv1a64(name.as_bytes()))
+                .u32(at)
+                .u32(len)
+                .u32(0)
+                .u32(0)
+                .u64(0);
+            for c in set {
+                data.0.extend_from_slice(c);
+            }
+        }
+        writer
+            .chunk("COLORSET", sets.take())
+            .chunk("COLORS", data.take());
+    }
     let mut props = Bytes::default();
     put_properties(&mut props, &mut strings, &extras.properties);
     let (mut shapes, mut shape_points, mut shape_props) =
@@ -877,7 +908,7 @@ pub fn encode(
     let has_shapes = !extras.shapes.is_empty();
     let has_regions = !extras.regions.is_empty();
     let has_paths = !extras.paths.is_empty();
-    if has_props || has_shapes || has_regions || has_paths {
+    if !colors.is_empty() || has_props || has_shapes || has_regions || has_paths {
         writer.chunk("STRINGS", strings.0);
     }
     if has_props {
@@ -942,6 +973,8 @@ pub struct Level {
     pub uvs: Vec<[f32; 2]>,
     /// `w` is the handedness.
     pub tangents: Vec<[f32; 4]>,
+    /// The `COLOR_0` color set, linear; empty without one.
+    pub colors: Vec<[f32; 4]>,
     /// Empty for reduced levels.
     pub meshlets: Vec<u32>,
     pub submeshes: Vec<u32>,
@@ -1058,7 +1091,23 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
             Some(u32::from(u16::from_le_bytes(raw.try_into().ok()?)))
         }
     };
+    // The COLOR_0 set's colors, when the mesh has one.
+    let vertex_count = chunks::u32_at(desc, 0, 32, 0).unwrap_or(0) as usize;
+    let color0 = color_set_names(&reader)
+        .iter()
+        .position(|n| n == "COLOR_0")
+        .and_then(|s| {
+            reader
+                .chunk("COLORS")?
+                .get(s * vertex_count * 4..(s + 1) * vertex_count * 4)
+        });
     let corner = |level: &mut Level, i: usize| -> Option<()> {
+        if let Some(colors) = color0 {
+            let c = colors.get(i * 4..i * 4 + 4)?;
+            level
+                .colors
+                .push([0, 1, 2, 3].map(|k| f32::from(c[k]) / 255.0));
+        }
         let base = i.checked_mul(28)?;
         let raw = vertices.get(base..base + 28)?;
         let f = |at: usize| f32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
@@ -1256,6 +1305,14 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
                 "none".into()
             },
         ),
+        ("Color sets", {
+            let names = color_set_names(&reader);
+            if names.is_empty() {
+                "none".into()
+            } else {
+                names.join(", ")
+            }
+        }),
         (
             "Locators",
             if locators > 0 {
@@ -1281,6 +1338,23 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             ),
         ),
     ])
+}
+
+/// The names of a mesh's color sets, in order; see docs/spec/amesh.md#color-sets.
+pub fn color_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
+    let (Some(sets), strings) = (reader.chunk("COLORSET"), reader.chunk("STRINGS")) else {
+        return Vec::new();
+    };
+    (0..sets.len() / 32)
+        .map(|s| {
+            let at = chunks::u32_at(sets, s, 32, 8).unwrap_or(0) as usize;
+            let len = chunks::u32_at(sets, s, 32, 12).unwrap_or(0) as usize;
+            strings
+                .and_then(|t| t.get(at..at + len))
+                .map(|t| String::from_utf8_lossy(t).into_owned())
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 /// `DESC.flags` as `0x07 (tangents, skinned, levels of detail)`.
@@ -1315,6 +1389,8 @@ pub fn describe(name: &str) -> &'static str {
         "LODIDX" => "LOD indices",
         "LODTABLE" => "LOD table",
         "SKIN" => "Skin weights",
+        "COLORSET" => "Color sets",
+        "COLORS" => "Vertex colors",
         "SKELETON" => "Skeleton",
         "LOCATORS" => "Locators",
         "LOCNAMES" => "Locator names",
@@ -1338,7 +1414,7 @@ pub fn describe(name: &str) -> &'static str {
 /// The shape of a chunk's table: its columns (after `#` for arrays; `Field`, `Value` for
 /// records) and row count.
 pub struct Table {
-    pub columns: Vec<&'static str>,
+    pub columns: Vec<String>,
     pub rows: usize,
     /// One row per element, with its index first.
     pub numbered: bool,
@@ -1362,19 +1438,19 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
     let reader = chunks::Reader::parse(bytes, FORMAT).ok()?;
     let payload = reader.chunk(name)?;
     let wide = reader.chunk("DESC").and_then(|d| d.get(22)) == Some(&4);
-    let array = |columns: Vec<&'static str>, stride: usize| Table {
-        columns,
+    let array = |columns: Vec<&str>, stride: usize| Table {
+        columns: columns.into_iter().map(str::to_owned).collect(),
         rows: payload.len() / stride,
         numbered: true,
     };
     Some(match name {
         "DESC" => Table {
-            columns: vec!["Field", "Value"],
+            columns: ["Field", "Value"].map(String::from).into(),
             rows: DESC_FIELDS.len(),
             numbered: false,
         },
         "BOUNDS" => Table {
-            columns: vec!["Field", "Value"],
+            columns: ["Field", "Value"].map(String::from).into(),
             rows: BOUNDS_FIELDS.len(),
             numbered: false,
         },
@@ -1403,11 +1479,23 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
         "MLBOUNDS" => array(vec!["Center", "Radius", "Cone axis", "Cone cutoff"], 32),
         // An 8-byte header, then one range per submesh and level.
         "LODTABLE" => Table {
-            columns: vec!["Submesh", "Level", "First index", "Index count"],
+            columns: ["Submesh", "Level", "First index", "Index count"]
+                .map(String::from)
+                .into(),
             rows: payload.len().saturating_sub(8) / 8,
             numbered: true,
         },
         "SKIN" => array(vec!["Joints", "Weights"], 24),
+        "COLORSET" => array(vec!["Name", "Hash", "Format", "Source"], 32),
+        // One row per vertex, one column per set.
+        "COLORS" => {
+            let names = color_set_names(&reader);
+            Table {
+                rows: payload.len() / 4 / names.len().max(1),
+                columns: names,
+                numbered: true,
+            }
+        }
         "SKELETON" => array(vec!["Parent", "Translation", "Rotation", "Scale"], 112),
         "LOCATORS" => array(
             vec![
@@ -1457,7 +1545,7 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
         "REGIONS" => array(vec!["Name", "Tags", "Triangles"], 32),
         "TRIREGN" => array(vec!["Regions"], 4),
         _ => Table {
-            columns: vec!["Offset", "Bytes"],
+            columns: ["Offset", "Bytes"].map(String::from).into(),
             rows: payload.len().div_ceil(16),
             numbered: false,
         },
@@ -1586,6 +1674,39 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
             } else {
                 vector(&floats(row, 24, 8, 4))
             }
+        }
+        "COLORSET" => {
+            let strings = reader.chunk("STRINGS").unwrap_or_default();
+            match column {
+                0 => {
+                    let (at, len) = (u32_at(row, 32, 8) as usize, u32_at(row, 32, 12) as usize);
+                    strings
+                        .get(at..at + len)
+                        .map(|t| String::from_utf8_lossy(t).into_owned())
+                        .unwrap_or_default()
+                }
+                1 => format!(
+                    "{:#018x}",
+                    p.get(row * 32..row * 32 + 8)
+                        .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
+                ),
+                2 => match u32_at(row, 32, 16) {
+                    0 => "RGBA8".into(),
+                    other => other.to_string(),
+                },
+                _ => match u32_at(row, 32, 20) {
+                    0 => "glTF".into(),
+                    other => other.to_string(),
+                },
+            }
+        }
+        "COLORS" => {
+            // Sets one after another, each `vertices` long.
+            let vertices = table.rows;
+            let at = (column * vertices + row) * 4;
+            p.get(at..at + 4)
+                .map(|c| format!("{}, {}, {}, {}", c[0], c[1], c[2], c[3]))
+                .unwrap_or_default()
         }
         "SKELETON" => match column {
             0 => match u32_at(row, 112, 104) as i32 {
@@ -1816,6 +1937,7 @@ mod tests {
             indices,
             material: Some(0),
             regions: Vec::new(),
+            colors: Vec::new(),
         }
     }
 

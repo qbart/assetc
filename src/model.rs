@@ -63,6 +63,32 @@ pub fn rows(data: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     rows.push(("Triangles", triangles.to_string()));
     rows.push(("Materials", gltf.materials().len().to_string()));
     rows.push(("Textures", gltf.textures().len().to_string()));
+    // See docs/features/vertex-colors.md#inspector-info.
+    let mut sets: Vec<u32> = gltf
+        .meshes()
+        .flat_map(|m| m.primitives())
+        .flat_map(|p| {
+            p.attributes()
+                .filter_map(|(semantic, _)| match semantic {
+                    gltf::Semantic::Colors(n) => Some(n),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    sets.sort_unstable();
+    sets.dedup();
+    rows.push((
+        "Color sets",
+        if sets.is_empty() {
+            "none".into()
+        } else {
+            sets.iter()
+                .map(|n| format!("COLOR_{n}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+    ));
     rows.push(("Skins", gltf.skins().len().to_string()));
     rows.push(("Animations", gltf.animations().len().to_string()));
     Ok(rows)
@@ -501,6 +527,8 @@ struct Part {
     material: Option<usize>,
     /// Bound to the skin: vertices in mesh space with weights.
     skinned: bool,
+    /// Its `COLOR_n` sets: `n` and one color per vertex.
+    colors: Vec<(u32, Vec<[u8; 4]>)>,
 }
 
 /// Every triangle primitive of the default scene, weights renormalized when the model is
@@ -522,7 +550,8 @@ fn read_parts(
             if !is_triangles(&primitive) {
                 continue;
             }
-            let (vertices, indices, has_tangents) = read_primitive(&primitive, read, instance)?;
+            let (vertices, indices, has_tangents, colors) =
+                read_primitive(&primitive, read, instance)?;
             tangents &= has_tangents;
             let material = primitive.material().index();
             parts.push(Part {
@@ -531,11 +560,13 @@ fn read_parts(
                     indices,
                     material: material.and_then(|i| slots.get(&i).copied()),
                     regions: Vec::new(),
+                    colors: Vec::new(),
                 },
                 mesh: mesh.index() as u32,
                 index: primitive.index() as u32,
                 material,
                 skinned: instance.skinned,
+                colors,
             });
         }
     }
@@ -739,6 +770,25 @@ pub fn compile(
                 .collect();
         }
     }
+    // Every set any primitive has, white where one does not; see
+    // docs/features/vertex-colors.md#from-gltf.
+    let mut color_sets: Vec<u32> = parts
+        .iter()
+        .flat_map(|p| p.colors.iter().map(|(n, _)| *n))
+        .collect();
+    color_sets.sort_unstable();
+    color_sets.dedup();
+    for part in &mut parts {
+        let count = part.primitive.vertices.len();
+        let mut own = std::mem::take(&mut part.colors);
+        part.primitive.colors = color_sets
+            .iter()
+            .map(|n| match own.iter().position(|(m, _)| m == n) {
+                Some(i) => own.swap_remove(i).1,
+                None => vec![[255; 4]; count],
+            })
+            .collect();
+    }
     let primitives: Vec<amesh::Primitive> = parts.into_iter().map(|p| p.primitive).collect();
     let extras = amesh::Extras {
         locators,
@@ -750,6 +800,7 @@ pub fn compile(
             .map(|r| (r.name.clone(), r.tags.clone()))
             .collect(),
         paths: resolve_paths(&sidecar.paths, skin_joints.as_deref()).map_err(sidecar_error)?,
+        color_sets: color_sets.iter().map(|n| format!("COLOR_{n}")).collect(),
     };
     let material_ids: Vec<u64> = outputs
         .materials
@@ -928,13 +979,16 @@ fn pack_orm(
 
 type Read<'s> = dyn Fn(gltf::Buffer<'_>) -> Option<&'s [u8]> + 's;
 
+/// A primitive's `COLOR_n` sets: `n` and one color per vertex.
+type ColorSets = Vec<(u32, Vec<[u8; 4]>)>;
+
 /// One primitive's vertices and triangle-list indices; static ones baked into world space.
-/// Also says whether it has (or got generated) tangents.
+/// Also says whether it has (or got generated) tangents, and gives its color sets.
 fn read_primitive<'s>(
     primitive: &Primitive<'_>,
     read: &Read<'s>,
     instance: &Instance<'_>,
-) -> Result<(Vec<Vertex>, Vec<u32>, bool), String> {
+) -> Result<(Vec<Vertex>, Vec<u32>, bool, ColorSets), String> {
     let reader = primitive.reader(read);
     let positions: Vec<[f32; 3]> = reader
         .read_positions()
@@ -967,6 +1021,19 @@ fn read_primitive<'s>(
     let tangents: Option<Vec<[f32; 4]>> = reader.read_tangents().map(Iterator::collect);
     let joints: Option<Vec<[u16; 4]>> = reader.read_joints(0).map(|j| j.into_u16().collect());
     let weights: Option<Vec<[f32; 4]>> = reader.read_weights(0).map(|w| w.into_f32().collect());
+    // Linear RGBA8, see docs/features/vertex-colors.md#from-gltf.
+    let mut colors: ColorSets = primitive
+        .attributes()
+        .filter_map(|(semantic, _)| match semantic {
+            gltf::Semantic::Colors(n) => Some(n),
+            _ => None,
+        })
+        .filter_map(|n| {
+            let set: Vec<[u8; 4]> = reader.read_colors(n)?.into_rgba_u8().collect();
+            (set.len() == positions.len()).then_some((n, set))
+        })
+        .collect();
+    colors.sort_by_key(|(n, _)| *n);
     let mut vertices: Vec<Vertex> = (0..positions.len())
         .map(|i| Vertex {
             position: positions[i],
@@ -990,6 +1057,10 @@ fn read_primitive<'s>(
                     ..vertices[i as usize]
                 });
             }
+        }
+        // Each copy keeps its source vertex's colors.
+        for (_, set) in &mut colors {
+            *set = indices.iter().map(|&i| set[i as usize]).collect();
         }
         vertices = flat;
         indices = (0..vertices.len() as u32).collect();
@@ -1031,7 +1102,7 @@ fn read_primitive<'s>(
             }
         }
     }
-    Ok((vertices, indices, has_tangents))
+    Ok((vertices, indices, has_tangents, colors))
 }
 
 /// MikkTSpace tangents, through Bevy's mesh.
@@ -1242,6 +1313,73 @@ mod tests {
             "scenes": [{{"nodes": [0]}}]
         }}"#
         )
+    }
+
+    #[test]
+    fn color_sets_follow_their_vertices() {
+        // Positions, RGB float colors (red, green, blue) and indices 2, 1, 0 (no normals, so
+        // the vertices are split per triangle in that order).
+        let mut bytes: Vec<u8> = [0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+            .iter()
+            .chain(&[1.0f32, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+            .flat_map(|f| f.to_le_bytes())
+            .collect();
+        bytes.extend([2u16, 1, 0, 0].iter().flat_map(|i| i.to_le_bytes()));
+        let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let gltf = format!(
+            r#"{{
+            "asset": {{"version": "2.0"}},
+            "buffers": [{{"byteLength": 80, "uri": "data:application/octet-stream;base64,{data}"}}],
+            "bufferViews": [{{"buffer": 0, "byteLength": 36}},
+                            {{"buffer": 0, "byteOffset": 36, "byteLength": 36}},
+                            {{"buffer": 0, "byteOffset": 72, "byteLength": 6}}],
+            "accessors": [{{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+                           "min": [0, 0, 0], "max": [1, 1, 0]}},
+                          {{"bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"}},
+                          {{"bufferView": 2, "componentType": 5123, "count": 3, "type": "SCALAR"}}],
+            "meshes": [{{"primitives": [
+                {{"attributes": {{"POSITION": 0, "COLOR_0": 1}}, "indices": 2}},
+                {{"attributes": {{"POSITION": 0}}}}]}}],
+            "nodes": [{{"mesh": 0}}],
+            "scenes": [{{"nodes": [0]}}]
+        }}"#
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("colors.gltf");
+        std::fs::write(&file, &gltf).unwrap();
+        assert_eq!(
+            row(&rows(gltf.as_bytes()).unwrap(), "Color sets"),
+            "COLOR_0"
+        );
+        let options = amesh::MeshOptions::default();
+        let compiled = compile(&file, "colors", &options, &Default::default()).unwrap();
+        let mesh = &compiled.mesh;
+        assert_eq!(amesh::cell(mesh, "COLORSET", 0, 1), "COLOR_0");
+        assert_eq!(amesh::cell(mesh, "COLORSET", 0, 3), "RGBA8");
+        // The first primitive's vertices in index order, the second's white.
+        let colors: Vec<String> = (0..6).map(|v| amesh::cell(mesh, "COLORS", v, 1)).collect();
+        assert_eq!(
+            colors,
+            [
+                "0, 0, 255, 255",
+                "0, 255, 0, 255",
+                "255, 0, 0, 255",
+                "255, 255, 255, 255",
+                "255, 255, 255, 255",
+                "255, 255, 255, 255",
+            ]
+        );
+        let info = amesh::rows(mesh).unwrap();
+        assert!(info.contains(&("Color sets", "COLOR_0".into())));
+        // The preview's first level carries COLOR_0, linear.
+        let preview = amesh::preview(mesh).unwrap();
+        assert_eq!(preview.levels[0].colors.len(), 6);
+
+        // Without colors, no color chunks.
+        std::fs::write(&file, static_triangle()).unwrap();
+        let plain = compile(&file, "tri", &options, &Default::default()).unwrap();
+        let reader = crate::chunks::Reader::parse(&plain.mesh, "AMESH").unwrap();
+        assert!(reader.chunk("COLORSET").is_none() && reader.chunk("COLORS").is_none());
     }
 
     #[test]
