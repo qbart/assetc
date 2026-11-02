@@ -101,7 +101,7 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | image                | reading images         | MIT or Apache-2.0           | github.com/image-rs/image |
 | ttf-parser           | reading fonts          | MIT or Apache-2.0           | github.com/harfbuzz/ttf-parser |
 | ab_glyph             | font atlases           | Apache-2.0                  | github.com/alexheretic/ab-glyph |
-| serde and toml       | settings files         | MIT or Apache-2.0           | serde.rs |
+| serde and toml       | settings and schema files | MIT or Apache-2.0        | serde.rs |
 | globset              | path patterns          | Unlicense or MIT            | github.com/BurntSushi/ripgrep |
 | clap                 | command line           | MIT or Apache-2.0           | github.com/clap-rs/clap |
 | base64               | embedded glTF data     | MIT or Apache-2.0           | github.com/marshallpierce/rust-base64 |
@@ -197,7 +197,7 @@ gizmo modes), `crosshair` (placing locators on the surface),
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
 `paint-bucket` (Inspector Regions tab), `paintbrush`, `eraser` (painting and erasing regions),
 `spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
-points), `x` (removing a path point), `link-2` (blended color sets), `play`, `pause` (animation timeline),
+points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `play`, `pause` (animation timeline),
 `database` (Inspector Properties tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after, locator visibility),

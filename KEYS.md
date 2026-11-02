@@ -85,6 +85,16 @@ On the animation timeline (see [`docs/features/animation-events.md`](docs/featur
 | Double-click on the track              | Add an event there                           |
 | Double-click on an event marker        | Delete the event                             |
 
+In a schema's curve editor (see [`docs/features/schemas.md`](docs/features/schemas.md#curve-editor)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left press / drag on a point           | Choose it / move it                          |
+| Left drag on a tangent handle          | Set its slope (the other follows)            |
+| `Shift` + drag on a tangent handle     | Break the tangents: set this slope only      |
+| Double-click on the curve area         | Add a point on the curve there               |
+| Double-click on a point                | Remove it                                    |
+
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
 
 | Input                                  | Action                                       |
