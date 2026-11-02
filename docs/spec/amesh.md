@@ -30,7 +30,9 @@ width are in `DESC`.
 | `LOCATORS` | no       | [`Locator`](#locator-64-bytes)`[]` (payload size / 64), see [Locators](#locators) |
 | `LOCNAMES` | no       | `u8[]`: the locators' names and tags, UTF-8, back to back         |
 | `LOCTAGS`  | no       | [`LocatorTag`](#locatortag-16-bytes)`[]` (payload size / 16), the locators' tags |
-| `STRINGS`  | no       | `u8[]`: UTF-8 text of properties, shapes, regions and paths, back to back, see [Strings](#strings) |
+| `COLORSETS`| no       | [`ColorSet`](#colorset-32-bytes)`[set_count]`, see [Color sets](#color-sets) |
+| `COLORS`   | no       | `u8[4][set_count × vertex_count]`: every set's colors, set after set |
+| `STRINGS`  | no       | `u8[]`: UTF-8 text of color sets, properties, shapes, regions and paths, back to back, see [Strings](#strings) |
 | `PROPS`    | no       | [`Property`](#property-32-bytes)`[]`: the model's properties, sorted by key |
 | `SHAPES`   | no       | [`Shape`](#shape-96-bytes)`[]`, see [Shapes](#shapes) |
 | `SHAPEPTS` | no       | `f32[3][]`: the hulls' points |
@@ -46,8 +48,9 @@ width are in `DESC`.
 assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
 together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
 `LOCATORS` and `LOCNAMES` (only for models with locators); `LOCTAGS`
-follows them when a locator has tags. `STRINGS` comes when properties,
-shapes or regions do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
+follows them when a locator has tags. `COLORSETS` and `COLORS` come
+together, when the mesh has color sets. `STRINGS` comes when color sets,
+properties, shapes, regions or paths do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
 and `SHAPEPRP` (with shapes; `SHAPEPTS` only with a hull, `SHAPEPRP` only
 when a shape has properties), `REGIONS`, `REGTAGS` (when a region has tags)
 and `TRIREGN` (with regions), `PATHS`, `PATHPTS`, `PATHSMP` and `PATHPRP`
@@ -237,7 +240,7 @@ sidecar lists them. A tag used by several locators appears once per locator.
 
 ## Strings
 
-`STRINGS` holds the text of properties (keys and Text values), shapes
+`STRINGS` holds the text of color sets (names), properties (keys and Text values), shapes
 (names and kinds), regions (names and tags) and paths (names and kinds), UTF-8, back to back, without
 terminators. Records point into it with a byte offset and length. Locators
 keep theirs in `LOCNAMES`.
@@ -320,6 +323,29 @@ regions.
 |     18 |    2 | `tag_count`      | u16                                                      |
 |     20 |    4 | `triangle_count` | u32, triangles of `INDICES` in it                         |
 |     24 |    8 | `reserved`       | `0`                                                      |
+
+## Color sets
+
+Per-vertex colors, see
+[`docs/features/vertex-colors.md`](../features/vertex-colors.md).
+`COLORSETS` holds one record per set; `COLORS` holds the sets' colors one
+set after another, each `vertex_count` entries long and parallel to
+`VERTICES`: the color of vertex `v` in set `s` is the 4 bytes at
+`(s × vertex_count + v) × 4`. Find a set by `name_hash`.
+
+### ColorSet (32 bytes)
+
+| Offset | Size | Field         | Notes                                                 |
+|-------:|-----:|---------------|-------------------------------------------------------|
+|      0 |    8 | `name_hash`   | u64, FNV-1a-64 of the name                            |
+|      8 |    4 | `name_offset` | u32, in `STRINGS`                                     |
+|     12 |    4 | `name_len`    | u32                                                   |
+|     16 |    4 | `format`      | u32: `0` RGBA8 (4 × u8, unsigned normalized, linear; `R8G8B8A8_UNORM`) |
+|     20 |    4 | `source`      | u32: `0` the glTF's `COLOR_n` attribute               |
+|     24 |    8 | `reserved`    | `0`                                                   |
+
+Readers skip sets whose `format` they do not know; every format's entries
+are 4 bytes in this version.
 
 ## Paths
 

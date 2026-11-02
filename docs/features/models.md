@@ -30,6 +30,7 @@ images are not read for these rows.
 | Triangles  | sum over triangle-list primitives of index count / 3 (vertex count / 3 without indices); strips and fans count n − 2 |
 | Materials  | number of materials                                                |
 | Textures   | number of textures                                                 |
+| Color sets | the `COLOR_n` attributes of the primitives (`COLOR_0, COLOR_1`), or `none`; see [`vertex-colors.md`](vertex-colors.md) |
 | Skins      | number of skins                                                    |
 | Animations | number of animations                                               |
 
@@ -49,7 +50,8 @@ Compiled files in the Output tree:
   (`1728 (u16)`), Triangles, Submeshes, Meshlets, Meshlet limits
   (`64 vertices, 124 triangles`), Materials, Flags (`0x07 (tangents,
   skinned, levels of detail)`, or `0x00 (none)`), Levels of detail (`2` or
-  `none`), Skin (`<n> joints` or `none`), Locators (`<n>` or `none`, see
+  `none`), Skin (`<n> joints` or `none`), Color sets (see
+  [`vertex-colors.md`](vertex-colors.md#inspector-info)), Locators (`<n>` or `none`, see
   [`locators.md`](locators.md#inspector-info)), Bounds (`min – max`), Asset path,
   Asset ID. A file that does not read shows an Error row.
 - **Compiled animation** (`*.aanim`): Clips (names with durations), Channels,
@@ -197,7 +199,8 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   applied (the 3D view's material has no such settings). Textures are read from their
   `.ktx2` (level 0). A material or texture that cannot be found or read is
   replaced by the defaults (white, roughness 1, no texture), and a submesh
-  without a material is light gray.
+  without a material is light gray. The `COLOR_0` [color set](vertex-colors.md)
+  multiplies the base color, as in glTF.
 - **Colors** of the ID modes: index `i` (meshlet, material slot or submesh)
   has hue `i × 0.618034` (fractional part, the golden ratio, so neighbours
   differ), saturation 0.65, value 0.9. Triangles are lit as usual (the
@@ -273,6 +276,8 @@ The **Chunks** view shows the data inside the `.amesh`
   | `LODIDX`   | LOD indices         | per triangle: i0, i1, i2                              |
   | `LODTABLE` | LOD table           | Submesh, Level, First index, Index count (the header's counts in the header line) |
   | `SKIN`     | Skin weights        | Joints, Weights                                       |
+  | `COLORSETS`| Color sets          | Name, Hash, Format (`RGBA8`), Source (`glTF`)          |
+  | `COLORS`   | Vertex colors       | per vertex: one column per set, `r, g, b, a` (0–255)   |
   | `SKELETON` | Skeleton            | Parent (or `—`), Translation, Rotation, Scale          |
   | `LOCATORS` | Locators            | Name, Hash (`0x` + 16 hex digits), Joint (or `—`), Translation, Rotation, Scale, Tags (joined with `, `) |
   | `LOCTAGS`  | Locator tags        | Name, Hash                                             |
@@ -382,7 +387,8 @@ line per model, e.g.
   triangles' own); `TEXCOORD_0` (missing: `0, 0`); `TANGENT` (missing:
   generated with MikkTSpace when there are UVs, otherwise zero and
   `DESC.flags` bit 0 cleared); `JOINTS_0` / `WEIGHTS_0` for skinning.
-  Weights are renormalized to sum 1.
+  Weights are renormalized to sum 1. `COLOR_n` become
+  [color sets](vertex-colors.md).
 - Per submesh: the vertex order is optimized for the GPU's vertex cache, then
   the submesh is split into **meshlets** with their bounds (cone weight
   `meshlet_cone_weight`, 0.25), of at most `meshlet_max_vertices` vertices and
