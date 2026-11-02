@@ -327,6 +327,9 @@ fn sync_vision(
 pub struct CompiledUpload {
     /// The level of detail to show.
     pub level: crate::amesh::Level,
+    /// The color set to show, by index in the level's; see
+    /// docs/features/vertex-colors.md#compiled-meshes.
+    pub color_set: Option<usize>,
     /// Bounds of the full mesh (min, max), so every level is fitted alike.
     pub bounds: [Vec3; 2],
     pub materials: Vec<Option<crate::inspect::MaterialPreview>>,
@@ -1027,8 +1030,10 @@ fn build_compiled(
     let per_triangle = |color: &dyn Fn(usize) -> [f32; 4]| -> Vec<[f32; 4]> {
         (0..p.triangles()).flat_map(|t| [color(t); 3]).collect()
     };
+    let chosen = upload.color_set.and_then(|s| p.colors.get(s));
     let colors = [
-        per_triangle(&|_| gray),
+        // Shaded: the chosen color set, or gray.
+        chosen.cloned().unwrap_or_else(|| per_triangle(&|_| gray)),
         // Reduced levels have no meshlets.
         per_triangle(&|t| p.meshlets.get(t).map_or(gray, |&m| id_color(m))),
         per_triangle(&|t| p.material_slots[t].map_or(gray, id_color)),
@@ -1086,11 +1091,12 @@ fn build_compiled(
             Mesh::ATTRIBUTE_TANGENT,
             corners.iter().map(|&c| p.tangents[c]).collect::<Vec<_>>(),
         );
-        // COLOR_0 multiplies the base color; see docs/features/vertex-colors.md#previews.
-        if !p.colors.is_empty() {
+        // The chosen color set multiplies the base color; see
+        // docs/features/vertex-colors.md#compiled-meshes.
+        if let Some(colors) = chosen {
             mesh.insert_attribute(
                 Mesh::ATTRIBUTE_COLOR,
-                corners.iter().map(|&c| p.colors[c]).collect::<Vec<_>>(),
+                corners.iter().map(|&c| colors[c]).collect::<Vec<_>>(),
             );
         }
         let found = slot.and_then(|s| upload.materials.get(s as usize).cloned().flatten());

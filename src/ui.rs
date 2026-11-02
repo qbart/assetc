@@ -92,6 +92,9 @@ struct UiState {
     mesh_view: MeshView,
     /// Level of detail shown for each compiled mesh, by path.
     lod_levels: HashMap<PathBuf, usize>,
+    /// The color set each compiled mesh shows, by path; see
+    /// docs/features/vertex-colors.md#compiled-meshes.
+    mesh_colors: HashMap<PathBuf, Option<usize>>,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
     mesh_in_3d: bool,
     /// The chosen chunk of the Chunks view, of a compiled mesh or font.
@@ -254,10 +257,11 @@ struct Inspected {
     uploaded_color_cube: bool,
     /// A glTF model's input-relative path and this inspection's generation, for the 3D view.
     model: Option<(PathBuf, u64)>,
-    /// A compiled mesh's levels and material slots, and the level the 3D view has.
+    /// A compiled mesh's levels and material slots, and the level and color set the 3D view
+    /// has.
     compiled_mesh: Option<crate::amesh::Preview>,
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
-    uploaded_lod: Option<usize>,
+    uploaded_lod: Option<(usize, Option<usize>)>,
     compiled_bytes: Option<Vec<u8>>,
     /// A model's geometry, for hulls, shape sizes and region materials.
     geometry: Option<model::ModelGeometry>,
@@ -423,6 +427,7 @@ impl Default for UiState {
             mip_levels: HashMap::new(),
             mesh_view: MeshView::default(),
             lod_levels: HashMap::new(),
+            mesh_colors: HashMap::new(),
             mesh_in_3d: true,
             font_atlas: true,
             data_filter: String::new(),
@@ -554,6 +559,13 @@ impl InspectorTab {
                         || model::is_model(&s.path))
                     && s.path.is_file()
             }),
+            Self::VertexColors
+                if inspected
+                    .and_then(|i| i.compiled_mesh.as_ref())
+                    .is_some_and(|m| !m.color_sets.is_empty()) =>
+            {
+                true
+            }
             Self::Locators
             | Self::Shapes
             | Self::Regions
@@ -779,18 +791,20 @@ fn shell(
                     }
                 }
                 (Shown::CompiledMesh, _) => {
-                    let lod = state
-                        .inspected
-                        .as_ref()
-                        .and_then(|i| state.lod_levels.get(&i.path).copied())
+                    let path = state.inspected.as_ref().map(|i| &i.path);
+                    let lod = path
+                        .and_then(|p| state.lod_levels.get(p).copied())
                         .unwrap_or(0);
+                    let color_set = path
+                        .and_then(|p| state.mesh_colors.get(p).copied())
+                        .flatten();
                     canvas_compiled_mesh(
                         ui,
                         rect,
                         state.inspected.as_mut(),
                         &mut preview3d,
                         &mut state.mesh_view,
-                        lod,
+                        (lod, color_set),
                         &mut state.vision,
                     )
                 }
@@ -2170,6 +2184,14 @@ fn right_sidebar(ui: &mut Ui, state: &mut UiState, assets: &Assets, frames: Opti
                             }
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
+                    }
+                }
+                (InspectorTab::VertexColors, Some(inspected), Some(_))
+                    if inspected.compiled_mesh.is_some() =>
+                {
+                    let choice = state.mesh_colors.entry(inspected.path.clone()).or_default();
+                    if let Some(mesh) = &inspected.compiled_mesh {
+                        mesh_colors_tab(ui, mesh, choice);
                     }
                 }
                 (
@@ -3861,6 +3883,23 @@ fn animations_tab(ui: &mut Ui, animations: &[(String, f32)], choice: &mut Option
     }
 }
 
+/// None, then one row per color set of a compiled mesh, the chosen one shown by the canvas;
+/// see docs/features/vertex-colors.md#compiled-meshes.
+fn mesh_colors_tab(ui: &mut Ui, mesh: &crate::amesh::Preview, choice: &mut Option<usize>) {
+    let rows: Vec<_> = std::iter::once(("None".to_owned(), String::new()))
+        .chain(
+            mesh.color_sets
+                .iter()
+                .map(|(name, source)| (name.clone(), crate::amesh::source_name(*source))),
+        )
+        .collect();
+    // Row 0 is None, row `i + 1` set `i`.
+    let chosen = choice.map_or(0, |i| i + 1);
+    if let Some(row) = choice_list(ui, &rows, chosen) {
+        *choice = row.checked_sub(1);
+    }
+}
+
 /// One row per mip level, the chosen one shown by the canvas; see
 /// docs/features/inspector.md#mipmaps-tab.
 fn mipmaps_tab(ui: &mut Ui, levels: &[Image], choice: &mut usize) {
@@ -4680,7 +4719,7 @@ fn canvas_compiled_mesh(
     inspected: Option<&mut Inspected>,
     preview: &mut Preview3d,
     mesh_view: &mut MeshView,
-    lod: usize,
+    (lod, color_set): (usize, Option<usize>),
     vision: &mut Option<Vision>,
 ) {
     let Some(inspected) = inspected else {
@@ -4690,7 +4729,8 @@ fn canvas_compiled_mesh(
         return;
     };
     let lod = lod.min(mesh.levels.len().saturating_sub(1));
-    if inspected.uploaded_lod != Some(lod)
+    let color_set = color_set.filter(|&s| s < mesh.color_sets.len());
+    if inspected.uploaded_lod != Some((lod, color_set))
         && let Some(level) = mesh.levels.get(lod)
     {
         // Every level is fitted by the full mesh's bounds.
@@ -4701,6 +4741,7 @@ fn canvas_compiled_mesh(
         }
         preview.compiled = Some(CompiledUpload {
             level: level.clone(),
+            color_set,
             bounds: [min, max],
             materials: inspected.compiled_materials.clone(),
             mesh_bounds: mesh.bounds,
@@ -4708,7 +4749,7 @@ fn canvas_compiled_mesh(
             meshlet_bounds: mesh.meshlet_bounds.clone(),
             meshlet_boxes: mesh.meshlet_boxes(),
         });
-        inspected.uploaded_lod = Some(lod);
+        inspected.uploaded_lod = Some((lod, color_set));
     }
     preview.compiled_shown = true;
     let MeshView {

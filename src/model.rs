@@ -1460,7 +1460,9 @@ mod tests {
         assert!(info.contains(&("Color sets", "COLOR_0".into())));
         // The preview's first level carries COLOR_0, linear.
         let preview = amesh::preview(mesh).unwrap();
-        assert_eq!(preview.levels[0].colors.len(), 6);
+        assert_eq!(preview.color_sets, [("COLOR_0".to_owned(), 0)]);
+        assert_eq!(preview.levels[0].colors.len(), 1);
+        assert_eq!(preview.levels[0].colors[0].len(), 6);
 
         // Renamed, and an authored gradient along X after it; see
         // docs/features/vertex-colors.md#build.
@@ -1479,8 +1481,11 @@ mod tests {
         let along: Vec<String> = (0..6).map(|v| amesh::cell(mesh, "COLORS", v, 2)).collect();
         let (black, white) = ("0, 0, 0, 255", "255, 255, 255, 255");
         assert_eq!(along, [black, white, black, black, white, black]);
-        // The preview keeps the glTF set whatever its name.
-        assert_eq!(amesh::preview(mesh).unwrap().levels[0].colors.len(), 6);
+        // The preview has every set, one color per corner.
+        let preview = amesh::preview(mesh).unwrap();
+        let names: Vec<&str> = preview.color_sets.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["tint", "along_x"]);
+        assert_eq!(preview.levels[0].colors[1].len(), 6);
         // The 3D view's colors, per corner in the glTF's order.
         let geometry = geometry(&file).unwrap();
         assert_eq!(geometry.color_sets, [0]);
@@ -1516,7 +1521,8 @@ mod tests {
             blended,
             [black, "0, 255, 0, 255", black, black, white, black]
         );
-        assert!(amesh::preview(mesh).unwrap().levels[0].colors.is_empty());
+        let preview = amesh::preview(mesh).unwrap();
+        assert_eq!(preview.color_sets, [("along_x".to_owned(), 1)]);
 
         sidecar.colors[1].blend.as_mut().unwrap().with = "nothing".into();
         let error = compile(&file, "colors", &options, &sidecar).err().unwrap();

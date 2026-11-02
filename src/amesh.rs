@@ -974,8 +974,8 @@ pub struct Level {
     pub uvs: Vec<[f32; 2]>,
     /// `w` is the handedness.
     pub tangents: Vec<[f32; 4]>,
-    /// The first glTF color set, linear; empty without one.
-    pub colors: Vec<[f32; 4]>,
+    /// Each of [`Preview::color_sets`], linear, one color per corner.
+    pub colors: Vec<Vec<[f32; 4]>>,
     /// Empty for reduced levels.
     pub meshlets: Vec<u32>,
     pub submeshes: Vec<u32>,
@@ -1000,6 +1000,9 @@ pub struct Preview {
     pub meshlet_bounds: Vec<MeshletBounds>,
     /// Asset IDs of the material slots (`MATERIAL`).
     pub materials: Vec<u64>,
+    /// Each color set's name and `source`, in file order; see
+    /// docs/features/vertex-colors.md#compiled-meshes.
+    pub color_sets: Vec<(String, u32)>,
     /// Each locator's name and transform in mesh space, joints at their bind pose; see
     /// docs/features/locators.md#compiled-mesh-preview.
     pub locators: Vec<(String, bevy::math::Affine3A)>,
@@ -1092,23 +1095,22 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
             Some(u32::from(u16::from_le_bytes(raw.try_into().ok()?)))
         }
     };
-    // The first glTF set's colors, when the mesh has one; see
-    // docs/features/vertex-colors.md#previews.
+    // Every color set's colors; see docs/features/vertex-colors.md#compiled-meshes.
     let vertex_count = chunks::u32_at(desc, 0, 32, 0).unwrap_or(0) as usize;
-    let color0 = reader
-        .chunk("COLORSET")
-        .and_then(|sets| (0..sets.len() / 32).find(|&s| chunks::u32_at(sets, s, 32, 20) == Some(0)))
-        .and_then(|s| {
+    let color_sets = color_sets(&reader);
+    let set_colors: Vec<&[u8]> = (0..color_sets.len())
+        .map(|s| {
             reader
-                .chunk("COLORS")?
-                .get(s * vertex_count * 4..(s + 1) * vertex_count * 4)
-        });
+                .chunk("COLORS")
+                .and_then(|c| c.get(s * vertex_count * 4..(s + 1) * vertex_count * 4))
+                .unwrap_or_default()
+        })
+        .collect();
     let corner = |level: &mut Level, i: usize| -> Option<()> {
-        if let Some(colors) = color0 {
+        level.colors.resize(set_colors.len(), Vec::new());
+        for (colors, out) in set_colors.iter().zip(&mut level.colors) {
             let c = colors.get(i * 4..i * 4 + 4)?;
-            level
-                .colors
-                .push([0, 1, 2, 3].map(|k| f32::from(c[k]) / 255.0));
+            out.push([0, 1, 2, 3].map(|k| f32::from(c[k]) / 255.0));
         }
         let base = i.checked_mul(28)?;
         let raw = vertices.get(base..base + 28)?;
@@ -1209,6 +1211,7 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
     let mesh_bounds = reader.require("BOUNDS")?;
     let meshlet_bounds = reader.require("MLBOUNDS")?;
     Ok(Preview {
+        color_sets,
         locators: preview_locators(&reader),
         levels,
         bounds: Bounds::read(mesh_bounds, 0).ok_or_else(bad)?,
@@ -1344,6 +1347,14 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
 
 /// The names of a mesh's color sets, in order; see docs/spec/amesh.md#color-sets.
 pub fn color_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
+    color_sets(reader)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// A mesh's color sets: name and `source`, in order.
+fn color_sets(reader: &chunks::Reader<'_>) -> Vec<(String, u32)> {
     let (Some(sets), strings) = (reader.chunk("COLORSET"), reader.chunk("STRINGS")) else {
         return Vec::new();
     };
@@ -1351,12 +1362,22 @@ pub fn color_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
         .map(|s| {
             let at = chunks::u32_at(sets, s, 32, 8).unwrap_or(0) as usize;
             let len = chunks::u32_at(sets, s, 32, 12).unwrap_or(0) as usize;
-            strings
+            let name = strings
                 .and_then(|t| t.get(at..at + len))
                 .map(|t| String::from_utf8_lossy(t).into_owned())
-                .unwrap_or_default()
+                .unwrap_or_default();
+            (name, chunks::u32_at(sets, s, 32, 20).unwrap_or(0))
         })
         .collect()
+}
+
+/// `COLORSET.source` as shown: `glTF`, `assetc` or the number.
+pub fn source_name(source: u32) -> String {
+    match source {
+        0 => "glTF".into(),
+        1 => "assetc".into(),
+        other => other.to_string(),
+    }
 }
 
 /// `DESC.flags` as `0x07 (tangents, skinned, levels of detail)`.
@@ -1696,11 +1717,7 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
                     0 => "RGBA8".into(),
                     other => other.to_string(),
                 },
-                _ => match u32_at(row, 32, 20) {
-                    0 => "glTF".into(),
-                    1 => "assetc".into(),
-                    other => other.to_string(),
-                },
+                _ => source_name(u32_at(row, 32, 20)),
             }
         }
         "COLORS" => {
