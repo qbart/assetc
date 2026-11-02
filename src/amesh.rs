@@ -226,6 +226,7 @@ pub struct Joint {
 /// A locator ready to write; see docs/spec/amesh.md#locators.
 pub struct Locator {
     pub name: String,
+    pub tags: Vec<String>,
     /// Index into the skeleton; `-1` is mesh space.
     pub joint: i32,
     pub translation: [f32; 3],
@@ -608,22 +609,42 @@ pub fn encode(
             .chunk("SKELETON", bones.take());
     }
     if !locators.is_empty() {
-        let (mut records, mut names) = (Bytes::default(), Vec::new());
-        for l in locators {
+        let (mut records, mut names, mut tags) = (Bytes::default(), Vec::new(), Bytes::default());
+        // Names first, then the tags' text; see docs/spec/amesh.md#locators.
+        let name_offsets: Vec<u32> = locators
+            .iter()
+            .map(|l| {
+                let at = names.len() as u32;
+                names.extend_from_slice(l.name.as_bytes());
+                at
+            })
+            .collect();
+        let mut tag_count = 0u16;
+        for (l, at) in locators.iter().zip(name_offsets) {
             records
                 .u64(crate::hash::fnv1a64(l.name.as_bytes()))
-                .u32(names.len() as u32)
+                .u32(at)
                 .u32(l.name.len() as u32)
                 .i32(l.joint)
                 .f32s(&l.translation)
                 .f32s(&l.rotation)
                 .f32s(&l.scale)
-                .u32(0);
-            names.extend_from_slice(l.name.as_bytes());
+                .u16(if l.tags.is_empty() { 0 } else { tag_count })
+                .u16(l.tags.len() as u16);
+            for tag in &l.tags {
+                tags.u64(crate::hash::fnv1a64(tag.as_bytes()))
+                    .u32(names.len() as u32)
+                    .u32(tag.len() as u32);
+                names.extend_from_slice(tag.as_bytes());
+                tag_count += 1;
+            }
         }
         writer
             .chunk("LOCATORS", records.take())
             .chunk("LOCNAMES", names);
+        if tag_count > 0 {
+            writer.chunk("LOCTAGS", tags.take());
+        }
     }
     let summary = Summary {
         vertices: vertices.len(),
@@ -1017,6 +1038,7 @@ pub fn describe(name: &str) -> &'static str {
         "SKELETON" => "Skeleton",
         "LOCATORS" => "Locators",
         "LOCNAMES" => "Locator names",
+        "LOCTAGS" => "Locator tags",
         _ => "Unknown chunk",
     }
 }
@@ -1096,9 +1118,18 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
         "SKIN" => array(vec!["Joints", "Weights"], 24),
         "SKELETON" => array(vec!["Parent", "Translation", "Rotation", "Scale"], 112),
         "LOCATORS" => array(
-            vec!["Name", "Hash", "Joint", "Translation", "Rotation", "Scale"],
+            vec![
+                "Name",
+                "Hash",
+                "Joint",
+                "Translation",
+                "Rotation",
+                "Scale",
+                "Tags",
+            ],
             64,
         ),
+        "LOCTAGS" => array(vec!["Name", "Hash"], 16),
         _ => Table {
             columns: vec!["Offset", "Bytes"],
             rows: payload.len().div_ceil(16),
@@ -1239,28 +1270,47 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
             2 => vector(&floats(row, 112, 76, 4)),
             _ => vector(&floats(row, 112, 92, 3)),
         },
-        "LOCATORS" => match column {
-            0 => {
-                let (at, len) = (u32_at(row, 64, 8) as usize, u32_at(row, 64, 12) as usize);
-                reader
-                    .chunk("LOCNAMES")
-                    .and_then(|names| names.get(at..at + len))
-                    .map(|name| String::from_utf8_lossy(name).into_owned())
+        "LOCATORS" | "LOCTAGS" => {
+            let stride = if name == "LOCATORS" { 64 } else { 16 };
+            let names = reader.chunk("LOCNAMES").unwrap_or_default();
+            // The text at an (offset, length) pair of a record of `chunk`.
+            let text = |chunk: &[u8], stride: usize, row: usize| {
+                let at = chunks::u32_at(chunk, row, stride, 8).unwrap_or(0) as usize;
+                let len = chunks::u32_at(chunk, row, stride, 12).unwrap_or(0) as usize;
+                names
+                    .get(at..at + len)
+                    .map(|n| String::from_utf8_lossy(n).into_owned())
                     .unwrap_or_default()
+            };
+            match column {
+                0 => text(p, stride, row),
+                1 => format!(
+                    "{:#018x}",
+                    p.get(row * stride..row * stride + 8)
+                        .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
+                ),
+                _ if name == "LOCTAGS" => String::new(),
+                2 => match u32_at(row, 64, 16) as i32 {
+                    -1 => "—".into(),
+                    joint => joint.to_string(),
+                },
+                3 => vector(&floats(row, 64, 20, 3)),
+                4 => vector(&floats(row, 64, 32, 4)),
+                5 => vector(&floats(row, 64, 48, 3)),
+                _ => {
+                    let u16_at = |at: usize| {
+                        p.get(row * 64 + at..row * 64 + at + 2)
+                            .map_or(0, |b| u16::from_le_bytes([b[0], b[1]]))
+                            as usize
+                    };
+                    let tags = reader.chunk("LOCTAGS").unwrap_or_default();
+                    (u16_at(60)..u16_at(60) + u16_at(62))
+                        .map(|t| text(tags, 16, t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
             }
-            1 => format!(
-                "{:#018x}",
-                p.get(row * 64..row * 64 + 8)
-                    .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
-            ),
-            2 => match u32_at(row, 64, 16) as i32 {
-                -1 => "—".into(),
-                joint => joint.to_string(),
-            },
-            3 => vector(&floats(row, 64, 20, 3)),
-            4 => vector(&floats(row, 64, 32, 4)),
-            _ => vector(&floats(row, 64, 48, 3)),
-        },
+        }
         _ => {
             let bytes = p.get(row * 16..(row * 16 + 16).min(p.len())).unwrap_or(&[]);
             if column == 0 {
@@ -1564,6 +1614,7 @@ meshlet_max_triangles = 64
             Some(&[joint]),
             &[Locator {
                 name: "hand".into(),
+                tags: vec!["weapon".into(), "right".into()],
                 joint: 0,
                 translation: [1.0, 2.0, 3.0],
                 rotation: [0.0, 0.0, 0.0, 1.0],
@@ -1584,7 +1635,14 @@ meshlet_max_triangles = 64
         assert_eq!(&locators[..8], crate::hash::fnv1a64(b"hand").to_le_bytes());
         assert_eq!(chunks::u32_at(locators, 0, 64, 16), Some(0));
         assert_eq!(chunks::f32_at(locators, 0, 64, 28), Some(3.0));
-        assert_eq!(reader.require("LOCNAMES").unwrap(), b"hand");
+        assert_eq!(reader.require("LOCNAMES").unwrap(), b"handweaponright");
+        assert_eq!(&locators[60..64], [0, 0, 2, 0]);
+        assert_eq!(cell(&bytes, "LOCATORS", 0, 7), "weapon, right");
+        assert_eq!(cell(&bytes, "LOCTAGS", 1, 1), "right");
+        assert_eq!(
+            cell(&bytes, "LOCTAGS", 0, 2),
+            format!("{:#018x}", crate::hash::fnv1a64(b"weapon"))
+        );
         assert!(rows(&bytes).unwrap().contains(&("Locators", "1".into())));
         assert_eq!(cell(&bytes, "LOCATORS", 0, 1), "hand");
         assert_eq!(cell(&bytes, "LOCATORS", 0, 3), "0");

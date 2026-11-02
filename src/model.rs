@@ -199,6 +199,7 @@ fn resolve_locators(
             }
             Ok(amesh::Locator {
                 name: l.name.clone(),
+                tags: l.tags.clone(),
                 joint,
                 translation: l.translation,
                 rotation: rotation.normalize().to_array(),

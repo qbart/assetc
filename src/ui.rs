@@ -5526,6 +5526,23 @@ fn locator_fields(
     }
 
     let locator = &mut locators[i];
+    // Edited as text; split into tags when it loses focus.
+    prop_row(ui, "Tags", |ui, width| {
+        let id = ui.id().with("locator_tags");
+        let mut text = ui
+            .data(|d| d.get_temp::<String>(id))
+            .unwrap_or_else(|| locator.tags.join(", "));
+        let field = egui::TextEdit::singleline(&mut text).hint_text("weapon, left");
+        let response = ui.add_sized(vec2(width, 22.0), field);
+        if response.has_focus() {
+            ui.data_mut(|d| d.insert_temp(id, text));
+        } else {
+            if response.lost_focus() {
+                locator.tags = amod::parse_tags(&text);
+            }
+            ui.data_mut(|d| d.remove::<String>(id));
+        }
+    });
     color_row(ui, &mut locator.color);
     ui.add_enabled_ui(!animating, |ui| {
         let mut joint = locator.joint.clone();

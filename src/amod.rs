@@ -24,6 +24,9 @@ pub struct Amod {
 #[serde(deny_unknown_fields)]
 pub struct Locator {
     pub name: String,
+    /// Names the game can group locators by; see docs/features/locators.md#locator.
+    #[serde(default)]
+    pub tags: Vec<String>,
     /// The first skin's joint, by node name; `None` is model space.
     #[serde(default)]
     pub joint: Option<String>,
@@ -54,6 +57,7 @@ impl Locator {
     pub fn new(name: String) -> Self {
         Self {
             name,
+            tags: Vec::new(),
             joint: None,
             translation: [0.0; 3],
             rotation: identity(),
@@ -62,6 +66,17 @@ impl Locator {
             color: None,
         }
     }
+}
+
+/// Tags typed as `text`: split at commas, trimmed, without empty or repeated ones.
+pub fn parse_tags(text: &str) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for tag in text.split(',').map(str::trim) {
+        if !tag.is_empty() && !tags.iter().any(|t| t == tag) {
+            tags.push(tag.to_owned());
+        }
+    }
+    tags
 }
 
 /// The RGB of a locator's `#rrggbb` color.
@@ -114,6 +129,14 @@ impl Amod {
             if locators[..i].iter().any(|l| l.name == locator.name) {
                 return Err(format!("locator {:?}: name used twice", locator.name));
             }
+            for (k, tag) in locator.tags.iter().enumerate() {
+                if tag.is_empty() || tag.contains(',') || locator.tags[..k].contains(tag) {
+                    return Err(format!(
+                        "locator {:?}: tag {tag:?} is empty, has a comma or is repeated",
+                        locator.name
+                    ));
+                }
+            }
             if let Some(color) = &locator.color
                 && locator_color(color).is_none()
             {
@@ -144,6 +167,14 @@ impl Amod {
             };
             out += "\n[[locators]]\n";
             out += &format!("name = {}\n", toml::Value::from(locator.name.as_str()));
+            if !locator.tags.is_empty() {
+                let tags: Vec<String> = locator
+                    .tags
+                    .iter()
+                    .map(|t| toml::Value::from(t.as_str()).to_string())
+                    .collect();
+                out += &format!("tags = [{}]\n", tags.join(", "));
+            }
             if let Some(joint) = &locator.joint {
                 out += &format!("joint = {}\n", toml::Value::from(joint.as_str()));
             }
@@ -289,6 +320,28 @@ mod tests {
         );
         assert!(colored.to_toml().ends_with("color = \"#22c55e\"\n"));
         assert!(Amod::parse("[[locators]]\nname = \"a\"\ncolor = \"red\"\n").is_err());
+
+        // Tags: written after the name, typed with commas.
+        let tagged = Amod {
+            locators: vec![Locator {
+                tags: vec!["weapon".into(), "left hand".into()],
+                ..Locator::new("a".into())
+            }],
+            ..Default::default()
+        };
+        let text = tagged.to_toml();
+        assert!(
+            text.starts_with("[[locators]]\nname = \"a\"\ntags = [\"weapon\", \"left hand\"]\n"),
+            "{text}"
+        );
+        assert_eq!(Amod::parse(&text).unwrap(), tagged);
+        assert_eq!(
+            parse_tags(" weapon, ,left hand,weapon,"),
+            ["weapon", "left hand"]
+        );
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\ntags = [\"\"]\n").is_err());
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\ntags = [\"a,b\"]\n").is_err());
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\ntags = [\"x\", \"x\"]\n").is_err());
     }
 
     #[test]
