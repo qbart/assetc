@@ -3967,9 +3967,9 @@ fn animations_tab(
                             .count()
                     });
                     let detail = match count {
-                        0 => format!("{duration:.2} s"),
-                        1 => format!("1 event · {duration:.2} s"),
-                        n => format!("{n} events · {duration:.2} s"),
+                        0 => format!("{duration:.3} s"),
+                        1 => format!("1 event · {duration:.3} s"),
+                        n => format!("{n} events · {duration:.3} s"),
                     };
                     let (_, folded) = ui
                         .push_id(("animation", a), |ui| {
@@ -4056,6 +4056,20 @@ fn event_list(ui: &mut Ui, edit: &mut MeshEdit, animation: &str, duration: f32, 
             FontId::proportional(14.0),
             TEXT,
         );
+        // Delete at the row's right end, over the row so it takes its own clicks.
+        let bin = Rect::from_min_max(pos2(rect.right() - 28.0, rect.top()), rect.max);
+        let deleted = ui
+            .scope_builder(
+                UiBuilder::new()
+                    .max_rect(bin)
+                    .layout(Layout::right_to_left(Align::Center)),
+                |ui| icon_button(ui, Icon::Trash2, "Delete", true).clicked(),
+            )
+            .inner;
+        if deleted {
+            delete = Some(i);
+            continue;
+        }
         if response.clicked() {
             edit.event = (!chosen).then_some(i);
         }
@@ -4080,12 +4094,6 @@ fn event_list(ui: &mut Ui, edit: &mut MeshEdit, animation: &str, duration: f32, 
             ui.add_space(4.0);
             ui.label(RichText::new("Properties").size(13.0).color(TEXT_WEAK));
             properties_editor(ui, &mut event.properties);
-            ui.add_space(4.0);
-            let button =
-                egui::Button::image_and_text(Icon::Trash2.image(14.0, TEXT), "Delete event");
-            if ui.add(button).clicked() {
-                delete = Some(i);
-            }
             ui.add_space(8.0);
         });
     }
@@ -7606,7 +7614,7 @@ fn timeline(
                 state.paused = !state.paused;
             }
             ui.label(
-                RichText::new(format!("{now:.2} / {duration:.2} s"))
+                RichText::new(format!("{now:.3} / {duration:.3} s"))
                     .monospace()
                     .color(TEXT),
             );
