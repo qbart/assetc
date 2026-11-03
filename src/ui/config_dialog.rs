@@ -483,6 +483,14 @@ fn tables_item(tables: Vec<Table>) -> Item {
     Item::ArrayOfTables(array)
 }
 
+/// The button at a row's end, while the scope sets the value.
+#[derive(Clone, Copy, PartialEq)]
+enum RowButton {
+    Reset,
+    Remove,
+    None,
+}
+
 /// What a row asks for.
 enum Change {
     Set(Item),
@@ -571,25 +579,30 @@ pub(super) fn config_dialog(ctx: &egui::Context, dialog: &mut ConfigDialog) -> D
                     .id_salt("config_fields")
                     .auto_shrink(false)
                     .show(ui, |ui| {
-                        let target = dialog.target.as_deref();
-                        let defaults = &dialog.defaults;
-                        match dialog.section {
-                            Section::General => {
-                                fields(ui, doc, defaults, target, &GENERAL, &mut changed)
+                        ui.set_width(ui.available_width());
+                        ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                            let target = dialog.target.as_deref();
+                            let defaults = &dialog.defaults;
+                            match dialog.section {
+                                Section::General => {
+                                    fields(ui, doc, defaults, target, &GENERAL, &mut changed)
+                                }
+                                Section::Textures => {
+                                    fields(ui, doc, defaults, target, &TEXTURES, &mut changed)
+                                }
+                                Section::Meshes => {
+                                    fields(ui, doc, defaults, target, &MESHES, &mut changed);
+                                    ui.add_space(12.0);
+                                    overrides(ui, doc, defaults, target, &mut changed);
+                                }
+                                Section::Locators => {
+                                    presets(ui, doc, target, &dialog.models, &mut changed)
+                                }
+                                Section::Pack => {
+                                    fields(ui, doc, defaults, target, &PACK, &mut changed)
+                                }
                             }
-                            Section::Textures => {
-                                fields(ui, doc, defaults, target, &TEXTURES, &mut changed)
-                            }
-                            Section::Meshes => {
-                                fields(ui, doc, defaults, target, &MESHES, &mut changed);
-                                ui.add_space(12.0);
-                                overrides(ui, doc, defaults, target, &mut changed);
-                            }
-                            Section::Locators => {
-                                presets(ui, doc, target, &dialog.models, &mut changed)
-                            }
-                            Section::Pack => fields(ui, doc, defaults, target, &PACK, &mut changed),
-                        }
+                        });
                     });
             });
             ui.add_space(12.0);
@@ -779,7 +792,7 @@ fn fields(
         let change = ui
             .horizontal(|ui| {
                 ui.add_enabled_ui(!shared, |ui| {
-                    field_row(ui, f, item.as_ref(), set_here, shared, true)
+                    field_row(ui, f, item.as_ref(), set_here, shared, RowButton::Reset)
                 })
                 .inner
             })
@@ -799,14 +812,14 @@ fn fields(
     }
 }
 
-/// A setting's name, editor and reset (`resettable`) or remove button.
+/// A setting's name, editor and reset or remove button.
 fn field_row(
     ui: &mut Ui,
     f: &Field,
     item: Option<&Item>,
     set_here: bool,
     shared: bool,
-    resettable: bool,
+    button: RowButton,
 ) -> Option<Change> {
     let color = if set_here { TEXT } else { TEXT_WEAK };
     let (label, _) = ui.allocate_exact_size(vec2(180.0, 24.0), Sense::hover());
@@ -825,15 +838,15 @@ fn field_row(
     ui.interact(label, ui.id().with(("help", f.key)), Sense::hover())
         .on_hover_text(help);
     let mut change = editor(ui, f, item, color).map(Change::Set);
-    if set_here && !shared {
-        let (icon, tip) = if resettable {
-            (Icon::RotateCcw, "Reset")
-        } else {
-            (Icon::X, "Remove")
-        };
-        if icon_button(ui, icon, tip, true).clicked() {
-            change = Some(Change::Reset);
-        }
+    let icon = match button {
+        RowButton::Reset => Some((Icon::RotateCcw, "Reset")),
+        RowButton::Remove => Some((Icon::X, "Remove")),
+        RowButton::None => None,
+    };
+    if let Some((icon, tip)) = icon.filter(|_| set_here && !shared)
+        && icon_button(ui, icon, tip, true).clicked()
+    {
+        change = Some(Change::Reset);
     }
     change
 }
@@ -990,9 +1003,14 @@ fn overrides(
                     );
                     let mut entry_changed = false;
                     ui.horizontal(|ui| {
-                        if let Some(Change::Set(item)) =
-                            field_row(ui, &globs, entry.get("match"), set_here, false, false)
-                        {
+                        if let Some(Change::Set(item)) = field_row(
+                            ui,
+                            &globs,
+                            entry.get("match"),
+                            set_here,
+                            false,
+                            RowButton::None,
+                        ) {
                             entry.insert("match", item);
                             entry_changed = true;
                         }
@@ -1004,7 +1022,14 @@ fn overrides(
                         .collect();
                     for f in present {
                         ui.horizontal(|ui| {
-                            match field_row(ui, f, entry.get(f.key), set_here, false, false) {
+                            match field_row(
+                                ui,
+                                f,
+                                entry.get(f.key),
+                                set_here,
+                                false,
+                                RowButton::Remove,
+                            ) {
                                 Some(Change::Set(item)) => {
                                     entry.insert(f.key, item);
                                     entry_changed = true;
@@ -1132,9 +1157,14 @@ fn presets(
                     "Globs of the models it applies to; empty: every model",
                 );
                 ui.horizontal(|ui| {
-                    if let Some(Change::Set(item)) =
-                        field_row(ui, &globs, entry.get("match"), set_here, false, false)
-                    {
+                    if let Some(Change::Set(item)) = field_row(
+                        ui,
+                        &globs,
+                        entry.get("match"),
+                        set_here,
+                        false,
+                        RowButton::None,
+                    ) {
                         // An empty list is no `match`: every model.
                         if strings(Some(&item)).is_empty() {
                             entry.remove("match");
