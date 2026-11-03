@@ -71,6 +71,15 @@ pub enum Job {
     Font { source: String },
     /// The atlas of a font, written by its [`Job::Font`].
     FontPart { source: String },
+    /// An atlas folder (relative to `input`): writes its `.aatlas` and its texture; see
+    /// docs/features/atlases.md#build.
+    Atlas {
+        source: String,
+        color: ColorSpace,
+        mipmaps: bool,
+    },
+    /// The texture of an atlas, written by its [`Job::Atlas`].
+    AtlasPart { source: String },
     /// An HDR environment map (relative to `input`) as a half-float cubemap; see
     /// docs/features/hdr.md#build.
     Cubemap { source: String },
@@ -109,7 +118,9 @@ impl Asset {
             | Job::Font { source }
             | Job::FontPart { source }
             | Job::Data { source, .. }
-            | Job::Cubemap { source } => source.clone(),
+            | Job::Cubemap { source }
+            | Job::Atlas { source, .. }
+            | Job::AtlasPart { source } => source.clone(),
         }
     }
 }
@@ -214,11 +225,53 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
     let meshes = MeshSettings::new(&config.meshes).map_err(Error::Meshes)?;
     let nodes = tree::scan(input).map_err(|e| Error::Io(input.to_path_buf(), e))?;
     let mut files = Vec::new();
-    flatten(&nodes, &mut files);
+    // Atlas folders are assets of their own; their images are not built alone.
+    let mut atlases = Vec::new();
+    flatten_atlases(&nodes, &mut files, &mut atlases);
 
     let mut plan = Plan::default();
     let mut sources = Vec::new();
     let mut groups: BTreeMap<(String, String), Group> = BTreeMap::new();
+    for dir in atlases {
+        let rel = match relative(input, dir) {
+            Ok(rel) => rel,
+            Err(message) => {
+                plan.failures.push(Failure {
+                    source: dir.display().to_string(),
+                    message,
+                });
+                continue;
+            }
+        };
+        // `P.aatlas` writes `P.ktx2` too; see docs/features/atlases.md#build.
+        let p = strip_extension(&rel).to_owned();
+        for (kind, asset_path, job) in [
+            (
+                Kind::Atlas,
+                format!("{p}.aatlas"),
+                Job::Atlas {
+                    source: rel.clone(),
+                    color: settings.color_space(&rel),
+                    mipmaps: settings.mipmaps(&rel),
+                },
+            ),
+            (
+                Kind::Texture,
+                p.clone(),
+                Job::AtlasPart {
+                    source: rel.clone(),
+                },
+            ),
+        ] {
+            plan.assets.push(Asset {
+                id: fnv1a64(asset_path.as_bytes()),
+                kind,
+                output: kind.output_path(&asset_path),
+                asset_path,
+                job,
+            });
+        }
+    }
     for file in files {
         let rel = match relative(input, file) {
             Ok(rel) => rel,
@@ -540,9 +593,17 @@ fn reject_bad_ids(plan: &mut Plan) {
 }
 
 pub fn flatten<'a>(nodes: &'a [Node], files: &mut Vec<&'a Path>) {
+    let mut atlases = Vec::new();
+    flatten_atlases(nodes, files, &mut atlases);
+    files.extend(atlases);
+}
+
+/// Files, and apart from them the atlas folders (not looked into).
+fn flatten_atlases<'a>(nodes: &'a [Node], files: &mut Vec<&'a Path>, atlases: &mut Vec<&'a Path>) {
     for node in nodes {
         match &node.children {
-            Some(children) => flatten(children, files),
+            Some(_) if crate::atlas::is_atlas(&node.path) => atlases.push(&node.path),
+            Some(children) => flatten_atlases(children, files, atlases),
             None => files.push(&node.path),
         }
     }

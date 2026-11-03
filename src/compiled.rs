@@ -398,9 +398,16 @@ pub fn encode_tree(tree: &Graph) -> Vec<u8> {
 
 /// The format of a compiled schema, data, graph or tree file.
 pub fn format_of(bytes: &[u8]) -> Option<&'static str> {
-    [ATYPE, AREC, AGRAPH, ATREE, crate::aanim::FORMAT]
-        .into_iter()
-        .find(|f| chunks::Reader::parse(bytes, f).is_ok())
+    [
+        ATYPE,
+        AREC,
+        AGRAPH,
+        ATREE,
+        crate::aanim::FORMAT,
+        crate::atlas::FORMAT,
+    ]
+    .into_iter()
+    .find(|f| chunks::Reader::parse(bytes, f).is_ok())
 }
 
 /// Info rows: the kind's counts from `DESC`; see docs/features/inspector.md#compiled-data.
@@ -409,6 +416,18 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     let reader = chunks::Reader::parse(bytes, format)?;
     let desc = reader.require("DESC")?;
     let field = |at| chunks::u32_at(desc, 0, 16, at).unwrap_or(0).to_string();
+    if format == crate::atlas::FORMAT {
+        let u = |at| chunks::u32_at(desc, 0, 48, at).unwrap_or(0);
+        let packing = match u(12) {
+            0 => format!("grid {} × {}", u(16), u(8).div_ceil(u(16).max(1))),
+            _ => "pack".into(),
+        };
+        return Ok(vec![
+            ("Frames", u(8).to_string()),
+            ("Size", format!("{} × {} px", u(0), u(4))),
+            ("Packing", packing),
+        ]);
+    }
     let names: [&'static str; 3] = match format {
         ATYPE => ["Types", "Fields", "Values"],
         AREC => ["Instances", "Values", "Types"],
@@ -568,6 +587,40 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
             32,
             vec![("Key", Text(8)), ("Type", PropType), ("Value", PropValue)],
         ),
+        // Atlases; see docs/spec/aatlas.md.
+        ("AATLAS", "DESC") => (
+            48,
+            vec![
+                ("width", U32(0)),
+                ("height", U32(4)),
+                ("frame_count", U32(8)),
+                ("packing", U32(12)),
+                ("columns", U32(16)),
+                ("cell_width", U32(20)),
+                ("cell_height", U32(24)),
+                ("padding", U32(28)),
+                ("texture", Hex(32)),
+            ],
+        ),
+        ("AATLAS", "FRAMES") => (
+            64,
+            vec![
+                ("Name", Text(8)),
+                ("Hash", Hex(0)),
+                ("X", U32(16)),
+                ("Y", U32(20)),
+                ("Width", U32(24)),
+                ("Height", U32(28)),
+                ("Source W", U32(32)),
+                ("Source H", U32(36)),
+                ("Offset X", U32(40)),
+                ("Offset Y", U32(44)),
+                ("U0", F32(48)),
+                ("V0", F32(52)),
+                ("U1", F32(56)),
+                ("V1", F32(60)),
+            ],
+        ),
         // Animations; see docs/spec/aanim.md.
         ("AANIM", "DESC") => (
             32,
@@ -641,6 +694,7 @@ pub fn describe(name: &str) -> &'static str {
         "EVENTS" => "Events",
         "EVPROPS" => "Event properties",
         "EVTEXT" => "Event text",
+        "FRAMES" => "Frames",
         _ => "Unknown chunk",
     }
 }

@@ -51,6 +51,9 @@ pub struct Inspection {
     pub compiled_materials: Vec<Option<MaterialPreview>>,
     /// `compiled_bytes` is an `.afont`, and `preview` its atlas (if found).
     pub compiled_font: bool,
+    /// An atlas' frames (name and rectangle in `preview`), drawn over it; see
+    /// docs/features/atlases.md#inspector.
+    pub atlas_frames: Vec<(String, [u32; 4])>,
     /// `compiled_bytes` is a compiled schema, data file, graph or tree, shown as its chunks;
     /// see docs/features/inspector.md#compiled-data.
     pub compiled_data: bool,
@@ -121,6 +124,7 @@ enum Kind {
     CompiledData,
     CompiledGraph,
     CompiledTree,
+    CompiledAtlas,
     Manifest,
     Ignored,
     File,
@@ -151,6 +155,7 @@ impl Kind {
             Self::CompiledData => "Compiled data",
             Self::CompiledGraph => "Compiled graph",
             Self::CompiledTree => "Compiled tree",
+            Self::CompiledAtlas => "Compiled atlas",
             Self::Manifest => "Manifest",
             Self::Ignored => "Ignored",
             Self::File => "File",
@@ -175,7 +180,11 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
     let meta = match fs::metadata(file) {
         Ok(meta) if meta.is_file() => meta,
         Ok(meta) if meta.is_dir() => {
-            folder(location, file, &mut out);
+            if location == Location::Input && crate::atlas::is_atlas(file) {
+                atlas_folder(project, file, &mut out);
+            } else {
+                folder(location, file, &mut out);
+            }
             return out;
         }
         _ => {
@@ -226,6 +235,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Output if has_ext(manifest::Kind::Data.extension()) => Kind::CompiledData,
         Location::Output if has_ext(manifest::Kind::Graph.extension()) => Kind::CompiledGraph,
         Location::Output if has_ext(manifest::Kind::Tree.extension()) => Kind::CompiledTree,
+        Location::Output if has_ext(manifest::Kind::Atlas.extension()) => Kind::CompiledAtlas,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output => Kind::File,
     };
@@ -297,17 +307,19 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
                 out.compiled_bytes = fs::read(file).ok();
             }),
         Kind::CompiledFont => compiled_font(project, file, &rel, &mut out),
-        Kind::CompiledSchema | Kind::CompiledData | Kind::CompiledGraph | Kind::CompiledTree => {
-            fs::read(file)
-                .map_err(|e| e.to_string())
-                .and_then(|bytes| Ok((crate::compiled::rows(&bytes)?, bytes)))
-                .map(|(rows, bytes)| {
-                    out.rows.extend(rows);
-                    asset_rows(&rel, &mut out);
-                    out.compiled_data = true;
-                    out.compiled_bytes = Some(bytes);
-                })
-        }
+        Kind::CompiledSchema
+        | Kind::CompiledData
+        | Kind::CompiledGraph
+        | Kind::CompiledTree
+        | Kind::CompiledAtlas => fs::read(file)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| Ok((crate::compiled::rows(&bytes)?, bytes)))
+            .map(|(rows, bytes)| {
+                out.rows.extend(rows);
+                asset_rows(&rel, &mut out);
+                out.compiled_data = true;
+                out.compiled_bytes = Some(bytes);
+            }),
         Kind::Manifest => manifest(file, &mut out),
         Kind::Ignored | Kind::File => Ok(()),
     };
@@ -886,6 +898,53 @@ fn color_lut(
     );
     out.lut = Some(lut);
     Ok(())
+}
+
+/// An atlas folder: packed as the build would, its frames kept for the canvas; see
+/// docs/features/atlases.md#inspector.
+fn atlas_folder(project: &Project, dir: &Path, out: &mut Inspection) {
+    out.rows.push(("Kind", "Atlas".into()));
+    let rel = project
+        .input_dir()
+        .and_then(|input| dir.strip_prefix(input).ok().map(Path::to_path_buf))
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default();
+    let (config, packed) = match crate::atlas::build(dir) {
+        Ok(built) => built,
+        Err(message) => {
+            out.rows.push(("Error", message.clone()));
+            out.note = Some(message);
+            return;
+        }
+    };
+    let (width, height) = packed.image.dimensions();
+    out.rows.push(("Frames", packed.frames.len().to_string()));
+    out.rows.push(("Size", format!("{width} × {height} px")));
+    out.rows
+        .push(("Packing", crate::atlas::packing_summary(&config, &packed)));
+    let asset_path = strip_extension(&rel).to_owned();
+    asset_rows(&asset_path, out);
+    if let Ok(settings) = crate::texture::Settings::new(&project.config.textures) {
+        let color = match settings.color_space(&rel) {
+            ColorSpace::Srgb => "sRGB",
+            ColorSpace::Linear => "linear",
+        };
+        out.rows.push(("Color", color.into()));
+        let levels = if settings.mipmaps(&rel) {
+            texture::level_count(width, height)
+        } else {
+            1
+        };
+        out.rows.push(("Mip levels", levels.to_string()));
+    }
+    output_row(project, &format!("{asset_path}.ktx2"), "", out);
+    out.atlas_frames = packed
+        .frames
+        .iter()
+        .map(|f| (f.name.clone(), [f.x, f.y, f.width, f.height]))
+        .collect();
+    out.channels = [true; 4];
+    out.preview = Some(to_image(packed.image));
 }
 
 fn folder(location: Location, dir: &Path, out: &mut Inspection) {

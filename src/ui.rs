@@ -310,6 +310,8 @@ struct Inspected {
     graph: Option<Result<GraphEdit, String>>,
     /// A compiled animation's playback; see docs/features/models.md#compiled-animation-preview.
     anim_player: AnimPlayer,
+    /// An atlas folder's settings: (being edited, as saved), or why they can't be read.
+    atlas: Option<Result<(crate::atlas::AtlasConfig, crate::atlas::AtlasConfig), String>>,
     /// An `.adata` file being edited with its schema, or why it can't be read and its text.
     data: Option<Result<DataEdit, (String, String)>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
@@ -549,6 +551,7 @@ enum InspectorTab {
     Types,
     Graph,
     Tree,
+    Atlas,
     Instances,
     Animations,
     Mipmaps,
@@ -557,7 +560,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 19] = [
+    const ALL: [Self; 20] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -572,6 +575,7 @@ impl InspectorTab {
         Self::Types,
         Self::Graph,
         Self::Tree,
+        Self::Atlas,
         Self::Instances,
         Self::Animations,
         Self::Mipmaps,
@@ -594,6 +598,7 @@ impl InspectorTab {
             Self::Types => Icon::Braces,
             Self::Graph => Icon::GraphStar,
             Self::Tree => Icon::ListTree,
+            Self::Atlas => Icon::Map,
             Self::Instances => Icon::Package,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
@@ -618,6 +623,7 @@ impl InspectorTab {
             Self::Types => "Types",
             Self::Graph => "Graph",
             Self::Tree => "Tree",
+            Self::Atlas => "Atlas",
             Self::Instances => "Instances",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
@@ -674,6 +680,9 @@ impl InspectorTab {
                 s.location == Location::Input
                     && crate::agraph::is_graph(&s.path)
                     && s.path.is_file()
+            }),
+            Self::Atlas => selection.is_some_and(|s| {
+                s.location == Location::Input && crate::atlas::is_atlas(&s.path) && s.path.is_dir()
             }),
             Self::Tree => selection.is_some_and(|s| {
                 s.location == Location::Input && crate::atree::is_tree(&s.path) && s.path.is_file()
@@ -1148,6 +1157,7 @@ struct Prepared {
     /// A graph or (true) a tree.
     graph: Option<Result<(Graph, bool), String>>,
     data: Option<Result<PreparedData, (String, String)>>,
+    atlas: Option<Result<crate::atlas::AtlasConfig, String>>,
     /// A model's sidecar (with every locator the model has), the meshlet limits the project
     /// gives it, and the locators it inherits.
     mesh: Option<Result<PreparedMesh, String>>,
@@ -1304,6 +1314,8 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
         schema,
         graph,
         data,
+        atlas: (selection.location == Location::Input && crate::atlas::is_atlas(&selection.path))
+            .then(|| crate::atlas::AtlasConfig::read(&selection.path)),
         mesh,
         model,
         pixels: inspection
@@ -1522,6 +1534,7 @@ fn inspected(
         compiled_materials: prepared.compiled_materials,
         uploaded_lod: None,
         anim_player: AnimPlayer::default(),
+        atlas: prepared.atlas.map(|r| r.map(|c| (c.clone(), c))),
         compiled_bytes: prepared.compiled_bytes,
         geometry: prepared.geometry,
         hulls: HashMap::new(),
@@ -2140,6 +2153,9 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
 /// The row icon by type, see docs/features/gui.md#tree-icons.
 fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
     if is_dir {
+        if crate::atlas::is_atlas(path) {
+            return Icon::Map;
+        }
         return match (inspect::is_environment_map(path), open) {
             (true, _) => Icon::SunMedium,
             (false, true) => Icon::FolderOpen,
@@ -2163,6 +2179,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "agraph" | "agph" => Icon::GraphStar,
         "adata" | "arec" => Icon::Package,
         "atree" | "atre" => Icon::ListTree,
+        "aatlas" => Icon::Map,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
@@ -2678,6 +2695,15 @@ fn right_sidebar(
                     let view = state.graph_views.entry(inspected.path.clone()).or_default();
                     if let Some(graph) = graph_tab(ui, inspected, view) {
                         match std::fs::write(&inspected.path, graph) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
+                (InspectorTab::Atlas, Some(inspected), Some(_)) => {
+                    if let Some(config) = atlas_tab(ui, inspected) {
+                        let path = inspected.path.join(crate::atlas::CONFIG);
+                        match std::fs::write(&path, config.to_toml()) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
@@ -4201,6 +4227,71 @@ fn image_modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
     })
 }
 
+/// An atlas' settings; returns them to write once nothing is being dragged or typed. See
+/// docs/features/atlases.md#inspector.
+fn atlas_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<crate::atlas::AtlasConfig> {
+    use crate::atlas::Packing;
+    let (edit, saved) = match &mut inspected.atlas {
+        Some(Ok(pair)) => (&mut pair.0, &mut pair.1),
+        Some(Err(e)) => {
+            placeholder(ui, e);
+            return None;
+        }
+        None => return None,
+    };
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                prop_row(ui, "Packing", |ui, width| {
+                    egui::ComboBox::from_id_salt("atlas_packing")
+                        .width(width - 8.0)
+                        .selected_text(edit.packing.name())
+                        .show_ui(ui, |ui| {
+                            for p in Packing::ALL {
+                                ui.selectable_value(&mut edit.packing, p, p.name());
+                            }
+                        });
+                });
+                let number = |ui: &mut Ui, label: &str, value: &mut u32, max: u32| {
+                    prop_row(ui, label, |ui, width| {
+                        let field = egui::DragValue::new(value).range(0..=max).speed(0.25);
+                        ui.add_sized(vec2(width, 22.0), field);
+                    });
+                };
+                if edit.packing == Packing::Grid {
+                    number(ui, "Cell width", &mut edit.cell_width, 4096);
+                    number(ui, "Cell height", &mut edit.cell_height, 4096);
+                    number(ui, "Columns", &mut edit.columns, 1024);
+                }
+                number(ui, "Padding", &mut edit.padding, 64);
+                let padding = edit.padding;
+                number(ui, "Extrude", &mut edit.extrude, padding);
+                edit.extrude = edit.extrude.min(edit.padding);
+                if edit.packing == Packing::Pack {
+                    prop_row(ui, "Trim", |ui, _| {
+                        ui.checkbox(&mut edit.trim, "");
+                    });
+                }
+                prop_row(ui, "Power of two", |ui, _| {
+                    ui.checkbox(&mut edit.power_of_two, "");
+                });
+                prop_row(ui, "Max size", |ui, width| {
+                    let field = egui::DragValue::new(&mut edit.max_size)
+                        .range(1..=16384)
+                        .speed(4.0);
+                    ui.add_sized(vec2(width, 22.0), field);
+                });
+            });
+        });
+    let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+    (!busy && edit != saved).then(|| {
+        *saved = edit.clone();
+        edit.clone()
+    })
+}
+
 /// The modifier cards and the Add button in a scrolling pane; see
 /// docs/features/noise.md#modifiers-tab.
 fn modifier_list(ui: &mut Ui, modifiers: &mut Vec<Modifier>) {
@@ -4613,6 +4704,7 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
                             Kind::Data => Icon::Package,
                             Kind::Graph => Icon::GraphStar,
                             Kind::Tree => Icon::ListTree,
+                            Kind::Atlas => Icon::Map,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {
@@ -4959,6 +5051,40 @@ fn canvas(
                 Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
+        }
+    }
+    // An atlas' frames, outlined; the one under the pointer named. See
+    // docs/features/atlases.md#inspector.
+    let frames = &inspected.inspection.atlas_frames;
+    if !frames.is_empty() {
+        let tile = Rect::from_min_max(shown.min, pos2(edge(0, 1), edge(1, 1)));
+        let scale = tile.size() / texels;
+        let pointer = ui.input(|i| i.pointer.hover_pos());
+        let mut named = None;
+        for (i, (name, [x, y, w, h])) in frames.iter().enumerate() {
+            let frame = Rect::from_min_size(
+                tile.min + vec2(*x as f32, *y as f32) * scale,
+                vec2(*w as f32, *h as f32) * scale,
+            );
+            painter.rect_stroke(
+                frame,
+                0,
+                Stroke::new(1.0, ACCENT.gamma_multiply(0.6)),
+                StrokeKind::Outside,
+            );
+            if pointer.is_some_and(|p| frame.contains(p)) {
+                named = Some((frame, format!("{name} (#{i})")));
+            }
+        }
+        if let Some((frame, text)) = named {
+            let galley = painter.layout_no_wrap(text, FontId::proportional(12.0), TEXT);
+            let at = frame.left_top() + vec2(0.0, -galley.size().y - 4.0);
+            painter.rect_filled(
+                Rect::from_min_size(at, galley.size()).expand(3.0),
+                3,
+                BG_BAR.gamma_multiply(0.85),
+            );
+            painter.galley(at, galley, TEXT);
         }
     }
 

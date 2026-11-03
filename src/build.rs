@@ -78,6 +78,7 @@ impl Outcome {
                         Kind::Data => ("data file", "data files"),
                         Kind::Graph => ("graph", "graphs"),
                         Kind::Tree => ("tree", "trees"),
+                        Kind::Atlas => ("atlas", "atlases"),
                     };
                     (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
                 })
@@ -167,14 +168,19 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
                 options,
                 sidecar,
             } => compile_model(input, source, output, options, sidecar),
-            // Written with its model or font; counted once that is built.
-            Job::ModelPart { source } | Job::FontPart { source } => {
+            // Written with its model, font or atlas; counted once that is built.
+            Job::ModelPart { source } | Job::FontPart { source } | Job::AtlasPart { source } => {
                 parts.push((source, asset.kind));
                 continue;
             }
             Job::Font { source } => compile_font(input, source, output),
             Job::Data { source, kind } => compile_data(&input.join(source), &dest, *kind),
             Job::Cubemap { source } => compile_cubemap(&input.join(source), &dest),
+            Job::Atlas {
+                source,
+                color,
+                mipmaps,
+            } => compile_atlas(input, source, output, *color, *mipmaps),
             Job::Lut { source, volume } => {
                 compile_lut(&input.join(source), &dest, *volume).map(|size| {
                     let layout = if *volume { "volume" } else { "strip" };
@@ -449,6 +455,30 @@ fn compile_model(
         write_texture(image, &dest, ColorSpace::Srgb, false)?;
     }
     Ok(model.detail)
+}
+
+/// Packs an atlas folder into `P.ktx2` and `P.aatlas`; see docs/features/atlases.md#build.
+fn compile_atlas(
+    input: &Path,
+    source: &str,
+    output: &Path,
+    color: ColorSpace,
+    mipmaps: bool,
+) -> Result<String, String> {
+    let p = strip_extension(source);
+    let (config, packed) = crate::atlas::build(&input.join(source))?;
+    let summary = crate::atlas::packing_summary(&config, &packed);
+    let (width, height) = packed.image.dimensions();
+    let frames = packed.frames.len();
+    let meta = crate::atlas::encode(&config, &packed, crate::hash::fnv1a64(p.as_bytes()));
+    write(&output.join(format!("{p}.aatlas")), &meta)?;
+    write_texture(
+        packed.image,
+        &output.join(format!("{p}.ktx2")),
+        color,
+        mipmaps,
+    )?;
+    Ok(format!("{frames} frames, {width} × {height} px, {summary}"))
 }
 
 /// Writes an HDR environment map as a half-float KTX2 cubemap; see docs/features/hdr.md.

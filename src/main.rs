@@ -5,6 +5,7 @@ mod amesh;
 mod amod;
 mod aschema;
 mod assets;
+mod atlas;
 mod atree;
 mod build;
 mod chart;

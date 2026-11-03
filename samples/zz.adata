@@ -1,3 +1,0 @@
-{ "$dialect": "a/1", "$schema": "zz.aschema", "instances": [
-  { "$type": "Weapon", "$id": "sword", "name": "Sword", "rarity": "rare" },
-  { "$type": "Weapon", "$id": "axe", "name": "Axe" } ] }

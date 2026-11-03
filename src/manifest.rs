@@ -22,10 +22,11 @@ pub enum Kind {
     Data = 6,
     Graph = 7,
     Tree = 8,
+    Atlas = 9,
 }
 
 impl Kind {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Texture,
         Self::Material,
         Self::Mesh,
@@ -35,6 +36,7 @@ impl Kind {
         Self::Data,
         Self::Graph,
         Self::Tree,
+        Self::Atlas,
     ];
 
     /// Extension of the files assets of this kind are written to.
@@ -49,6 +51,7 @@ impl Kind {
             Self::Data => "arec",
             Self::Graph => "agph",
             Self::Tree => "atre",
+            Self::Atlas => "aatlas",
         }
     }
 
@@ -63,6 +66,7 @@ impl Kind {
             Self::Data => "Data",
             Self::Graph => "Graph",
             Self::Tree => "Tree",
+            Self::Atlas => "Atlas",
         }
     }
 
@@ -168,6 +172,7 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<Entry>, DecodeError> {
             6 => Kind::Data,
             7 => Kind::Graph,
             8 => Kind::Tree,
+            9 => Kind::Atlas,
             _ => continue,
         };
         entries.push(Entry {

@@ -1,7 +1,0 @@
-{ "$dialect": "a/1", "types": {
-  "Rarity": { "kind": "enum", "values": ["common", "rare"] },
-  "Weapon": { "kind": "struct", "fields": [
-    { "name": "name", "type": "string" },
-    { "name": "damage", "type": "i32", "default": 10, "min": 0 },
-    { "name": "rarity", "type": "Rarity" },
-    { "name": "tint", "type": "rgb", "default": "#ff8000" } ] } } }
