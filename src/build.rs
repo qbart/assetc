@@ -1,6 +1,6 @@
 //! Compiles `input` into `output`, see docs/features/build.md.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::io;
@@ -46,6 +46,8 @@ pub struct Outcome {
     /// but not listed.
     pub parts: Vec<Kind>,
     pub skipped: usize,
+    /// Assets an incremental build left as they were; see docs/features/cli.md#assetc-watch.
+    pub up_to_date: usize,
     /// Stale outputs deleted after a successful build, relative to `output`.
     pub removed: Vec<String>,
     /// Non-empty means the build failed and no manifest was written.
@@ -88,11 +90,18 @@ impl Outcome {
             } else {
                 counts.join(", ")
             };
+            let up_to_date = match self.up_to_date {
+                0 => String::new(),
+                u => format!(", {u} up to date"),
+            };
             let removed = match self.removed.len() {
                 0 => String::new(),
                 k => format!(", {k} removed"),
             };
-            format!("Built {counts} ({} skipped{removed})", self.skipped)
+            format!(
+                "Built {counts} ({} skipped{up_to_date}{removed})",
+                self.skipped
+            )
         }
     }
 }
@@ -130,6 +139,22 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outcome, Error> {
+    run_cached(input, output, config, &mut Cache::default())
+}
+
+/// What the builds so far read for each asset they compiled, by output path; see
+/// docs/features/cli.md#assetc-watch.
+#[derive(Default)]
+pub struct Cache(HashMap<String, u64>);
+
+/// Builds like [`run`], compiling only the assets whose job or read files changed since
+/// `cache` saw them built.
+pub fn run_cached(
+    input: &Path,
+    output: &Path,
+    config: &config::Config,
+    cache: &mut Cache,
+) -> Result<Outcome, Error> {
     // Checked first so bad settings are reported even without an input directory.
     texture::Settings::new(&config.textures).map_err(Error::Pattern)?;
     crate::amesh::MeshSettings::new(&config.meshes).map_err(Error::Meshes)?;
@@ -150,9 +175,31 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
         ..Default::default()
     };
 
+    // Every output of a source, parts included, must exist for it to be up to date.
+    let mut outputs: HashMap<String, Vec<&str>> = HashMap::new();
+    for asset in &plan.assets {
+        outputs
+            .entry(asset.source())
+            .or_default()
+            .push(&asset.output);
+    }
+    let mut schemas = None;
     let mut parts = Vec::new();
     for asset in &plan.assets {
         let dest = output.join(&asset.output);
+        let stamp = match &asset.job {
+            Job::ModelPart { .. } | Job::FontPart { .. } | Job::AtlasPart { .. } => None,
+            job => Some(stamp(input, job, &mut schemas)),
+        };
+        if let Some(stamp) = stamp
+            && cache.0.get(&asset.output) == Some(&stamp)
+            && outputs[&asset.source()]
+                .iter()
+                .all(|out| output.join(out).is_file())
+        {
+            outcome.up_to_date += 1;
+            continue;
+        }
         let result = match &asset.job {
             Job::Texture {
                 source,
@@ -192,18 +239,29 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
             }
         };
         match result {
-            Ok(detail) => outcome.built.push(Built {
-                source: asset.source(),
-                output: asset.output.clone(),
-                kind: asset.kind,
-                detail,
-            }),
-            Err(message) => outcome.failures.push(Failure {
-                source: asset.source(),
-                message,
-            }),
+            Ok(detail) => {
+                if let Some(stamp) = stamp {
+                    cache.0.insert(asset.output.clone(), stamp);
+                }
+                outcome.built.push(Built {
+                    source: asset.source(),
+                    output: asset.output.clone(),
+                    kind: asset.kind,
+                    detail,
+                });
+            }
+            Err(message) => {
+                cache.0.remove(&asset.output);
+                outcome.failures.push(Failure {
+                    source: asset.source(),
+                    message,
+                });
+            }
         }
     }
+    cache
+        .0
+        .retain(|out, _| plan.assets.iter().any(|a| a.output == *out));
 
     outcome.parts = parts
         .into_iter()
@@ -265,6 +323,75 @@ fn material_detail(m: &material::Material) -> String {
     } else {
         format!("material: {}", slots.join(", "))
     }
+}
+
+/// A hash of `job` and of the size and modification time of every file it reads; see
+/// docs/features/cli.md#assetc-watch. `schemas` holds the input's schemas once listed.
+fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
+    let mut reads: Vec<PathBuf> = match job {
+        Job::Texture { source, .. }
+        | Job::Lut { source, .. }
+        | Job::Cubemap { source }
+        | Job::Font { source } => vec![input.join(source)],
+        Job::Orm { sources } => sources.iter().flatten().map(|s| input.join(s)).collect(),
+        Job::Model { source, .. } if source.to_ascii_lowercase().ends_with(".gltf") => {
+            files_under(input.join(source).parent().unwrap_or(input))
+        }
+        Job::Model { source, .. } => vec![input.join(source)],
+        Job::Atlas { source, .. } => files_under(&input.join(source)),
+        Job::Data { source, kind } => {
+            let mut reads = vec![input.join(source)];
+            if *kind == Kind::Data {
+                reads.extend(
+                    schemas
+                        .get_or_insert_with(|| {
+                            files_under(input)
+                                .into_iter()
+                                .filter(|f| crate::aschema::is_schema(f))
+                                .collect()
+                        })
+                        .iter()
+                        .cloned(),
+                );
+            }
+            reads
+        }
+        Job::Material { source, .. } if source.ends_with(material::SOURCE_SUFFIX) => {
+            vec![input.join(source)]
+        }
+        Job::Material { .. }
+        | Job::ModelPart { .. }
+        | Job::FontPart { .. }
+        | Job::AtlasPart { .. } => Vec::new(),
+    };
+    reads.sort();
+    let mut text = format!("{job:?}");
+    for file in reads {
+        let meta = fs::metadata(&file).ok();
+        let modified = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        let len = meta.map_or(u64::MAX, |m| m.len());
+        text += &format!("\n{} {len} {modified}", file.display());
+    }
+    crate::hash::fnv1a64(text.as_bytes())
+}
+
+/// Every file under `dir`, as the build lists them (dotfiles skipped, symlinks not followed).
+pub fn files_under(dir: &Path) -> Vec<PathBuf> {
+    fn walk(nodes: &[tree::Node], out: &mut Vec<PathBuf>) {
+        for node in nodes {
+            match &node.children {
+                Some(children) => walk(children, out),
+                None => out.push(node.path.clone()),
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&tree::scan(dir).unwrap_or_default(), &mut out);
+    out
 }
 
 /// Deletes outputs not in `produced` (lowercased `output`-relative paths) and
@@ -838,6 +965,38 @@ mod tests {
         assert_eq!(entries[0].id, fnv1a64(b"ui/monogram.afont.bin"));
         assert_eq!(entries[1].path, "ui/monogram.ktx2");
         assert_eq!(entries[1].id, atlas);
+    }
+
+    #[test]
+    fn incremental_builds_compile_what_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        png(&input.join("a.png"), 1, 1);
+        png(&input.join("b.png"), 1, 1);
+        let config = config::Config::default();
+        let mut cache = Cache::default();
+        let first = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(first.summary(), "Built 2 textures (0 skipped)");
+
+        let again = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(again.summary(), "Built nothing (0 skipped, 2 up to date)");
+
+        // Changed, new and deleted files.
+        png(&input.join("a.png"), 2, 2);
+        png(&input.join("c.png"), 1, 1);
+        fs::remove_file(input.join("b.png")).unwrap();
+        let changed = run_cached(&input, &output, &config, &mut cache).unwrap();
+        let built: Vec<&str> = changed.built.iter().map(|b| b.output.as_str()).collect();
+        assert_eq!(built, ["a.ktx2", "c.ktx2"]);
+        assert_eq!(changed.removed, ["b.ktx2"]);
+
+        // A missing output is written again.
+        fs::remove_file(output.join("c.ktx2")).unwrap();
+        let restored = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(
+            restored.summary(),
+            "Built 1 texture (0 skipped, 1 up to date)"
+        );
     }
 
     #[test]
