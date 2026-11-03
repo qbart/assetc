@@ -53,7 +53,11 @@ Keeps the output up to date while you edit the input: a build, then an
   (entries starting with `.` skipped, symlinks not followed, the output
   directory left out when it lies inside the input), with each file's size
   and modification time, plus `assetc.toml`. A difference from the last
-  listing is a **change**. It waits until two listings 0.5 s apart agree (so a
+  listing is a **change**: a file edited, added or deleted (also by renaming
+  or moving, or with its folder). An added file is built as any other new
+  source; a deleted one's outputs are removed as
+  [stale](build.md#removing-stale-outputs), and assets that read it (a data
+  file's schema, a material's textures) are compiled again. It waits until two listings 0.5 s apart agree (so a
   save that writes several files builds once), then prints an empty line and
   builds.
 - **Incremental build**: the build is planned as usual (stale outputs
