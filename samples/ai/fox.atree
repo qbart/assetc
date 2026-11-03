@@ -1,0 +1,132 @@
+{
+  "$dialect": "atree/1",
+  "root": {
+    "id": "root",
+    "label": "Selector",
+    "color": "#64748b",
+    "x": 0,
+    "y": 0,
+    "data": {
+      "node": "selector"
+    },
+    "children": [
+      {
+        "id": "flee",
+        "label": "Flee when hurt",
+        "color": "#ef4444",
+        "x": -6,
+        "y": 2,
+        "data": {
+          "node": "sequence"
+        },
+        "children": [
+          {
+            "id": "low_hp",
+            "label": "HP < 25%",
+            "x": -8,
+            "y": 4,
+            "data": {
+              "node": "condition",
+              "threshold": 0.25
+            }
+          },
+          {
+            "id": "run_away",
+            "label": "Run to den",
+            "x": -4,
+            "y": 4,
+            "data": {
+              "node": "action",
+              "speed": 1.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "hunt",
+        "label": "Hunt",
+        "color": "#f59e0b",
+        "x": 0,
+        "y": 2,
+        "data": {
+          "node": "sequence"
+        },
+        "children": [
+          {
+            "id": "see_prey",
+            "label": "Sees prey",
+            "x": -2,
+            "y": 4,
+            "data": {
+              "node": "condition",
+              "range": 12.0
+            }
+          },
+          {
+            "id": "stalk",
+            "label": "Stalk",
+            "x": 0,
+            "y": 4,
+            "data": {
+              "crouch": true,
+              "node": "action"
+            }
+          },
+          {
+            "id": "pounce",
+            "label": "Pounce",
+            "x": 2,
+            "y": 4,
+            "data": {
+              "node": "action",
+              "skill": "pounce"
+            }
+          }
+        ]
+      },
+      {
+        "id": "wander",
+        "label": "Wander",
+        "color": "#22c55e",
+        "x": 6,
+        "y": 2,
+        "data": {
+          "node": "sequence"
+        },
+        "children": [
+          {
+            "id": "pick_point",
+            "label": "Pick patrol point",
+            "x": 4,
+            "y": 4,
+            "data": {
+              "node": "action",
+              "path": "patrol"
+            }
+          },
+          {
+            "id": "walk",
+            "label": "Walk",
+            "x": 6,
+            "y": 4,
+            "data": {
+              "animation": "Walk",
+              "node": "action"
+            }
+          },
+          {
+            "id": "survey",
+            "label": "Survey",
+            "x": 8,
+            "y": 4,
+            "data": {
+              "animation": "Survey",
+              "node": "action",
+              "wait": 2.0
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,82 @@
+width = 128
+height = 64
+cell_width = 16
+cell_height = 64
+layout = "rows"
+
+[[gradients]]
+name = "Day sky"
+dither = "none"
+stops = [
+    { at = 0.0, color = "#cfe8ff" },
+    { at = 0.55, color = "#7fb8f0" },
+    { at = 1.0, color = "#2b5fa8" },
+]
+
+[[gradients]]
+name = "Sunset"
+dither = "crosshatch"
+stops = [
+    { at = 0.0, color = "#1b1036" },
+    { at = 0.35, color = "#7a2e6b" },
+    { at = 0.6, color = "#ff6b35" },
+    { at = 1.0, color = "#ffe66d" },
+]
+
+[[gradients]]
+name = "Night"
+dither = "crosshatch"
+stops = [
+    { at = 0.0, color = "#141b33" },
+    { at = 1.0, color = "#02030a" },
+]
+
+[[gradients]]
+name = "Fire"
+dither = "pixel"
+stops = [
+    { at = 0.0, color = "#2b0a00" },
+    { at = 0.3, color = "#b81d00" },
+    { at = 0.6, color = "#ff8a00" },
+    { at = 0.85, color = "#ffd23f" },
+    { at = 1.0, color = "#fffbe0" },
+]
+
+[[gradients]]
+name = "Toxic"
+dither = "none"
+stops = [
+    { at = 0.0, color = "#0d2b0d" },
+    { at = 1.0, color = "#a3ff3c" },
+]
+
+[[gradients.modifiers]]
+type = "posterize"
+enabled = true
+steps = 6
+
+[[gradients]]
+name = "Fade"
+dither = "crosshatch"
+stops = [
+    { at = 0.0, color = "#ffffffff" },
+    { at = 1.0, color = "#ffffff00" },
+]
+
+[[gradients]]
+name = "Health"
+dither = "none"
+stops = [
+    { at = 0.0, color = "#dc2626" },
+    { at = 0.5, color = "#facc15" },
+    { at = 1.0, color = "#16a34a" },
+]
+
+[[gradients]]
+name = "Ice"
+dither = "pixel"
+stops = [
+    { at = 0.0, color = "#e0f7ff" },
+    { at = 0.5, color = "#7dd3fc" },
+    { at = 1.0, color = "#1e3a8a" },
+]

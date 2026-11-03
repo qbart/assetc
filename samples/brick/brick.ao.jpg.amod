@@ -1,0 +1,6 @@
+[[modifiers]]
+type = "levels"
+enabled = true
+black = 0.05
+white = 1.0
+gamma = 0.8

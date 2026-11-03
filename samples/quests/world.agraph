@@ -1,0 +1,107 @@
+{
+  "$dialect": "agraph/1",
+  "nodes": [
+    {
+      "id": "village",
+      "label": "Village",
+      "color": "#22c55e",
+      "x": 0,
+      "y": 0,
+      "data": {
+        "safe": true
+      }
+    },
+    {
+      "id": "forest",
+      "label": "Old Forest",
+      "color": "#16a34a",
+      "x": 4,
+      "y": 0,
+      "data": {
+        "level": 3
+      }
+    },
+    {
+      "id": "river",
+      "label": "River Crossing",
+      "color": "#38bdf8",
+      "x": 4,
+      "y": 3,
+      "data": {
+        "level": 4
+      }
+    },
+    {
+      "id": "den",
+      "label": "Fox Den",
+      "color": "#f97316",
+      "x": 8,
+      "y": 0,
+      "data": {
+        "boss": "fox_alpha",
+        "level": 6
+      }
+    },
+    {
+      "id": "shrine",
+      "label": "Shrine",
+      "color": "#a855f7",
+      "x": 8,
+      "y": 3,
+      "data": {
+        "level": 5,
+        "reward": "ember_bow"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "village",
+      "to": "forest",
+      "label": "road",
+      "weight": 1
+    },
+    {
+      "from": "forest",
+      "to": "village",
+      "label": "road",
+      "weight": 1
+    },
+    {
+      "from": "village",
+      "to": "river",
+      "label": "ferry",
+      "weight": 3,
+      "data": {
+        "price": 5
+      }
+    },
+    {
+      "from": "forest",
+      "to": "den",
+      "label": "trail",
+      "weight": 2
+    },
+    {
+      "from": "river",
+      "to": "shrine",
+      "label": "bridge",
+      "weight": 1
+    },
+    {
+      "from": "shrine",
+      "to": "den",
+      "label": "secret path",
+      "weight": 1,
+      "data": {
+        "hidden": true
+      }
+    },
+    {
+      "from": "den",
+      "to": "den",
+      "label": "respawn",
+      "weight": 0
+    }
+  ]
+}

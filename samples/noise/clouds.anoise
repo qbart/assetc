@@ -1,0 +1,20 @@
+type = "noise/perlin-worley"
+size = 512
+
+[noise.perlin-worley]
+seed = 7
+frequency_x = 4
+frequency_y = 4
+translate_x = 0.0
+translate_y = 0.0
+octaves = 5
+gain = 0.5
+worley_octaves = 3
+warp = 0.3
+
+[[modifiers]]
+type = "levels"
+enabled = true
+black = 0.25
+white = 0.95
+gamma = 1.2

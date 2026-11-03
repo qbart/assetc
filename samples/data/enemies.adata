@@ -1,0 +1,67 @@
+{
+  "$dialect": "a/1",
+  "$schema": "game.aschema",
+  "instances": [
+    {
+      "$type": "Enemy",
+      "$id": "fox",
+      "name": "Fox",
+      "stats": {
+        "hp": 40,
+        "speed": 2.4
+      },
+      "weapon": "rusty_sword",
+      "drops": [
+        "rusty_sword"
+      ],
+      "spawn": {
+        "x": 12,
+        "y": 3
+      },
+      "leader": "fox_alpha"
+    },
+    {
+      "$type": "Enemy",
+      "$id": "frost_fox",
+      "name": "Frost Fox",
+      "stats": {
+        "hp": 60,
+        "armor": 5,
+        "speed": 2.2
+      },
+      "weapon": "frost_hammer",
+      "drops": [
+        "frost_hammer",
+        "rusty_sword"
+      ],
+      "spawn": {
+        "x": 18,
+        "y": -4
+      },
+      "leader": "fox_alpha"
+    },
+    {
+      "$type": "Enemy",
+      "$id": "fox_alpha",
+      "name": "Fox Alpha",
+      "skills": "skills/fox.agraph",
+      "stats": {
+        "hp": 320,
+        "armor": 20,
+        "speed": 2.8
+      },
+      "weapon": "golden_fang",
+      "drops": [
+        "golden_fang",
+        "ember_bow"
+      ],
+      "spawn": {
+        "x": 30,
+        "y": 0
+      },
+      "boss": true,
+      "boss_phases": 3,
+      "boss_music": "den_theme.ogg"
+    }
+  ]
+}

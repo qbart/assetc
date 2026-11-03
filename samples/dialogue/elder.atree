@@ -1,0 +1,70 @@
+{
+  "$dialect": "atree/1",
+  "root": {
+    "id": "greet",
+    "label": "Hello, traveller.",
+    "color": "#3b82f6",
+    "x": 0,
+    "y": 0,
+    "data": {
+      "speaker": "elder"
+    },
+    "children": [
+      {
+        "id": "ask_fox",
+        "label": "About the fox…",
+        "x": -4,
+        "y": 2,
+        "data": {
+          "speaker": "player"
+        },
+        "children": [
+          {
+            "id": "fox_story",
+            "label": "It stole our sword.",
+            "color": "#3b82f6",
+            "x": -4,
+            "y": 4,
+            "data": {
+              "quest": "den",
+              "speaker": "elder"
+            }
+          }
+        ]
+      },
+      {
+        "id": "trade",
+        "label": "Let's trade.",
+        "x": 0,
+        "y": 2,
+        "data": {
+          "speaker": "player"
+        },
+        "children": [
+          {
+            "id": "shop",
+            "label": "Take a look.",
+            "color": "#3b82f6",
+            "x": 0,
+            "y": 4,
+            "data": {
+              "shop": true,
+              "speaker": "elder"
+            }
+          }
+        ]
+      },
+      {
+        "id": "bye",
+        "label": "Goodbye.",
+        "color": "#64748b",
+        "x": 4,
+        "y": 2,
+        "data": {
+          "ends": true,
+          "speaker": "player"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$dialect": "a/1",
+  "$schema": "game.aschema",
+  "instances": [
+    {
+      "$type": "Level",
+      "$id": "old_forest",
+      "title": "Old Forest",
+      "spawns": [
+        "fox",
+        "frost_fox"
+      ],
+      "start": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "$type": "Level",
+      "$id": "fox_den",
+      "title": "Fox Den",
+      "grade": "blue-and-pink.lut.cube",
+      "sky_ramp": "gradients/sky.agradient",
+      "spawns": [
+        "fox",
+        "fox",
+        "fox_alpha"
+      ],
+      "start": {
+        "x": 4,
+        "y": -2
+      },
+      "difficulty": [
+        [
+          0,
+          0.5,
+          0,
+          0
+        ],
+        [
+          0.7,
+          0.8,
+          0.5,
+          0.5
+        ],
+        [
+          1,
+          1,
+          0,
+          0
+        ]
+      ],
+      "fog": "#3b1d4a99"
+    }
+  ]
+}

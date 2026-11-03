@@ -1,0 +1,69 @@
+width = 64
+height = 64
+cell_width = 16
+cell_height = 16
+layout = "rows"
+
+[[colors]]
+name = "Black"
+color = "#000000"
+
+[[colors]]
+name = "Dark blue"
+color = "#1d2b53"
+
+[[colors]]
+name = "Dark purple"
+color = "#7e2553"
+
+[[colors]]
+name = "Dark green"
+color = "#008751"
+
+[[colors]]
+name = "Brown"
+color = "#ab5236"
+
+[[colors]]
+name = "Dark grey"
+color = "#5f574f"
+
+[[colors]]
+name = "Light grey"
+color = "#c2c3c7"
+
+[[colors]]
+name = "White"
+color = "#fff1e8"
+
+[[colors]]
+name = "Red"
+color = "#ff004d"
+
+[[colors]]
+name = "Orange"
+color = "#ffa300"
+
+[[colors]]
+name = "Yellow"
+color = "#ffec27"
+
+[[colors]]
+name = "Green"
+color = "#00e436"
+
+[[colors]]
+name = "Blue"
+color = "#29adff"
+
+[[colors]]
+name = "Lavender"
+color = "#83769c"
+
+[[colors]]
+name = "Pink"
+color = "#ff77a8"
+
+[[colors]]
+name = "Peach"
+color = "#ffccaa"

@@ -1,0 +1,4 @@
+roughness = 0.9
+normal_scale = 1.2
+height_mode = "parallax"
+height_scale = 0.03

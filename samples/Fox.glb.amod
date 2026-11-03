@@ -1,0 +1,272 @@
+[mesh]
+lod_ratios = [0.5, 0.25, 0.125]
+
+[properties]
+mass = 6.5
+playable = true
+species = "red fox"
+top_speed = 8.0
+
+[[locators]]
+name = "head.hat"
+tags = ["attach"]
+joint = "b_Head_05"
+translation = [14.0, 0.0, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+scale = [1.0, 1.0, 1.0]
+color = "#f59e0b"
+
+[[locators]]
+name = "hand_r.weapon"
+tags = ["attach", "weapon"]
+joint = "b_RightHand_08"
+translation = [6.0, 0.0, 0.0]
+rotation = [0.0, 0.0, -0.70710677, 0.70710677]
+scale = [0.5, 0.5, 0.5]
+preview = "props/sword.gltf"
+color = "#38bdf8"
+
+[[locators]]
+name = "tail.tip"
+tags = ["fx"]
+joint = "b_Tail03_014"
+translation = [22.0, 0.0, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+scale = [1.0, 1.0, 1.0]
+color = "#ef4444"
+
+[[locators]]
+name = "foot_l.step"
+tags = ["fx", "footstep"]
+joint = "b_LeftFoot02_018"
+translation = [0.0, 0.0, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+scale = [1.0, 1.0, 1.0]
+
+[[locators]]
+name = "foot_r.step"
+tags = ["fx", "footstep"]
+joint = "b_RightFoot02_022"
+translation = [0.0, 0.0, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+scale = [1.0, 1.0, 1.0]
+
+[[locators]]
+name = "nameplate"
+tags = ["ui"]
+translation = [0.0, 105.0, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+scale = [1.0, 1.0, 1.0]
+color = "#a3e635"
+
+[[locators]]
+name = "camera.follow"
+tags = ["camera"]
+translation = [0.0, 140.0, -260.0]
+rotation = [0.0, 1.0, 0.0, 0.0]
+scale = [1.0, 1.0, 1.0]
+color = "#c084fc"
+
+[[shapes]]
+name = "body"
+kind = "collision"
+type = "capsule"
+translation = [0.0, 38.0, -8.0]
+rotation = [0.70710677, 0.0, 0.0, 0.70710677]
+radius = 16.0
+height = 70.0
+color = "#22c55e"
+
+[[shapes]]
+name = "head"
+kind = "hitbox"
+type = "sphere"
+joint = "b_Head_05"
+translation = [6.0, 0.0, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+radius = 11.0
+color = "#ef4444"
+
+[shapes.properties]
+damage_multiplier = 2.0
+
+[[shapes]]
+name = "pickup"
+kind = "trigger"
+type = "box"
+translation = [0.0, 40.0, -10.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+size = [60.0, 80.0, 170.0]
+color = "#eab308"
+
+[[shapes]]
+name = "hull"
+kind = "physics"
+type = "hull"
+
+[[regions]]
+name = "head"
+tags = ["skin"]
+color = "#f97316"
+triangles = [
+    [0, 0, 1, 5], [0, 0, 7, 4], [0, 0, 25, 6], [0, 0, 32, 1],
+    [0, 0, 47, 5], [0, 0, 53, 4], [0, 0, 71, 6], [0, 0, 78, 1],
+    [0, 0, 119, 1], [0, 0, 121, 2], [0, 0, 124, 1], [0, 0, 139, 2],
+    [0, 0, 142, 5], [0, 0, 148, 2], [0, 0, 153, 1], [0, 0, 194, 1],
+    [0, 0, 196, 3], [0, 0, 205, 1], [0, 0, 240, 2], [0, 0, 243, 5],
+    [0, 0, 249, 2], [0, 0, 254, 1], [0, 0, 292, 1], [0, 0, 294, 3],
+    [0, 0, 303, 1], [0, 0, 574, 2],
+]
+
+[[regions]]
+name = "tail"
+tags = ["fur"]
+color = "#a855f7"
+triangles = [
+    [0, 0, 11, 1], [0, 0, 16, 1], [0, 0, 18, 4], [0, 0, 23, 1],
+    [0, 0, 35, 1], [0, 0, 39, 5], [0, 0, 57, 1], [0, 0, 62, 1],
+    [0, 0, 64, 4], [0, 0, 69, 1], [0, 0, 81, 1], [0, 0, 85, 5],
+    [0, 0, 126, 2], [0, 0, 132, 1], [0, 0, 134, 1], [0, 0, 150, 1],
+    [0, 0, 152, 1], [0, 0, 156, 1], [0, 0, 159, 4], [0, 0, 164, 2],
+    [0, 0, 168, 1], [0, 0, 175, 9], [0, 0, 186, 3], [0, 0, 190, 1],
+    [0, 0, 202, 1], [0, 0, 204, 1], [0, 0, 207, 2], [0, 0, 211, 2],
+    [0, 0, 216, 9], [0, 0, 231, 1], [0, 0, 233, 1], [0, 0, 251, 1],
+    [0, 0, 253, 1], [0, 0, 257, 1], [0, 0, 260, 3], [0, 0, 264, 2],
+    [0, 0, 268, 1], [0, 0, 273, 9], [0, 0, 284, 3], [0, 0, 288, 1],
+    [0, 0, 300, 1], [0, 0, 302, 1], [0, 0, 305, 2], [0, 0, 309, 3],
+    [0, 0, 314, 8], [0, 0, 368, 12], [0, 0, 382, 2], [0, 0, 385, 5],
+    [0, 0, 420, 14], [0, 0, 447, 1], [0, 0, 449, 9], [0, 0, 459, 3],
+    [0, 0, 477, 14], [0, 0, 504, 1], [0, 0, 506, 9], [0, 0, 516, 3],
+    [0, 0, 562, 12],
+]
+
+[[regions]]
+name = "paws"
+tags = ["fur"]
+color = "#06b6d4"
+triangles = [
+    [0, 0, 423, 2], [0, 0, 428, 6], [0, 0, 440, 7], [0, 0, 452, 11],
+    [0, 0, 464, 1], [0, 0, 468, 9], [0, 0, 480, 2], [0, 0, 485, 6],
+    [0, 0, 497, 7], [0, 0, 509, 11], [0, 0, 521, 1], [0, 0, 525, 10],
+    [0, 0, 537, 1], [0, 0, 539, 1], [0, 0, 542, 1], [0, 0, 544, 1],
+    [0, 0, 557, 1],
+]
+
+[[regions]]
+name = "fur"
+color = "#64748b"
+materials = ["fox_material"]
+
+[[paths]]
+name = "tail"
+kind = "rope"
+joint = "b_Tail01_012"
+points = [
+    [0.0, 0.0, 0.0],
+    [12.0, 1.0, 0.0],
+    [24.0, 3.0, 0.0],
+    [36.0, 2.0, 0.0],
+    [46.0, 0.0, 0.0],
+]
+closed = false
+tension = 0.0
+alpha = 0.5
+color = "#f472b6"
+
+[paths.properties]
+stiffness = 0.6
+
+[[paths]]
+name = "patrol"
+kind = "ai"
+points = [
+    [200.0, 0.0, 0.0],
+    [100.0, 0.0, 173.2],
+    [-100.0, 0.0, 173.2],
+    [-200.0, 0.0, 0.0],
+    [-100.0, 0.0, -173.2],
+    [100.0, 0.0, -173.2],
+]
+closed = true
+tension = 0.0
+alpha = 0.5
+color = "#22c55e"
+
+[paths.properties]
+speed = 1.5
+wait = 2.0
+
+[[colors]]
+name = "height"
+fill = "linear"
+from = [0.0, 0.0, 0.0]
+to = [0.0, 80.0, 0.0]
+stops = [
+    { at = 0.0, color = "#3f1d0b" },
+    { at = 0.6, color = "#d97706" },
+    { at = 1.0, color = "#fde68a" },
+]
+export = "both"
+
+[[colors]]
+name = "snout"
+fill = "radial"
+from = [0.0, 40.0, 62.0]
+to = [0.0, 40.0, 30.0]
+stops = [
+    { at = 0.0, color = "#ffffff" },
+    { at = 1.0, color = "#ffffff00" },
+]
+blend = { with = "height", mode = "screen", amount = 0.75 }
+
+[[colors]]
+name = "team"
+fill = "solid"
+color = "#2563eb"
+
+[[events]]
+animation = "Walk"
+name = "footstep"
+time = 0.0
+
+[events.properties]
+foot = "left"
+
+[[events]]
+animation = "Walk"
+name = "footstep"
+time = 0.35
+
+[events.properties]
+foot = "right"
+
+[[events]]
+animation = "Run"
+name = "footstep"
+time = 0.2
+
+[events.properties]
+foot = "left"
+volume = 1.2
+
+[[events]]
+animation = "Run"
+name = "footstep"
+time = 0.78
+
+[events.properties]
+foot = "right"
+volume = 1.2
+
+[[events]]
+animation = "Survey"
+name = "sniff"
+time = 1.4
+
+[events.properties]
+sound = "fox_sniff"
+
+[[events]]
+animation = "Survey"
+name = "look_around"
+time = 2.2

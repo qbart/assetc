@@ -1,0 +1,25 @@
+type = "noise/fbm"
+size = 512
+
+[noise.fbm]
+seed = 42
+basis = "simplex"
+frequency_x = 3
+frequency_y = 3
+translate_x = 0.0
+translate_y = 0.0
+octaves = 6
+lacunarity = 2
+gain = 0.55
+warp = 2.5
+
+[[modifiers]]
+type = "normalize"
+enabled = true
+
+[[modifiers]]
+type = "colorize"
+enabled = true
+hue = 28.0
+saturation = 0.35
+lightness = 0.2

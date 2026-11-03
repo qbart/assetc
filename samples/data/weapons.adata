@@ -1,0 +1,118 @@
+{
+  "$dialect": "a/1",
+  "$schema": "game.aschema",
+  "instances": [
+    {
+      "$type": "Weapon",
+      "$id": "rusty_sword",
+      "name": "Rusty Sword",
+      "damage": 12,
+      "tags": [
+        "melee",
+        "starter"
+      ],
+      "tint": "#8b5a2b"
+    },
+    {
+      "$type": "Weapon",
+      "$id": "frost_hammer",
+      "name": "Frost Hammer",
+      "damage": 40,
+      "element": "ice",
+      "crit_chance": 0,
+      "falloff": [
+        [
+          0,
+          0.2,
+          0,
+          0
+        ],
+        [
+          0.6,
+          1,
+          0,
+          0
+        ],
+        [
+          1,
+          0.4,
+          -1.5,
+          -1.5
+        ]
+      ],
+      "rarity": "epic",
+      "two_handed": true,
+      "tags": [
+        "melee",
+        "heavy"
+      ],
+      "tint": "#7fd4ff",
+      "glow": "#7fd4ff80",
+      "trail": [
+        [
+          0,
+          "#7fd4ffff"
+        ],
+        [
+          0.7,
+          "#7fd4ff80"
+        ],
+        [
+          1,
+          "#7fd4ff00"
+        ]
+      ],
+      "notes": "Slows on hit"
+    },
+    {
+      "$type": "Weapon",
+      "$id": "ember_bow",
+      "name": "Ember Bow",
+      "damage": 22,
+      "element": "fire",
+      "crit_chance": 0.15,
+      "crit_multiplier": 2.5,
+      "rarity": "rare",
+      "tags": [
+        "ranged"
+      ],
+      "tint": "#ff8a3d",
+      "glow": "#ff5a1fcc",
+      "trail": [
+        [
+          0,
+          "#fff3b0ff"
+        ],
+        [
+          0.4,
+          "#ff8a00ff"
+        ],
+        [
+          1,
+          "#ff5a1f00"
+        ]
+      ],
+      "material": "materials/lava.mat.toml"
+    },
+    {
+      "$type": "Weapon",
+      "$id": "golden_fang",
+      "name": "Golden Fang",
+      "damage": 65,
+      "element": "lightning",
+      "crit_chance": 0.3,
+      "crit_multiplier": 3,
+      "rarity": "legendary",
+      "tags": [
+        "melee",
+        "unique"
+      ],
+      "tint": "#ffd34d",
+      "material": "materials/gold.mat.toml",
+      "offset": {
+        "x": 0.25,
+        "y": 0.1
+      }
+    }
+  ]
+}

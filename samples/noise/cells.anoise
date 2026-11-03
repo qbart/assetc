@@ -1,0 +1,23 @@
+type = "noise/voronoi"
+size = 256
+
+[noise.voronoi]
+seed = 3
+frequency_x = 8
+frequency_y = 8
+translate_x = 0.0
+translate_y = 0.0
+jitter = 0.85
+metric = "euclidean"
+output = "edge"
+warp = 0.0
+
+[[modifiers]]
+type = "threshold"
+enabled = true
+level = 0.08
+softness = 0.04
+
+[[modifiers]]
+type = "invert"
+enabled = true

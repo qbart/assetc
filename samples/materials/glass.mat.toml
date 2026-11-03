@@ -1,0 +1,5 @@
+base_color = [0.6, 0.85, 1.0, 0.35]
+metallic = 0.0
+roughness = 0.05
+alpha_mode = "blend"
+double_sided = true

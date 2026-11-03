@@ -1,0 +1,37 @@
+width = 8
+height = 1
+cell_width = 1
+cell_height = 1
+layout = "rows"
+
+[[colors]]
+name = "Background"
+color = "#1f1f22"
+
+[[colors]]
+name = "Panel"
+color = "#2a2a2e"
+
+[[colors]]
+name = "Text"
+color = "#f4f4f5"
+
+[[colors]]
+name = "Muted"
+color = "#a1a1aa"
+
+[[colors]]
+name = "Accent"
+color = "#3b82f6"
+
+[[colors]]
+name = "Success"
+color = "#22c55e"
+
+[[colors]]
+name = "Warning"
+color = "#f59e0b"
+
+[[colors]]
+name = "Danger"
+color = "#ef4444cc"

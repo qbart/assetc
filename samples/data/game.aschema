@@ -1,0 +1,348 @@
+{
+  "$dialect": "a/1",
+  "types": {
+    "Rarity": {
+      "kind": "enum",
+      "doc": "Drop tier, drives colour and loot tables",
+      "values": [
+        "common",
+        "rare",
+        "epic",
+        "legendary"
+      ]
+    },
+    "Element": {
+      "kind": "enum",
+      "values": [
+        "none",
+        "fire",
+        "ice",
+        "lightning"
+      ]
+    },
+    "Vec2": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "x",
+          "type": "f32",
+          "default": 0
+        },
+        {
+          "name": "y",
+          "type": "f32",
+          "default": 0
+        }
+      ]
+    },
+    "Stats": {
+      "kind": "struct",
+      "doc": "The numbers every living thing has",
+      "fields": [
+        {
+          "name": "hp",
+          "type": "i32",
+          "default": 100,
+          "min": 1,
+          "max": 9999
+        },
+        {
+          "name": "armor",
+          "type": "u8",
+          "default": 0,
+          "min": 0,
+          "max": 100
+        },
+        {
+          "name": "speed",
+          "type": "f32",
+          "default": 1.0,
+          "min": 0,
+          "max": 10,
+          "step": 0.1
+        }
+      ]
+    },
+    "Weapon": {
+      "kind": "struct",
+      "doc": "A thing to hit with",
+      "groups": {
+        "Advanced": {
+          "collapsed": true,
+          "doc": "Rarely tuned by hand"
+        }
+      },
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "doc": "Shown in the inventory"
+        },
+        {
+          "name": "model",
+          "type": "asset<model>",
+          "default": "props/sword.gltf"
+        },
+        {
+          "name": "icon",
+          "type": "asset<atlas>",
+          "default": "ui/icons.atlas"
+        },
+        {
+          "name": "damage",
+          "type": "i32",
+          "default": 10,
+          "min": 0,
+          "max": 999,
+          "group": "Combat"
+        },
+        {
+          "name": "element",
+          "type": "Element",
+          "default": "none",
+          "group": "Combat",
+          "widget": "toggle"
+        },
+        {
+          "name": "crit_chance",
+          "type": "f32",
+          "default": 0.05,
+          "min": 0,
+          "max": 1,
+          "step": 0.01,
+          "group": "Combat",
+          "label": "Crit chance"
+        },
+        {
+          "name": "crit_multiplier",
+          "type": "f32",
+          "default": 2,
+          "min": 1,
+          "max": 5,
+          "step": 0.1,
+          "group": "Combat",
+          "show_if": "crit_chance > 0"
+        },
+        {
+          "name": "falloff",
+          "type": "curve",
+          "group": "Combat"
+        },
+        {
+          "name": "rarity",
+          "type": "Rarity",
+          "default": "common"
+        },
+        {
+          "name": "two_handed",
+          "type": "bool",
+          "default": false
+        },
+        {
+          "name": "tags",
+          "type": "list<string>"
+        },
+        {
+          "name": "tint",
+          "type": "rgb",
+          "default": "#c8c8c8"
+        },
+        {
+          "name": "glow",
+          "type": "rgba",
+          "group": "Advanced"
+        },
+        {
+          "name": "trail",
+          "type": "gradient",
+          "group": "Advanced"
+        },
+        {
+          "name": "material",
+          "type": "asset<material>",
+          "group": "Advanced"
+        },
+        {
+          "name": "offset",
+          "type": "Vec2",
+          "default": {
+            "x": 0.5
+          },
+          "group": "Advanced",
+          "widget": "inline"
+        },
+        {
+          "name": "notes",
+          "type": "string",
+          "optional": true,
+          "group": "Advanced"
+        }
+      ]
+    },
+    "Enemy": {
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "name",
+          "type": "string",
+          "order": -1
+        },
+        {
+          "name": "model",
+          "type": "asset<model>",
+          "default": "Fox.glb"
+        },
+        {
+          "name": "ai",
+          "type": "asset<tree>",
+          "default": "ai/fox.atree"
+        },
+        {
+          "name": "skills",
+          "type": "asset<graph>",
+          "optional": true
+        },
+        {
+          "name": "stats",
+          "type": "Stats",
+          "widget": "inline"
+        },
+        {
+          "name": "weapon",
+          "type": "ref<Weapon>"
+        },
+        {
+          "name": "drops",
+          "type": "list<ref<Weapon>>"
+        },
+        {
+          "name": "spawn",
+          "type": "Vec2"
+        },
+        {
+          "name": "leader",
+          "type": "ref<Enemy>",
+          "optional": true
+        },
+        {
+          "name": "boss",
+          "type": "bool",
+          "default": false,
+          "group": "Boss"
+        },
+        {
+          "name": "boss_phases",
+          "type": "u8",
+          "default": 1,
+          "min": 1,
+          "max": 3,
+          "group": "Boss",
+          "show_if": "boss"
+        },
+        {
+          "name": "boss_music",
+          "type": "string",
+          "optional": true,
+          "group": "Boss",
+          "hide_if": "!boss"
+        }
+      ]
+    },
+    "Level": {
+      "kind": "struct",
+      "doc": "One playable map and everything it loads",
+      "fields": [
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "sky",
+          "type": "asset<hdr>",
+          "default": "sky.exr"
+        },
+        {
+          "name": "grade",
+          "type": "asset<lut>",
+          "default": "blue-and-pink.lut.cube"
+        },
+        {
+          "name": "ground",
+          "type": "asset<material>",
+          "default": "brick/brick.mat.toml"
+        },
+        {
+          "name": "ground_detail",
+          "type": "asset<texture>",
+          "default": "brick/brick.jpg"
+        },
+        {
+          "name": "heightmap",
+          "type": "asset<noise>",
+          "default": "noise/terrain.anoise"
+        },
+        {
+          "name": "sky_ramp",
+          "type": "asset<gradient>",
+          "default": "gradients/sky.agradient"
+        },
+        {
+          "name": "palette",
+          "type": "asset<palette>",
+          "default": "palettes/pico8.apalette"
+        },
+        {
+          "name": "font",
+          "type": "asset<font>",
+          "default": "monogram.ttf"
+        },
+        {
+          "name": "map",
+          "type": "asset<graph>",
+          "default": "quests/world.agraph"
+        },
+        {
+          "name": "intro",
+          "type": "asset<tree>",
+          "default": "dialogue/elder.atree"
+        },
+        {
+          "name": "loot_table",
+          "type": "asset<data>",
+          "default": "data/weapons.adata"
+        },
+        {
+          "name": "spawns",
+          "type": "list<ref<Enemy>>"
+        },
+        {
+          "name": "start",
+          "type": "Vec2"
+        },
+        {
+          "name": "difficulty",
+          "type": "curve",
+          "default": [
+            [
+              0,
+              0.2,
+              0,
+              0
+            ],
+            [
+              1,
+              1,
+              1.5,
+              1.5
+            ]
+          ]
+        },
+        {
+          "name": "fog",
+          "type": "rgba",
+          "default": "#9fb4d080"
+        }
+      ]
+    }
+  }
+}

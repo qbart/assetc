@@ -1,0 +1,9 @@
+packing = "grid"
+cell_width = 0
+cell_height = 0
+columns = 4
+padding = 2
+extrude = 1
+trim = false
+power_of_two = true
+max_size = 4096

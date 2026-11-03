@@ -1,0 +1,14 @@
+type = "noise/curl"
+size = 256
+
+[noise.curl]
+seed = 5
+basis = "simplex"
+frequency_x = 4
+frequency_y = 4
+translate_x = 0.0
+translate_y = 0.0
+octaves = 2
+lacunarity = 2
+gain = 0.5
+warp = 0.0

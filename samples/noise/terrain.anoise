@@ -1,0 +1,27 @@
+type = "noise/ridged"
+size = 512
+
+[noise.ridged]
+seed = 11
+basis = "perlin"
+frequency_x = 4
+frequency_y = 4
+translate_x = 0.0
+translate_y = 0.0
+octaves = 7
+lacunarity = 2
+dimension = 1.0
+offset = 1.0
+gain = 2.0
+warp = 0.6
+
+[[modifiers]]
+type = "blur"
+enabled = false
+radius = 2
+edges = "wrap"
+
+[[modifiers]]
+type = "posterize"
+enabled = true
+steps = 12
