@@ -69,6 +69,36 @@ impl Section {
             Self::Pack => "Pack",
         }
     }
+
+    /// What the section controls and how its values are written.
+    fn intro(self) -> &'static str {
+        match self {
+            Self::General => {
+                "Where assetc reads your source assets and writes the build. Paths are relative \
+                 to the folder holding assetc.toml."
+            }
+            Self::Textures => {
+                "Each list holds glob patterns, one per row, matched against a texture's path \
+                 inside the input folder (ui/button.png). * matches within one folder or file \
+                 name, ** any number of folders, ? one character, {a,b} either. A texture \
+                 matching any pattern gets the setting; an empty list matches nothing."
+            }
+            Self::Meshes => {
+                "How glTF models are split into meshlets and simplified into levels of detail. \
+                 The defaults suit most models; overrides below, or a model's .amod sidecar, \
+                 change them for some models."
+            }
+            Self::Locators => {
+                "A preset shares the locators of one model (placed in its .amod sidecar) with \
+                 other models whose skeleton has the same joints, so they are placed once."
+            }
+            Self::Pack => {
+                "assetc pack bundles the build into one file. Patterns here match paths inside \
+                 the output folder (models/Fox.amesh.bin), with the syntax of the Textures \
+                 section."
+            }
+        }
+    }
 }
 
 /// How a setting is edited.
@@ -83,35 +113,54 @@ enum Edit {
     Alignment,
 }
 
-/// One setting: its table (`None` at the top level), key, editor and meaning.
+/// One setting: its table (`None` at the top level), key, editor, name, help
+/// and an example for empty fields; see docs/features/config.md#help-texts.
 struct Field {
     table: Option<&'static str>,
     key: &'static str,
     edit: Edit,
+    label: &'static str,
     help: &'static str,
+    hint: &'static str,
 }
 
 const fn field(
     table: Option<&'static str>,
     key: &'static str,
     edit: Edit,
-    help: &'static str,
+    text: [&'static str; 3],
 ) -> Field {
+    let [label, help, hint] = text;
     Field {
         table,
         key,
         edit,
+        label,
         help,
+        hint,
     }
 }
 
 const GENERAL: [Field; 2] = [
-    field(None, "input", Edit::Text, "Directory holding source assets"),
+    field(
+        None,
+        "input",
+        Edit::Text,
+        [
+            "Input folder",
+            "Folder with your source assets, relative to assetc.toml's folder. Shared by every target.",
+            "assets",
+        ],
+    ),
     field(
         None,
         "output",
         Edit::Text,
-        "Directory compiled assets are written to",
+        [
+            "Output folder",
+            "Folder the build writes to, relative to assetc.toml's folder. A named target writes to <output>-<name> unless it sets its own.",
+            "build",
+        ],
     ),
 ];
 
@@ -120,19 +169,31 @@ const TEXTURES: [Field; 3] = [
         Some("textures"),
         "linear",
         Edit::Globs,
-        "Globs of textures holding linear data, not sRGB color",
+        [
+            "Linear data",
+            "Textures holding data rather than color (normal maps, masks) are stored linear instead of sRGB. Textures used by a material take this from their slot.",
+            "**/*_n.png",
+        ],
     ),
     field(
         Some("textures"),
         "no_mipmaps",
         Edit::Globs,
-        "Globs of textures written without mipmaps",
+        [
+            "Without mipmaps",
+            "Textures built with no mipmaps: only the full-size image, no smaller copies. For UI and pixel art drawn at their own size; every other texture gets a full mip chain.",
+            "ui/**",
+        ],
     ),
     field(
         Some("textures"),
         "volume_luts",
         Edit::Globs,
-        "Globs of color LUTs compiled as 3D textures instead of 2D strips",
+        [
+            "3D LUTs",
+            "Color grading LUTs (.cube) built as 3D textures; the others become 2D strips.",
+            "grades/**",
+        ],
     ),
 ];
 
@@ -145,7 +206,11 @@ const MESHES: [Field; 14] = [
             max: 256,
             step: 1,
         },
-        "Most vertices per meshlet",
+        [
+            "Meshlet vertices",
+            "Most vertices in one meshlet, 3–256 (default 64). Match the output limit of your mesh shader.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
@@ -155,31 +220,51 @@ const MESHES: [Field; 14] = [
             max: 512,
             step: 4,
         },
-        "Most triangles per meshlet, a multiple of 4",
+        [
+            "Meshlet triangles",
+            "Most triangles in one meshlet, 4–512 in steps of 4 (default 124).",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "meshlet_cone_weight",
         Edit::Float { min: 0.0, max: 1.0 },
-        "How much meshlet building favours tight normal cones over compact meshlets",
+        [
+            "Cone weight",
+            "0–1 (default 0.25). Higher keeps each meshlet's normals close together for better back-face culling; lower makes meshlets more compact.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_ratios",
         Edit::Floats,
-        "Reduced levels of detail, as decreasing fractions of the full triangle count",
+        [
+            "LOD ratios",
+            "One row per reduced level of detail: the share of the full triangle count it keeps (0.5 is half), each smaller than the one before, at most 8. No rows: no levels.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_error",
         Edit::Float { min: 0.0, max: 1.0 },
-        "First error limit of simplification, relative to the mesh's size",
+        [
+            "LOD error",
+            "0–1 (default 0.05). How far a simplified mesh may move from the original, as a share of the mesh's size.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_error_step",
         Edit::Float { min: 0.0, max: 1.0 },
-        "How much the limit rises per retry",
+        [
+            "Error step",
+            "0–1 (default 0.05). How much the error limit rises on each retry.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
@@ -189,13 +274,21 @@ const MESHES: [Field; 14] = [
             max: 10,
             step: 1,
         },
-        "Retries with a raised limit while a level makes no progress",
+        [
+            "Retries",
+            "0–10 (default 3). Retries with a raised error limit while a level cannot get smaller.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_sloppy_fallback",
         Edit::Bool,
-        "After the retries, fall back to sloppy simplification",
+        [
+            "Sloppy fallback",
+            "After the retries, simplify ignoring the mesh's topology (may open seams). Off: the level reuses the previous one.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
@@ -204,7 +297,11 @@ const MESHES: [Field; 14] = [
             min: 0.0,
             max: 100.0,
         },
-        "Weight of UV error in simplification",
+        [
+            "UV weight",
+            "0–100 (default 1). How much stretching of texture coordinates counts against a simplification.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
@@ -213,31 +310,51 @@ const MESHES: [Field; 14] = [
             min: 0.0,
             max: 100.0,
         },
-        "Weight of normal error in simplification",
+        [
+            "Normal weight",
+            "0–100 (default 0.5). How much change in shading (normals) counts against a simplification.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_permissive",
         Edit::Bool,
-        "Allow collapses across attribute seams",
+        [
+            "Cross seams",
+            "Allow simplifying across UV and normal seams: fewer triangles, small texture shifts at seams.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_lock_border",
         Edit::Bool,
-        "Keep vertices on the mesh's open borders in place",
+        [
+            "Lock borders",
+            "Keep vertices on the mesh's open edges in place, so parts that meet stay joined.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_regularize",
         Edit::Bool,
-        "Prefer evenly sized triangles, at some cost to accuracy",
+        [
+            "Even triangles",
+            "Prefer evenly sized triangles, at some cost to accuracy.",
+            "",
+        ],
     ),
     field(
         Some("meshes"),
         "lod_prune",
         Edit::Bool,
-        "Remove small disconnected parts while simplifying",
+        [
+            "Prune islands",
+            "Remove small disconnected parts while simplifying.",
+            "",
+        ],
     ),
 ];
 
@@ -246,25 +363,41 @@ const PACK: [Field; 4] = [
         Some("pack"),
         "file",
         Edit::Text,
-        "Path of the pack, relative to output, ending in .pak",
+        [
+            "Pack file",
+            "Name of the pack inside the output folder, ending in .pak.",
+            "assetc.pak",
+        ],
     ),
     field(
         Some("pack"),
         "alignment",
         Edit::Alignment,
-        "Byte alignment of every packed file",
+        [
+            "Alignment",
+            "Every packed file starts at a multiple of this many bytes. Larger values suit memory-mapping and GPU uploads; smaller ones waste less space.",
+            "",
+        ],
     ),
     field(
         Some("pack"),
         "include",
         Edit::Globs,
-        "Globs of the output files to pack",
+        [
+            "Include",
+            "Output files to pack. The default ** packs everything.",
+            "**",
+        ],
     ),
     field(
         Some("pack"),
         "exclude",
         Edit::Globs,
-        "Globs of output files left out, even when included",
+        [
+            "Exclude",
+            "Output files left out, even when included.",
+            "**/*.aanim.bin",
+        ],
     ),
 ];
 
@@ -581,6 +714,8 @@ pub(super) fn config_dialog(ctx: &egui::Context, dialog: &mut ConfigDialog) -> D
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
                         ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                            help_text(ui, dialog.section.intro(), 13.0);
+                            ui.add_space(14.0);
                             let target = dialog.target.as_deref();
                             let defaults = &dialog.defaults;
                             match dialog.section {
@@ -808,11 +943,16 @@ fn fields(
             }
             None => {}
         }
-        ui.add_space(4.0);
+        ui.add_space(12.0);
     }
 }
 
-/// A setting's name, editor and reset or remove button.
+/// Weak wrapped text explaining a section or a setting.
+fn help_text(ui: &mut Ui, text: &str, size: f32) {
+    ui.add(egui::Label::new(RichText::new(text).size(size).color(TEXT_WEAK)).wrap());
+}
+
+/// A setting's name and key, editor, reset or remove button and help.
 fn field_row(
     ui: &mut Ui,
     f: &Field,
@@ -822,33 +962,40 @@ fn field_row(
     button: RowButton,
 ) -> Option<Change> {
     let color = if set_here { TEXT } else { TEXT_WEAK };
-    let (label, _) = ui.allocate_exact_size(vec2(180.0, 24.0), Sense::hover());
-    ui.painter().text(
-        pos2(label.left(), label.center().y),
-        Align2::LEFT_CENTER,
-        f.key,
-        FontId::proportional(14.0),
-        color,
-    );
-    let help = if shared {
-        "Shared by every target"
-    } else {
-        f.help
-    };
-    ui.interact(label, ui.id().with(("help", f.key)), Sense::hover())
-        .on_hover_text(help);
-    let mut change = editor(ui, f, item, color).map(Change::Set);
-    let icon = match button {
-        RowButton::Reset => Some((Icon::RotateCcw, "Reset")),
-        RowButton::Remove => Some((Icon::X, "Remove")),
-        RowButton::None => None,
-    };
-    if let Some((icon, tip)) = icon.filter(|_| set_here && !shared)
-        && icon_button(ui, icon, tip, true).clicked()
-    {
-        change = Some(Change::Reset);
-    }
-    change
+    name_column(ui, f.label, f.key, color);
+    ui.vertical(|ui| {
+        let mut change = None;
+        ui.horizontal(|ui| {
+            change = editor(ui, f, item, color).map(Change::Set);
+            let icon = match button {
+                RowButton::Reset => Some((Icon::RotateCcw, "Reset")),
+                RowButton::Remove => Some((Icon::X, "Remove")),
+                RowButton::None => None,
+            };
+            if let Some((icon, tip)) = icon.filter(|_| set_here && !shared)
+                && icon_button(ui, icon, tip, true).clicked()
+            {
+                change = Some(Change::Reset);
+            }
+        });
+        ui.set_max_width(ui.available_width().min(520.0));
+        help_text(ui, f.help, 12.0);
+        change
+    })
+    .inner
+}
+
+/// The left column of a row: the setting's name, its `assetc.toml` key under it.
+fn name_column(ui: &mut Ui, label: &str, key: &str, color: Color32) {
+    ui.vertical(|ui| {
+        ui.set_width(200.0);
+        ui.label(RichText::new(label).size(14.0).color(color));
+        ui.label(
+            RichText::new(key)
+                .font(FontId::monospace(11.0))
+                .color(TEXT_WEAK),
+        );
+    });
 }
 
 /// The editor of a setting's value; the new value when edited.
@@ -860,16 +1007,18 @@ fn editor(ui: &mut Ui, f: &Field, item: Option<&Item>, color: Color32) -> Option
             let response = ui.add(
                 egui::TextEdit::singleline(&mut text)
                     .desired_width(320.0)
+                    .hint_text(f.hint)
                     .text_color(color),
             );
             response.changed().then(|| toml_edit::value(text))
         }
         Edit::Globs => {
             let mut list = strings(item);
-            list_editor(ui, id, &mut list, |ui, s| {
+            list_editor(ui, id, "+ Add pattern", &mut list, |ui, s| {
                 ui.add(
                     egui::TextEdit::singleline(s)
                         .desired_width(280.0)
+                        .hint_text(f.hint)
                         .text_color(color),
                 )
                 .changed()
@@ -878,7 +1027,7 @@ fn editor(ui: &mut Ui, f: &Field, item: Option<&Item>, color: Color32) -> Option
         }
         Edit::Floats => {
             let mut list = numbers(item);
-            list_editor(ui, id, &mut list, |ui, v| {
+            list_editor(ui, id, "+ Add level", &mut list, |ui, v| {
                 ui.add(egui::DragValue::new(v).range(0.0..=1.0).speed(0.01))
                     .changed()
             })
@@ -929,10 +1078,11 @@ fn editor(ui: &mut Ui, f: &Field, item: Option<&Item>, color: Color32) -> Option
     }
 }
 
-/// A column of `item` editors with `x` buttons, then `+`; whether anything changed.
+/// A column of `item` editors with `x` buttons, then the `add` button; whether anything changed.
 fn list_editor<T: Default>(
     ui: &mut Ui,
     id: egui::Id,
+    add: &str,
     list: &mut Vec<T>,
     mut item: impl FnMut(&mut Ui, &mut T) -> bool,
 ) -> bool {
@@ -953,7 +1103,7 @@ fn list_editor<T: Default>(
             list.remove(i);
             changed = true;
         }
-        if icon_button(ui, Icon::Plus, "Add", true).clicked() {
+        if ui.button(add).clicked() {
             list.push(T::default());
             changed = true;
         }
@@ -975,13 +1125,19 @@ fn overrides(
     let color = if set_here { TEXT } else { TEXT_WEAK };
     let mut edited = false;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("overrides").size(14.0).color(color))
-            .on_hover_text("Per-model values; the last matching entry that sets a value wins");
+        name_column(ui, "Overrides", "[[meshes.overrides]]", color);
         if set_here && icon_button(ui, Icon::RotateCcw, "Reset", true).clicked() {
             reset(doc, target, Some("meshes"), "overrides");
             *changed = true;
         }
     });
+    help_text(
+        ui,
+        "Other values for some models: each override lists patterns of model paths and the \
+         settings it changes. When several match, the last one that sets a value wins.",
+        12.0,
+    );
+    ui.add_space(6.0);
     if !*changed {
         let mut remove = None;
         for (i, entry) in list.iter_mut().enumerate() {
@@ -999,7 +1155,12 @@ fn overrides(
                         None,
                         "match",
                         Edit::Globs,
-                        "Globs of the models it applies to",
+                        [
+                            "Models",
+                            "Patterns of model paths inside the input folder this override \
+                             applies to.",
+                            "characters/**",
+                        ],
                     );
                     let mut entry_changed = false;
                     ui.horizontal(|ui| {
@@ -1050,7 +1211,7 @@ fn overrides(
                     if !missing.is_empty() {
                         ui.menu_button("+ Setting", |ui| {
                             for f in missing {
-                                if ui.button(f.key).clicked() {
+                                if ui.button(f.label).clicked() {
                                     let (value, _) = effective(doc, defaults, target, f);
                                     if let Some(value) = value {
                                         entry.insert(f.key, value);
@@ -1096,13 +1257,13 @@ fn presets(
     let color = if set_here { TEXT } else { TEXT_WEAK };
     let mut edited = false;
     ui.horizontal(|ui| {
-        ui.label(RichText::new("presets").size(14.0).color(color))
-            .on_hover_text("Locators of one model shared with others");
+        name_column(ui, "Presets", "[[locators.presets]]", color);
         if set_here && icon_button(ui, Icon::RotateCcw, "Reset", true).clicked() {
             reset(doc, target, Some("locators"), "presets");
             *changed = true;
         }
     });
+    ui.add_space(6.0);
     if *changed {
         return;
     }
@@ -1119,42 +1280,43 @@ fn presets(
                     });
                 });
                 ui.horizontal(|ui| {
-                    let (label, _) = ui.allocate_exact_size(vec2(180.0, 24.0), Sense::hover());
-                    ui.painter().text(
-                        pos2(label.left(), label.center().y),
-                        Align2::LEFT_CENTER,
-                        "from",
-                        FontId::proportional(14.0),
-                        color,
-                    );
-                    let mut from = entry
-                        .get("from")
-                        .and_then(Item::as_str)
-                        .unwrap_or_default()
-                        .to_owned();
-                    let before = from.clone();
-                    egui::ComboBox::from_id_salt("from")
-                        .width(320.0)
-                        .selected_text(if from.is_empty() {
-                            "Choose a model"
-                        } else {
-                            &from
-                        })
-                        .show_ui(ui, |ui| {
-                            for model in models {
-                                ui.selectable_value(&mut from, model.clone(), model);
-                            }
-                        });
-                    if from != before {
-                        entry.insert("from", toml_edit::value(from));
-                        edited = true;
-                    }
+                    name_column(ui, "From model", "from", color);
+                    ui.vertical(|ui| {
+                        let mut from = entry
+                            .get("from")
+                            .and_then(Item::as_str)
+                            .unwrap_or_default()
+                            .to_owned();
+                        let before = from.clone();
+                        egui::ComboBox::from_id_salt("from")
+                            .width(320.0)
+                            .selected_text(if from.is_empty() {
+                                "Choose a model"
+                            } else {
+                                &from
+                            })
+                            .show_ui(ui, |ui| {
+                                for model in models {
+                                    ui.selectable_value(&mut from, model.clone(), model);
+                                }
+                            });
+                        if from != before {
+                            entry.insert("from", toml_edit::value(from));
+                            edited = true;
+                        }
+                        help_text(ui, "The model whose locators are shared.", 12.0);
+                    });
                 });
                 let globs = field(
                     None,
                     "match",
                     Edit::Globs,
-                    "Globs of the models it applies to; empty: every model",
+                    [
+                        "Applies to",
+                        "Patterns of the models that get them. No rows: every model with the \
+                         joints they use.",
+                        "animals/**",
+                    ],
                 );
                 ui.horizontal(|ui| {
                     if let Some(Change::Set(item)) = field_row(
