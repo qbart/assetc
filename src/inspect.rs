@@ -553,7 +553,7 @@ fn hdr_rows(project: &Project, file: &Path, rel: &str, out: &mut Inspection) -> 
 }
 
 /// See docs/features/instances.md#info-tab.
-fn data_rows(_: &Project, file: &Path, _: &str, out: &mut Inspection) -> Result<(), String> {
+fn data_rows(project: &Project, file: &Path, _: &str, out: &mut Inspection) -> Result<(), String> {
     use crate::adata::{DataFile, load_schema};
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
     let data = DataFile::parse(&text)?;
@@ -569,7 +569,12 @@ fn data_rows(_: &Project, file: &Path, _: &str, out: &mut Inspection) -> Result<
     out.rows.push(("Schema", shown));
     out.rows
         .push(("Instances", data.instances.len().to_string()));
-    let problems = schema.map(|s| data.check(&s)).unwrap_or_default();
+    let assets = project
+        .input_dir()
+        .map(|input| crate::adata::asset_files(&input));
+    let problems = schema
+        .map(|s| data.check_with(&s, assets.as_deref()))
+        .unwrap_or_default();
     let warnings = problems.iter().filter(|p| p.warning).count();
     let errors = problems.len() - warnings;
     let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });

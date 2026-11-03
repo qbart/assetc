@@ -428,7 +428,69 @@ pub const PRIMITIVES: [&str; 15] = [
 ];
 /// The last primitive, kept apart so [`PRIMITIVES`] lists them in the type menu's order.
 pub const GRADIENT: &str = "gradient";
-pub const GENERICS: [&str; 2] = ["list", "ref"];
+pub const GENERICS: [&str; 3] = ["list", "ref", "asset"];
+
+/// The kinds of input files `asset<K>` can name, with their menu names; see
+/// docs/aschema.md#asset-references.
+pub const ASSET_KINDS: [(&str, &str); 13] = [
+    ("texture", "Texture"),
+    ("noise", "Noise"),
+    ("gradient", "Gradient"),
+    ("palette", "Palette"),
+    ("model", "Model"),
+    ("font", "Font"),
+    ("lut", "Color LUT"),
+    ("hdr", "HDR map"),
+    ("atlas", "Atlas"),
+    ("material", "Material"),
+    ("graph", "Graph"),
+    ("tree", "Tree"),
+    ("data", "Data"),
+];
+
+/// The asset kind of an input path, by its name.
+pub fn asset_kind(path: &str) -> Option<&'static str> {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".mat.toml") {
+        return Some("material");
+    }
+    let ext = lower.rsplit_once('.').map(|(_, e)| e)?;
+    Some(match ext {
+        "png" | "jpg" | "jpeg" | "tga" => "texture",
+        "noise" => "noise",
+        "gradient" => "gradient",
+        "palette" => "palette",
+        "gltf" | "glb" => "model",
+        "ttf" | "otf" => "font",
+        "cube" => "lut",
+        "exr" => "hdr",
+        "atlas" => "atlas",
+        "agraph" => "graph",
+        "atree" => "tree",
+        "adata" => "data",
+        _ => return None,
+    })
+}
+
+/// The asset ID the build gives an input file's main output (`0` for `""`); see
+/// docs/spec/arec.md.
+pub fn asset_id(path: &str) -> u64 {
+    if path.is_empty() {
+        return 0;
+    }
+    let stem = |p: &str| p.rsplit_once('.').map_or(p, |(s, _)| s).to_owned();
+    let asset_path = match asset_kind(path) {
+        Some("material") => format!("{}.amat", &path[..path.len() - ".mat.toml".len()]),
+        Some("model") => format!("{}.amesh", stem(path)),
+        Some("font") => format!("{}.afont", stem(path)),
+        Some("atlas") => format!("{}.aatlas", stem(path)),
+        Some("graph") => format!("{}.agph", stem(path)),
+        Some("tree") => format!("{}.atre", stem(path)),
+        Some("data") => format!("{}.arec", stem(path)),
+        _ => stem(path),
+    };
+    crate::hash::fnv1a64(asset_path.as_bytes())
+}
 
 /// Whether `name` is reserved: a primitive or a generic.
 pub fn is_reserved(name: &str) -> bool {
@@ -442,6 +504,8 @@ pub enum Ty {
     Named(String),
     List(Box<Ty>),
     Ref(Box<Ty>),
+    /// A file of the input, of this kind.
+    Asset(&'static str),
 }
 
 pub fn parse_type(text: &str) -> Result<Ty, String> {
@@ -455,6 +519,13 @@ pub fn parse_type(text: &str) -> Result<Ty, String> {
         let (outer, inner) = inner
             .split_once('<')
             .ok_or_else(|| format!("type {text:?} does not parse"))?;
+        if outer == "asset" {
+            return ASSET_KINDS
+                .iter()
+                .find(|(k, _)| *k == inner)
+                .map(|(k, _)| Ty::Asset(k))
+                .ok_or_else(|| format!("unknown asset kind {inner:?}"));
+        }
         let inner = Box::new(parse_type(inner)?);
         return match outer {
             "list" => Ok(Ty::List(inner)),
@@ -484,6 +555,7 @@ impl std::fmt::Display for Ty {
             Ty::Named(n) => write!(f, "{n}"),
             Ty::List(t) => write!(f, "list<{t}>"),
             Ty::Ref(t) => write!(f, "ref<{t}>"),
+            Ty::Asset(k) => write!(f, "asset<{k}>"),
         }
     }
 }
@@ -738,6 +810,12 @@ impl Schema {
                 items.iter().try_for_each(|v| self.encodes(t, v))
             }
             Ty::Ref(_) => value.as_str().map(|_| ()).ok_or_else(bad),
+            Ty::Asset(kind) => match value.as_str() {
+                Some("") => Ok(()),
+                Some(path) if asset_kind(path) == Some(*kind) => Ok(()),
+                Some(path) => Err(format!("{path:?} is not a {kind}")),
+                None => Err(bad()),
+            },
             Ty::Named(name) => match self.type_index(name).map(|i| &self.types[i].body) {
                 Some(Body::Enum { values }) => value
                     .as_str()
@@ -773,6 +851,7 @@ impl Schema {
                 .map(|_| ())
                 .ok_or_else(|| format!("unknown type {n:?}")),
             Ty::List(t) => self.check_type(t),
+            Ty::Asset(_) => Ok(()),
             Ty::Ref(t) => match &**t {
                 Ty::Named(n)
                     if matches!(
@@ -1001,7 +1080,7 @@ pub fn implicit_value(schema: &Schema, ty: &Ty) -> Value {
         Ty::Prim("gradient") => default_gradient(),
         Ty::Prim(_) => 0.into(),
         Ty::List(_) => Value::Array(Vec::new()),
-        Ty::Ref(_) => "".into(),
+        Ty::Ref(_) | Ty::Asset(_) => "".into(),
         Ty::Named(n) => match schema.type_index(n).map(|i| &schema.types[i].body) {
             Some(Body::Enum { values }) => values.first().cloned().unwrap_or_default().into(),
             _ => Value::Object(Map::new()),
@@ -1161,6 +1240,43 @@ mod tests {
         assert!(evaluate_curve(&points, 0.25) < 0.25);
         assert_eq!(evaluate_curve(&points, -1.0), 0.0);
         assert_eq!(evaluate_curve(&points, 2.0), 1.0);
+    }
+
+    #[test]
+    fn asset_references() {
+        assert_eq!(parse_type("asset<texture>"), Ok(Ty::Asset("texture")));
+        assert_eq!(
+            parse_type("list<asset<model>>"),
+            Ok(Ty::List(Box::new(Ty::Asset("model"))))
+        );
+        assert!(
+            parse_type("asset<sound>")
+                .unwrap_err()
+                .contains("unknown asset kind")
+        );
+        assert_eq!(asset_kind("a/b.GLB"), Some("model"));
+        assert_eq!(asset_kind("brick/brick.mat.toml"), Some("material"));
+        assert_eq!(asset_kind("fx/boom.atlas"), Some("atlas"));
+        assert_eq!(
+            asset_id("textures/grass.png"),
+            crate::hash::fnv1a64(b"textures/grass")
+        );
+        assert_eq!(asset_id("Fox.glb"), crate::hash::fnv1a64(b"Fox.amesh"));
+        assert_eq!(
+            asset_id("brick/brick.mat.toml"),
+            crate::hash::fnv1a64(b"brick/brick.amat")
+        );
+        assert_eq!(asset_id(""), 0);
+        let schema = Schema::default();
+        let ty = Ty::Asset("texture");
+        assert!(schema.encodes(&ty, &serde_json::json!("a.png")).is_ok());
+        assert!(schema.encodes(&ty, &serde_json::json!("")).is_ok());
+        assert!(
+            schema
+                .encodes(&ty, &serde_json::json!("a.glb"))
+                .unwrap_err()
+                .contains("not a texture")
+        );
     }
 
     #[test]

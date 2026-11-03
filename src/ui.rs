@@ -1158,6 +1158,8 @@ struct Prepared {
     graph: Option<Result<(Graph, bool), String>>,
     data: Option<Result<PreparedData, (String, String)>>,
     atlas: Option<Result<crate::atlas::AtlasConfig, String>>,
+    /// The input's files asset references can name, for a schema or data file.
+    assets: Vec<String>,
     /// A model's sidecar (with every locator the model has), the meshlet limits the project
     /// gives it, and the locators it inherits.
     mesh: Option<Result<PreparedMesh, String>>,
@@ -1303,6 +1305,14 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
     let geometry = (selection.location == Location::Input && model::is_model(&selection.path))
         .then(|| model::geometry(&selection.path).ok())
         .flatten();
+    // The input's files, for asset references; see docs/aschema.md#asset-references.
+    let assets = match (&schema, &data) {
+        (None, None) => Vec::new(),
+        _ => project
+            .input_dir()
+            .map(|input| crate::adata::asset_files(&input))
+            .unwrap_or_default(),
+    };
     Prepared {
         sidecar,
         geometry,
@@ -1316,6 +1326,7 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
         data,
         atlas: (selection.location == Location::Input && crate::atlas::is_atlas(&selection.path))
             .then(|| crate::atlas::AtlasConfig::read(&selection.path)),
+        assets,
         mesh,
         model,
         pixels: inspection
@@ -1401,9 +1412,13 @@ fn inspected(
         .as_mut()
         .and_then(|p| p.data.take())
         .and_then(Result::ok);
-    let data = prepared
-        .data
-        .map(|parsed| parsed.map(|p| DataEdit::new(p, kept_data)));
+    let data = prepared.data.map(|parsed| {
+        parsed.map(|p| {
+            let mut edit = DataEdit::new(p, kept_data);
+            edit.assets = prepared.assets.clone();
+            edit
+        })
+    });
     let (kept, kept_gradient, kept_palette, kept_mesh, kept_sidecar, kept_schema, kept_graph) =
         previous.map_or((None, None, None, None, None, None, None), |p| {
             (
@@ -1428,6 +1443,12 @@ fn inspected(
             Some(edit) if edit.saved == schema => edit,
             Some(edit) => SchemaEdit::new(schema, edit),
             None => SchemaEdit::new(schema, SchemaEdit::default()),
+        })
+    });
+    let schema = schema.map(|parsed| {
+        parsed.map(|mut edit| {
+            edit.assets = prepared.assets.clone();
+            edit
         })
     });
     let palette = prepared.palette.map(|parsed| {

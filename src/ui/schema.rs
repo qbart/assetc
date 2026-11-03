@@ -26,6 +26,8 @@ pub(super) struct SchemaEdit {
     curve_settings: CurveSettings,
     /// Whether a group was being dragged last frame: groups then show their headers only.
     group_drag: bool,
+    /// The input's files `asset<K>` defaults can name; see docs/aschema.md#asset-references.
+    pub(super) assets: Vec<String>,
 }
 
 impl SchemaEdit {
@@ -623,6 +625,7 @@ fn field_rows(
                             curves: &mut edit.curves,
                             curve_settings: &mut edit.curve_settings,
                             gradients: &mut edit.gradients,
+                            assets: &edit.assets,
                             ti,
                         };
                         default_cell(ui, &mut editors, field, snapshot, ty.as_ref());
@@ -651,6 +654,7 @@ fn field_rows(
                         curves: &mut edit.curves,
                         curve_settings: &mut edit.curve_settings,
                         gradients: &mut edit.gradients,
+                        assets: &edit.assets,
                         ti,
                     };
                     let mut shown = vec![ti];
@@ -790,8 +794,18 @@ fn type_menu(
             });
         });
     }
-    ui.add_enabled_ui(false, |ui| {
-        ui.menu_button(RichText::new("Reference").size(14.0).color(TEXT), |_| {});
+    // References to the input's files; see docs/aschema.md#asset-references.
+    ui.menu_button(RichText::new("Reference").size(14.0).color(TEXT), |ui| {
+        for (kind, name) in aschema::ASSET_KINDS {
+            let ty = if in_list {
+                format!("list<asset<{kind}>>")
+            } else {
+                format!("asset<{kind}>")
+            };
+            if menu_item(ui, name, Some(ty == current)).clicked() {
+                *picked = Some(ty);
+            }
+        }
     });
     if !in_list {
         ui.menu_button(RichText::new("List").size(14.0).color(TEXT), |ui| {
@@ -803,7 +817,7 @@ fn type_menu(
 /// Whether every name in `ty` is a primitive or a type of the schema.
 fn check_known(schema: &Schema, ty: &Ty) -> bool {
     match ty {
-        Ty::Prim(_) => true,
+        Ty::Prim(_) | Ty::Asset(_) => true,
         Ty::Named(n) => schema.type_index(n).is_some(),
         Ty::List(t) | Ty::Ref(t) => check_known(schema, t),
     }
@@ -816,6 +830,8 @@ pub(super) struct ValueEditors<'a> {
     pub(super) curves: &'a mut HashMap<(usize, String), CurveState>,
     pub(super) curve_settings: &'a mut CurveSettings,
     pub(super) gradients: &'a mut HashMap<(usize, String), GradientCard>,
+    /// The input's files, for `asset<K>` values.
+    pub(super) assets: &'a [String],
     pub(super) ti: usize,
 }
 
@@ -911,6 +927,29 @@ pub(super) fn value_editor(
         return;
     }
     let key = (editors.ti, path.to_owned());
+    if let Some(Ty::Asset(kind)) = ty {
+        // The input's files of that kind.
+        let current = default.as_str().unwrap_or_default().to_owned();
+        let shown = if current.is_empty() { "—" } else { &current };
+        egui::ComboBox::from_id_salt(("asset", path))
+            .width(DEFAULT_W - 8.0)
+            .selected_text(shown)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(current.is_empty(), "—").clicked() {
+                    *default = Value::String(String::new());
+                }
+                for file in editors
+                    .assets
+                    .iter()
+                    .filter(|f| aschema::asset_kind(f) == Some(*kind))
+                {
+                    if ui.selectable_label(*file == current, file).clicked() {
+                        *default = Value::String(file.clone());
+                    }
+                }
+            });
+        return;
+    }
     match (ty, enum_values) {
         (_, Some(values)) => {
             let current = default.as_str().unwrap_or_default().to_owned();

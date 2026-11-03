@@ -145,13 +145,16 @@ impl DataFile {
             .expect("a free id")
     }
 
-    /// Every data problem of [§5](docs/aschema.md#5-validation) one file can have.
-    pub fn check(&self, schema: &Schema) -> Vec<DataProblem> {
+    /// Every data problem of [§5](docs/aschema.md#5-validation) one file can have, with
+    /// asset references to files not among `assets` (the input's, from [`asset_files`]) when
+    /// given.
+    pub fn check_with(&self, schema: &Schema, assets: Option<&[String]>) -> Vec<DataProblem> {
         let ids: HashSet<(&str, &str)> = self
             .instances
             .iter()
             .map(|i| (i.ty.as_str(), i.id.as_str()))
             .collect();
+        let known = Known { ids, assets };
         let mut out = Vec::new();
         for (index, inst) in self.instances.iter().enumerate() {
             let mut add = |field: Option<String>, message: String, warning: bool| {
@@ -190,7 +193,7 @@ impl DataFile {
                 continue;
             };
             let mut found = Vec::new();
-            check_struct(schema, si, &inst.values, &inst.id, &ids, &mut found);
+            check_struct(schema, si, &inst.values, &inst.id, &known, &mut found);
             for (field, message, warning) in found {
                 add(field, message, warning);
             }
@@ -417,6 +420,12 @@ fn resolve_items(schema: &Schema, ty: &Ty, v: &Value) -> Value {
     )
 }
 
+/// What values may point at: the file's instances, and the input's files when known.
+struct Known<'a> {
+    ids: HashSet<(&'a str, &'a str)>,
+    assets: Option<&'a [String]>,
+}
+
 /// Problems of a struct value: `(top-level field, message, warning)`.
 type Found = Vec<(Option<String>, String, bool)>;
 
@@ -425,7 +434,7 @@ fn check_struct(
     si: usize,
     values: &Map<String, Value>,
     path: &str,
-    ids: &HashSet<(&str, &str)>,
+    known: &Known,
     out: &mut Found,
 ) {
     let Body::Struct { fields, .. } = &schema.types[si].body else {
@@ -455,7 +464,7 @@ fn check_struct(
         let Ok(ty) = parse_type(&f.ty) else {
             continue;
         };
-        check_value(schema, &ty, f, v, &at, ids, out);
+        check_value(schema, &ty, f, v, &at, known, out);
     }
 }
 
@@ -465,7 +474,7 @@ fn check_value(
     f: &Field,
     v: &Value,
     at: &str,
-    ids: &HashSet<(&str, &str)>,
+    known: &Known,
     out: &mut Found,
 ) {
     let mut add = |message: String, warning: bool| {
@@ -476,23 +485,31 @@ fn check_value(
         Ty::Named(n) if struct_index(schema, n).is_some() => match v.as_object() {
             Some(o) => {
                 let si = struct_index(schema, n).unwrap_or_default();
-                check_struct(schema, si, o, at, ids, out);
+                check_struct(schema, si, o, at, known, out);
             }
             None => add(format!("{v} is not a {n}"), false),
         },
         Ty::List(item) => match v.as_array() {
             Some(items) => {
                 for (i, v) in items.iter().enumerate() {
-                    check_value(schema, item, f, v, &format!("{at}/[{i}]"), ids, out);
+                    check_value(schema, item, f, v, &format!("{at}/[{i}]"), known, out);
                 }
             }
             None => add(format!("{v} is not a {ty}"), false),
         },
+        Ty::Asset(_) if schema.encodes(ty, v).is_ok() => {
+            if let (Some(path), Some(assets)) = (v.as_str(), known.assets)
+                && !path.is_empty()
+                && !assets.iter().any(|a| a == path)
+            {
+                add(format!("no asset {path:?} in the input"), true);
+            }
+        }
         Ty::Ref(target) => match v.as_str() {
             Some("") => {}
             Some(id) => {
                 let target = target.to_string();
-                if !ids.contains(&(target.as_str(), id)) {
+                if !known.ids.contains(&(target.as_str(), id)) {
                     add(format!("no {target} {id:?} in this file"), true);
                 }
             }
@@ -513,6 +530,37 @@ fn check_value(
             }
         }
     }
+}
+
+/// Every file `asset<K>` can name under `input`: its files and `*.atlas` folders (not
+/// looked into), by input-relative path, sorted; entries starting with `.` are skipped.
+pub fn asset_files(input: &Path) -> Vec<String> {
+    fn walk(input: &Path, dir: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let path = e.path();
+            if e.file_name().to_string_lossy().starts_with('.') {
+                continue;
+            }
+            let rel = || {
+                path.strip_prefix(input)
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default()
+            };
+            match e.file_type() {
+                Ok(t) if t.is_dir() && crate::atlas::is_atlas(&path) => out.push(rel()),
+                Ok(t) if t.is_dir() => walk(input, &path, out),
+                Ok(t) if t.is_file() && aschema::asset_kind(&rel()).is_some() => out.push(rel()),
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(input, input, &mut out);
+    out.sort();
+    out
 }
 
 /// Every `.aschema` under `input`, by input-relative path; entries starting with `.` are
@@ -683,7 +731,7 @@ mod tests {
             { "$type": "Enemy", "$id": "d" }
           ]
         }"##;
-        let problems = DataFile::parse(text).unwrap().check(&schema());
+        let problems = DataFile::parse(text).unwrap().check_with(&schema(), None);
         let has = |i: usize, part: &str, warning: bool| {
             problems
                 .iter()

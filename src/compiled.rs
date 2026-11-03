@@ -185,6 +185,10 @@ impl Rec<'_> {
                     .collect();
                 self.children(slot, name, 7, &items);
             }
+            (Some(Ty::Asset(_)), Value::String(path)) => {
+                let id = crate::aschema::asset_id(path);
+                self.put(slot, name, 10, 0, id.to_le_bytes());
+            }
             (Some(Ty::Ref(_)), Value::String(s)) => {
                 let (payload, len) = self.text(s);
                 self.put(slot, name, 8, len, payload);
@@ -818,6 +822,7 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
             7 => "list",
             8 => "ref",
             9 => "enum",
+            10 => "asset",
             _ => "?",
         }
         .into(),
@@ -833,6 +838,7 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
                     format!("#{:02x}{:02x}{:02x}{:02x}", c[0], c[1], c[2], c[3])
                 }),
                 6 | 7 => format!("→ {} ({count})", u32_at(16)),
+                10 => format!("{:#018x}", u64_at(16)),
                 9 => format!(
                     "{} (#{})",
                     text_at(u32_at(16) as usize, count as usize),

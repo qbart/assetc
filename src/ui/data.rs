@@ -37,6 +37,8 @@ pub(super) struct DataEdit {
     gradients: HashMap<(usize, String), GradientCard>,
     /// Groups were folded as `collapsed` says, by instance.
     started: HashSet<usize>,
+    /// The input's files `asset<K>` values can name.
+    pub(super) assets: Vec<String>,
 }
 
 /// What reading a data file gives the editor: the file, its schema, the schemas to choose
@@ -60,6 +62,7 @@ impl DataEdit {
             curve_settings: CurveSettings::default(),
             gradients: HashMap::new(),
             started: HashSet::new(),
+            assets: Vec::new(),
         };
         match previous {
             Some(p) => Self {
@@ -147,7 +150,7 @@ pub(super) fn instances_tab(
     let problems = edit
         .schema
         .as_ref()
-        .map(|s| edit.edit.check(s))
+        .map(|s| edit.edit.check_with(s, Some(&edit.assets)))
         .unwrap_or_default();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
@@ -337,7 +340,7 @@ pub(super) fn canvas_data(
     }
     *chosen = (*chosen).min(edit.edit.instances.len() - 1);
     let i = *chosen;
-    let problems = edit.edit.check(&schema);
+    let problems = edit.edit.check_with(&schema, Some(&edit.assets));
     let mine: Vec<&DataProblem> = problems.iter().filter(|p| p.instance == i).collect();
     // Refs choose among this file's instances.
     let ids: Vec<(String, String)> = edit
@@ -369,6 +372,7 @@ pub(super) fn canvas_data(
             curves,
             curve_settings,
             gradients,
+            assets,
             ..
         } = edit;
         let mut cx = Cx {
@@ -383,6 +387,7 @@ pub(super) fn canvas_data(
                 curves,
                 curve_settings,
                 gradients,
+                assets,
                 ti: i,
             },
         };

@@ -174,7 +174,7 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
                 continue;
             }
             Job::Font { source } => compile_font(input, source, output),
-            Job::Data { source, kind } => compile_data(&input.join(source), &dest, *kind),
+            Job::Data { source, kind } => compile_data(input, source, &dest, *kind),
             Job::Cubemap { source } => compile_cubemap(&input.join(source), &dest),
             Job::Atlas {
                 source,
@@ -501,8 +501,9 @@ fn first_problem(problems: &[String]) -> Result<(), String> {
 
 /// Compiles a schema, data file (resolved), graph or tree to its binary; see
 /// docs/features/build.md#inputs.
-fn compile_data(source: &Path, dest: &Path, kind: Kind) -> Result<String, String> {
+fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<String, String> {
     use crate::compiled;
+    let source = &input.join(source);
     let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
     let (written, detail) = match kind {
         Kind::Schema => {
@@ -520,8 +521,11 @@ fn compile_data(source: &Path, dest: &Path, kind: Kind) -> Result<String, String
             let data = crate::adata::DataFile::parse(&text)?;
             let (path, schema) = crate::adata::load_schema(source, &data);
             let schema = schema.map_err(|e| format!("schema {}: {e}", path.display()))?;
+            // Asset references are checked against the input; see
+            // docs/aschema.md#asset-references.
+            let assets = crate::adata::asset_files(input);
             let errors: Vec<String> = data
-                .check(&schema)
+                .check_with(&schema, Some(&assets))
                 .into_iter()
                 .filter(|p| !p.warning)
                 .map(|p| p.message)
