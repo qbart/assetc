@@ -1804,7 +1804,7 @@ name = \"x\"\n",
         let i = inspect(&project, Location::Output, &fake);
         assert_eq!(row(&i, "Error"), "not a KTX2 file");
 
-        let nested_manifest = dir.path().join("build/sub/assets.aman.bin");
+        let nested_manifest = dir.path().join("build/sub/assetc.aman.bin");
         fs::create_dir_all(nested_manifest.parent().unwrap()).unwrap();
         fs::write(&nested_manifest, "x").unwrap();
         let i = inspect(&project, Location::Output, &nested_manifest);

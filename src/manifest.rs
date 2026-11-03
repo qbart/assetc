@@ -1,11 +1,11 @@
-//! `assets.aman.bin` reader/writer, see docs/spec/aman.bin.md.
+//! `assetc.aman.bin` reader/writer, see docs/spec/aman.bin.md.
 
 use std::fmt;
 use std::path::Path;
 
-pub const FILE_NAME: &str = "assets.aman.bin";
+pub const FILE_NAME: &str = "assetc.aman.bin";
 /// The manifest's names before, removed by builds; see docs/features/build.md.
-pub const LEGACY_FILE_NAMES: [&str; 2] = ["assets.manifest", "assets.aman"];
+pub const LEGACY_FILE_NAMES: [&str; 3] = ["assets.manifest", "assets.aman", "assets.aman.bin"];
 /// Extensions of outputs before they ended in `.bin`, removed by builds; see
 /// docs/features/build.md#removing-stale-outputs.
 pub const LEGACY_EXTENSIONS: [&str; 9] = [

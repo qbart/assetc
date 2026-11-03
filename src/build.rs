@@ -853,7 +853,12 @@ mod tests {
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(
             outcome.removed,
-            ["old.atre", "assets.manifest", "assets.aman"]
+            [
+                "old.atre",
+                "assets.manifest",
+                "assets.aman",
+                "assets.aman.bin"
+            ]
         );
         for name in manifest::LEGACY_FILE_NAMES {
             assert!(!output.join(name).exists());
