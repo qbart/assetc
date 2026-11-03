@@ -75,8 +75,6 @@ impl Plugin for UiPlugin {
 
 #[derive(Resource)]
 struct UiState {
-    show_left_sidebar: bool,
-    show_right_sidebar: bool,
     inspector_tab: InspectorTab,
     browser_tab: BrowserTab,
     rescan: bool,
@@ -477,8 +475,6 @@ enum BuildStatus {
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            show_left_sidebar: true,
-            show_right_sidebar: true,
             inspector_tab: InspectorTab::Info,
             browser_tab: BrowserTab::Input,
             rescan: false,
@@ -778,33 +774,29 @@ fn shell(
             )
         });
 
-    if state.show_left_sidebar {
-        egui::Panel::left("left_sidebar")
-            .resizable(true)
-            .default_size(260.0)
-            .min_size(200.0)
-            .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, |ui| {
-                left_sidebar(ui, &mut state, &project, &trees)
-            });
-    }
+    egui::Panel::left("left_sidebar")
+        .resizable(true)
+        .default_size(260.0)
+        .min_size(200.0)
+        .frame(Frame::new().fill(BG_PANEL))
+        .show(&mut root, |ui| {
+            left_sidebar(ui, &mut state, &project, &trees)
+        });
 
-    if state.show_right_sidebar {
-        egui::Panel::right("right_sidebar")
-            .resizable(true)
-            .default_size(320.0)
-            .min_size(220.0)
-            .frame(Frame::new().fill(BG_PANEL))
-            .show(&mut root, |ui| {
-                right_sidebar(
-                    ui,
-                    &mut state,
-                    &assets,
-                    preview3d.frames.as_ref(),
-                    preview3d.animation_time,
-                )
-            });
-    }
+    egui::Panel::right("right_sidebar")
+        .resizable(true)
+        .default_size(320.0)
+        .min_size(220.0)
+        .frame(Frame::new().fill(BG_PANEL))
+        .show(&mut root, |ui| {
+            right_sidebar(
+                ui,
+                &mut state,
+                &assets,
+                preview3d.frames.as_ref(),
+                preview3d.animation_time,
+            )
+        });
 
     // The chosen mip level, kept the same size on screen.
     let ui_state = &mut *state;
@@ -1799,19 +1791,6 @@ fn menu_bar(
         ui.menu_button("File", |ui| {
             if shortcut_row(ui, "Quit", &quit, true).clicked() {
                 exit.write(AppExit::Success);
-            }
-        });
-        ui.add_enabled_ui(false, |ui| {
-            ui.menu_button("Edit", |_| {});
-        });
-        ui.menu_button("View", |ui| {
-            let left = &mut state.show_left_sidebar;
-            if menu_item(ui, "Left Sidebar", Some(*left)).clicked() {
-                *left = !*left;
-            }
-            let right = &mut state.show_right_sidebar;
-            if menu_item(ui, "Right Sidebar", Some(*right)).clicked() {
-                *right = !*right;
             }
         });
         ui.menu_button("Build", |ui| {
