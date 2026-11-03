@@ -176,7 +176,7 @@ to date, then `, <K> removed` when stale outputs were removed:
   of the rescan button. It is disabled while a build is running or when no
   project is open. Its tooltip shows its shortcut: `Build (Ctrl+B)`.
 - `Ctrl+B` (`Cmd+B` on macOS) builds, like the button, from anywhere (even
-  while a text field has focus or the sidebar is hidden); it does nothing
+  while a text field has focus); it does nothing
   when the button would be disabled.
 - The build runs on a background thread; the UI stays responsive.
 - Status bar shows `Building…` while running, then either the

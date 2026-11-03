@@ -10,7 +10,7 @@ the platform's default size.
 
 ```
 +--------------------------------------------------------------+
-| ◆  File  Edit  View  Build  Help                  (menu bar) |
+| ◆  File  Build  Help                              (menu bar) |
 +-------------+------------------------------+-----------------+
 | Input|Output|                              | Inspector       |
 |             |                              |-----------------|
@@ -23,7 +23,7 @@ the platform's default size.
 ```
 
 - **Menu bar** (top, fixed height): logo (see [Logo](#logo)) followed by the
-  `File`, `Edit`, `View`, `Build`, `Help` menus. See [Menus](#menus).
+  `File`, `Build`, `Help` menus. See [Menus](#menus).
 - **Left sidebar** (resizable, default width 260 px, min 200 px): file
   browser with two tabs in its header row, **Input** and **Output**, plus
   build (`hammer` icon, see [`build.md`](build.md#gui)) and rescan
@@ -51,7 +51,7 @@ the platform's default size.
 
 ## Menus
 
-- **Bar items** (`File`, `Edit`, …): 14 px text, 12 px horizontal padding,
+- **Bar items** (`File`, `Build`, …): 14 px text, 12 px horizontal padding,
   each item exactly as tall as the bar's content (the bar has no vertical
   margin), items edge to edge with no gaps. The hover / open highlight fills
   the item's whole rectangle with square corners, so it covers the full item,
@@ -68,9 +68,6 @@ the platform's default size.
   `Ctrl+,` [config](config.md), `Ctrl+R` rescan (`Cmd` on macOS); each
   works anywhere, even while a text field has focus (not while a dialog is
   open).
-- `Edit` contains no items yet (button shown disabled).
-- `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar (check
-  shown when visible); the menu stays open after toggling.
 - `Build` holds **Config…** (opens the [Config dialog](config.md)),
   **Build** ([build](build.md#gui)) and **Pack** ([pack](pack.md#gui)),
   each with its shortcut right-aligned in `TEXT_WEAK` like `Quit`. All are
