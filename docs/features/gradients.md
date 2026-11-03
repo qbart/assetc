@@ -1,9 +1,9 @@
 # Gradients
 
-Color gradients stored as stops in `.gradient` files (format and exact
-rendering: [`docs/spec/gradient.md`](../spec/gradient.md)). One file holds
+Color gradients stored as stops in `.agradient` files (format and exact
+rendering: [`docs/spec/agradient.md`](../spec/agradient.md)). One file holds
 several gradients, each drawn as a vertical gradient (first stop at the
-bottom) in one **cell** of a grid in one image (a gradient lookup atlas). Like `.noise` files they are texture sources: the
+bottom) in one **cell** of a grid in one image (a gradient lookup atlas). Like `.anoise` files they are texture sources: the
 build turns them into `.ktx2`, the canvas previews them (2D and 3D), and they
 can fill material slots.
 
@@ -12,18 +12,18 @@ can fill material slots.
 In the Input tree's context menu, **New Color ▸ Gradient** (New Color is a
 submenu after New Pattern, see [`file-operations.md`](file-operations.md))
 creates
-`gradient.gradient` (`gradient 2.gradient`, … if taken) with a 256 × 256
+`gradient.agradient` (`gradient 2.agradient`, … if taken) with a 256 × 256
 image of 16 × 64 cells (16 columns × 4 rows, room for 64 gradients) and one
 gradient named `Gradient 1`, black (`#000000`) at
 0 to white (`#ffffff`) at 1, no dithering. It then selects it and starts
 renaming it.
 
-The file tree shows `.gradient` files with the `swatch-book` icon.
+The file tree shows `.agradient` files with the `swatch-book` icon.
 
 ## Parameters tab
 
 The Inspector's **Parameters** tab (`sliders-vertical`) edits the selected
-`.gradient` file's image layout (the Modifiers tab does not apply). It uses
+`.agradient` file's image layout (the Modifiers tab does not apply). It uses
 the [property editor](gui.md#property-editor) look, with one **Output**
 section (collapsible):
 
@@ -41,7 +41,7 @@ the editor never writes an invalid file.
 ## Gradients tab
 
 The Inspector's **Gradients** tab (`palette`) lists the selected
-`.gradient` file's gradients, one card each, in order:
+`.agradient` file's gradients, one card each, in order:
 
 - Cards **fold** like property sections: a chevron (or a click on the title)
   folds and unfolds the card, **folded** by default, remembered for the session.
@@ -62,7 +62,7 @@ The Inspector's **Gradients** tab (`palette`) lists the selected
     [Modifiers tab](noise.md#modifiers-tab) shows them (reorder, enable,
     remove, parameters). They change the gradient's cell in the image (and
     so the canvas and the build), on its color only: alpha is kept, see
-    [Modifiers](../spec/gradient.md#modifiers). The bar and the folded
+    [Modifiers](../spec/agradient.md#modifiers). The bar and the folded
     preview show the stops without them.
 - Below the cards: an **Add gradient** button (`plus` icon and text) that
   appends `Gradient <n>` (black to white, no dithering). It is disabled when
@@ -72,7 +72,7 @@ The Inspector's **Gradients** tab (`palette`) lists the selected
 - If the file does not parse, both tabs show the error instead.
 
 Edits in both tabs are saved like noise parameters (see [`noise.md`](noise.md#saving)):
-written to the file in the [written form](../spec/gradient.md#written-form)
+written to the file in the [written form](../spec/agradient.md#written-form)
 once nothing is being dragged or typed, then inspected again in the
 background.
 
@@ -141,8 +141,8 @@ and no image.
 
 ## Build
 
-- `*.gradient` (any case) files in `input` are texture sources; their asset
-  path drops `.gradient`, e.g. `luts/sky.gradient` → `luts/sky.ktx2`.
+- `*.agradient` (any case) files in `input` are texture sources; their asset
+  path drops `.agradient`, e.g. `luts/sky.agradient` → `luts/sky.ktx2`.
 - Gradients are colors: **sRGB** unless a `[textures] linear` glob matches
   (or a linear material slot uses the file).
 - They are **never mipmapped** (1 level): smaller levels would blend

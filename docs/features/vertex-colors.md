@@ -84,8 +84,8 @@ Each vertex at `p` gets position `t` along the gradient:
 - `t` is clamped to 0–1 (the first stop's color before it, the last's past
   it); From and To at the same point give `t = 0`.
 
-Its color is the gradient's at `t` as a `.gradient` gradient without
-dithering computes it ([blending](../spec/gradient.md#image): sRGB values,
+Its color is the gradient's at `t` as an `.agradient` gradient without
+dithering computes it ([blending](../spec/agradient.md#image): sRGB values,
 premultiplied alpha), then stored like a glTF set: R, G and B converted from
 sRGB to linear and rounded to 8 bits, alpha as it is. A Solid set's color is
 stored the same way.
@@ -131,7 +131,7 @@ How a written set reaches the game:
   - a **texture** `P/<set>.colors.ktx2` (asset path `P/<set>.colors`, `P`
     the model's input-relative path without the extension): the set's
     gradient as a 256 × 1 `R8G8B8A8_SRGB` image, texel `x` the gradient's
-    color at `(x + 0.5) / 256` as a `.gradient` without dithering computes
+    color at `(x + 0.5) / 256` as an `.agradient` without dithering computes
     it, no mipmaps;
   - a **UV set** in the mesh's `UVSET` / `UVS` (see
     [`amesh.md`](../spec/amesh.md#uv-sets)), named as the set, naming the
@@ -148,7 +148,7 @@ How a written set reaches the game:
 
 ## Vertex colors tab
 
-The Inspector's **Vertex colors** tab (`swatch-book`, the `.gradient` file
+The Inspector's **Vertex colors** tab (`swatch-book`, the `.agradient` file
 icon) is shown for a model in the Input tree:
 
 - **Add color set** (`plus` and text) adds an authored set at the end of

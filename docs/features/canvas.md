@@ -225,8 +225,8 @@ and study, so they are given as approximations):
   clicking the button that is on turns it off, showing normal vision. None
   is on to start with; the choice is one for the whole canvas (every file,
   2D and 3D) and lasts for the session.
-- **Shown in**: the 2D image views (images, `.noise`, `.gradient`,
-  `.palette`, compiled textures and their mip levels, font specimens and
+- **Shown in**: the 2D image views (images, `.anoise`, `.agradient`,
+  `.apalette`, compiled textures and their mip levels, font specimens and
   compiled font atlases, the LUT Compare view, both its sides) and every 3D
   view (images on shapes, environment maps, models, compiled meshes, the LUT
   Cube). Not in views of data: LUT Curves, Chunks and data tables. Views

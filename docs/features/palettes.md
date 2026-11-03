@@ -1,7 +1,7 @@
 # Palettes
 
-Named colors stored in `.palette` files (format and image:
-[`docs/spec/palette.md`](../spec/palette.md)). One file holds a set of
+Named colors stored in `.apalette` files (format and image:
+[`docs/spec/apalette.md`](../spec/apalette.md)). One file holds a set of
 colors, each filling one **cell** of a grid in one image (a palette
 texture). Palettes are managed like [gradients](gradients.md): they are
 texture sources, the build turns them into `.ktx2`, the canvas previews them
@@ -11,12 +11,12 @@ texture sources, the build turns them into `.ktx2`, the canvas previews them
 
 In the Input tree's context menu, **New Color ▸ Palette** (after Gradient,
 see [`file-operations.md`](file-operations.md)) creates
-`palette.palette` (`palette 2.palette`, … if taken) with a 128 × 128 image of
+`palette.apalette` (`palette 2.apalette`, … if taken) with a 128 × 128 image of
 16 × 16 cells (8 columns × 8 rows, room for 64 colors) and two colors,
 `Black` (`#000000`) and `White` (`#ffffff`). It then selects it and starts
 renaming it.
 
-The file tree shows `.palette` files with the `palette` icon.
+The file tree shows `.apalette` files with the `palette` icon.
 
 ## Parameters tab
 
@@ -56,7 +56,7 @@ The Inspector's **Colors** tab (`palette`) edits the colors:
 - If the file does not parse, both tabs show the error instead.
 
 Edits in both tabs are saved like gradients: written to the file in the
-[written form](../spec/palette.md#written-form) once nothing is being
+[written form](../spec/apalette.md#written-form) once nothing is being
 dragged or typed, then inspected again in the background.
 
 ## Inspector Info
@@ -68,8 +68,8 @@ Output). An invalid file shows an **Error** row and no image.
 
 ## Build
 
-- `*.palette` (any case) files in `input` are texture sources; their asset
-  path drops `.palette`, e.g. `ui/theme.palette` → `ui/theme.ktx2`.
+- `*.apalette` (any case) files in `input` are texture sources; their asset
+  path drops `.apalette`, e.g. `ui/theme.apalette` → `ui/theme.ktx2`.
 - Palettes are colors: **sRGB** unless a `[textures] linear` glob matches
   (or a linear material slot uses the file).
 - They are **never mipmapped** (1 level): smaller levels would blend

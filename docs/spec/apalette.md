@@ -1,6 +1,6 @@
-# `.palette` file format
+# `.apalette` file format
 
-A `.palette` file describes one image holding a set of named colors, one per
+An `.apalette` file describes one image holding a set of named colors, one per
 **cell** of a grid, each cell filled with its color. It is a texture source:
 the build compiles the image to KTX2 (see
 [`docs/features/palettes.md`](../features/palettes.md#build)). The file is
@@ -60,7 +60,7 @@ Errors (counting colors from 1): `color <n>: missing color`,
 The image is `width × height` RGBA8 (straight alpha), starting fully
 transparent (`0 0 0 0`). Color `i` (from 0) fills its whole cell, whose
 top-left pixel is `(column × cell_width, row × cell_height)`, placed exactly
-like a [gradient's cell](gradient.md#image):
+like a [gradient's cell](agradient.md#image):
 
 | `layout`  | Order                              | Cell of color `i`                                 |
 |-----------|------------------------------------|---------------------------------------------------|

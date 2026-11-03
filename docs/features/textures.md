@@ -69,7 +69,7 @@ Unless the texture matches `no_mipmaps`, a full mip chain is written, down to
 ## Modifiers
 
 A `.png` / `.jpg` / `.jpeg` / `.tga` in `input` can carry the same modifier stack as
-a [`.noise`](noise.md#modifiers-tab) file, kept in its
+a [`.anoise`](noise.md#modifiers-tab) file, kept in its
 [`.amod`](../spec/amod.md#modifiers) sidecar (`brick.jpg.amod`) and edited
 in the Inspector's Modifiers tab.
 
@@ -85,7 +85,7 @@ in the Inspector's Modifiers tab.
 - A sidecar that does not parse fails the image like an undecodable file
   (`brick.jpg.amod: <problem>`).
 - **Modifiers tab**: for images in the Input tree it works exactly as for
-  `.noise` files (see [`noise.md`](noise.md#modifiers-tab)), but saves to the
+  `.anoise` files (see [`noise.md`](noise.md#modifiers-tab)), but saves to the
   sidecar: adding the first modifier creates `<file>.amod`, and removing the
   last deletes it (unless it holds other settings).
 

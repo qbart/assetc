@@ -20,7 +20,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 ## Tabs
 
 Twenty icon tabs, top to bottom: **Info** (`info`), **Parameters**
-(`sliders-vertical`) for `.noise`, `.gradient`, `.palette` and model files,
+(`sliders-vertical`) for `.anoise`, `.agradient`, `.apalette` and model files,
 **Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
 (`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`swatch-book`) and
 **Properties** (`database`) for model files (see
@@ -30,9 +30,9 @@ Twenty icon tabs, top to bottom: **Info** (`info`), **Parameters**
 [`properties.md`](properties.md#properties-tab)); Vertex colors is also
 shown for compiled meshes with color sets (see
 [`vertex-colors.md`](vertex-colors.md#compiled-meshes)),
-**Modifiers** (`wrench`) for `.noise` files and images (`.png`, `.jpg`,
-`.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and
-**Colors** (`palette`) for `.palette` files, **Types** (`braces`) for
+**Modifiers** (`wrench`) for `.anoise` files and images (`.png`, `.jpg`,
+`.jpeg`, `.tga`), **Gradients** (`palette`) for `.agradient` files and
+**Colors** (`palette`) for `.apalette` files, **Types** (`braces`) for
 `.aschema` files, **Graph** (`graph-star`) for `.agraph` files,
 **Tree** (`list-tree`) for `.atree` files, **Atlas** (`map`) for `*.atlas`
 folders,
@@ -81,9 +81,9 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.mat.toml`               | Material source    |
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
 | Input  | `*.exr` (any case)         | HDR environment map, see [`hdr.md`](hdr.md#preview-and-inspector) |
-| Input  | `*.noise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |
-| Input  | `*.gradient` (any case)    | Gradient, see [`gradients.md`](gradients.md#inspector-info) |
-| Input  | `*.palette` (any case)     | Palette, see [`palettes.md`](palettes.md#inspector-info) |
+| Input  | `*.anoise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |
+| Input  | `*.agradient` (any case)    | Gradient, see [`gradients.md`](gradients.md#inspector-info) |
+| Input  | `*.apalette` (any case)     | Palette, see [`palettes.md`](palettes.md#inspector-info) |
 | Input  | `*.ttf`, `*.otf` (any case) | Font, see [`fonts.md`](fonts.md#inspector) |
 | Input  | `*.gltf`, `*.glb` (any case) | Model, see [`models.md`](models.md#inspector) |
 | Input  | anything else              | Ignored            |
@@ -253,7 +253,7 @@ Lists the assets a file contains, as recorded in `<output>/assets.aman`
 
 ## Loading
 
-Inspecting a file (reading and decoding it, generating a `.noise` image,
+Inspecting a file (reading and decoding it, generating an `.anoise` image,
 loading an environment map's faces, parsing a LUT, rendering a font
 specimen) runs on a background
 thread, so the UI never waits for it. There is no file watching.

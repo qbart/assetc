@@ -220,9 +220,9 @@ textures, models, fonts, graphs… a game should load with it. `K` is one of:
 | `K`        | Files (any case) |
 |------------|------------------|
 | `texture`  | `*.png`, `*.jpg`, `*.jpeg`, `*.tga` |
-| `noise`    | `*.noise` |
-| `gradient` | `*.gradient` |
-| `palette`  | `*.palette` |
+| `noise`    | `*.anoise` |
+| `gradient` | `*.agradient` |
+| `palette`  | `*.apalette` |
 | `model`    | `*.gltf`, `*.glb` |
 | `font`     | `*.ttf`, `*.otf` |
 | `lut`      | `*.cube` |

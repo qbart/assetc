@@ -1,6 +1,6 @@
-# `.noise` procedural textures
+# `.anoise` procedural textures
 
-A `.noise` file is a texture source made of parameters instead of pixels: a
+An `.anoise` file is a texture source made of parameters instead of pixels: a
 **generator** with its own parameters, and an ordered list of **modifiers**.
 The build generates the image from them (see
 [`docs/features/noise.md`](../features/noise.md)); the file itself stays as
@@ -9,7 +9,7 @@ Inspector.
 
 ## Encoding
 
-[TOML 1.1](https://toml.io/en/v1.1.0), UTF-8, extension `.noise` (any case).
+[TOML 1.1](https://toml.io/en/v1.1.0), UTF-8, extension `.anoise` (any case).
 
 Top level:
 
@@ -40,7 +40,7 @@ as the table path separator: `noise/perlin` → `[noise.perlin]`,
 
 ### Written form
 
-When assetc writes a `.noise` file it writes `type` and `size`; then, after a
+When assetc writes an `.anoise` file it writes `type` and `size`; then, after a
 blank line, the current generator's section with every parameter in the
 order of its table below, one per line (`key = value`); then the kept
 sections of other generators, in the order of the [Generators](#generators)

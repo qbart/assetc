@@ -1,10 +1,10 @@
 # Noise textures
 
-Procedural textures stored as parameters in `.noise` files (format and exact
-algorithms: [`docs/spec/noise.md`](../spec/noise.md)): a generator with its
+Procedural textures stored as parameters in `.anoise` files (format and exact
+algorithms: [`docs/spec/anoise.md`](../spec/anoise.md)): a generator with its
 own parameters, followed by a list of modifiers. They behave like any other
 texture source: the build turns them into `.ktx2`, the canvas previews them,
-and they can fill material slots (`rock.h.noise` is the height map of
+and they can fill material slots (`rock.h.anoise` is the height map of
 material `rock`).
 
 ## Generators
@@ -29,7 +29,7 @@ seed, basis noise, separate X / Y frequency, translation, fractal octaves /
 lacunarity / gain, domain warp, and their own extras (interpolation for
 Value, jitter / metric / output for Voronoi, dimension / offset for the
 multifractals, …); the full list is in the
-[spec](../spec/noise.md#generators). Every setting keeps the texture
+[spec](../spec/anoise.md#generators). Every setting keeps the texture
 tileable.
 
 ## Creating
@@ -38,14 +38,14 @@ In the Input tree's context menu, **New Noise** lists the `noise/…`
 generators and **New Pattern** the `pattern/…` ones (Checkerboard, which is
 not a noise), by the names above (see
 [`file-operations.md`](file-operations.md)). Picking one
-creates `<name>.noise` (the last part of `type`, e.g. `perlin-worley.noise`,
-`checkerboard.noise`; `<name> 2.noise`, … if taken) with that generator, its
+creates `<name>.anoise` (the last part of `type`, e.g. `perlin-worley.anoise`,
+`checkerboard.anoise`; `<name> 2.anoise`, … if taken) with that generator, its
 default parameters and no modifiers, selects it and starts renaming it.
 
 ## Parameters tab
 
 The Inspector's **Parameters** tab (`sliders-vertical`) edits the selected
-`.noise` file from the Input tree; for anything else it is disabled. It uses
+`.anoise` file from the Input tree; for anything else it is disabled. It uses
 the [property editor](gui.md#property-editor) look, with two sections:
 
 - **Generator**: **Type** (dropdown of the names above) and **Size**
@@ -62,13 +62,13 @@ the [property editor](gui.md#property-editor) look, with two sections:
 
 Changing **Type** switches to that generator's parameters. The previous
 type's parameters stay in the file as its own
-[section](../spec/noise.md#generator-sections) (unless they are all
+[section](../spec/anoise.md#generator-sections) (unless they are all
 defaults), so switching back restores them, also after reopening assetc. Only
 the current type's section affects the image.
 
 ## Modifiers tab
 
-The **Modifiers** tab (`wrench`) edits the selected `.noise` file's modifiers
+The **Modifiers** tab (`wrench`) edits the selected `.anoise` file's modifiers
 (and an image's, saved to its sidecar, see
 [`textures.md`](textures.md#modifiers)). Each modifier is a section card, in order:
 
@@ -95,7 +95,7 @@ The **Modifiers** tab (`wrench`) edits the selected `.noise` file's modifiers
 ## Saving
 
 Edits are **written to the file** in the
-[written form](../spec/noise.md#written-form) when committed: dropdowns,
+[written form](../spec/anoise.md#written-form) when committed: dropdowns,
 checkboxes and the modifier buttons (add, remove, enable)
 and drops immediately; sliders and fields when the pointer is released (or
 Enter is pressed). Writing the file happens at once, on the UI thread (it
@@ -107,8 +107,8 @@ parse, both tabs show the error instead.
 
 ## Build
 
-- `*.noise` (any case) files in `input` are texture sources; their asset path
-  drops `.noise`, e.g. `textures/clouds.noise` → `textures/clouds.ktx2`.
+- `*.anoise` (any case) files in `input` are texture sources; their asset path
+  drops `.anoise`, e.g. `textures/clouds.anoise` → `textures/clouds.ktx2`.
 - Generated noise is **linear** (data) unless it fills an sRGB material slot
   (base color, emissive); the `[textures] linear` globs do not apply to it.
   `no_mipmaps` applies as usual.

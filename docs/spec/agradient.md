@@ -1,6 +1,6 @@
-# `.gradient` file format
+# `.agradient` file format
 
-A `.gradient` file describes one image holding several color gradients, one
+An `.agradient` file describes one image holding several color gradients, one
 per **cell** of a grid, each running vertically (first stop at the bottom). It is a texture source: the
 build compiles the image to KTX2 (see
 [`docs/features/gradients.md`](../features/gradients.md#build)). The file is
@@ -43,7 +43,7 @@ assetc writes files exactly in this form: `width`, `height`, `cell_width`,
 lines) with `name`, `dither` and `stops` (one inline table per line, sorted
 by `at`), then its modifiers as `[[gradients.modifiers]]` tables (each after
 a blank line: `type`, `enabled`, then the parameters that differ from their
-defaults, as `.noise` files write them). Numbers are written in their shortest form that reads back to the
+defaults, as `.anoise` files write them). Numbers are written in their shortest form that reads back to the
 same value (`0.0`, `0.25`, `0.333`).
 
 ## Top level
@@ -69,7 +69,7 @@ Any other key is an error (`unknown key <key>`).
 | `name`   | string | `""`     | label shown in the editor; not used by the image          |
 | `dither` | string | `"none"` | `none`, `crosshatch` or `pixel`, see [Dithering](#dithering) |
 | `stops`  | array of tables | — | at least two stops                                 |
-| `modifiers` | array of tables | none | this gradient's [modifiers](noise.md#modifiers), in order; see [Modifiers](#modifiers) |
+| `modifiers` | array of tables | none | this gradient's [modifiers](anoise.md#modifiers), in order; see [Modifiers](#modifiers) |
 
 Any other key is an error (`gradient <n>: unknown key <key>`, counting from
 1).
@@ -114,7 +114,7 @@ stops are at the same position. `a` and `b` are stops `k` and `k + 1`.
 ### Modifiers
 
 A gradient's enabled modifiers run on its own cell, after the cell is
-drawn (dithering included), in order, as [`.noise` modifiers](noise.md#modifiers)
+drawn (dithering included), in order, as [`.anoise` modifiers](anoise.md#modifiers)
 run on a noise image: on the cell's **R, G and B** (0–1), the cell's edges
 as the image's edges (so `blur` with `wrap` wraps within the cell, and
 `normalize` uses the cell's minimum and maximum). **Alpha is never

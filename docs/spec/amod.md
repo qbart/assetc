@@ -137,7 +137,7 @@ a place); any other is an authored set.
 | `color` | string                   | `"#ffffff"` | solid: `#rrggbb` or `#rrggbbaa`, sRGB |
 | `from`  | array of 3 floats        | `[0, 0, 0]` | linear and radial: start (linear) or center (radial), model space |
 | `to`    | array of 3 floats        | `[0, 1, 0]` | linear and radial: end (linear) or a point on the edge (radial), model space |
-| `stops` | array of tables          | black at 0 to white at 1 | linear and radial: at least two `{ at = <0–1>, color = "#rrggbb[aa]" }`, as in [`.gradient` files](gradient.md) |
+| `stops` | array of tables          | black at 0 to white at 1 | linear and radial: at least two `{ at = <0–1>, color = "#rrggbb[aa]" }`, as in [`.agradient` files](agradient.md) |
 | `export` | string                  | `"colors"` | linear and radial: `"colors"` (Color buffer), `"texture"` (Texture + UV buffer) or `"both"`, see [Export](../features/vertex-colors.md#export) |
 | `blend` | inline table             | (none)     | authored sets: `{ with = "<set name>", mode = "<mode>", amount = <0–1> }`, see [Blending](../features/vertex-colors.md#blending); `mode` is `"mix"` (the default), `"multiply"`, `"screen"`, `"overlay"` or `"add"`; `amount` defaults to `1.0` |
 
@@ -160,9 +160,9 @@ One table per event:
 
 For images (`*.png`, `*.jpg`, `*.jpeg`, `*.tga`); see
 [`docs/features/textures.md`](../features/textures.md#modifiers). A list of
-modifiers, exactly as in a `.noise` file: each table has `type`, `enabled`
+modifiers, exactly as in an `.anoise` file: each table has `type`, `enabled`
 and the modifier's parameters, see
-[`docs/spec/noise.md`](noise.md#modifiers). They run in order on the image
+[`docs/spec/anoise.md`](anoise.md#modifiers). They run in order on the image
 whenever assetc loads it.
 
 ## Written form
@@ -187,7 +187,7 @@ authored one `fill`, then `color` for a solid set or `from`, `to` and
 when not `"colors"`, then `blend` when set, with all three keys), then each event as an `[[events]]` table
 (`animation`, `name`, `time`, then its `[events.properties]` when it has
 any), then each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
-parameter, as `.noise` files write them), each table preceded by a blank line
+parameter, as `.anoise` files write them), each table preceded by a blank line
 except the first:
 
 ```toml

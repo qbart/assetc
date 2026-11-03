@@ -107,7 +107,7 @@ kerning pairs, 512 × 160 atlas)`.
 
 ## Compiled fonts
 
-Selecting a `.afont` in the Output tree shows its Info rows: Format (`AFONT
+Selecting an `.afont` in the Output tree shows its Info rows: Format (`AFONT
 v1, 3 chunks`), Glyphs, Kerning pairs, Em size (`48 px`), Distance range
 (`11.95 texels`), Atlas (`512 × 160 px` and its output path, or `not found`),
 Ascent, Descent, Line gap (em, three decimals), Asset path, Asset ID.
