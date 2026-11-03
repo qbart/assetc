@@ -59,7 +59,7 @@ This covers type names, field names and `$id` values.
 
 **Type names:**
 - Unique within the file.
-- May not shadow a primitive (`bool`, `i32`, `string`, `rgb`, …) or a generic (`list`, `ref`).
+- May not shadow a primitive (`bool`, `i32`, `string`, `rgb`, …) or a generic (`list`, `ref`, `asset`).
 - PascalCase by convention.
 - May be referenced in any order.
 
@@ -176,7 +176,9 @@ A field's `type` is a string with no whitespace inside it:
 
 ```
 type      := primitive | name | generic
-generic   := ( "list" | "ref" ) "<" type ">"
+generic   := ( "list" | "ref" ) "<" type ">" | "asset<" kind ">"
+kind      := "texture" | "noise" | "gradient" | "palette" | "model" | "font"
+           | "lut" | "hdr" | "atlas" | "material" | "graph" | "tree" | "data"
 name      := identifier                 ; a key of `types`
 primitive := "bool"
            | "i8" | "i16" | "i32" | "i64"
@@ -204,10 +206,37 @@ name is a schema error.
 | `S` (struct) | embedded value owned by the parent | object of `S`'s fields (sparse) | object of `S`'s defaults |
 | `list<T>` | ordered sequence | array of `T` encodings | `[]` |
 | `ref<S>` | reference to an instance of struct `S` | string holding the target's `$id` | none: **required** |
+| `asset<K>` | reference to a file of kind `K` in the project's input (see [Asset references](#asset-references)) | string: its input-relative path, `/`-separated (`textures/grass.png`); `""` for none | `""` |
 
 **Nesting rules:**
 - `ref<T>` requires `T` to be a struct. A primitive, enum or list is an error.
 - Anything else composes: `list<ref<Weapon>>`, `list<list<f32>>`, `list<Vec2>`.
+
+### Asset references
+
+`asset<K>` points at a source file of the project, so data can name the
+textures, models, fonts, graphs… a game should load with it. `K` is one of:
+
+| `K`        | Files (any case) |
+|------------|------------------|
+| `texture`  | `*.png`, `*.jpg`, `*.jpeg`, `*.tga` |
+| `noise`    | `*.noise` |
+| `gradient` | `*.gradient` |
+| `palette`  | `*.palette` |
+| `model`    | `*.gltf`, `*.glb` |
+| `font`     | `*.ttf`, `*.otf` |
+| `lut`      | `*.cube` |
+| `hdr`      | `*.exr` |
+| `atlas`    | folders `*.atlas` |
+| `material` | `*.mat.toml` |
+| `graph`    | `*.agraph` |
+| `tree`     | `*.atree` |
+| `data`     | `*.adata` |
+
+- `""` means no asset.
+- A path whose file (or folder) does not exist is a data **warning**; one
+  that is not of kind `K` (by its name) is an **error**.
+- An unknown `K` is a schema error.
 
 ### Optional fields
 
@@ -354,7 +383,8 @@ loading or saving.
 | `show_if`/`hide_if` naming no sibling, or ordering op with non-number; `widget` on a type it doesn't fit; unknown `widget` value | schema | error |
 | `$type` not a struct of the schema; `$id` missing or not an identifier | data | error |
 | Duplicate `($type, $id)` across the project | data | error |
-| Value not encodable as its type (string in `i32`, `300` in `u8`, `12.5` in `i32`, unknown enum value, `"red"` in `rgb`, curve with < 2 points or a point out of `0..1` or unsorted, gradient with < 2 stops) | data | error |
+| `asset<K>` naming a file that does not exist | data | warning |
+| Value not encodable as its type (string in `i32`, an `asset<K>` path not of kind `K`, `300` in `u8`, `12.5` in `i32`, unknown enum value, `"red"` in `rgb`, curve with < 2 points or a point out of `0..1` or unsorted, gradient with < 2 stops) | data | error |
 | Number outside `min`/`max` | data | warning |
 | Ref to an id that does not exist for that type (dangling) | data | warning |
 | Required ref absent or `""` | data | warning |

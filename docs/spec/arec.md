@@ -66,6 +66,16 @@ FNV-1a-64 of the UTF-8 text.
 | 7 | `list<T>`, `curve`, `gradient` | u32 index of its first item, then u32 `0`; its `count` items follow one another |
 | 8 | `ref<S>` | u32 offset of the target's id in `STRINGS`, then u32 `0` |
 | 9 | an enum | u32 offset of the value's name in `STRINGS`, then u32 the value's index in its enum |
+| 10 | `asset<K>` | u64 asset ID of the file's main output (`0` for `""`), see below |
+
+An `asset<K>` value is the [asset ID](../features/build.md#asset-ids) the
+build gives the referenced file's main output, so a game finds it in
+`assets.aman`: its input-relative path without the extension for
+`texture`, `noise`, `gradient`, `palette`, `lut` and `hdr` (their `.ktx2`);
+with `.amesh` for `model`, `.afont` for `font`, `.aatlas` for `atlas` (the
+folder's path without `.atlas`), `.agph` for `graph`, `.atre` for `tree`,
+`.arec` for `data`; and `<dir>/<name>.amat` for a `material`
+`<dir>/<name>.mat.toml`.
 
 A `curve` is a list of points, each a list of four floats `x y in out`; a
 `gradient` a list of stops, each a list of a float `t` and a color.

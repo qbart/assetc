@@ -165,6 +165,8 @@ rules:
   - A list item: `n items` and its own items under it.
 - `ref<S>`: a dropdown of `—` (`""`) and the ids of this file's instances of
   `S`, in file order; a stored id that is none of them stays shown.
+- `asset<K>`: a dropdown of `—` (`""`) and every file of kind `K` in the
+  input directory (input-relative paths, sorted), as for schema defaults.
 
 ## Problems
 
@@ -175,9 +177,10 @@ make is checked whenever the file or its schema changes:
 |-------|-------|
 | `$type` not a struct of the schema; `$id` missing or not an identifier | error |
 | The same `$type` and `$id` twice in the file | error |
-| A value that does not encode as its field's type (a `null` is fine in an optional field) | error |
+| A value that does not encode as its field's type (a `null` is fine in an optional field; an `asset<K>` path not of kind `K`) | error |
 | A number outside the field's `min` / `max` | warning |
 | A ref field without a default left out or `""` (not optional) | warning |
+| An `asset<K>` path that does not exist in the input | warning |
 | A ref to an id that no instance of that type in the file has | warning |
 | A key that is not a field of its struct (on an instance or a nested struct value); kept | warning |
 

@@ -146,8 +146,8 @@ sets the field's type (the text field stays editable for anything else):
 | Curve     | `curve` |
 | Struct    | the file's structs, in the Types tab's order (disabled when there are none) |
 | Enum      | the file's enums, likewise |
-| Reference | disabled, empty: picking `ref<…>` types comes later |
-| List      | the Value, Color, Curve, Struct and Enum submenus again (and Reference, disabled); an item `T` there sets `list<T>` |
+| Reference | the [asset kinds](../aschema.md#asset-references): Texture, Noise, Gradient, Palette, Model, Font, Color LUT, HDR map, Atlas, Material, Graph, Tree, Data; each sets `asset<texture>`, `asset<noise>`, … |
+| List      | the Value, Color, Curve, Struct, Enum and Reference submenus again; an item `T` there sets `list<T>` |
 
 The current type is marked with a `check` in its submenu.
 
@@ -198,6 +198,9 @@ in the type's data encoding:
   item's editor (200 px, so the Remove buttons line up; as above: a struct item's fields and a list item's items
   under its row) and **Remove** (`x`). Then **Add item** (`plus` and text),
   appending `T`'s implicit default.
+- `asset<K>`: a dropdown of `—` (`""`) and every file of kind `K` in the
+  input directory, by input-relative path, sorted; a path that is none of
+  them stays shown.
 - Refs, and values that do not have their type's JSON shape (a list default
   that is not an array, a struct default that is not an object): JSON text.
 
