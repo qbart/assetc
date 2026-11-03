@@ -70,7 +70,7 @@ FNV-1a-64 of the UTF-8 text.
 
 An `asset<K>` value is the [asset ID](../features/build.md#asset-ids) the
 build gives the referenced file's main output, so a game finds it in
-`assets.aman.bin`: its input-relative path without the extension for
+`assetc.aman.bin`: its input-relative path without the extension for
 `texture`, `noise`, `gradient`, `palette`, `lut` and `hdr` (their `.ktx2`);
 with `.amesh.bin` for `model`, `.afont.bin` for `font`, `.aatlas.bin` for `atlas` (the
 folder's path without `.atlas`), `.agraph.bin` for `graph`, `.atree.bin` for `tree`,

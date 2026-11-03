@@ -8,7 +8,7 @@ One compiled PBR material (glTF 2.0 metallic-roughness), written to
 
 The file is a single fixed-size record, so it can be read straight into a
 struct or uploaded to a GPU buffer. Textures are referenced by asset ID and
-resolved through [`assets.aman.bin`](aman.bin.md).
+resolved through [`assetc.aman.bin`](aman.bin.md).
 
 ## Encoding
 

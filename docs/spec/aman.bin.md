@@ -1,8 +1,8 @@
-# `assets.aman.bin`
+# `assetc.aman.bin`
 
 Maps every asset ID (see [`docs/features/build.md`](../features/build.md#asset-ids))
 to the output file holding it. Written once per successful build to
-`<output>/assets.aman.bin`.
+`<output>/assetc.aman.bin`.
 
 The layout is designed for direct use from a memory-mapped file: entries have
 a fixed stride and are sorted by ID, so a reader can binary-search them

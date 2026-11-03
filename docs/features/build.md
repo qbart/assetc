@@ -61,7 +61,7 @@ grayscale or color-mapped, with either origin). Color space and mipmaps follow t
 
 ```
 <output>/
-  assets.aman.bin            see docs/spec/aman.bin.md
+  assetc.aman.bin            see docs/spec/aman.bin.md
   <asset path>.ktx2          one per texture (incl. <name>.orm.ktx2), same directory structure as input
   <dir>/<name>.amat.bin      one per material
   <model>.amesh.bin          one per glTF model, with <model>/… for its materials and textures
@@ -104,8 +104,8 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | atlas      | `*.aatlas.bin` |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
-  touched. `assets.aman.bin` is rewritten, never removed; a leftover
-  `assets.manifest` or `assets.aman` (its names before) at the output root is
+  touched. `assetc.aman.bin` is rewritten, never removed; a leftover
+  `assets.manifest`, `assets.aman` or `assets.aman.bin` (its names before) at the output root is
   removed, as are files with the extensions outputs had before `.bin`
   (`*.amesh`, `*.amat`, `*.aanim`, `*.afont`, `*.atype`, `*.arec`, `*.agph`,
   `*.atre`, `*.aatlas`). Entries
@@ -127,7 +127,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
 
 - Every source is attempted; failures are collected and reported together.
 - If any source fails, or an ID collision is found, the build fails and
-  `assets.aman.bin` is **not** written, so a manifest never refers to a broken
+  `assetc.aman.bin` is **not** written, so a manifest never refers to a broken
   set of outputs. Individual `.ktx2` files that did succeed are still written.
 - Building without a project (`assetc.toml` not found) is an error.
 - An invalid glob pattern in `[textures]` is an error; nothing is compiled.

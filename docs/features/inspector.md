@@ -93,7 +93,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `*.aanim.bin`                  | Compiled animation, see [`models.md`](models.md#inspector) |
 | Output | `*.afont.bin`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
 | Output | `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin` | Compiled schema, data, graph or tree, see [Compiled data](#compiled-data) |
-| Output | `assets.aman.bin` at the output root | Manifest, see [Manifest view](#manifest-view) |
+| Output | `assetc.aman.bin` at the output root | Manifest, see [Manifest view](#manifest-view) |
 | Output | anything else              | File               |
 | either | folder named `*.env` (any case) | Environment map |
 | Input  | folder named `*.atlas` (any case) | Atlas, see [`atlases.md`](atlases.md#inspector) |
@@ -146,7 +146,7 @@ toolbar is not shown.
 
 ### Manifest view
 
-Selecting `assets.aman.bin` (Output tree root) shows its entries:
+Selecting `assetc.aman.bin` (Output tree root) shows its entries:
 
 - Header line: `AMAN v1   <n> entries   <size>`, then a **Filter path…**
   field (240 px): only entries whose asset path or file contains the text
@@ -233,7 +233,7 @@ switches which level the [canvas](canvas.md) shows.
 
 ## Assets tab
 
-Lists the assets a file contains, as recorded in `<output>/assets.aman.bin`
+Lists the assets a file contains, as recorded in `<output>/assetc.aman.bin`
 (see [`docs/spec/aman.bin.md`](../spec/aman.bin.md)).
 
 - Enabled only for compiled files (`.ktx2`, `.amat.bin`, `.amesh.bin`, `.aanim.bin` or `.afont.bin` selected in the Output
