@@ -168,6 +168,7 @@ The icon follows the entry's type, by extension (any case):
 | directed graph: `agraph`, `agph`              | `graph-star`              |
 | data: `adata`, `arec`                         | `package`                 |
 | tree: `atree`, `atre`                         | `list-tree`               |
+| atlas folder (`*.atlas`), atlas: `aatlas`     | `map`                     |
 | palette: `palette`                            | `palette`                 |
 | mesh: `gltf`, `glb`, `obj`, `amesh`          | `torus`                   |
 | animation: `aanim`                            | `film`                    |
@@ -207,7 +208,7 @@ gizmo modes), `crosshair` (placing locators on the surface),
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
 `paint-bucket` (Inspector Regions tab), `paintbrush`, `eraser` (painting and erasing regions),
 `spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
-points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `graph-star` (`.agraph` files, Inspector Graph tab), `package` (`.adata` files, Inspector Instances tab), `list-tree` (`.atree` files, Inspector Tree tab), `rotate-ccw` (resetting an instance's field), `bug` (schema problems), `settings` (schema field details), `play`, `pause` (animation timeline, curve editor playhead), `plus`, `trash-2`, `link-2`, `unlink-2` (curve editor points, joining and splitting slopes),
+points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `graph-star` (`.agraph` files, Inspector Graph tab), `package` (`.adata` files, Inspector Instances tab), `list-tree` (`.atree` files, Inspector Tree tab), `map` (atlases, Inspector Atlas tab), `rotate-ccw` (resetting an instance's field), `bug` (schema problems), `settings` (schema field details), `play`, `pause` (animation timeline, curve editor playhead), `plus`, `trash-2`, `link-2`, `unlink-2` (curve editor points, joining and splitting slopes),
 `database` (Inspector Properties tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.palette` files), `eye`, `eye-off` (LUT cube before / after, locator visibility),

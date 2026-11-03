@@ -36,6 +36,7 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.noise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
 | `*.gradient` (any case) | texture, generated | `<asset path>.ktx2`, see [`gradients.md`](gradients.md#build) |
 | `*.palette` (any case) | texture, generated | `<asset path>.ktx2`, see [`palettes.md`](palettes.md#build) |
+| folder `*.atlas` (any case) | texture and atlas | `<asset path>.ktx2` and `<asset path>.aatlas`, see [`atlases.md`](atlases.md#build) |
 | `*.exr` (any case) | texture, cubemap | `<asset path>.ktx2`, see [`hdr.md`](hdr.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
 | `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat`, see [`materials.md`](materials.md) |
@@ -93,6 +94,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | data       | `*.arec`       |
   | graph      | `*.agph`       |
   | tree       | `*.atre`       |
+  | atlas      | `*.aatlas`     |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assets.aman` is rewritten, never removed; a leftover
@@ -149,7 +151,8 @@ when stale outputs were removed:
 - `<counts>`: each kind of asset built at least once, in this order, as
   `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat`),
   meshes (`.amesh`), animations (`.aanim`), fonts (`.afont`), schemas
-  (`.atype`), data files (`.arec`), graphs (`.agph`), trees (`.atre`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
+  (`.atype`), data files (`.arec`), graphs (`.agph`), trees (`.atre`),
+  atlases (`.aatlas`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
   `nothing` when nothing was built.
 - Outputs written along with a model or font count too (a model's `.aanim`,
   `.amat`s and textures, a font's atlas), though the CLI prints one line for

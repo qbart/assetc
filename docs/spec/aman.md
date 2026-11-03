@@ -62,6 +62,7 @@ back.
 |     6 | data     | [`arec.md`](arec.md)         |
 |     7 | graph    | [`agph.md`](agph.md)         |
 |     8 | tree     | [`atre.md`](atre.md)         |
+|     9 | atlas    | [`aatlas.md`](aatlas.md)     |
 
 Other values are reserved. Readers should skip entries with unknown kinds.
 

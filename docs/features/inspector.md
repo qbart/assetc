@@ -19,7 +19,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Nineteen icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Twenty icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.noise`, `.gradient`, `.palette` and model files,
 **Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
 (`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`swatch-book`) and
@@ -34,14 +34,15 @@ shown for compiled meshes with color sets (see
 `.jpeg`, `.tga`), **Gradients** (`palette`) for `.gradient` files and
 **Colors** (`palette`) for `.palette` files, **Types** (`braces`) for
 `.aschema` files, **Graph** (`graph-star`) for `.agraph` files,
-**Tree** (`list-tree`) for `.atree` files,
-**Instances** (`package`) for `.adata` files, all eight only
+**Tree** (`list-tree`) for `.atree` files, **Atlas** (`map`) for `*.atlas`
+folders,
+**Instances** (`package`) for `.adata` files, all nine only
 in the Input tree
 (see [`noise.md`](noise.md#parameters-tab),
 [`gradients.md`](gradients.md#parameters-tab),
 [`palettes.md`](palettes.md#colors-tab),
 [`schemas.md`](schemas.md#types-tab), [`graphs.md`](graphs.md#graph-tab),
-[`trees.md`](trees.md#tree-tab), [`instances.md`](instances.md#instances-tab)),
+[`trees.md`](trees.md#tree-tab), [`atlases.md`](atlases.md#inspector), [`instances.md`](instances.md#instances-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
 compiled textures with more than one mip level (see
@@ -95,6 +96,8 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `assets.aman` at the output root | Manifest, see [Manifest view](#manifest-view) |
 | Output | anything else              | File               |
 | either | folder named `*.env` (any case) | Environment map |
+| Input  | folder named `*.atlas` (any case) | Atlas, see [`atlases.md`](atlases.md#inspector) |
+| Output | `*.aatlas`                 | Compiled atlas, see [`atlases.md`](atlases.md#inspector) |
 | either | any other folder           | Folder             |
 
 Every kind shows **Kind** and **Size** (`B`, `KiB`, `MiB`, `GiB` with one
