@@ -33,7 +33,7 @@ error line                                     [Cancel] [Save]
 - **Sections** on the left (selectable rows, 140 px): General, Textures,
   Meshes, Locators, Pack. The chosen section's settings fill the right side,
   scrolling when long.
-- Bottom: the first problem of the edited file (red, `ERROR`) or nothing;
+- Bottom: the first problem of the edited file (red) or nothing;
   **Cancel** and **Save** (accent) on the right.
 
 ## Settings
