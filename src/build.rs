@@ -231,10 +231,12 @@ pub fn run(input: &Path, output: &Path, config: &config::Config) -> Result<Outco
             .map(|a| a.output.to_lowercase())
             .collect();
         outcome.removed = remove_stale(output, &produced)?;
-        let legacy = output.join(manifest::LEGACY_FILE_NAME);
-        if legacy.is_file() {
-            fs::remove_file(&legacy).map_err(|e| Error::Io(legacy, e))?;
-            outcome.removed.push(manifest::LEGACY_FILE_NAME.into());
+        for name in manifest::LEGACY_FILE_NAMES {
+            let legacy = output.join(name);
+            if legacy.is_file() {
+                fs::remove_file(&legacy).map_err(|e| Error::Io(legacy, e))?;
+                outcome.removed.push(name.into());
+            }
         }
     }
     Ok(outcome)
@@ -268,8 +270,8 @@ fn material_detail(m: &material::Material) -> String {
 /// Deletes outputs not in `produced` (lowercased `output`-relative paths) and
 /// the directories this leaves empty. Returns the deleted paths.
 ///
-/// Only files matching an output pattern (`*.<ext>` of an asset kind, any
-/// case) are candidates, so other files in `output` are never touched.
+/// Only files matching an output pattern (`*.<ext>` of an asset kind, or an extension outputs
+/// had before `.bin`, any case) are candidates, so other files in `output` are never touched.
 fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>, Error> {
     let nodes = tree::scan(output).map_err(|e| Error::Io(output.to_path_buf(), e))?;
     let mut files = Vec::new();
@@ -277,11 +279,12 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
 
     let mut removed = Vec::new();
     for file in files {
-        let is_output = file.extension().is_some_and(|ext| {
-            Kind::ALL
-                .iter()
-                .any(|kind| ext.eq_ignore_ascii_case(kind.extension()))
-        });
+        let is_output = Kind::of(file).is_some()
+            || file.extension().is_some_and(|ext| {
+                manifest::LEGACY_EXTENSIONS
+                    .iter()
+                    .any(|old| ext.eq_ignore_ascii_case(old))
+            });
         let Ok(rel) = relative(output, file) else {
             continue;
         };
@@ -441,13 +444,13 @@ fn compile_model(
 ) -> Result<String, String> {
     let p = strip_extension(source);
     let model = crate::model::compile(&input.join(source), p, options, sidecar)?;
-    write(&output.join(format!("{p}.amesh")), &model.mesh)?;
+    write(&output.join(format!("{p}.amesh.bin")), &model.mesh)?;
     if let Some(animation) = &model.animation {
-        write(&output.join(format!("{p}.aanim")), animation)?;
+        write(&output.join(format!("{p}.aanim.bin")), animation)?;
     }
     for (name, m) in &model.materials {
         write(
-            &output.join(format!("{p}/{name}.amat")),
+            &output.join(format!("{p}/{name}.amat.bin")),
             &material::encode(m),
         )?;
     }
@@ -465,7 +468,7 @@ fn compile_model(
     Ok(model.detail)
 }
 
-/// Packs an atlas folder into `P.ktx2` and `P.aatlas`; see docs/features/atlases.md#build.
+/// Packs an atlas folder into `P.ktx2` and `P.aatlas.bin`; see docs/features/atlases.md#build.
 fn compile_atlas(
     input: &Path,
     source: &str,
@@ -479,7 +482,7 @@ fn compile_atlas(
     let (width, height) = packed.image.dimensions();
     let frames = packed.frames.len();
     let meta = crate::atlas::encode(&config, &packed, crate::hash::fnv1a64(p.as_bytes()));
-    write(&output.join(format!("{p}.aatlas")), &meta)?;
+    write(&output.join(format!("{p}.aatlas.bin")), &meta)?;
     write_texture(
         packed.image,
         &output.join(format!("{p}.ktx2")),
@@ -566,12 +569,12 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
     Ok(detail)
 }
 
-/// Writes a font's `.afont` and SDF atlas; see docs/features/fonts.md#build.
+/// Writes a font's `.afont.bin` and SDF atlas; see docs/features/fonts.md#build.
 fn compile_font(input: &Path, source: &str, output: &Path) -> Result<String, String> {
     let p = strip_extension(source);
     let data = fs::read(input.join(source)).map_err(|e| e.to_string())?;
     let font = crate::font::compile(&data, crate::hash::fnv1a64(p.as_bytes()))?;
-    write(&output.join(format!("{p}.afont")), &font.afont)?;
+    write(&output.join(format!("{p}.afont.bin")), &font.afont)?;
     let (width, height) = (font.atlas.width, font.atlas.height);
     let atlas = image::RgbaImage::from_raw(width, height, font.atlas.pixels)
         .ok_or("atlas size mismatch")?;
@@ -816,10 +819,10 @@ mod tests {
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(outcome.built.len(), 1);
-        assert_eq!(outcome.built[0].output, "ui/monogram.afont");
+        assert_eq!(outcome.built[0].output, "ui/monogram.afont.bin");
         assert!(outcome.built[0].detail.contains(" glyphs, "));
 
-        let afont = fs::read(output.join("ui/monogram.afont")).unwrap();
+        let afont = fs::read(output.join("ui/monogram.afont.bin")).unwrap();
         let (_, atlas) = crate::font::afont_rows(&afont).unwrap();
         assert_eq!(atlas, fnv1a64(b"ui/monogram"));
         let ktx = fs::read(output.join("ui/monogram.ktx2")).unwrap();
@@ -832,7 +835,7 @@ mod tests {
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].kind, manifest::Kind::Font);
-        assert_eq!(entries[0].id, fnv1a64(b"ui/monogram.afont"));
+        assert_eq!(entries[0].id, fnv1a64(b"ui/monogram.afont.bin"));
         assert_eq!(entries[1].path, "ui/monogram.ktx2");
         assert_eq!(entries[1].id, atlas);
     }
@@ -843,10 +846,18 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         png(&input.join("a.png"), 1, 1);
         fs::create_dir_all(&output).unwrap();
-        fs::write(output.join(manifest::LEGACY_FILE_NAME), "old").unwrap();
+        for name in manifest::LEGACY_FILE_NAMES {
+            fs::write(output.join(name), "old").unwrap();
+        }
+        fs::write(output.join("old.atre"), "old").unwrap();
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
-        assert_eq!(outcome.removed, [manifest::LEGACY_FILE_NAME]);
-        assert!(!output.join(manifest::LEGACY_FILE_NAME).exists());
+        assert_eq!(
+            outcome.removed,
+            ["old.atre", "assets.manifest", "assets.aman"]
+        );
+        for name in manifest::LEGACY_FILE_NAMES {
+            assert!(!output.join(name).exists());
+        }
         assert!(output.join(manifest::FILE_NAME).is_file());
     }
 
@@ -1055,10 +1066,10 @@ mod tests {
                 .filter(|name| !name.is_empty())
                 .collect()
         };
-        assert_eq!(names("chars/hero.amesh"), ["mouth"]);
+        assert_eq!(names("chars/hero.amesh.bin"), ["mouth"]);
         // Inherited first, replaced in place by the sidecar; then its own.
-        assert_eq!(names("chars/villain.amesh"), ["mouth", "tail"]);
-        let villain = fs::read(output.join("chars/villain.amesh")).unwrap();
+        assert_eq!(names("chars/villain.amesh.bin"), ["mouth", "tail"]);
+        let villain = fs::read(output.join("chars/villain.amesh.bin")).unwrap();
         // `b_Neck_04`, after `_rootJoint` in skin order.
         assert_eq!(crate::amesh::cell(&villain, "LOCATORS", 0, 3), "5");
 
@@ -1091,7 +1102,7 @@ mod tests {
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         let built: Vec<_> = outcome.built.iter().map(|b| b.output.as_str()).collect();
-        assert_eq!(built, ["models/Fox.amesh"]);
+        assert_eq!(built, ["models/Fox.amesh.bin"]);
         assert!(outcome.built[0].detail.contains("24 joints, 3 clips"));
         // Its animation, material and texture count too; see docs/features/build.md#summary.
         assert_eq!(
@@ -1099,15 +1110,16 @@ mod tests {
             "Built 1 texture, 1 material, 1 mesh, 1 animation (0 skipped)"
         );
 
-        let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
+        let mesh = fs::read(output.join("models/Fox.amesh.bin")).unwrap();
         let rows = crate::amesh::rows(&mesh).unwrap();
         assert!(rows.contains(&("Skin", "24 joints".into())));
         assert!(rows.contains(&("Materials", "1".into())));
-        let anim = fs::read(output.join("models/Fox.aanim")).unwrap();
+        let anim = fs::read(output.join("models/Fox.aanim.bin")).unwrap();
         let rows = crate::aanim::rows(&anim).unwrap();
         assert!(rows[0].1.starts_with("Survey ("), "{rows:?}");
-        let m = material::decode(&fs::read(output.join("models/Fox/fox_material.amat")).unwrap())
-            .unwrap();
+        let m =
+            material::decode(&fs::read(output.join("models/Fox/fox_material.amat.bin")).unwrap())
+                .unwrap();
         assert_eq!(m.textures.base_color, fnv1a64(b"models/Fox/image_0"));
         assert!(output.join("models/Fox/image_0.ktx2").is_file());
 
@@ -1115,14 +1127,17 @@ mod tests {
         let entries =
             manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
         let kind = |path: &str| entries.iter().find(|e| e.path == path).map(|e| e.kind);
-        assert_eq!(kind("models/Fox.amesh"), Some(Kind::Mesh));
-        assert_eq!(kind("models/Fox.aanim"), Some(Kind::Animation));
-        assert_eq!(kind("models/Fox/fox_material.amat"), Some(Kind::Material));
+        assert_eq!(kind("models/Fox.amesh.bin"), Some(Kind::Mesh));
+        assert_eq!(kind("models/Fox.aanim.bin"), Some(Kind::Animation));
+        assert_eq!(
+            kind("models/Fox/fox_material.amat.bin"),
+            Some(Kind::Material)
+        );
         assert_eq!(kind("models/Fox/image_0.ktx2"), Some(Kind::Texture));
         let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
         assert_eq!(
             reader.require("MATERIAL").unwrap(),
-            fnv1a64(b"models/Fox/fox_material.amat").to_le_bytes()
+            fnv1a64(b"models/Fox/fox_material.amat.bin").to_le_bytes()
         );
 
         // Meshlet limits come from [meshes], overridden per model.
@@ -1136,7 +1151,7 @@ mod tests {
             },
         });
         run(&input, &output, &config).unwrap();
-        let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
+        let mesh = fs::read(output.join("models/Fox.amesh.bin")).unwrap();
         let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
         let desc = reader.require("DESC").unwrap();
         assert_eq!(desc[24..32], [32, 0, 0, 0, 32, 0, 0, 0]);
@@ -1148,7 +1163,7 @@ mod tests {
         .unwrap();
         let outcome = run(&input, &output, &config).unwrap();
         assert!(outcome.failures.is_empty());
-        let mesh = fs::read(output.join("models/Fox.amesh")).unwrap();
+        let mesh = fs::read(output.join("models/Fox.amesh.bin")).unwrap();
         let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
         assert_eq!(
             reader.require("DESC").unwrap()[24..32],
@@ -1196,7 +1211,7 @@ mod tests {
         assert_eq!(pixels[..4], [pixels[0], pixels[0], pixels[0], 255]);
         // In a material slot: compiled under its slot.
         assert!(output.join("rock/rock.h.ktx2").is_file());
-        assert!(output.join("rock/rock.amat").is_file());
+        assert!(output.join("rock/rock.amat.bin").is_file());
     }
 
     #[test]
@@ -1334,7 +1349,7 @@ mod tests {
                 "brick/brick.png -> brick/brick.ktx2 (srgb, 3 levels)",
                 "brick/grass.png -> brick/grass.ktx2 (srgb, 2 levels)",
                 "brick/brick.ao.png, brick/brick.r.png -> brick/brick.orm.ktx2 (linear, 3 levels)",
-                "brick/brick.* -> brick/brick.amat (material: base_color, normal, orm)",
+                "brick/brick.* -> brick/brick.amat.bin (material: base_color, normal, orm)",
             ]
         );
         assert_eq!(
@@ -1352,7 +1367,7 @@ mod tests {
             Some(::ktx2::Format::R8G8B8A8_SRGB)
         );
 
-        let m = material::decode(&fs::read(output.join("brick/brick.amat")).unwrap()).unwrap();
+        let m = material::decode(&fs::read(output.join("brick/brick.amat.bin")).unwrap()).unwrap();
         assert_eq!(m.textures.base_color, fnv1a64(b"brick/brick"));
         assert_eq!(m.textures.normal, fnv1a64(b"brick/brick.n"));
         assert_eq!(m.textures.orm, fnv1a64(b"brick/brick.orm"));
@@ -1362,8 +1377,8 @@ mod tests {
         let entries =
             manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
         let material = entries.iter().find(|e| e.kind == Kind::Material).unwrap();
-        assert_eq!(material.id, fnv1a64(b"brick/brick.amat"));
-        assert_eq!(material.path, "brick/brick.amat");
+        assert_eq!(material.id, fnv1a64(b"brick/brick.amat.bin"));
+        assert_eq!(material.path, "brick/brick.amat.bin");
         assert_eq!(entries.len(), 6);
     }
 
@@ -1383,7 +1398,7 @@ mod tests {
         assert_eq!(outcome.built[0].source, "gold.mat.toml");
         assert_eq!(outcome.built[0].detail, "material: no textures");
         assert_eq!(outcome.summary(), "Built 1 material (0 skipped)");
-        let m = material::decode(&fs::read(output.join("gold.amat")).unwrap()).unwrap();
+        let m = material::decode(&fs::read(output.join("gold.amat.bin")).unwrap()).unwrap();
         assert_eq!((m.metallic, m.roughness), (1.0, 0.3));
         assert_eq!(m.textures, material::TextureIds::default());
     }
@@ -1494,7 +1509,7 @@ mod tests {
         run(&input, &output, &config::Config::default()).unwrap();
         fs::remove_file(input.join("a.mat.toml")).unwrap();
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
-        assert_eq!(outcome.removed, ["a.amat"]);
+        assert_eq!(outcome.removed, ["a.amat.bin"]);
     }
 
     #[test]

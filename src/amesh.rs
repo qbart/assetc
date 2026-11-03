@@ -1,5 +1,5 @@
-//! `.amesh` meshes: submeshes with meshlets, bounds, levels of detail and skin; see
-//! docs/spec/amesh.md.
+//! `.amesh.bin` meshes: submeshes with meshlets, bounds, levels of detail and skin; see
+//! docs/spec/amesh.bin.md.
 
 use std::collections::HashMap;
 
@@ -221,7 +221,7 @@ pub struct Primitive {
     pub uvs: Vec<Vec<[f32; 2]>>,
 }
 
-/// A shape ready to write; see docs/spec/amesh.md#shapes.
+/// A shape ready to write; see docs/spec/amesh.bin.md#shapes.
 pub struct CompiledShape {
     pub name: String,
     pub kind: String,
@@ -237,7 +237,7 @@ pub struct CompiledShape {
     pub properties: crate::enrich::Properties,
 }
 
-/// A path ready to write; see docs/spec/amesh.md#paths.
+/// A path ready to write; see docs/spec/amesh.bin.md#paths.
 pub struct CompiledPath {
     pub name: String,
     pub kind: String,
@@ -263,10 +263,10 @@ pub struct Extras {
     pub regions: Vec<(String, Vec<String>)>,
     pub paths: Vec<CompiledPath>,
     /// The name and `source` of the color sets every primitive has; see
-    /// docs/spec/amesh.md#color-sets.
+    /// docs/spec/amesh.bin.md#color-sets.
     pub color_sets: Vec<(String, u32)>,
     /// The name and texture asset ID of the UV sets every primitive has; see
-    /// docs/spec/amesh.md#uv-sets.
+    /// docs/spec/amesh.bin.md#uv-sets.
     pub uv_sets: Vec<(String, u64)>,
 }
 
@@ -283,7 +283,7 @@ impl Strings {
     }
 }
 
-/// Writes `properties` as [`Property`](docs/spec/amesh.md#property-32-bytes) records.
+/// Writes `properties` as [`Property`](docs/spec/amesh.bin.md#property-32-bytes) records.
 pub(crate) fn put_properties(
     out: &mut Bytes,
     strings: &mut Strings,
@@ -309,7 +309,7 @@ pub(crate) fn put_properties(
     }
 }
 
-/// Writes `tags` as [`Tag`](docs/spec/amesh.md#tag-16-bytes) records.
+/// Writes `tags` as [`Tag`](docs/spec/amesh.bin.md#tag-16-bytes) records.
 fn put_tags(out: &mut Bytes, strings: &mut Strings, tags: &[String]) {
     for tag in tags {
         let (at, len) = strings.add(tag);
@@ -329,7 +329,7 @@ pub struct Joint {
     pub parent: i32,
 }
 
-/// A locator ready to write; see docs/spec/amesh.md#locators.
+/// A locator ready to write; see docs/spec/amesh.bin.md#locators.
 pub struct Locator {
     pub name: String,
     pub tags: Vec<String>,
@@ -412,7 +412,7 @@ fn put_bounds(out: &mut Bytes, b: &Bounds) {
         .f32s(&[b.radius]);
 }
 
-/// Octahedral encoding of a unit vector as two SNORM16 values, see docs/spec/amesh.md.
+/// Octahedral encoding of a unit vector as two SNORM16 values, see docs/spec/amesh.bin.md.
 pub fn octahedral([x, y, z]: [f32; 3]) -> [i16; 2] {
     let sum = x.abs() + y.abs() + z.abs();
     if sum == 0.0 {
@@ -471,7 +471,7 @@ pub fn encode(
     let (mut meshlet_count, mut meshlet_vertex_count, mut meshlet_triangle_count) = (0, 0, 0);
     let mut submesh_count = 0;
     let locators = &extras.locators;
-    // Per triangle of `indices`, its regions; see docs/spec/amesh.md#regions.
+    // Per triangle of `indices`, its regions; see docs/spec/amesh.bin.md#regions.
     let mut triangle_regions: Vec<u32> = Vec::new();
 
     for primitive in primitives.iter().filter(|p| !p.indices.is_empty()) {
@@ -761,7 +761,7 @@ pub fn encode(
     }
     if !locators.is_empty() {
         let (mut records, mut names, mut tags) = (Bytes::default(), Vec::new(), Bytes::default());
-        // Names first, then the tags' text; see docs/spec/amesh.md#locators.
+        // Names first, then the tags' text; see docs/spec/amesh.bin.md#locators.
         let name_offsets: Vec<u32> = locators
             .iter()
             .map(|l| {
@@ -1385,7 +1385,7 @@ pub fn preview(bytes: &[u8]) -> Result<Preview, String> {
     })
 }
 
-/// Inspector rows of an `.amesh` file; see docs/features/models.md#inspector.
+/// Inspector rows of an `.amesh.bin` file; see docs/features/models.md#inspector.
 pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     let reader = chunks::Reader::parse(bytes, FORMAT)?;
     if reader.version != VERSION {
@@ -1489,7 +1489,7 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     ])
 }
 
-/// The names of a mesh's color sets, in order; see docs/spec/amesh.md#color-sets.
+/// The names of a mesh's color sets, in order; see docs/spec/amesh.bin.md#color-sets.
 pub fn color_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
     color_sets(reader)
         .into_iter()
@@ -1497,7 +1497,7 @@ pub fn color_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
         .collect()
 }
 
-/// A mesh's UV sets' names, in order; see docs/spec/amesh.md#uv-sets.
+/// A mesh's UV sets' names, in order; see docs/spec/amesh.bin.md#uv-sets.
 fn uv_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
     let (Some(sets), strings) = (reader.chunk("UVSET"), reader.chunk("STRINGS")) else {
         return Vec::new();
@@ -2593,7 +2593,7 @@ meshlet_max_triangles = 64
         assert_eq!(reader.require("DESC").unwrap()[23], 0b110);
         assert!(rows(&bytes).unwrap().contains(&("Skin", "1 joint".into())));
 
-        // Locators: a record and its name; see docs/spec/amesh.md#locators.
+        // Locators: a record and its name; see docs/spec/amesh.bin.md#locators.
         let locators = reader.require("LOCATORS").unwrap();
         assert_eq!(locators.len(), 64);
         assert_eq!(&locators[..8], crate::hash::fnv1a64(b"hand").to_le_bytes());

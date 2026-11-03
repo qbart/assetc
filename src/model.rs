@@ -1,4 +1,4 @@
-//! glTF models: inspection and compilation to `.amesh`, `.amat`, `.aanim` and textures; see
+//! glTF models: inspection and compilation to `.amesh.bin`, `.amat.bin`, `.aanim.bin` and textures; see
 //! docs/features/models.md.
 
 use std::collections::HashMap;
@@ -428,7 +428,7 @@ pub struct Outputs {
     pub images: Vec<(usize, String, ColorSpace)>,
     /// Names of the used materials that get an ORM texture.
     pub orm: Vec<String>,
-    /// Skinned, with animations: an `.aanim` too.
+    /// Skinned, with animations: an `.aanim.bin` too.
     pub animation: bool,
 }
 
@@ -504,7 +504,7 @@ fn analyze(document: &Document) -> Result<Outputs, String> {
 pub struct Compiled {
     pub mesh: Vec<u8>,
     pub animation: Option<Vec<u8>>,
-    /// By name: `<P>/<name>.amat`.
+    /// By name: `<P>/<name>.amat.bin`.
     pub materials: Vec<(String, Material)>,
     /// By name: `<P>/<name>.ktx2`.
     pub images: Vec<(String, image::RgbaImage, ColorSpace)>,
@@ -953,7 +953,7 @@ pub fn compile(
     let material_ids: Vec<u64> = outputs
         .materials
         .iter()
-        .map(|(_, name)| fnv1a64(format!("{asset_path}/{name}.amat").as_bytes()))
+        .map(|(_, name)| fnv1a64(format!("{asset_path}/{name}.amat.bin").as_bytes()))
         .collect();
     let (mesh, summary) = amesh::encode(
         &primitives,
@@ -972,7 +972,7 @@ pub fn compile(
             let clips = clips(document, &read)?;
             clip_count = clips.len();
             let events = resolve_events(&sidecar.events, &clips).map_err(sidecar_error)?;
-            let mesh_id = fnv1a64(format!("{asset_path}.amesh").as_bytes());
+            let mesh_id = fnv1a64(format!("{asset_path}.amesh.bin").as_bytes());
             Some(aanim::encode(&clips, &events, joints.len() as u32, mesh_id))
         }
         _ if !sidecar.events.is_empty() => {
@@ -1659,7 +1659,7 @@ mod tests {
         assert_eq!(&vertices[12..16], &[0, 0, 0, 0]);
         assert_eq!(
             reader.require("MATERIAL").unwrap(),
-            fnv1a64(b"props/tri/Paint.amat").to_le_bytes()
+            fnv1a64(b"props/tri/Paint.amat.bin").to_le_bytes()
         );
         assert!(
             compiled
@@ -1864,7 +1864,7 @@ submeshes = [[0, 0], [3, 1]]
         amod.events = vec![event(&names[0], "x", 99.0)];
         let err = compile(&file, "Fox", &options, &amod).err().unwrap();
         assert!(err.contains("is past the end of"), "{err}");
-        // A model without a skin has no .aanim for them.
+        // A model without a skin has no .aanim.bin for them.
         std::fs::write(&file, static_triangle()).unwrap();
         let err = compile(&file, "Fox", &options, &amod).err().unwrap();
         assert!(err.contains("events need a skinned model"), "{err}");

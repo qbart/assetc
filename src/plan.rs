@@ -21,7 +21,7 @@ use crate::tree::{self, Node};
 
 #[derive(Debug, Default)]
 pub struct Plan {
-    /// In build order: textures in input order, then each material's ORM and `.amat`.
+    /// In build order: textures in input order, then each material's ORM and `.amat.bin`.
     pub assets: Vec<Asset>,
     /// Problems found while planning; any of them fails the build.
     pub failures: Vec<Failure>,
@@ -56,7 +56,7 @@ pub enum Job {
     /// A color LUT (relative to `input`) as a strip texture, or a 3D one when `volume`; see
     /// docs/features/lut.md#build.
     Lut { source: String, volume: bool },
-    /// A glTF model (relative to `input`): writes its `.amesh` and every other output of it.
+    /// A glTF model (relative to `input`): writes its `.amesh.bin` and every other output of it.
     Model {
         source: String,
         options: MeshOptions,
@@ -66,12 +66,12 @@ pub enum Job {
     },
     /// Another output of a model, written by its [`Job::Model`].
     ModelPart { source: String },
-    /// A font (relative to `input`): writes its `.afont` and SDF atlas; see
+    /// A font (relative to `input`): writes its `.afont.bin` and SDF atlas; see
     /// docs/features/fonts.md#build.
     Font { source: String },
     /// The atlas of a font, written by its [`Job::Font`].
     FontPart { source: String },
-    /// An atlas folder (relative to `input`): writes its `.aatlas` and its texture; see
+    /// An atlas folder (relative to `input`): writes its `.aatlas.bin` and its texture; see
     /// docs/features/atlases.md#build.
     Atlas {
         source: String,
@@ -95,7 +95,7 @@ pub enum Job {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Use {
-    /// Material asset path, e.g. `brick/brick.amat`.
+    /// Material asset path, e.g. `brick/brick.amat.bin`.
     pub material: String,
     pub slot: Slot,
 }
@@ -169,7 +169,7 @@ fn model_assets(
     };
     push(
         Kind::Mesh,
-        format!("{p}.amesh"),
+        format!("{p}.amesh.bin"),
         Job::Model {
             source: source.to_owned(),
             options,
@@ -177,10 +177,10 @@ fn model_assets(
         },
     );
     if outputs.animation {
-        push(Kind::Animation, format!("{p}.aanim"), part());
+        push(Kind::Animation, format!("{p}.aanim.bin"), part());
     }
     for (_, name) in &outputs.materials {
-        push(Kind::Material, format!("{p}/{name}.amat"), part());
+        push(Kind::Material, format!("{p}/{name}.amat.bin"), part());
     }
     for (_, name, _) in &outputs.images {
         push(Kind::Texture, format!("{p}/{name}"), part());
@@ -243,12 +243,12 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 continue;
             }
         };
-        // `P.aatlas` writes `P.ktx2` too; see docs/features/atlases.md#build.
+        // `P.aatlas.bin` writes `P.ktx2` too; see docs/features/atlases.md#build.
         let p = strip_extension(&rel).to_owned();
         for (kind, asset_path, job) in [
             (
                 Kind::Atlas,
-                format!("{p}.aatlas"),
+                format!("{p}.aatlas.bin"),
                 Job::Atlas {
                     source: rel.clone(),
                     color: settings.color_space(&rel),
@@ -356,7 +356,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             for (kind, asset_path, job) in [
                 (
                     Kind::Font,
-                    format!("{p}.afont"),
+                    format!("{p}.afont.bin"),
                     Job::Font {
                         source: rel.clone(),
                     },
@@ -402,7 +402,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
         if group.source.is_none() && group.slots.is_empty() {
             continue;
         }
-        let asset_path = join(dir, &format!("{name}.amat"));
+        let asset_path = join(dir, &format!("{name}.amat.bin"));
         let label = group
             .source
             .clone()

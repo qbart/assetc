@@ -49,7 +49,7 @@ pub struct Inspection {
     pub compiled_bytes: Option<Vec<u8>>,
     /// Its material slots, as found in the output (`None` when missing or unreadable).
     pub compiled_materials: Vec<Option<MaterialPreview>>,
-    /// `compiled_bytes` is an `.afont`, and `preview` its atlas (if found).
+    /// `compiled_bytes` is an `.afont.bin`, and `preview` its atlas (if found).
     pub compiled_font: bool,
     /// An atlas' frames (name and rectangle in `preview`), drawn over it; see
     /// docs/features/atlases.md#inspector.
@@ -60,7 +60,7 @@ pub struct Inspection {
     /// A compiled animation read back, to play on its companion mesh (`compiled_mesh`), or
     /// why there is no mesh to play it on; see docs/features/models.md#compiled-animation-preview.
     pub compiled_animation: Option<(crate::aanim::Decoded, Option<String>)>,
-    /// The file's data as a table, for files without a preview (manifest, `.amat`).
+    /// The file's data as a table, for files without a preview (manifest, `.amat.bin`).
     pub data: Option<DataTable>,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
@@ -193,9 +193,11 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         }
     };
 
+    // By name: compiled extensions have two parts (`amesh.bin`).
     let has_ext = |ext: &str| {
-        file.extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case(ext))
+        file.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.to_ascii_lowercase().ends_with(&format!(".{ext}")))
     };
     let dir = match location {
         Location::Input => project.input_dir(),
@@ -279,7 +281,14 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
                 out.rows.extend(rows);
                 asset_rows(&rel, &mut out);
                 // The companion mesh, next to it.
-                let mesh_path = file.with_extension("amesh");
+                let mesh_path = file.with_file_name(format!(
+                    "{}.{}",
+                    file.file_name()
+                        .and_then(|n| n.to_str())
+                        .and_then(|n| n.get(..n.len().checked_sub(".aanim.bin".len())?))
+                        .unwrap_or_default(),
+                    manifest::Kind::Mesh.extension()
+                ));
                 let name = mesh_path
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -380,7 +389,7 @@ fn source_texture(
             }
             let orm_use = uses.iter().find_map(|u| {
                 let channel = u.slot.orm_channel()?;
-                let orm_path = format!("{}.orm", u.material.strip_suffix(".amat")?);
+                let orm_path = format!("{}.orm", u.material.strip_suffix(".amat.bin")?);
                 Some((plan.by_asset_path(&orm_path)?, channel))
             });
             if let Some(asset) = plan.texture(rel)
@@ -659,8 +668,8 @@ fn font_rows(
 ) -> Result<(), String> {
     let data = fs::read(file).map_err(|e| e.to_string())?;
     out.rows.extend(font::rows(&data)?);
-    // Compiled to an `.afont` and its atlas, see docs/features/fonts.md#build.
-    let afont = format!("{}.afont", strip_extension(rel));
+    // Compiled to an `.afont.bin` and its atlas, see docs/features/fonts.md#build.
+    let afont = format!("{}.afont.bin", strip_extension(rel));
     out.rows.push(("Asset path", afont.clone()));
     output_row(project, &afont, "", out);
     out.preview = Some(font::specimen(&data)?);
@@ -751,7 +760,7 @@ fn model_rows(
         out.models = input_models(&input);
         out.models.retain(|m| m != rel);
     }
-    // Compiled to an `.amesh` and more, see docs/features/models.md#build.
+    // Compiled to an `.amesh.bin` and more, see docs/features/models.md#build.
     match mesh_options(project, file, rel) {
         Ok(options) => {
             out.rows.push((
@@ -811,7 +820,7 @@ fn model_rows(
         out.rows.push(("Paths", count(amod.paths.len())));
         out.rows.push(("Events", count(amod.events.len())));
     }
-    let mesh = format!("{}.amesh", strip_extension(rel));
+    let mesh = format!("{}.amesh.bin", strip_extension(rel));
     out.rows.push(("Asset path", mesh.clone()));
     output_row(project, &mesh, "", out);
     Ok(())
@@ -827,7 +836,7 @@ pub struct MaterialPreview {
     pub emissive: Option<Image>,
 }
 
-/// The `.amat` (and its textures) of each asset ID, through the output's manifest; see
+/// The `.amat.bin` (and its textures) of each asset ID, through the output's manifest; see
 /// docs/features/models.md#compiled-mesh-preview.
 fn compiled_materials(project: &Project, ids: &[u64]) -> Vec<Option<MaterialPreview>> {
     let Some(output) = project.output_dir() else {
@@ -1053,7 +1062,7 @@ fn material_source(
 ) -> Result<(), String> {
     let (dir, name) = split_dir(rel);
     let name = name.strip_suffix(material::SOURCE_SUFFIX).unwrap_or(name);
-    let asset_path = join(dir, &format!("{name}.amat"));
+    let asset_path = join(dir, &format!("{name}.amat.bin"));
     asset_rows(&asset_path, out);
     output_row(
         project,
@@ -1178,7 +1187,7 @@ fn manifest(file: &Path, out: &mut Inspection) -> Result<(), String> {
     Ok(())
 }
 
-/// The `.amat` record field by field; see docs/features/inspector.md#material-view.
+/// The `.amat.bin` record field by field; see docs/features/inspector.md#material-view.
 fn material_table(bytes: &[u8], entries: Option<&[manifest::Entry]>) -> DataTable {
     let f = |at: usize| {
         bytes
@@ -1646,14 +1655,14 @@ name = \"x\"\n",
         let file = |p: &str| dir.path().join(p);
 
         let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
-        assert_eq!(row(&r, "Material"), "brick/brick.amat (roughness)");
+        assert_eq!(row(&r, "Material"), "brick/brick.amat.bin (roughness)");
         assert_eq!(row(&r, "Color"), "linear");
         assert_eq!(
             row(&r, "Output"),
             "brick/brick.orm.ktx2 (channel G) (not built)"
         );
         let base = inspect(&project, Location::Input, &file("assets/brick/brick.png"));
-        assert_eq!(row(&base, "Material"), "brick/brick.amat (base_color)");
+        assert_eq!(row(&base, "Material"), "brick/brick.amat.bin (base_color)");
         assert_eq!(row(&base, "Color"), "sRGB");
         let toml = inspect(
             &project,
@@ -1661,8 +1670,8 @@ name = \"x\"\n",
             &file("assets/brick/brick.mat.toml"),
         );
         assert_eq!(row(&toml, "Kind"), "Material source");
-        assert_eq!(row(&toml, "Asset path"), "brick/brick.amat");
-        assert_eq!(row(&toml, "Output"), "brick/brick.amat (not built)");
+        assert_eq!(row(&toml, "Asset path"), "brick/brick.amat.bin");
+        assert_eq!(row(&toml, "Output"), "brick/brick.amat.bin (not built)");
 
         let input = project.input_dir().unwrap();
         let output = project.output_dir().unwrap();
@@ -1670,9 +1679,13 @@ name = \"x\"\n",
         let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
         assert_eq!(row(&r, "Output"), "brick/brick.orm.ktx2 (channel G)");
 
-        let mat = inspect(&project, Location::Output, &file("build/brick/brick.amat"));
+        let mat = inspect(
+            &project,
+            Location::Output,
+            &file("build/brick/brick.amat.bin"),
+        );
         assert_eq!(row(&mat, "Kind"), "Compiled material");
-        assert_eq!(row(&mat, "Asset path"), "brick/brick.amat");
+        assert_eq!(row(&mat, "Asset path"), "brick/brick.amat.bin");
         assert_eq!(row(&mat, "Roughness"), "0.50");
         assert_eq!(row(&mat, "Alpha"), "mask, cutoff 0.50");
         assert_eq!(
@@ -1756,7 +1769,7 @@ name = \"x\"\n",
         assert_eq!(row(&i, "Kind"), "Model");
         assert_eq!(row(&i, "Animations"), "3");
         assert_eq!(row(&i, "Meshlet limits"), "64 vertices, 124 triangles");
-        assert_eq!(row(&i, "Asset path"), "Fox.amesh");
+        assert_eq!(row(&i, "Asset path"), "Fox.amesh.bin");
         assert_eq!(i.animations.len(), 3);
         assert!(i.model);
 
@@ -1791,7 +1804,7 @@ name = \"x\"\n",
         let i = inspect(&project, Location::Output, &fake);
         assert_eq!(row(&i, "Error"), "not a KTX2 file");
 
-        let nested_manifest = dir.path().join("build/sub/assets.aman");
+        let nested_manifest = dir.path().join("build/sub/assets.aman.bin");
         fs::create_dir_all(nested_manifest.parent().unwrap()).unwrap();
         fs::write(&nested_manifest, "x").unwrap();
         let i = inspect(&project, Location::Output, &nested_manifest);

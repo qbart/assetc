@@ -6,7 +6,7 @@ use matma::{Spline, cardinal, cardinal_tangent, float3};
 /// Steps of the spline parameter per segment when measuring a curve.
 const MEASURE_STEPS: usize = 32;
 
-/// Samples per segment written to the `.amesh`; see docs/spec/amesh.md#paths.
+/// Samples per segment written to the `.amesh.bin`; see docs/spec/amesh.bin.md#paths.
 pub const SAMPLES_PER_SEGMENT: usize = 16;
 
 /// A path's curve.

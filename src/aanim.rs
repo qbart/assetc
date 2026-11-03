@@ -1,4 +1,4 @@
-//! `.aanim` animation clips of a skinned mesh, see docs/spec/aanim.md.
+//! `.aanim.bin` animation clips of a skinned mesh, see docs/spec/aanim.bin.md.
 
 use crate::chunks::{self, Bytes, Writer};
 
@@ -24,7 +24,7 @@ pub struct Channel {
     pub values: Vec<f32>,
 }
 
-/// A named moment of a clip; see docs/spec/aanim.md#events.
+/// A named moment of a clip; see docs/spec/aanim.bin.md#events.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Event {
     /// Index into the clips.
@@ -126,7 +126,7 @@ pub fn encode(clips: &[Clip], events: &[Event], joint_count: u32, mesh: u64) -> 
     writer.finish()
 }
 
-/// Inspector rows of an `.aanim` file; see docs/features/models.md#inspector.
+/// Inspector rows of an `.aanim.bin` file; see docs/features/models.md#inspector.
 pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     let reader = chunks::Reader::parse(bytes, FORMAT)?;
     if reader.version != VERSION {
@@ -163,7 +163,7 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     ])
 }
 
-/// An `.aanim` read back: its clips and events, and its skeleton's joint count.
+/// An `.aanim.bin` read back: its clips and events, and its skeleton's joint count.
 #[derive(Debug, Clone)]
 pub struct Decoded {
     pub clips: Vec<Clip>,
@@ -171,7 +171,7 @@ pub struct Decoded {
     pub joint_count: u32,
 }
 
-/// Reads an `.aanim` back; see docs/features/models.md#compiled-animation-preview.
+/// Reads an `.aanim.bin` back; see docs/features/models.md#compiled-animation-preview.
 pub fn decode(bytes: &[u8]) -> Result<Decoded, String> {
     use crate::enrich::PropValue;
     let reader = chunks::Reader::parse(bytes, FORMAT)?;

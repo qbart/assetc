@@ -1,6 +1,6 @@
 //! Atlases: a `*.atlas` folder's images packed into one texture, with metadata of where
 //! each frame is; see docs/features/atlases.md, docs/spec/atlas.toml.md and
-//! docs/spec/aatlas.md.
+//! docs/spec/aatlas.bin.md.
 
 use std::path::{Path, PathBuf};
 
@@ -167,7 +167,7 @@ pub fn frame_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-/// Where a frame is in the atlas; see docs/spec/aatlas.md#frame-64-bytes.
+/// Where a frame is in the atlas; see docs/spec/aatlas.bin.md#frame-64-bytes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Frame {
     pub name: String,
@@ -413,7 +413,7 @@ pub fn packing_summary(config: &AtlasConfig, packed: &Packed) -> String {
     }
 }
 
-/// The `.aatlas` metadata; see docs/spec/aatlas.md.
+/// The `.aatlas.bin` metadata; see docs/spec/aatlas.bin.md.
 pub fn encode(config: &AtlasConfig, packed: &Packed, texture: u64) -> Vec<u8> {
     let (width, height) = packed.image.dimensions();
     let mut desc = Bytes::default();

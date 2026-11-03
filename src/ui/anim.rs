@@ -1,4 +1,4 @@
-//! A compiled `.aanim` played on its companion mesh, with a read-only timeline; see
+//! A compiled `.aanim.bin` played on its companion mesh, with a read-only timeline; see
 //! docs/features/models.md#compiled-animation-preview.
 
 use super::*;

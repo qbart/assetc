@@ -697,13 +697,7 @@ impl InspectorTab {
             }),
             // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
-                s.location == Location::Output
-                    && s.path.is_file()
-                    && s.path.extension().is_some_and(|ext| {
-                        Kind::ALL
-                            .iter()
-                            .any(|kind| ext.eq_ignore_ascii_case(kind.extension()))
-                    })
+                s.location == Location::Output && s.path.is_file() && Kind::of(&s.path).is_some()
             }),
         }
     }
@@ -2183,12 +2177,15 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
             (false, false) => Icon::Folder,
         };
     }
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
+    // A compiled `<name>.<format>.bin` takes the icon of its format.
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    match ext.as_str() {
+    let name = name.strip_suffix(".bin").unwrap_or(&name);
+    let ext = name.rsplit_once('.').map_or("", |(_, ext)| ext);
+    match ext {
         "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga" | "webp" | "tif" | "tiff" | "hdr"
         | "dds" | "ktx2" => Icon::Image,
         "ttf" | "otf" | "woff" | "woff2" => Icon::Type,
@@ -2196,10 +2193,10 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "anoise" => Icon::ImagePlay,
         "agradient" => Icon::SwatchBook,
         "apalette" => Icon::Palette,
-        "aschema" | "atype" => Icon::Braces,
-        "agraph" | "agph" => Icon::GraphStar,
-        "adata" | "arec" => Icon::Package,
-        "atree" | "atre" => Icon::ListTree,
+        "aschema" => Icon::Braces,
+        "agraph" => Icon::GraphStar,
+        "adata" => Icon::Package,
+        "atree" => Icon::ListTree,
         "aatlas" => Icon::Map,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
@@ -4835,16 +4832,16 @@ enum Shown {
     Specimen,
     Environment,
     Model,
-    /// An `.amesh` from the Output tree, with its meshlets.
+    /// An `.amesh.bin` from the Output tree, with its meshlets.
     CompiledMesh,
-    /// An `.aanim` from the Output tree, played on its companion mesh.
+    /// An `.aanim.bin` from the Output tree, played on its companion mesh.
     CompiledAnimation,
     /// A compiled schema, data file, graph or tree, as its chunks.
     CompiledData,
-    /// An `.afont` from the Output tree: its atlas (like a specimen) or its chunks.
+    /// An `.afont.bin` from the Output tree: its atlas (like a specimen) or its chunks.
     CompiledFont,
     Lut,
-    /// A file shown as a table of its data (manifest, `.amat`).
+    /// A file shown as a table of its data (manifest, `.amat.bin`).
     Data,
     /// An `.aschema`'s type editor.
     Schema,

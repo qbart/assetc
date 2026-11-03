@@ -473,20 +473,20 @@ pub fn asset_kind(path: &str) -> Option<&'static str> {
 }
 
 /// The asset ID the build gives an input file's main output (`0` for `""`); see
-/// docs/spec/arec.md.
+/// docs/spec/adata.bin.md.
 pub fn asset_id(path: &str) -> u64 {
     if path.is_empty() {
         return 0;
     }
     let stem = |p: &str| p.rsplit_once('.').map_or(p, |(s, _)| s).to_owned();
     let asset_path = match asset_kind(path) {
-        Some("material") => format!("{}.amat", &path[..path.len() - ".mat.toml".len()]),
-        Some("model") => format!("{}.amesh", stem(path)),
-        Some("font") => format!("{}.afont", stem(path)),
-        Some("atlas") => format!("{}.aatlas", stem(path)),
-        Some("graph") => format!("{}.agph", stem(path)),
-        Some("tree") => format!("{}.atre", stem(path)),
-        Some("data") => format!("{}.arec", stem(path)),
+        Some("material") => format!("{}.amat.bin", &path[..path.len() - ".mat.toml".len()]),
+        Some("model") => format!("{}.amesh.bin", stem(path)),
+        Some("font") => format!("{}.afont.bin", stem(path)),
+        Some("atlas") => format!("{}.aatlas.bin", stem(path)),
+        Some("graph") => format!("{}.agraph.bin", stem(path)),
+        Some("tree") => format!("{}.atree.bin", stem(path)),
+        Some("data") => format!("{}.adata.bin", stem(path)),
         _ => stem(path),
     };
     crate::hash::fnv1a64(asset_path.as_bytes())
@@ -1261,10 +1261,10 @@ mod tests {
             asset_id("textures/grass.png"),
             crate::hash::fnv1a64(b"textures/grass")
         );
-        assert_eq!(asset_id("Fox.glb"), crate::hash::fnv1a64(b"Fox.amesh"));
+        assert_eq!(asset_id("Fox.glb"), crate::hash::fnv1a64(b"Fox.amesh.bin"));
         assert_eq!(
             asset_id("brick/brick.mat.toml"),
-            crate::hash::fnv1a64(b"brick/brick.amat")
+            crate::hash::fnv1a64(b"brick/brick.amat.bin")
         );
         assert_eq!(asset_id(""), 0);
         let schema = Schema::default();

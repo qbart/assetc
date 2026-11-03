@@ -1,10 +1,16 @@
-//! `assets.aman` reader/writer, see docs/spec/aman.md.
+//! `assets.aman.bin` reader/writer, see docs/spec/aman.bin.md.
 
 use std::fmt;
+use std::path::Path;
 
-pub const FILE_NAME: &str = "assets.aman";
-/// The manifest's name before, removed by builds; see docs/features/build.md.
-pub const LEGACY_FILE_NAME: &str = "assets.manifest";
+pub const FILE_NAME: &str = "assets.aman.bin";
+/// The manifest's names before, removed by builds; see docs/features/build.md.
+pub const LEGACY_FILE_NAMES: [&str; 2] = ["assets.manifest", "assets.aman"];
+/// Extensions of outputs before they ended in `.bin`, removed by builds; see
+/// docs/features/build.md#removing-stale-outputs.
+pub const LEGACY_EXTENSIONS: [&str; 9] = [
+    "amesh", "amat", "aanim", "afont", "atype", "arec", "agph", "atre", "aatlas",
+];
 pub const MAGIC: [u8; 4] = *b"AMAN";
 pub const VERSION: u32 = 1;
 const HEADER_SIZE: usize = 16;
@@ -39,20 +45,29 @@ impl Kind {
         Self::Atlas,
     ];
 
-    /// Extension of the files assets of this kind are written to.
+    /// Extension of the files assets of this kind are written to, without the leading `.`;
+    /// every kind but textures ends in `.bin`, see docs/features/build.md#outputs.
     pub fn extension(self) -> &'static str {
         match self {
             Self::Texture => "ktx2",
-            Self::Material => "amat",
-            Self::Mesh => "amesh",
-            Self::Animation => "aanim",
-            Self::Font => "afont",
-            Self::Schema => "atype",
-            Self::Data => "arec",
-            Self::Graph => "agph",
-            Self::Tree => "atre",
-            Self::Atlas => "aatlas",
+            Self::Material => "amat.bin",
+            Self::Mesh => "amesh.bin",
+            Self::Animation => "aanim.bin",
+            Self::Font => "afont.bin",
+            Self::Schema => "aschema.bin",
+            Self::Data => "adata.bin",
+            Self::Graph => "agraph.bin",
+            Self::Tree => "atree.bin",
+            Self::Atlas => "aatlas.bin",
         }
+    }
+
+    /// The kind whose extension `file`'s name ends in, any case.
+    pub fn of(file: &Path) -> Option<Self> {
+        let name = file.file_name()?.to_str()?.to_ascii_lowercase();
+        Self::ALL
+            .into_iter()
+            .find(|kind| name.ends_with(&format!(".{}", kind.extension())))
     }
 
     pub fn name(self) -> &'static str {
@@ -71,7 +86,7 @@ impl Kind {
     }
 
     /// Output path (relative to `output`) of an asset; asset paths of every kind but textures
-    /// already end in their extension (`.amat`, `.amesh`, `.aanim`, `.afont`, `.aschema`, …).
+    /// already end in their extension (`.amat.bin`, `.amesh.bin`, `.aanim.bin`, …).
     pub fn output_path(self, asset_path: &str) -> String {
         match self {
             Self::Texture => format!("{asset_path}.{}", self.extension()),

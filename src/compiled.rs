@@ -1,5 +1,5 @@
-//! Compiled schemas, data, graphs and trees: binary chunked files; see docs/spec/atype.md,
-//! docs/spec/arec.md, docs/spec/agph.md and docs/spec/atre.md.
+//! Compiled schemas, data, graphs and trees: binary chunked files; see docs/spec/aschema.bin.md,
+//! docs/spec/adata.bin.md, docs/spec/agraph.bin.md and docs/spec/atree.bin.md.
 
 use serde_json::Value;
 
@@ -9,8 +9,8 @@ use crate::aschema::{Body, Schema, Ty, parse_type};
 use crate::chunks::{self, Bytes, Writer};
 use crate::hash::fnv1a64;
 
-pub const ATYPE: &str = "ATYPE";
-pub const AREC: &str = "AREC";
+pub const ASCHEMA: &str = "ASCHEMA";
+pub const ADATA: &str = "ADATA";
 pub const AGRAPH: &str = "AGRAPH";
 pub const ATREE: &str = "ATREE";
 pub const VERSION: u32 = 1;
@@ -32,7 +32,7 @@ fn color_bytes(color: Option<&str>) -> [u8; 4] {
         .unwrap_or([0; 4])
 }
 
-/// A schema as an `.atype`; see docs/spec/atype.md.
+/// A schema as an `.aschema.bin`; see docs/spec/aschema.bin.md.
 pub fn encode_schema(schema: &Schema) -> Vec<u8> {
     let (mut types, mut fields, mut values) =
         (Bytes::default(), Bytes::default(), Bytes::default());
@@ -90,7 +90,7 @@ pub fn encode_schema(schema: &Schema) -> Vec<u8> {
         .u32(field_count)
         .u32(value_count)
         .u32(0);
-    let mut writer = Writer::new(ATYPE, VERSION);
+    let mut writer = Writer::new(ASCHEMA, VERSION);
     writer
         .chunk("DESC", desc.take())
         .chunk("TYPES", types.take())
@@ -100,7 +100,7 @@ pub fn encode_schema(schema: &Schema) -> Vec<u8> {
     writer.finish()
 }
 
-/// The `VALUES` being built for an `.arec`.
+/// The `VALUES` being built for an `.adata.bin`.
 struct Rec<'a> {
     schema: &'a Schema,
     values: Vec<[u8; 24]>,
@@ -140,7 +140,7 @@ impl Rec<'_> {
         }
     }
 
-    /// Writes `v` (of type `ty` when known) into `slot`; see docs/spec/arec.md#value-24-bytes.
+    /// Writes `v` (of type `ty` when known) into `slot`; see docs/spec/adata.bin.md#value-24-bytes.
     fn value(&mut self, slot: usize, name: u64, ty: Option<&Ty>, v: &Value) {
         let float = |f: f64| f.to_bits().to_le_bytes();
         match (ty, v) {
@@ -245,7 +245,7 @@ impl Rec<'_> {
     }
 }
 
-/// A data file as an `.arec`, every field resolved; see docs/spec/arec.md.
+/// A data file as an `.adata.bin`, every field resolved; see docs/spec/adata.bin.md.
 pub fn encode_data(data: &crate::adata::DataFile, schema: &Schema) -> Vec<u8> {
     let mut rec = Rec {
         schema,
@@ -289,7 +289,7 @@ pub fn encode_data(data: &crate::adata::DataFile, schema: &Schema) -> Vec<u8> {
         .u32(used.len() as u32)
         .u32(0);
     let values: Vec<u8> = rec.values.concat();
-    let mut writer = Writer::new(AREC, VERSION);
+    let mut writer = Writer::new(ADATA, VERSION);
     writer
         .chunk("DESC", desc.take())
         .chunk("TYPES", types.take())
@@ -308,7 +308,7 @@ fn node_head(out: &mut Bytes, strings: &mut Strings, n: &crate::agraph::Node) {
     out.0.extend_from_slice(&color_bytes(n.color.as_deref()));
 }
 
-/// A graph as an `.agph`; see docs/spec/agph.md.
+/// A graph as an `.agraph.bin`; see docs/spec/agraph.bin.md.
 pub fn encode_graph(graph: &Graph) -> Vec<u8> {
     let (mut nodes, mut edges, mut props) = (Bytes::default(), Bytes::default(), Bytes::default());
     let mut strings = Strings::default();
@@ -344,7 +344,7 @@ pub fn encode_graph(graph: &Graph) -> Vec<u8> {
     writer.finish()
 }
 
-/// A tree as an `.atre`, nodes breadth first; see docs/spec/atre.md.
+/// A tree as an `.atree.bin`, nodes breadth first; see docs/spec/atree.bin.md.
 pub fn encode_tree(tree: &Graph) -> Vec<u8> {
     use crate::atree::{children, depth};
     // Breadth first, with each node's depth and parent (by place in the order).
@@ -403,8 +403,8 @@ pub fn encode_tree(tree: &Graph) -> Vec<u8> {
 /// The format of a compiled schema, data, graph or tree file.
 pub fn format_of(bytes: &[u8]) -> Option<&'static str> {
     [
-        ATYPE,
-        AREC,
+        ASCHEMA,
+        ADATA,
         AGRAPH,
         ATREE,
         crate::aanim::FORMAT,
@@ -433,8 +433,8 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
         ]);
     }
     let names: [&'static str; 3] = match format {
-        ATYPE => ["Types", "Fields", "Values"],
-        AREC => ["Instances", "Values", "Types"],
+        ASCHEMA => ["Types", "Fields", "Values"],
+        ADATA => ["Instances", "Values", "Types"],
         AGRAPH => ["Nodes", "Edges", "Properties"],
         _ => ["Nodes", "Properties", "Depth"],
     };
@@ -478,7 +478,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
         ("Color", Color(32)),
     ];
     Some(match (format, chunk) {
-        (ATYPE, "DESC") => (
+        (ASCHEMA, "DESC") => (
             16,
             vec![
                 ("type_count", U32(0)),
@@ -486,7 +486,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("value_count", U32(8)),
             ],
         ),
-        (AREC, "DESC") => (
+        (ADATA, "DESC") => (
             16,
             vec![
                 ("instance_count", U32(0)),
@@ -510,7 +510,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("depth", U32(8)),
             ],
         ),
-        (ATYPE, "TYPES") => (
+        (ASCHEMA, "TYPES") => (
             32,
             vec![
                 ("Name", Text(8)),
@@ -520,7 +520,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("Count", U32(24)),
             ],
         ),
-        (ATYPE, "FIELDS") => (
+        (ASCHEMA, "FIELDS") => (
             112,
             vec![
                 ("Name", Text(8)),
@@ -539,9 +539,9 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("Doc", Text(40)),
             ],
         ),
-        (ATYPE, "VALUES") => (16, vec![("Name", Text(8)), ("Hash", Hex(0))]),
-        (AREC, "TYPES") => (16, vec![("Name", Text(8)), ("Hash", Hex(0))]),
-        (AREC, "INSTANCE") => (
+        (ASCHEMA, "VALUES") => (16, vec![("Name", Text(8)), ("Hash", Hex(0))]),
+        (ADATA, "TYPES") => (16, vec![("Name", Text(8)), ("Hash", Hex(0))]),
+        (ADATA, "INSTANCE") => (
             32,
             vec![
                 ("Id", Text(16)),
@@ -550,7 +550,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("Value", U32(4)),
             ],
         ),
-        (AREC, "VALUES") => (
+        (ADATA, "VALUES") => (
             24,
             vec![
                 ("Name hash", Hex(0)),
@@ -591,7 +591,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
             32,
             vec![("Key", Text(8)), ("Type", PropType), ("Value", PropValue)],
         ),
-        // Atlases; see docs/spec/aatlas.md.
+        // Atlases; see docs/spec/aatlas.bin.md.
         ("AATLAS", "DESC") => (
             48,
             vec![
@@ -625,7 +625,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("V1", F32(60)),
             ],
         ),
-        // Animations; see docs/spec/aanim.md.
+        // Animations; see docs/spec/aanim.bin.md.
         ("AANIM", "DESC") => (
             32,
             vec![
@@ -894,7 +894,7 @@ mod tests {
         )
         .unwrap();
         let types = encode_schema(&schema);
-        assert_eq!(format_of(&types), Some(ATYPE));
+        assert_eq!(format_of(&types), Some(ASCHEMA));
         assert_eq!(rows(&types).unwrap()[1], ("Fields", "5".into()));
         assert_eq!(cell(&types, "TYPES", 1, 1), "Weapon");
         assert_eq!(cell(&types, "FIELDS", 1, 5), "10");
@@ -906,7 +906,7 @@ mod tests {
         )
         .unwrap();
         let rec = encode_data(&data, &schema);
-        assert_eq!(format_of(&rec), Some(AREC));
+        assert_eq!(format_of(&rec), Some(ADATA));
         assert_eq!(cell(&rec, "INSTANCE", 0, 1), "sword");
         // The struct, then its five fields, then the tag list's item.
         let kinds: Vec<String> = (0..7).map(|r| cell(&rec, "VALUES", r, 2)).collect();

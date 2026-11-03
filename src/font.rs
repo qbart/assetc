@@ -236,7 +236,7 @@ impl Sheet {
     }
 }
 
-// ---- Compiling: SDF atlas and `.afont`, see docs/features/fonts.md#build -------------
+// ---- Compiling: SDF atlas and `.afont.bin`, see docs/features/fonts.md#build -------------
 
 /// Atlas pixels per em, distance spread in pixels, and the value on the outline.
 const EM_SIZE: f32 = 48.0;
@@ -249,7 +249,7 @@ const CURVE_SEGMENTS: usize = 16;
 pub const FORMAT: &str = "AFONT";
 pub const VERSION: u32 = 1;
 
-/// A compiled font: the `.afont` bytes and its atlas.
+/// A compiled font: the `.afont.bin` bytes and its atlas.
 pub struct Compiled {
     pub afont: Vec<u8>,
     pub atlas: Image,
@@ -502,7 +502,7 @@ pub fn compile(data: &[u8], atlas_id: u64) -> Result<Compiled, String> {
 
 pub type Rows = Vec<(&'static str, String)>;
 
-/// Info rows of an `.afont` and its atlas's asset ID; see docs/features/fonts.md#compiled-fonts.
+/// Info rows of an `.afont.bin` and its atlas's asset ID; see docs/features/fonts.md#compiled-fonts.
 pub fn afont_rows(bytes: &[u8]) -> Result<(Rows, u64), String> {
     let reader = crate::chunks::Reader::parse(bytes, FORMAT)?;
     if reader.version != VERSION {
