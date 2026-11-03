@@ -34,6 +34,18 @@ pub struct Instance {
     pub values: Map<String, Value>,
 }
 
+/// An instance of the project, the data files sharing a schema; see
+/// docs/features/instances.md#references.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Target {
+    pub ty: String,
+    pub id: String,
+    /// Its file, input-relative with forward slashes.
+    pub file: String,
+    /// Its index in the file's instances.
+    pub index: usize,
+}
+
 /// A data problem of one instance; see docs/features/instances.md#problems.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DataProblem {
@@ -147,12 +159,18 @@ impl DataFile {
 
     /// Every data problem of [§5](docs/aschema.md#5-validation) one file can have, with
     /// asset references to files not among `assets` (the input's, from [`asset_files`]) when
-    /// given.
-    pub fn check_with(&self, schema: &Schema, assets: Option<&[String]>) -> Vec<DataProblem> {
+    /// given, and ids and refs checked against `others`, the project's other files' instances.
+    pub fn check_with(
+        &self,
+        schema: &Schema,
+        assets: Option<&[String]>,
+        others: &[Target],
+    ) -> Vec<DataProblem> {
         let ids: HashSet<(&str, &str)> = self
             .instances
             .iter()
             .map(|i| (i.ty.as_str(), i.id.as_str()))
+            .chain(others.iter().map(|t| (t.ty.as_str(), t.id.as_str())))
             .collect();
         let known = Known { ids, assets };
         let mut out = Vec::new();
@@ -183,6 +201,13 @@ impl DataFile {
                     format!("{}/{} is used twice", inst.ty, inst.id),
                     false,
                 );
+            }
+            if let Some(other) = others
+                .iter()
+                .find(|o| o.ty == inst.ty && o.id == inst.id && !inst.id.is_empty())
+            {
+                let message = format!("{}/{} is also in {}", inst.ty, inst.id, other.file);
+                add(None, message, false);
             }
             let Some(si) = struct_index(schema, &inst.ty) else {
                 add(
@@ -510,7 +535,7 @@ fn check_value(
             Some(id) => {
                 let target = target.to_string();
                 if !known.ids.contains(&(target.as_str(), id)) {
-                    add(format!("no {target} {id:?} in this file"), true);
+                    add(format!("no {target} {id:?} in the project"), true);
                 }
             }
             None => add(format!("{v} is not a {ty}"), false),
@@ -566,7 +591,65 @@ pub fn asset_files(input: &Path) -> Vec<String> {
 /// Every `.aschema` under `input`, by input-relative path; entries starting with `.` are
 /// skipped and symlinks are not followed, as in the file browser.
 pub fn schemas_in(input: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+    files_in(input, aschema::is_schema)
+}
+
+/// The instances of every data file under `input` whose `$schema` is the schema at `schema`,
+/// by file path, then file order; see docs/features/instances.md#references.
+pub fn project(input: &Path, schema: &Path) -> Vec<Target> {
+    let schema = schema
+        .canonicalize()
+        .unwrap_or_else(|_| schema.to_path_buf());
+    let mut out = Vec::new();
+    for file in files_in(input, is_data) {
+        let Some(data) = std::fs::read_to_string(&file)
+            .ok()
+            .and_then(|text| DataFile::parse(&text).ok())
+        else {
+            continue;
+        };
+        let dir = file.parent().unwrap_or(Path::new(""));
+        let names = dir.join(&data.schema);
+        if data.schema.is_empty() || names.canonicalize().unwrap_or(names) != schema {
+            continue;
+        }
+        let rel = file
+            .strip_prefix(input)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        out.extend(
+            data.instances
+                .into_iter()
+                .enumerate()
+                .map(|(index, i)| Target {
+                    ty: i.ty,
+                    id: i.id,
+                    file: rel.clone(),
+                    index,
+                }),
+        );
+    }
+    out.sort_by(|a, b| (&a.file, a.index).cmp(&(&b.file, b.index)));
+    out
+}
+
+/// The instances of the project of `data` (read from `file`) in files other than `file`.
+pub fn others(input: &Path, file: &Path, data: &DataFile) -> Vec<Target> {
+    let (schema, _) = load_schema(file, data);
+    let file = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    project(input, &schema)
+        .into_iter()
+        .filter(|t| {
+            let path = input.join(&t.file);
+            path.canonicalize().unwrap_or(path) != file
+        })
+        .collect()
+}
+
+/// Every file under `input` that `keep` takes, sorted by path; entries starting with `.` are
+/// skipped and symlinks are not followed, as in the file browser.
+fn files_in(input: &Path, keep: fn(&Path) -> bool) -> Vec<PathBuf> {
+    fn walk(dir: &Path, keep: fn(&Path) -> bool, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -578,14 +661,14 @@ pub fn schemas_in(input: &Path) -> Vec<PathBuf> {
                 continue;
             }
             match e.file_type() {
-                Ok(t) if t.is_dir() => walk(&path, out),
-                Ok(t) if t.is_file() && aschema::is_schema(&path) => out.push(path),
+                Ok(t) if t.is_dir() => walk(&path, keep, out),
+                Ok(t) if t.is_file() && keep(&path) => out.push(path),
                 _ => {}
             }
         }
     }
     let mut out = Vec::new();
-    walk(input, &mut out);
+    walk(input, keep, &mut out);
     out
 }
 
@@ -687,6 +770,72 @@ mod tests {
     }
 
     #[test]
+    fn refs_reach_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path();
+        std::fs::create_dir_all(input.join("enemies")).unwrap();
+        std::fs::write(input.join("game.aschema"), SCHEMA).unwrap();
+        std::fs::write(input.join("other.aschema"), SCHEMA).unwrap();
+        let file = |schema: &str, instances: &str| {
+            format!(r#"{{ "$dialect": "a/1", "$schema": "{schema}", "instances": [{instances}] }}"#)
+        };
+        let weapons = file(
+            "game.aschema",
+            r#"{ "$type": "Weapon", "$id": "sword" }, { "$type": "Weapon", "$id": "axe" }"#,
+        );
+        std::fs::write(input.join("weapons.adata"), weapons).unwrap();
+        // Another schema's data is not of the project.
+        let elsewhere = file("other.aschema", r#"{ "$type": "Weapon", "$id": "bow" }"#);
+        std::fs::write(input.join("elsewhere.adata"), elsewhere).unwrap();
+        let enemies = file(
+            "../game.aschema",
+            r#"{ "$type": "Enemy", "$id": "goblin", "weapon": "axe" },
+               { "$type": "Enemy", "$id": "orc", "weapon": "bow" },
+               { "$type": "Weapon", "$id": "sword" }"#,
+        );
+        let path = input.join("enemies/goblins.adata");
+        std::fs::write(&path, &enemies).unwrap();
+
+        let project = project(input, &input.join("game.aschema"));
+        let found: Vec<(String, String, usize)> = project
+            .iter()
+            .map(|t| (t.file.clone(), t.id.clone(), t.index))
+            .collect();
+        assert_eq!(
+            found[0],
+            ("enemies/goblins.adata".into(), "goblin".into(), 0)
+        );
+        assert_eq!(found[3], ("weapons.adata".into(), "sword".into(), 0));
+        assert_eq!(found.len(), 5);
+
+        let data = DataFile::parse(&enemies).unwrap();
+        let others = others(input, &path, &data);
+        assert_eq!(others.len(), 2);
+        let messages: Vec<String> = data
+            .check_with(&schema(), None, &others)
+            .into_iter()
+            .map(|p| p.message)
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                r#"orc/weapon: no Weapon "bow" in the project"#,
+                "Weapon/sword is also in weapons.adata",
+            ]
+        );
+
+        let bytes =
+            crate::compiled::encode_data(&data, &schema(), "enemies/goblins.adata", &others);
+        let reader = crate::chunks::Reader::parse(&bytes, crate::compiled::ADATA).unwrap();
+        let refs = reader.require("REFS").unwrap();
+        assert_eq!(refs.len(), 24);
+        let u64_at = |at: usize| u64::from_le_bytes(refs[at..at + 8].try_into().unwrap());
+        assert_eq!(u64_at(0), aschema::asset_id("weapons.adata"));
+        assert_eq!(u64_at(8), crate::hash::fnv1a64(b"axe"));
+        assert_eq!(refs[16], 1);
+    }
+
+    #[test]
     fn built_data_is_resolved() {
         let schema = schema();
         let values = serde_json::json!({ "x_old": 1, "offset": { "y": 2 }, "notes": null });
@@ -731,7 +880,9 @@ mod tests {
             { "$type": "Enemy", "$id": "d" }
           ]
         }"##;
-        let problems = DataFile::parse(text).unwrap().check_with(&schema(), None);
+        let problems = DataFile::parse(text)
+            .unwrap()
+            .check_with(&schema(), None, &[]);
         let has = |i: usize, part: &str, warning: bool| {
             problems
                 .iter()

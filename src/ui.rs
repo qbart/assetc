@@ -1061,13 +1061,24 @@ fn shell(
                     }
                 }
                 (Shown::Instances, _) => {
-                    if let Some(inspected) = state.inspected.as_mut()
-                        && let Some(text) =
+                    if let Some(inspected) = state.inspected.as_mut() {
+                        if let Some(text) =
                             canvas_data(ui, rect, inspected, &mut state.data_instances)
-                    {
-                        match std::fs::write(&inspected.path, text) {
-                            Ok(()) => state.reinspect = true,
-                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        {
+                            match std::fs::write(&inspected.path, text) {
+                                Ok(()) => state.reinspect = true,
+                                Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                            }
+                        }
+                        // A ref's Go to: its target's file, with the target chosen.
+                        let go = match &mut inspected.data {
+                            Some(Ok(edit)) => edit.go_to.take(),
+                            _ => None,
+                        };
+                        if let (Some(t), Some(input)) = (go, project.input_dir()) {
+                            let path = input.join(&t.file);
+                            state.data_instances.insert(path.clone(), t.index);
+                            select(state, Location::Input, path);
                         }
                     }
                 }
@@ -1185,6 +1196,11 @@ struct Prepared {
     atlas: Option<Result<crate::atlas::AtlasConfig, String>>,
     /// The input's files asset references can name, for a schema or data file.
     assets: Vec<String>,
+    /// The instances refs can name: of the data files using a schema, or of a data file's
+    /// project's other files; see docs/features/instances.md#references.
+    refs: Vec<crate::adata::Target>,
+    /// The file, input-relative with forward slashes.
+    rel: String,
     /// A model's sidecar (with every locator the model has), the meshlet limits the project
     /// gives it, and the locators it inherits.
     mesh: Option<Result<PreparedMesh, String>>,
@@ -1338,7 +1354,21 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
             .map(|input| crate::adata::asset_files(&input))
             .unwrap_or_default(),
     };
+    let refs = match (&schema, &data, project.input_dir()) {
+        (Some(Ok(_)), _, Some(input)) => crate::adata::project(&input, &selection.path),
+        (_, Some(Ok((d, ..))), Some(input)) => crate::adata::others(&input, &selection.path, d),
+        _ => Vec::new(),
+    };
+    let rel = project
+        .input_dir()
+        .and_then(|input| {
+            let rel = selection.path.strip_prefix(input).ok()?;
+            Some(rel.to_string_lossy().replace('\\', "/"))
+        })
+        .unwrap_or_default();
     Prepared {
+        refs,
+        rel,
         sidecar,
         geometry,
         compiled_mesh: inspection.compiled_mesh.take(),
@@ -1441,6 +1471,8 @@ fn inspected(
         parsed.map(|p| {
             let mut edit = DataEdit::new(p, kept_data);
             edit.assets = prepared.assets.clone();
+            edit.others = prepared.refs.clone();
+            edit.file = prepared.rel.clone();
             edit
         })
     });
@@ -1473,6 +1505,7 @@ fn inspected(
     let schema = schema.map(|parsed| {
         parsed.map(|mut edit| {
             edit.assets = prepared.assets.clone();
+            edit.refs = prepared.refs.clone();
             edit
         })
     });

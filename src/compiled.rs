@@ -1,6 +1,8 @@
 //! Compiled schemas, data, graphs and trees: binary chunked files; see docs/spec/aschema.bin.md,
 //! docs/spec/adata.bin.md, docs/spec/agraph.bin.md and docs/spec/atree.bin.md.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::agraph::Graph;
@@ -14,6 +16,8 @@ pub const ADATA: &str = "ADATA";
 pub const AGRAPH: &str = "AGRAPH";
 pub const ATREE: &str = "ATREE";
 pub const VERSION: u32 = 1;
+/// The `.adata.bin` version: 2 added `REFS`; see docs/spec/adata.bin.md.
+pub const DATA_VERSION: u32 = 2;
 
 /// Adds text to `strings`, as `offset len` in `out`.
 fn text(out: &mut Bytes, strings: &mut Strings, text: &str) {
@@ -105,6 +109,10 @@ struct Rec<'a> {
     schema: &'a Schema,
     values: Vec<[u8; 24]>,
     strings: Strings,
+    /// Every instance a ref can name, by type and id: its file's asset ID and its index there.
+    targets: HashMap<(&'a str, &'a str), (u64, u32)>,
+    /// `REFS`: the targets refs name, in order of first use.
+    refs: Vec<(u64, u64, u32)>,
 }
 
 impl Rec<'_> {
@@ -189,8 +197,20 @@ impl Rec<'_> {
                 let id = crate::aschema::asset_id(path);
                 self.put(slot, name, 10, 0, id.to_le_bytes());
             }
-            (Some(Ty::Ref(_)), Value::String(s)) => {
-                let (payload, len) = self.text(s);
+            (Some(Ty::Ref(target)), Value::String(s)) => {
+                let (mut payload, len) = self.text(s);
+                let index = match self.targets.get(&(target.to_string().as_str(), s.as_str())) {
+                    Some(&(file, instance)) => {
+                        let target = (file, fnv1a64(s.as_bytes()), instance);
+                        let at = self.refs.iter().position(|r| *r == target);
+                        at.unwrap_or_else(|| {
+                            self.refs.push(target);
+                            self.refs.len() - 1
+                        }) as u32
+                    }
+                    None => u32::MAX,
+                };
+                payload[4..8].copy_from_slice(&index.to_le_bytes());
                 self.put(slot, name, 8, len, payload);
             }
             (Some(ty @ Ty::Prim(_)), Value::Number(n)) if ty.is_integer() => {
@@ -245,12 +265,37 @@ impl Rec<'_> {
     }
 }
 
-/// A data file as an `.adata.bin`, every field resolved; see docs/spec/adata.bin.md.
-pub fn encode_data(data: &crate::adata::DataFile, schema: &Schema) -> Vec<u8> {
+/// A data file at `file` (input-relative) as an `.adata.bin`, every field resolved, its refs
+/// pointing into it or the project's `others`; see docs/spec/adata.bin.md.
+pub fn encode_data(
+    data: &crate::adata::DataFile,
+    schema: &Schema,
+    file: &str,
+    others: &[crate::adata::Target],
+) -> Vec<u8> {
+    let own = crate::aschema::asset_id(file);
+    let mut targets = HashMap::new();
+    // An instance's index in `INSTANCE`: instances of a struct, in file order.
+    let compiled = data
+        .instances
+        .iter()
+        .filter(|i| crate::adata::struct_index(schema, &i.ty).is_some());
+    for (index, inst) in compiled.enumerate() {
+        targets
+            .entry((inst.ty.as_str(), inst.id.as_str()))
+            .or_insert((own, index as u32));
+    }
+    for t in others {
+        targets
+            .entry((t.ty.as_str(), t.id.as_str()))
+            .or_insert((crate::aschema::asset_id(&t.file), t.index as u32));
+    }
     let mut rec = Rec {
         schema,
         values: Vec::new(),
         strings: Strings::default(),
+        targets,
+        refs: Vec::new(),
     };
     let (mut types, mut instances) = (Bytes::default(), Bytes::default());
     let mut used: Vec<&str> = Vec::new();
@@ -287,14 +332,19 @@ pub fn encode_data(data: &crate::adata::DataFile, schema: &Schema) -> Vec<u8> {
     desc.u32(data.instances.len() as u32)
         .u32(rec.values.len() as u32)
         .u32(used.len() as u32)
-        .u32(0);
+        .u32(rec.refs.len() as u32);
     let values: Vec<u8> = rec.values.concat();
-    let mut writer = Writer::new(ADATA, VERSION);
+    let mut refs = Bytes::default();
+    for (file, id, instance) in &rec.refs {
+        refs.u64(*file).u64(*id).u32(*instance).u32(0);
+    }
+    let mut writer = Writer::new(ADATA, DATA_VERSION);
     writer
         .chunk("DESC", desc.take())
         .chunk("TYPES", types.take())
         .chunk("INSTANCE", instances.take())
         .chunk("VALUES", values)
+        .chunk("REFS", refs.take())
         .chunk("STRINGS", rec.strings.0);
     writer.finish()
 }
@@ -432,16 +482,16 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             ("Packing", packing),
         ]);
     }
-    let names: [&'static str; 3] = match format {
-        ASCHEMA => ["Types", "Fields", "Values"],
-        ADATA => ["Instances", "Values", "Types"],
-        AGRAPH => ["Nodes", "Edges", "Properties"],
-        _ => ["Nodes", "Properties", "Depth"],
+    let names: &[&'static str] = match format {
+        ASCHEMA => &["Types", "Fields", "Values"],
+        ADATA => &["Instances", "Values", "Types", "References"],
+        AGRAPH => &["Nodes", "Edges", "Properties"],
+        _ => &["Nodes", "Properties", "Depth"],
     };
     Ok(names
-        .into_iter()
+        .iter()
         .enumerate()
-        .map(|(i, name)| (name, field(i * 4)))
+        .map(|(i, name)| (*name, field(i * 4)))
         .collect())
 }
 
@@ -492,6 +542,7 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("instance_count", U32(0)),
                 ("value_count", U32(4)),
                 ("type_count", U32(8)),
+                ("ref_count", U32(12)),
             ],
         ),
         (AGRAPH, "DESC") => (
@@ -549,6 +600,10 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("Type", U32(0)),
                 ("Value", U32(4)),
             ],
+        ),
+        (ADATA, "REFS") => (
+            24,
+            vec![("File", Hex(0)), ("Id hash", Hex(8)), ("Instance", U32(16))],
         ),
         (ADATA, "VALUES") => (
             24,
@@ -833,7 +888,14 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
                 1 => (u64_at(16) != 0).to_string(),
                 2 => (u64_at(16) as i64).to_string(),
                 3 => format!("{}", f64::from_bits(u64_at(16))),
-                4 | 8 => format!("{:?}", text_at(u32_at(16) as usize, count as usize)),
+                4 => format!("{:?}", text_at(u32_at(16) as usize, count as usize)),
+                8 => {
+                    let id = text_at(u32_at(16) as usize, count as usize);
+                    match u32_at(20) {
+                        u32::MAX => format!("{id:?} (not found)"),
+                        r => format!("{id:?} → ref #{r}"),
+                    }
+                }
                 5 => bytes_at(16, 4).map_or_else(String::new, |c| {
                     format!("#{:02x}{:02x}{:02x}{:02x}", c[0], c[1], c[2], c[3])
                 }),
@@ -905,7 +967,7 @@ mod tests {
               { "$type": "Weapon", "$id": "sword", "name": "Sword", "rarity": "rare", "tags": ["a"] } ] }"##,
         )
         .unwrap();
-        let rec = encode_data(&data, &schema);
+        let rec = encode_data(&data, &schema, "items.adata", &[]);
         assert_eq!(format_of(&rec), Some(ADATA));
         assert_eq!(cell(&rec, "INSTANCE", 0, 1), "sword");
         // The struct, then its five fields, then the tag list's item.

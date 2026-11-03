@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use super::curve::{CurveSettings, CurveState};
 use super::schema::{ValueEditors, commit_field, gradient_preview, struct_of, value_editor};
 use super::*;
-use crate::adata::{self, DataFile, DataProblem, Instance, inherited, same};
+use crate::adata::{self, DataFile, DataProblem, Instance, Target, inherited, same};
 use crate::aschema::{Field, Ty, parse_type};
 use crate::theme::CHANNEL_R;
 
@@ -39,6 +39,12 @@ pub(super) struct DataEdit {
     started: HashSet<usize>,
     /// The input's files `asset<K>` values can name.
     pub(super) assets: Vec<String>,
+    /// The file, input-relative, and the instances of the project's other files `ref<S>`
+    /// values can name; see docs/features/instances.md#references.
+    pub(super) file: String,
+    pub(super) others: Vec<Target>,
+    /// The instance a ref's Go to chose, for the shell to show.
+    pub(super) go_to: Option<Target>,
 }
 
 /// What reading a data file gives the editor: the file, its schema, the schemas to choose
@@ -63,6 +69,9 @@ impl DataEdit {
             gradients: HashMap::new(),
             started: HashSet::new(),
             assets: Vec::new(),
+            file: String::new(),
+            others: Vec::new(),
+            go_to: None,
         };
         match previous {
             Some(p) => Self {
@@ -150,7 +159,7 @@ pub(super) fn instances_tab(
     let problems = edit
         .schema
         .as_ref()
-        .map(|s| edit.edit.check_with(s, Some(&edit.assets)))
+        .map(|s| edit.edit.check_with(s, Some(&edit.assets), &edit.others))
         .unwrap_or_default();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
@@ -340,14 +349,23 @@ pub(super) fn canvas_data(
     }
     *chosen = (*chosen).min(edit.edit.instances.len() - 1);
     let i = *chosen;
-    let problems = edit.edit.check_with(&schema, Some(&edit.assets));
+    let problems = edit
+        .edit
+        .check_with(&schema, Some(&edit.assets), &edit.others);
     let mine: Vec<&DataProblem> = problems.iter().filter(|p| p.instance == i).collect();
-    // Refs choose among this file's instances.
-    let ids: Vec<(String, String)> = edit
+    // Refs choose among this file's instances, as edited, then the project's other files'.
+    let refs: Vec<Target> = edit
         .edit
         .instances
         .iter()
-        .map(|inst| (inst.ty.clone(), inst.id.clone()))
+        .enumerate()
+        .map(|(index, inst)| Target {
+            ty: inst.ty.clone(),
+            id: inst.id.clone(),
+            file: edit.file.clone(),
+            index,
+        })
+        .chain(edit.others.iter().cloned())
         .collect();
     egui::ScrollArea::both().auto_shrink(false).show(ui, |ui| {
         property_style(ui);
@@ -373,11 +391,12 @@ pub(super) fn canvas_data(
             curve_settings,
             gradients,
             assets,
+            file,
+            go_to,
             ..
         } = edit;
         let mut cx = Cx {
             schema: &schema,
-            ids: &ids,
             problems: &mine,
             open,
             instance: i,
@@ -388,6 +407,9 @@ pub(super) fn canvas_data(
                 curve_settings,
                 gradients,
                 assets,
+                refs: &refs,
+                here: file,
+                go: Some(go_to),
                 ti: i,
             },
         };
@@ -437,7 +459,6 @@ fn instance_header(ui: &mut Ui, edit: &mut DataEdit, i: usize, problems: &[&Data
 /// What the field rows share.
 struct Cx<'a> {
     schema: &'a Schema,
-    ids: &'a [(String, String)],
     problems: &'a [&'a DataProblem],
     open: &'a mut HashSet<(usize, String)>,
     instance: usize,
@@ -768,24 +789,6 @@ fn data_value(ui: &mut Ui, cx: &mut Cx, f: &Field, ty: Option<&Ty>, value: &mut 
             if ui.add_sized(vec2(VALUE_W, 22.0), field).changed() {
                 *value = aschema::json_number(n);
             }
-        }
-        (Some(Ty::Ref(target)), _) => {
-            let target = target.to_string();
-            let current = value.as_str().unwrap_or_default().to_owned();
-            let shown = if current.is_empty() { "—" } else { &current };
-            egui::ComboBox::from_id_salt("ref")
-                .width(VALUE_W - 8.0)
-                .selected_text(shown)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(current.is_empty(), "—").clicked() {
-                        *value = Value::String(String::new());
-                    }
-                    for (ty, id) in cx.ids {
-                        if *ty == target && ui.selectable_label(*id == current, id).clicked() {
-                            *value = Value::String(id.clone());
-                        }
-                    }
-                });
         }
         _ => value_editor(ui, &mut cx.editors, value, cx.schema, ty, path),
     }

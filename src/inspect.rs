@@ -589,8 +589,12 @@ fn data_rows(project: &Project, file: &Path, _: &str, out: &mut Inspection) -> R
     let assets = project
         .input_dir()
         .map(|input| crate::adata::asset_files(&input));
+    let others = project
+        .input_dir()
+        .map(|input| crate::adata::others(&input, file, &data))
+        .unwrap_or_default();
     let problems = schema
-        .map(|s| data.check_with(&s, assets.as_deref()))
+        .map(|s| data.check_with(&s, assets.as_deref(), &others))
         .unwrap_or_default();
     let warnings = problems.iter().filter(|p| p.warning).count();
     let errors = problems.len() - warnings;

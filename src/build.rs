@@ -326,7 +326,8 @@ fn material_detail(m: &material::Material) -> String {
 }
 
 /// A hash of `job` and of the size and modification time of every file it reads; see
-/// docs/features/cli.md#assetc-watch. `schemas` holds the input's schemas once listed.
+/// docs/features/cli.md#assetc-watch. `schemas` holds the input's schemas and data files once
+/// listed.
 fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
     let mut reads: Vec<PathBuf> = match job {
         Job::Texture { source, .. }
@@ -347,7 +348,9 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
                         .get_or_insert_with(|| {
                             files_under(input)
                                 .into_iter()
-                                .filter(|f| crate::aschema::is_schema(f))
+                                .filter(|f| {
+                                    crate::aschema::is_schema(f) || crate::adata::is_data(f)
+                                })
                                 .collect()
                         })
                         .iter()
@@ -641,6 +644,7 @@ fn first_problem(problems: &[String]) -> Result<(), String> {
 /// docs/features/build.md#inputs.
 fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<String, String> {
     use crate::compiled;
+    let rel = &source.replace('\\', "/");
     let source = &input.join(source);
     let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
     let (written, detail) = match kind {
@@ -662,8 +666,11 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
             // Asset references are checked against the input; see
             // docs/aschema.md#asset-references.
             let assets = crate::adata::asset_files(input);
+            // Ids and refs reach the project's other files; see
+            // docs/features/instances.md#references.
+            let others = crate::adata::others(input, source, &data);
             let errors: Vec<String> = data
-                .check_with(&schema, Some(&assets))
+                .check_with(&schema, Some(&assets), &others)
                 .into_iter()
                 .filter(|p| !p.warning)
                 .map(|p| p.message)
@@ -671,7 +678,7 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
             first_problem(&errors)?;
             let n = data.instances.len();
             (
-                compiled::encode_data(&data, &schema),
+                compiled::encode_data(&data, &schema, rel, &others),
                 format!("{n} instances"),
             )
         }

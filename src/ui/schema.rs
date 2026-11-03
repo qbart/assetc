@@ -7,6 +7,7 @@ use serde_json::{Number, Value};
 
 use super::curve::{self, CurveSettings, CurveState, curve_preview};
 use super::*;
+use crate::adata::Target;
 use crate::aschema::{Field, Group, Problem, Ty, TypeDef, parse_type};
 use crate::theme::CHANNEL_R;
 
@@ -28,6 +29,9 @@ pub(super) struct SchemaEdit {
     group_drag: bool,
     /// The input's files `asset<K>` defaults can name; see docs/aschema.md#asset-references.
     pub(super) assets: Vec<String>,
+    /// The instances of the data files using the schema, for `ref<S>` defaults; see
+    /// docs/features/instances.md#references.
+    pub(super) refs: Vec<Target>,
 }
 
 impl SchemaEdit {
@@ -626,6 +630,9 @@ fn field_rows(
                             curve_settings: &mut edit.curve_settings,
                             gradients: &mut edit.gradients,
                             assets: &edit.assets,
+                            refs: &edit.refs,
+                            here: "",
+                            go: None,
                             ti,
                         };
                         default_cell(ui, &mut editors, field, snapshot, ty.as_ref());
@@ -655,6 +662,9 @@ fn field_rows(
                         curve_settings: &mut edit.curve_settings,
                         gradients: &mut edit.gradients,
                         assets: &edit.assets,
+                        refs: &edit.refs,
+                        here: "",
+                        go: None,
                         ti,
                     };
                     let mut shown = vec![ti];
@@ -806,6 +816,23 @@ fn type_menu(
                 *picked = Some(ty);
             }
         }
+        // References to instances; see docs/features/instances.md#references.
+        ui.separator();
+        let structs = named(false);
+        ui.add_enabled_ui(!structs.is_empty(), |ui| {
+            ui.menu_button(RichText::new("Instance").size(14.0).color(TEXT), |ui| {
+                for name in structs {
+                    let ty = if in_list {
+                        format!("list<ref<{name}>>")
+                    } else {
+                        format!("ref<{name}>")
+                    };
+                    if menu_item(ui, &name, Some(ty == current)).clicked() {
+                        *picked = Some(ty);
+                    }
+                }
+            });
+        });
     });
     if !in_list {
         ui.menu_button(RichText::new("List").size(14.0).color(TEXT), |ui| {
@@ -832,6 +859,12 @@ pub(super) struct ValueEditors<'a> {
     pub(super) gradients: &'a mut HashMap<(usize, String), GradientCard>,
     /// The input's files, for `asset<K>` values.
     pub(super) assets: &'a [String],
+    /// The instances `ref<S>` values can name, and the file whose instances show without
+    /// their file's path.
+    pub(super) refs: &'a [Target],
+    pub(super) here: &'a str,
+    /// Where a ref's Go to button puts its target; no button without it.
+    pub(super) go: Option<&'a mut Option<Target>>,
     pub(super) ti: usize,
 }
 
@@ -878,6 +911,55 @@ pub(super) fn struct_of<'s>(schema: &'s Schema, ty: Option<&Ty>) -> Option<(usiz
     match &schema.types[si].body {
         Body::Struct { fields, .. } => Some((si, fields)),
         Body::Enum { .. } => None,
+    }
+}
+
+/// A `ref<S>` value's dropdown of the instances of `target` (struct `S`), then Go to when
+/// [`ValueEditors::go`] is given; see docs/features/instances.md#editors.
+fn ref_editor(
+    ui: &mut Ui,
+    editors: &mut ValueEditors,
+    value: &mut Value,
+    target: &str,
+    path: &str,
+) {
+    let current = value.as_str().unwrap_or_default().to_owned();
+    let shown = if current.is_empty() { "—" } else { &current };
+    let refs = editors.refs.iter().filter(|t| t.ty == target);
+    egui::ComboBox::from_id_salt(("ref", path))
+        .width(DEFAULT_W - 8.0)
+        .selected_text(shown)
+        .show_ui(ui, |ui| {
+            ui.set_min_width(280.0);
+            if ui.selectable_label(current.is_empty(), "—").clicked() {
+                *value = Value::String(String::new());
+            }
+            for t in refs.clone() {
+                let response = ui.selectable_label(t.id == current, &t.id);
+                if t.file != editors.here {
+                    // The file it is in, right-aligned.
+                    let rect = response.rect.shrink2(vec2(6.0, 0.0));
+                    ui.painter().text(
+                        rect.right_center(),
+                        Align2::RIGHT_CENTER,
+                        &t.file,
+                        egui::FontId::proportional(12.0),
+                        TEXT_WEAK,
+                    );
+                }
+                if response.clicked() {
+                    *value = Value::String(t.id.clone());
+                }
+            }
+        });
+    let found = refs
+        .clone()
+        .find(|t| t.id == current && !current.is_empty());
+    if let (Some(go), Some(t)) = (editors.go.as_mut(), found) {
+        let tip = format!("Go to {}: {}", t.file, t.id);
+        if icon_button(ui, Icon::Link2, &tip, true).clicked() {
+            **go = Some(t.clone());
+        }
     }
 }
 
@@ -948,6 +1030,10 @@ pub(super) fn value_editor(
                     }
                 }
             });
+        return;
+    }
+    if let Some(Ty::Ref(target)) = ty {
+        ref_editor(ui, editors, default, &target.to_string(), path);
         return;
     }
     match (ty, enum_values) {
