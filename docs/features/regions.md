@@ -10,7 +10,7 @@ Regions are an *enrichment* like [locators](locators.md): kept in the
 model's [`.amod`](../spec/amod.md#regions) sidecar, edited in the
 Inspector's [Regions tab](#regions-tab) and painted in the
 [3D view](#painting), and compiled into its
-[`.amesh`](../spec/amesh.md#regions) as a mask per triangle.
+[`.amesh.bin`](../spec/amesh.bin.md#regions) as a mask per triangle.
 
 ## Region
 
@@ -113,8 +113,8 @@ turns them off):
 
 ## Build
 
-A model with regions gets [`REGIONS`, `REGTAGS` and `TRIREGN`](../spec/amesh.md#regions)
-in its `.amesh` (none without regions): one record per region, and one
+A model with regions gets [`REGIONS`, `REGTAGS` and `TRIREGN`](../spec/amesh.bin.md#regions)
+in its `.amesh.bin` (none without regions): one record per region, and one
 32-bit mask per triangle of the full mesh (level of detail 0), bit `i` set
 when the triangle is in region `i` (by material, submesh or painting). Reduced levels of detail carry no
 regions. Painted triangles that do not exist in the model (after a

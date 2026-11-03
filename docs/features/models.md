@@ -40,12 +40,12 @@ of detail** (`50%, 25%`, or `none`): what this model builds with, from
 `[meshes]` and its `.amod` (a **Mesh settings** row with the error instead
 when either is invalid), **Locators** (their count in the `.amod`, or
 `none`; see [`locators.md`](locators.md)), then **Asset path** and
-**Output** (the `.amesh`; `(not built)` appended when it does not exist), as
+**Output** (the `.amesh.bin`; `(not built)` appended when it does not exist), as
 for source textures.
 
 Compiled files in the Output tree:
 
-- **Compiled mesh** (`*.amesh`), every `DESC` value and more: Format
+- **Compiled mesh** (`*.amesh.bin`), every `DESC` value and more: Format
   (`AMESH v1, 14 chunks`), Vertices, Vertex stride (`28 B`), Indices
   (`1728 (u16)`), Triangles, Submeshes, Meshlets, Meshlet limits
   (`64 vertices, 124 triangles`), Materials, Flags (`0x07 (tangents,
@@ -54,7 +54,7 @@ Compiled files in the Output tree:
   [`vertex-colors.md`](vertex-colors.md#inspector-info)), Locators (`<n>` or `none`, see
   [`locators.md`](locators.md#inspector-info)), Bounds (`min – max`), Asset path,
   Asset ID. A file that does not read shows an Error row.
-- **Compiled animation** (`*.aanim`): Clips (names with durations), Channels,
+- **Compiled animation** (`*.aanim.bin`): Clips (names with durations), Channels,
   Keys, Asset path, Asset ID.
 A file that fails to parse shows an **Error** row (`not a valid glTF file:
 <reason>`) and the canvas shows the message as "No preview".
@@ -185,7 +185,7 @@ and `TEXT_WEAK` when it comes from the project.
 
 ## Compiled mesh preview
 
-Selecting a compiled mesh (`*.amesh` in the Output tree) shows it in the
+Selecting a compiled mesh (`*.amesh.bin` in the Output tree) shows it in the
 canvas, to check what the build produced. The [view bar](canvas.md#view-bar)
 offers **3D** (the default) and **Chunks** (the file's data as tables, see
 [Chunks view](#chunks-view)); the choice lasts for the session.
@@ -207,8 +207,8 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   | Material ID | `image`       | each material slot in its own color; no material in gray |
   | Submeshes   | `boxes`       | each submesh in its own color                            |
 
-- **Material**: each submesh uses its `.amat` (looked up by the `MATERIAL`
-  asset IDs in the output's [`assets.aman`](../spec/aman.md)) as a
+- **Material**: each submesh uses its `.amat.bin` (looked up by the `MATERIAL`
+  asset IDs in the output's [`assets.aman.bin`](../spec/aman.bin.md)) as a
   physically based material: base color factor and texture, metallic and
   roughness factors with the ORM texture (G roughness, B metallic, R
   occlusion), normal texture, emissive factor × strength and texture, alpha
@@ -260,9 +260,9 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
 
 ## Compiled animation preview
 
-Selecting a compiled animation (`*.aanim` in the Output tree) plays it, to
+Selecting a compiled animation (`*.aanim.bin` in the Output tree) plays it, to
 check what the build kept: its clips, read from the file, on its companion
-mesh, `P.amesh` next to it (same folder and name). The [view bar](canvas.md#view-bar) offers **Play** (the
+mesh, `P.amesh.bin` next to it (same folder and name). The [view bar](canvas.md#view-bar) offers **Play** (the
 default) and **Chunks** (the file's data as tables, see
 [Chunks view](#chunks-view)); the choice lasts for the session.
 
@@ -280,7 +280,7 @@ default) and **Chunks** (the file's data as tables, see
     matrices, as a game would skin it.
 - Without a companion (no such file, a mesh without a skeleton, or one
   whose joint count is not the animation's `joint_count`), the 3D view
-  shows a weak `No skinned P.amesh to play on` (or `P.amesh has 24 joints,
+  shows a weak `No skinned P.amesh.bin to play on` (or `P.amesh.bin has 24 joints,
   the animation 25`); the timeline still shows.
 - A **timeline** panel under the 3D view, as a model's
   [timeline](animation-events.md#timeline), read only:
@@ -300,7 +300,7 @@ default) and **Chunks** (the file's data as tables, see
 ## Chunks view
 
 The **Chunks** view shows the data inside a [chunked file](../spec/chunks.md)
-(an `.amesh`, `.aanim`, `.afont`, or [compiled data](inspector.md#compiled-data)),
+(an `.amesh.bin`, `.aanim.bin`, `.afont.bin`, or [compiled data](inspector.md#compiled-data)),
 chunk by chunk:
 
 - **Chunk list** on the left (220 px, `BG_PANEL`, 1 px `STROKE` line on its
@@ -360,7 +360,7 @@ chunk by chunk:
 ## Levels of detail tab
 
 The Inspector's **Levels of detail** tab (`bring-to-front`) is shown for a
-compiled mesh (`*.amesh` in the Output tree) with reduced levels (a
+compiled mesh (`*.amesh.bin` in the Output tree) with reduced levels (a
 `LODTABLE`). It switches which level the
 [compiled mesh preview](#compiled-mesh-preview) draws.
 
@@ -408,14 +408,14 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 
 | Output (in `output`)        | Asset kind | Asset path        | When                                   |
 |-----------------------------|------------|-------------------|----------------------------------------|
-| `P.amesh`                   | mesh       | `P.amesh`         | always ([spec](../spec/amesh.md))       |
-| `P/<material>.amat`         | material   | `P/<material>.amat` | per material a submesh uses ([spec](../spec/amat.md)) |
+| `P.amesh.bin`                   | mesh       | `P.amesh.bin`         | always ([spec](../spec/amesh.bin.md))       |
+| `P/<material>.amat.bin`         | material   | `P/<material>.amat.bin` | per material a submesh uses ([spec](../spec/amat.bin.md)) |
 | `P/<image>.ktx2`            | texture    | `P/<image>`       | per image used as base color, normal or emissive texture |
 | `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
 | `P/<set>.colors.ktx2`       | texture    | `P/<set>.colors`  | per color set exported as Texture + UV buffer or Both, see [`vertex-colors.md`](vertex-colors.md#export) |
-| `P.aanim`                   | animation  | `P.aanim`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.md)) |
+| `P.aanim.bin`                   | animation  | `P.aanim.bin`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.bin.md)) |
 
-The `.amesh` also carries the model's [properties](properties.md),
+The `.amesh.bin` also carries the model's [properties](properties.md),
 [shapes](shapes.md), [regions](regions.md) and [paths](paths.md), and its
 [locators](locators.md#build): its
 sidecar's, its file's `SOCKET_*` nodes and presets' (see
@@ -424,7 +424,7 @@ sidecar's, its file's `SOCKET_*` nodes and presets' (see
 Like other assets, each gets the FNV-1a-64 of its asset path as ID and a
 manifest entry; collisions are build errors as usual. The build prints one
 line per model, e.g.
-`models/Fox.glb -> models/Fox.amesh (1728 vertices, 576 triangles, 1 submesh, 12 meshlets, 24 joints, 3 clips, 1 material, 1 texture)`.
+`models/Fox.glb -> models/Fox.amesh.bin (1728 vertices, 576 triangles, 1 submesh, 12 meshlets, 24 joints, 3 clips, 1 material, 1 texture)`.
 
 ### Names
 
@@ -459,7 +459,7 @@ line per model, e.g.
   defaults or overrides them for the model, or the model's
   [`.amod`](../spec/amod.md#mesh) sidecar (edited in the
   [Parameters tab](#parameters-tab)) sets its own. The limits used are
-  stored in the `.amesh` `DESC`, and simplified into **levels of detail**
+  stored in the `.amesh.bin` `DESC`, and simplified into **levels of detail**
   at `lod_ratios` of its triangles (two, at about 50% and 25%; none writes
   no `LODIDX` / `LODTABLE`), all with
   [meshoptimizer](https://github.com/zeux/meshoptimizer).
@@ -482,17 +482,17 @@ line per model, e.g.
 ### Skinning and animations
 
 - The first skin of the file is used (a later skin's primitives are bound to
-  it as if rigid); its joints become the `.amesh` skeleton, with the joints'
+  it as if rigid); its joints become the `.amesh.bin` skeleton, with the joints'
   bind-pose transforms and inverse bind matrices (identity when missing).
-- With a skin and animations, `P.aanim` holds every clip, keeping channels
+- With a skin and animations, `P.aanim.bin` holds every clip, keeping channels
   that target the skin's joints (translation, rotation, scale). Animations
   of a file without a skin are not compiled.
 
 ### Materials and textures
 
-Each used glTF material becomes an `.amat` with:
+Each used glTF material becomes an `.amat.bin` with:
 
-| `.amat` field          | From glTF                                                   |
+| `.amat.bin` field          | From glTF                                                   |
 |------------------------|-------------------------------------------------------------|
 | `base_color`           | `baseColorFactor`                                           |
 | `base_color_texture`   | `baseColorTexture` → `P/<image>.ktx2`, sRGB                 |

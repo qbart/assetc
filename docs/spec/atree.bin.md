@@ -1,4 +1,4 @@
-# `.atre` compiled trees
+# `.atree.bin` compiled trees
 
 A [tree](../features/trees.md) (`*.atree`) as the build writes it, nodes in
 **breadth-first** order so each node's children are contiguous. A
@@ -10,7 +10,7 @@ A [tree](../features/trees.md) (`*.atree`) as the build writes it, nodes in
 |-----------|----------|---------|
 | `DESC`    | yes      | [`TreeDesc`](#treedesc-16-bytes) |
 | `NODES`   | yes      | [`Node`](#node-64-bytes)`[node_count]`: the root first, then level by level, each node's children in order |
-| `PROPS`   | no       | [`Property`](amesh.md#property-32-bytes)`[]`: the nodes' data, text in `STRINGS` |
+| `PROPS`   | no       | [`Property`](amesh.bin.md#property-32-bytes)`[]`: the nodes' data, text in `STRINGS` |
 | `STRINGS` | yes      | UTF-8 text back to back: ids, labels, property keys and Text values |
 
 ## TreeDesc (16 bytes)

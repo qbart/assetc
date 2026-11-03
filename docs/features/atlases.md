@@ -4,7 +4,7 @@ An **atlas** glues many images into one texture, with a metadata file that
 tells a game where each image (a **frame**) is: sprite sheets, flipbook
 animations, icon sets. assetc builds one from a folder.
 
-Binary metadata: [`docs/spec/aatlas.md`](../spec/aatlas.md); settings:
+Binary metadata: [`docs/spec/aatlas.bin.md`](../spec/aatlas.bin.md); settings:
 [`docs/spec/atlas.toml.md`](../spec/atlas.toml.md).
 
 ## Source
@@ -49,15 +49,15 @@ matched against the atlas' folder path with its extension
 | Output | Asset kind | Asset path |
 |--------|------------|------------|
 | `P.ktx2` | texture | `P` |
-| `P.aatlas` | atlas | `P.aatlas` |
+| `P.aatlas.bin` | atlas | `P.aatlas.bin` |
 
 An atlas folder without frames, frames that fail to decode, or an atlas
 larger than the max size fail the build. The CLI line reads
-`<folder> -> P.aatlas (12 frames, 512 × 256 px, grid 4 × 3)` (or `pack`).
+`<folder> -> P.aatlas.bin (12 frames, 512 × 256 px, grid 4 × 3)` (or `pack`).
 
 ## Inspector
 
-- The file tree shows `*.atlas` folders and `.aatlas` files with the `map`
+- The file tree shows `*.atlas` folders and `.aatlas.bin` files with the `map`
   icon; the frames inside show as usual.
 - **Info** for an atlas folder: Kind `Atlas`, **Frames** (count), **Size**
   (`W × H px` of the packed atlas), **Packing** (`grid 4 × 3` or `pack`),
@@ -72,5 +72,5 @@ larger than the max size fail the build. The CLI line reads
   Columns only for Grid, Trim only for Pack). Edits are written to
   `atlas.toml` (created on the first edit) once nothing is being dragged or
   typed, and the atlas is packed again.
-- A compiled `.aatlas` in the Output tree shows Frames, Size and Packing in
+- A compiled `.aatlas.bin` in the Output tree shows Frames, Size and Packing in
   Info and its [Chunks view](models.md#chunks-view).

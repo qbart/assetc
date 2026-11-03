@@ -88,16 +88,16 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.gltf`, `*.glb` (any case) | Model, see [`models.md`](models.md#inspector) |
 | Input  | anything else              | Ignored            |
 | Output | `*.ktx2` (any case)        | Compiled texture   |
-| Output | `*.amat`                   | Compiled material  |
-| Output | `*.amesh`                  | Compiled mesh, see [`models.md`](models.md#inspector) |
-| Output | `*.aanim`                  | Compiled animation, see [`models.md`](models.md#inspector) |
-| Output | `*.afont`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
-| Output | `*.atype`, `*.arec`, `*.agph`, `*.atre` | Compiled schema, data, graph or tree, see [Compiled data](#compiled-data) |
-| Output | `assets.aman` at the output root | Manifest, see [Manifest view](#manifest-view) |
+| Output | `*.amat.bin`                   | Compiled material  |
+| Output | `*.amesh.bin`                  | Compiled mesh, see [`models.md`](models.md#inspector) |
+| Output | `*.aanim.bin`                  | Compiled animation, see [`models.md`](models.md#inspector) |
+| Output | `*.afont.bin`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
+| Output | `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin` | Compiled schema, data, graph or tree, see [Compiled data](#compiled-data) |
+| Output | `assets.aman.bin` at the output root | Manifest, see [Manifest view](#manifest-view) |
 | Output | anything else              | File               |
 | either | folder named `*.env` (any case) | Environment map |
 | Input  | folder named `*.atlas` (any case) | Atlas, see [`atlases.md`](atlases.md#inspector) |
-| Output | `*.aatlas`                 | Compiled atlas, see [`atlases.md`](atlases.md#inspector) |
+| Output | `*.aatlas.bin`                 | Compiled atlas, see [`atlases.md`](atlases.md#inspector) |
 | either | any other folder           | Folder             |
 
 Every kind shows **Kind** and **Size** (`B`, `KiB`, `MiB`, `GiB` with one
@@ -146,7 +146,7 @@ toolbar is not shown.
 
 ### Manifest view
 
-Selecting `assets.aman` (Output tree root) shows its entries:
+Selecting `assets.aman.bin` (Output tree root) shows its entries:
 
 - Header line: `AMAN v1   <n> entries   <size>`, then a **Filter path…**
   field (240 px): only entries whose asset path or file contains the text
@@ -161,8 +161,8 @@ Selecting `assets.aman` (Output tree root) shows its entries:
 
 ### Material view
 
-Selecting a compiled material (`*.amat`) shows the record field by field, in
-the [spec](../spec/amat.md)'s order:
+Selecting a compiled material (`*.amat.bin`) shows the record field by field, in
+the [spec](../spec/amat.bin.md)'s order:
 
 - Header line: `ACMT v1   <size>`.
 - Columns: **Offset** (bytes), **Field** (the spec's name), **Value**:
@@ -197,8 +197,8 @@ manifest), the details show the rows that are still known (Kind, Size) and an
 
 ## Compiled data
 
-Compiled schemas, data, graphs and trees (`.atype`, `.arec`, `.agph`,
-`.atre` in the Output tree) are read only. Selecting one shows:
+Compiled schemas, data, graphs and trees (`.aschema.bin`, `.adata.bin`, `.agraph.bin`,
+`.atree.bin` in the Output tree) are read only. Selecting one shows:
 
 - **Info**: Kind (`Compiled schema`, `Compiled data`, `Compiled graph`,
   `Compiled tree`), Size, the counts of its descriptor (Types, Fields and
@@ -209,7 +209,7 @@ Compiled schemas, data, graphs and trees (`.atype`, `.arec`, `.agph`,
   (hashes in hex, text read from `STRINGS`, colors as `#rrggbbaa`, a
   value's kind by name), and `STRINGS` as offset / text rows.
 
-A compiled animation (`.aanim`) keeps its [player](models.md#compiled-animation-preview)
+A compiled animation (`.aanim.bin`) keeps its [player](models.md#compiled-animation-preview)
 and also offers **Chunks** in the view bar.
 
 ## Mipmaps tab
@@ -233,10 +233,10 @@ switches which level the [canvas](canvas.md) shows.
 
 ## Assets tab
 
-Lists the assets a file contains, as recorded in `<output>/assets.aman`
-(see [`docs/spec/aman.md`](../spec/aman.md)).
+Lists the assets a file contains, as recorded in `<output>/assets.aman.bin`
+(see [`docs/spec/aman.bin.md`](../spec/aman.bin.md)).
 
-- Enabled only for compiled files (`.ktx2`, `.amat`, `.amesh`, `.aanim` or `.afont` selected in the Output
+- Enabled only for compiled files (`.ktx2`, `.amat.bin`, `.amesh.bin`, `.aanim.bin` or `.afont.bin` selected in the Output
   tree) for now. Each holds exactly one asset; later container formats
   (e.g. meshes with embedded materials) will list several.
 - The manifest is read when the app opens and on every rescan (rescan button,

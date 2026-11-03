@@ -160,18 +160,18 @@ The icon follows the entry's type, by extension (any case):
 | environment map folder (`*.env`), HDR environment map (`exr`) | `sun-medium` |
 | other folder                                  | `folder` / `folder-open`  |
 | image: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `tga`, `webp`, `tif`, `tiff`, `hdr`, `dds`, `ktx2` | `image` |
-| font: `ttf`, `otf`, `woff`, `woff2`, `afont`  | `type`                    |
+| font: `ttf`, `otf`, `woff`, `woff2`, `afont.bin` | `type`                 |
 | color LUT: `cube`                             | `aperture`                |
-| noise / pattern: `noise`                      | `image-play`              |
-| gradient: `gradient`                          | `swatch-book`             |
-| schema: `aschema`, `atype`                    | `braces`                  |
-| directed graph: `agraph`, `agph`              | `graph-star`              |
-| data: `adata`, `arec`                         | `package`                 |
-| tree: `atree`, `atre`                         | `list-tree`               |
-| atlas folder (`*.atlas`), atlas: `aatlas`     | `map`                     |
-| palette: `palette`                            | `palette`                 |
-| mesh: `gltf`, `glb`, `obj`, `amesh`          | `torus`                   |
-| animation: `aanim`                            | `film`                    |
+| noise / pattern: `anoise`                     | `image-play`              |
+| gradient: `agradient`                         | `swatch-book`             |
+| schema: `aschema`, `aschema.bin`              | `braces`                  |
+| directed graph: `agraph`, `agraph.bin`        | `graph-star`              |
+| data: `adata`, `adata.bin`                    | `package`                 |
+| tree: `atree`, `atree.bin`                    | `list-tree`               |
+| atlas folder (`*.atlas`), atlas: `aatlas.bin` | `map`                     |
+| palette: `apalette`                           | `palette`                 |
+| mesh: `gltf`, `glb`, `obj`, `amesh.bin`       | `torus`                   |
+| animation: `aanim.bin`                        | `film`                    |
 | per-file settings: `amod`                     | `settings-2` (dimmed)     |
 | anything else                                 | `file`                    |
 

@@ -36,16 +36,16 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.anoise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
 | `*.agradient` (any case) | texture, generated | `<asset path>.ktx2`, see [`gradients.md`](gradients.md#build) |
 | `*.apalette` (any case) | texture, generated | `<asset path>.ktx2`, see [`palettes.md`](palettes.md#build) |
-| folder `*.atlas` (any case) | texture and atlas | `<asset path>.ktx2` and `<asset path>.aatlas`, see [`atlases.md`](atlases.md#build) |
+| folder `*.atlas` (any case) | texture and atlas | `<asset path>.ktx2` and `<asset path>.aatlas.bin`, see [`atlases.md`](atlases.md#build) |
 | `*.exr` (any case) | texture, cubemap | `<asset path>.ktx2`, see [`hdr.md`](hdr.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
-| `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat`, see [`materials.md`](materials.md) |
-| `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh` and more, see [`models.md`](models.md#build) |
-| `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
-| `*.aschema` (any case) | schema | `<asset path>.atype`, see [`schemas.md`](schemas.md#build) |
-| `*.adata` (any case) | data | `<asset path>.arec`, resolved, see [`instances.md`](instances.md#build) |
-| `*.agraph` (any case) | graph | `<asset path>.agph`, see [`graphs.md`](graphs.md#build) |
-| `*.atree` (any case) | tree | `<asset path>.atre`, see [`trees.md`](trees.md#build) |
+| `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat.bin`, see [`materials.md`](materials.md) |
+| `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh.bin` and more, see [`models.md`](models.md#build) |
+| `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont.bin` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
+| `*.aschema` (any case) | schema | `<asset path>.aschema.bin`, see [`schemas.md`](schemas.md#build) |
+| `*.adata` (any case) | data | `<asset path>.adata.bin`, resolved, see [`instances.md`](instances.md#build) |
+| `*.agraph` (any case) | graph | `<asset path>.agraph.bin`, see [`graphs.md`](graphs.md#build) |
+| `*.atree` (any case) | tree | `<asset path>.atree.bin`, see [`trees.md`](trees.md#build) |
 | anything else      | —          | ignored, counted as skipped                   |
 
 Texture sources that belong to a material are compiled as that material
@@ -61,14 +61,21 @@ grayscale or color-mapped, with either origin). Color space and mipmaps follow t
 
 ```
 <output>/
-  assets.aman                see docs/spec/aman.md
+  assets.aman.bin            see docs/spec/aman.bin.md
   <asset path>.ktx2          one per texture (incl. <name>.orm.ktx2), same directory structure as input
-  <dir>/<name>.amat          one per material
-  <model>.amesh              one per glTF model, with <model>/… for its materials and textures
-  <model>.aanim              one per skinned, animated glTF model
-  <font>.afont               one per font, beside its atlas <font>.ktx2
+  <dir>/<name>.amat.bin      one per material
+  <model>.amesh.bin          one per glTF model, with <model>/… for its materials and textures
+  <model>.aanim.bin          one per skinned, animated glTF model
+  <font>.afont.bin           one per font, beside its atlas <font>.ktx2
+  <path>.aschema.bin         one per schema, data file, graph, tree and atlas
+  (.adata.bin, .agraph.bin, .atree.bin, .aatlas.bin)
 ```
 
+- **Naming**: every file in assetc's own binary formats ends in `.bin`, after
+  the extension of the format: `<name>.<format>.bin`. Where a source and its
+  output share a format name, the output is the source's name plus `.bin`
+  (`forest.atree` → `forest.atree.bin`). A bare `.a<name>` file is always a
+  source, a `.bin` one always compiled. Textures stay `.ktx2`.
 - Output directories are created as needed; existing files are overwritten.
 - `output` must not be the input directory or contain it (e.g. `output = "."`
   with `input = "assets"`); the build refuses to start, since cleaning could
@@ -86,19 +93,22 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | Asset kind | Output pattern |
   |------------|----------------|
   | texture    | `*.ktx2`       |
-  | material   | `*.amat`       |
-  | mesh       | `*.amesh`      |
-  | animation  | `*.aanim`      |
-  | font       | `*.afont`      |
-  | schema     | `*.atype`      |
-  | data       | `*.arec`       |
-  | graph      | `*.agph`       |
-  | tree       | `*.atre`       |
-  | atlas      | `*.aatlas`     |
+  | material   | `*.amat.bin`   |
+  | mesh       | `*.amesh.bin`  |
+  | animation  | `*.aanim.bin`  |
+  | font       | `*.afont.bin`  |
+  | schema     | `*.aschema.bin` |
+  | data       | `*.adata.bin`  |
+  | graph      | `*.agraph.bin` |
+  | tree       | `*.atree.bin`  |
+  | atlas      | `*.aatlas.bin` |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
-  touched. `assets.aman` is rewritten, never removed; a leftover
-  `assets.manifest` (its name before) at the output root is removed. Entries
+  touched. `assets.aman.bin` is rewritten, never removed; a leftover
+  `assets.manifest` or `assets.aman` (its names before) at the output root is
+  removed, as are files with the extensions outputs had before `.bin`
+  (`*.amesh`, `*.amat`, `*.aanim`, `*.afont`, `*.atype`, `*.arec`, `*.agph`,
+  `*.atre`, `*.aatlas`). Entries
   starting with `.` and the contents of symlinked directories are not looked
   at, as in the file browser.
 - A candidate is kept if its `output`-relative path matches an output of this
@@ -117,7 +127,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
 
 - Every source is attempted; failures are collected and reported together.
 - If any source fails, or an ID collision is found, the build fails and
-  `assets.aman` is **not** written, so a manifest never refers to a broken
+  `assets.aman.bin` is **not** written, so a manifest never refers to a broken
   set of outputs. Individual `.ktx2` files that did succeed are still written.
 - Building without a project (`assetc.toml` not found) is an error.
 - An invalid glob pattern in `[textures]` is an error; nothing is compiled.
@@ -149,13 +159,13 @@ After a successful build the CLI's last line and the GUI's status bar read
 when stale outputs were removed:
 
 - `<counts>`: each kind of asset built at least once, in this order, as
-  `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat`),
-  meshes (`.amesh`), animations (`.aanim`), fonts (`.afont`), schemas
-  (`.atype`), data files (`.arec`), graphs (`.agph`), trees (`.atre`),
-  atlases (`.aatlas`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
+  `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat.bin`),
+  meshes (`.amesh.bin`), animations (`.aanim.bin`), fonts (`.afont.bin`), schemas
+  (`.aschema.bin`), data files (`.adata.bin`), graphs (`.agraph.bin`), trees (`.atree.bin`),
+  atlases (`.aatlas.bin`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
   `nothing` when nothing was built.
-- Outputs written along with a model or font count too (a model's `.aanim`,
-  `.amat`s and textures, a font's atlas), though the CLI prints one line for
+- Outputs written along with a model or font count too (a model's `.aanim.bin`,
+  `.amat.bin`s and textures, a font's atlas), though the CLI prints one line for
   the model or font only.
 - Example: `Built 12 textures, 1 material, 1 mesh, 1 animation, 1 font (1 skipped)`.
 

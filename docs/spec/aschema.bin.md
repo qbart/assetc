@@ -1,9 +1,9 @@
-# `.atype` compiled schemas
+# `.aschema.bin` compiled schemas
 
 A [schema](../features/schemas.md) (`*.aschema`) as the build writes it:
 its types, fields and enum values as fixed-size records, so a game can look
 types up by name hash and read every field's settings. A
-[chunked file](chunks.md) with format `ATYPE`, version `1`.
+[chunked file](chunks.md) with format `ASCHEMA`, version `1`.
 
 ## Chunks
 

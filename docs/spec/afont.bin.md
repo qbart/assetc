@@ -1,4 +1,4 @@
-# `.afont` fonts
+# `.afont.bin` fonts
 
 A compiled font: glyph metrics, atlas rectangles and kerning for text drawn
 from a signed-distance-field (SDF) atlas, a companion texture. See

@@ -34,7 +34,7 @@ Names are the first Unicode entry with that ID; a missing name leaves its row
 out. A file that is not a valid font shows an **Error** row
 (`not a valid font: <reason>`) and the canvas shows "No preview".
 
-After them, **Asset path** (`<path>.afont`) and **Output** (`(not built)`
+After them, **Asset path** (`<path>.afont.bin`) and **Output** (`(not built)`
 appended when it does not exist). No other Inspector tab applies to fonts.
 
 ## Specimen
@@ -79,10 +79,10 @@ into two assets. With `P` the input-relative path without the extension
 
 | Output (in `output`) | Asset kind | Asset path | Holds |
 |----------------------|------------|------------|-------|
-| `P.afont`            | font       | `P.afont`  | glyph metrics, atlas rectangles, kerning ([spec](../spec/afont.md)) |
-| `P.ktx2`             | texture    | `P`        | the SDF atlas, see [spec](../spec/afont.md#atlas) |
+| `P.afont.bin`            | font       | `P.afont.bin`  | glyph metrics, atlas rectangles, kerning ([spec](../spec/afont.bin.md)) |
+| `P.ktx2`             | texture    | `P`        | the SDF atlas, see [spec](../spec/afont.bin.md#atlas) |
 
-The build prints e.g. `ui/inter.ttf -> ui/inter.afont (191 glyphs, 0
+The build prints e.g. `ui/inter.ttf -> ui/inter.afont.bin (191 glyphs, 0
 kerning pairs, 512 × 160 atlas)`.
 
 - **Characters**: ASCII printable (U+0020–U+007E) and Latin-1 (U+00A0–U+00FF)
@@ -107,7 +107,7 @@ kerning pairs, 512 × 160 atlas)`.
 
 ## Compiled fonts
 
-Selecting an `.afont` in the Output tree shows its Info rows: Format (`AFONT
+Selecting an `.afont.bin` in the Output tree shows its Info rows: Format (`AFONT
 v1, 3 chunks`), Glyphs, Kerning pairs, Em size (`48 px`), Distance range
 (`11.95 texels`), Atlas (`512 × 160 px` and its output path, or `not found`),
 Ascent, Descent, Line gap (em, three decimals), Asset path, Asset ID.

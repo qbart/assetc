@@ -1,4 +1,4 @@
-# `.amesh` meshes
+# `.amesh.bin` meshes
 
 One compiled mesh: every triangle primitive of a glTF model's scene, with
 meshlets, bounds, levels of detail and (when skinned) its skeleton; see
@@ -18,7 +18,7 @@ width are in `DESC`.
 | `VERTICES` | yes      | [`Vertex`](#vertex-28-bytes)`[vertex_count]`                      |
 | `INDICES`  | yes      | `u16[index_count]` or `u32[index_count]` (`DESC.index_width`); triangle lists, global into `VERTICES` |
 | `SUBMESH`  | yes      | [`SubMesh`](#submesh-64-bytes)`[submesh_count]`                   |
-| `MATERIAL` | yes      | `u64[material_count]`: asset IDs of the materials (`.amat`), see [Materials](#materials) |
+| `MATERIAL` | yes      | `u64[material_count]`: asset IDs of the materials (`.amat.bin`), see [Materials](#materials) |
 | `MESHLETS` | yes      | [`Meshlet`](#meshlet-16-bytes)`[meshlet_count]`                   |
 | `MLVERTS`  | yes      | `u32[]`: each meshlet's vertices, as global vertex indices        |
 | `MLTRIS`   | yes      | `u8[3][]`: each meshlet's triangles, as indices into its own `MLVERTS` range |
@@ -152,9 +152,9 @@ As computed by meshoptimizer's `meshopt_computeMeshletBounds`.
 
 ## Materials
 
-`MATERIAL` lists the asset IDs of the `.amat` files the submeshes use, each
+`MATERIAL` lists the asset IDs of the `.amat.bin` files the submeshes use, each
 once, in order of first use; `SubMesh.material` indexes into it. The IDs
-resolve through [`assets.aman`](aman.md).
+resolve through [`assets.aman.bin`](aman.bin.md).
 
 ## LodTable
 

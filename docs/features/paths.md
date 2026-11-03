@@ -8,7 +8,7 @@ path means; its **kind** and **properties** tell the game.
 Paths are an *enrichment* like [locators](locators.md): kept in the model's
 [`.amod`](../spec/amod.md#paths) sidecar, edited in the Inspector's
 [Paths tab](#paths-tab) and in the [3D view](#3d-view), and compiled into
-its [`.amesh`](../spec/amesh.md#paths) with the curve already measured and
+its [`.amesh.bin`](../spec/amesh.bin.md#paths) with the curve already measured and
 sampled.
 
 ## Path
@@ -116,8 +116,8 @@ While the chosen path's **Draw** is on:
 
 ## Build
 
-A model's paths are written to its `.amesh` as the
-[`PATHS`, `PATHPTS`, `PATHSMP` and `PATHPRP`](../spec/amesh.md#paths)
+A model's paths are written to its `.amesh.bin` as the
+[`PATHS`, `PATHPTS`, `PATHSMP` and `PATHPRP`](../spec/amesh.bin.md#paths)
 chunks (none without paths), their names, kinds and text values in
 `STRINGS`:
 

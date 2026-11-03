@@ -1,7 +1,7 @@
-# `.aanim` animations
+# `.aanim.bin` animations
 
 Every animation clip of a skinned glTF model, driving the joints of its
-[`.amesh`](amesh.md) skeleton; see
+[`.amesh.bin`](amesh.bin.md) skeleton; see
 [`docs/features/models.md`](../features/models.md#build). A
 [chunked file](chunks.md) with format name `AANIM`, version `1`. The content
 follows assetc-cpp's `.hanim` v1, laid out as plain arrays.
@@ -17,7 +17,7 @@ follows assetc-cpp's `.hanim` v1, laid out as plain arrays.
 | `VALUES`   | yes      | `f32[value_count]`: key values, `components` per key        |
 | `NAMES`    | yes      | UTF-8 clip names, back to back (not terminated)             |
 | `EVENTS`   | no       | [`Event`](#event-32-bytes)`[event_count]`, see [Events](#events) |
-| `EVPROPS`  | no       | [`Property`](amesh.md#property-32-bytes)`[]`: the events' properties, text in `EVTEXT` |
+| `EVPROPS`  | no       | [`Property`](amesh.bin.md#property-32-bytes)`[]`: the events' properties, text in `EVTEXT` |
 | `EVTEXT`   | no       | UTF-8 event names, property keys and Text values, back to back (not terminated) |
 
 ## AnimDesc (32 bytes)
@@ -29,8 +29,8 @@ follows assetc-cpp's `.hanim` v1, laid out as plain arrays.
 |      8 |    4 | `key_count`     | u32, entries in `TIMES`                           |
 |     12 |    4 | `value_count`   | u32, entries in `VALUES`                          |
 |     16 |    4 | `names_size`    | u32, bytes in `NAMES`                             |
-|     20 |    4 | `joint_count`   | u32, joints in the companion `.amesh` skeleton    |
-|     24 |    8 | `mesh`          | u64, asset ID of the companion `.amesh`           |
+|     20 |    4 | `joint_count`   | u32, joints in the companion `.amesh.bin` skeleton    |
+|     24 |    8 | `mesh`          | u64, asset ID of the companion `.amesh.bin`           |
 
 ## Clip (24 bytes)
 
@@ -49,7 +49,7 @@ Clips are in glTF file order.
 
 | Offset | Size | Field           | Notes                                                    |
 |-------:|-----:|-----------------|----------------------------------------------------------|
-|      0 |    4 | `joint`         | u32, index into the `.amesh` `SKELETON`                  |
+|      0 |    4 | `joint`         | u32, index into the `.amesh.bin` `SKELETON`                  |
 |      4 |    1 | `path`          | u8: `0` translation, `1` rotation, `2` scale             |
 |      5 |    1 | `interpolation` | u8: `0` step, `1` linear                                 |
 |      6 |    1 | `components`    | u8: `3` (translation, scale) or `4` (rotation `x y z w`) |
@@ -71,8 +71,8 @@ Named moments of the clips, see
 / 32. Events are sorted by `clip`, then `time`, so a clip's events are one
 run (find it by binary search on `clip`). An event's properties are
 records `first_property` to `first_property + property_count − 1` of
-`EVPROPS`, sorted by key, laid out as the `.amesh`
-[`Property`](amesh.md#property-32-bytes) with offsets into `EVTEXT`.
+`EVPROPS`, sorted by key, laid out as the `.amesh.bin`
+[`Property`](amesh.bin.md#property-32-bytes) with offsets into `EVTEXT`.
 
 ### Event (32 bytes)
 

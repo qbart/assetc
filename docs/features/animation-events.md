@@ -8,7 +8,7 @@ Events are an *enrichment* like [locators](locators.md): kept in the model's
 [`.amod`](../spec/amod.md#events) sidecar, listed in each animation's card
 of the [Animations tab](#event-list), placed on a [timeline](#timeline)
 under the 3D view, and compiled into the model's
-[`.aanim`](../spec/aanim.md#events).
+[`.aanim.bin`](../spec/aanim.bin.md#events).
 
 ## Event list
 
@@ -95,22 +95,22 @@ Interactions:
 
 ## Build
 
-A model's events are written to its `.aanim` as the
-[`EVENTS` and `EVNAMES`](../spec/aanim.md#events) chunks (none without
+A model's events are written to its `.aanim.bin` as the
+[`EVENTS` and `EVNAMES`](../spec/aanim.bin.md#events) chunks (none without
 events), sorted by animation (file order), then time:
 
 - An event of an animation the model does not have fails the build:
   `<file>.amod: event "<name>": no animation "<animation>"`.
 - An event past its animation's end fails it: `<file>.amod: event
   "<name>": time <t> is past the end of "<animation>" (<duration> s)`.
-- Events on a model without an `.aanim` (no skin) fail it: `<file>.amod:
+- Events on a model without an `.aanim.bin` (no skin) fail it: `<file>.amod:
   events need a skinned model`.
 
 ## Inspector Info
 
 - A model in the Input tree: an **Events** row after Paths: their count, or
   `none`.
-- A compiled `.aanim`: an **Events** row after Keys: their count, or `none`.
+- A compiled `.aanim.bin`: an **Events** row after Keys: their count, or `none`.
 
 ## Not yet
 

@@ -1,4 +1,4 @@
-# `.aatlas` atlas metadata
+# `.aatlas.bin` atlas metadata
 
 Where each frame of an [atlas](../features/atlases.md) is in its texture. A
 [chunked file](chunks.md) with format `AATLAS`, version `1`.

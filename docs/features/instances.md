@@ -197,9 +197,9 @@ inspected again. Keys that are not fields are kept.
 
 ## Build
 
-Each data file is compiled to `<asset path>.arec` (asset kind `data`,
-asset path its input-relative path without the extension, plus `.arec`), a
-[binary file](../spec/arec.md) of its instances with **every field
+Each data file is compiled to `<asset path>.adata.bin` (asset kind `data`,
+asset path its input-relative path without the extension, plus `.adata.bin`), a
+[binary file](../spec/adata.bin.md) of its instances with **every field
 resolved**, so a game reads typed values with no defaults to apply.
 A file that cannot be read, whose schema cannot be read, or that has
 errors, fails the build: `<message>` of the first error, `(and <n> more)`

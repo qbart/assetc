@@ -1,10 +1,10 @@
-# `.arec` compiled data
+# `.adata.bin` compiled data
 
 A [data file](../features/instances.md) (`*.adata`) as the build writes it:
 its instances with **every field resolved** (defaults applied, as
 [§4.2](../aschema.md#42-sparse-storage) resolves them), as a tree of typed
 values a game reads without its schema's defaults. A
-[chunked file](chunks.md) with format `AREC`, version `1`.
+[chunked file](chunks.md) with format `ADATA`, version `1`.
 
 ## Chunks
 
@@ -70,11 +70,11 @@ FNV-1a-64 of the UTF-8 text.
 
 An `asset<K>` value is the [asset ID](../features/build.md#asset-ids) the
 build gives the referenced file's main output, so a game finds it in
-`assets.aman`: its input-relative path without the extension for
+`assets.aman.bin`: its input-relative path without the extension for
 `texture`, `noise`, `gradient`, `palette`, `lut` and `hdr` (their `.ktx2`);
-with `.amesh` for `model`, `.afont` for `font`, `.aatlas` for `atlas` (the
-folder's path without `.atlas`), `.agph` for `graph`, `.atre` for `tree`,
-`.arec` for `data`; and `<dir>/<name>.amat` for a `material`
+with `.amesh.bin` for `model`, `.afont.bin` for `font`, `.aatlas.bin` for `atlas` (the
+folder's path without `.atlas`), `.agraph.bin` for `graph`, `.atree.bin` for `tree`,
+`.adata.bin` for `data`; and `<dir>/<name>.amat.bin` for a `material`
 `<dir>/<name>.mat.toml`.
 
 A `curve` is a list of points, each a list of four floats `x y in out`; a

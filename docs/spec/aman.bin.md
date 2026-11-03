@@ -1,8 +1,8 @@
-# `assets.aman`
+# `assets.aman.bin`
 
 Maps every asset ID (see [`docs/features/build.md`](../features/build.md#asset-ids))
 to the output file holding it. Written once per successful build to
-`<output>/assets.aman`.
+`<output>/assets.aman.bin`.
 
 The layout is designed for direct use from a memory-mapped file: entries have
 a fixed stride and are sorted by ID, so a reader can binary-search them
@@ -54,15 +54,15 @@ back.
 | Value | Kind    | File format                  |
 |------:|---------|------------------------------|
 |     0 | texture | [`ktx2.md`](ktx2.md)         |
-|     1 | material | [`amat.md`](amat.md)         |
-|     2 | mesh     | [`amesh.md`](amesh.md)       |
-|     3 | animation | [`aanim.md`](aanim.md)      |
-|     4 | font     | [`afont.md`](afont.md)       |
-|     5 | schema   | [`atype.md`](atype.md)       |
-|     6 | data     | [`arec.md`](arec.md)         |
-|     7 | graph    | [`agph.md`](agph.md)         |
-|     8 | tree     | [`atre.md`](atre.md)         |
-|     9 | atlas    | [`aatlas.md`](aatlas.md)     |
+|     1 | material | [`amat.bin.md`](amat.bin.md)         |
+|     2 | mesh     | [`amesh.bin.md`](amesh.bin.md)       |
+|     3 | animation | [`aanim.bin.md`](aanim.bin.md)      |
+|     4 | font     | [`afont.bin.md`](afont.bin.md)       |
+|     5 | schema   | [`aschema.bin.md`](aschema.bin.md)       |
+|     6 | data     | [`adata.bin.md`](adata.bin.md)         |
+|     7 | graph    | [`agraph.bin.md`](agraph.bin.md)         |
+|     8 | tree     | [`atree.bin.md`](atree.bin.md)         |
+|     9 | atlas    | [`aatlas.bin.md`](aatlas.bin.md)     |
 
 Other values are reserved. Readers should skip entries with unknown kinds.
 

@@ -1,7 +1,7 @@
 # Vertex colors
 
 A glTF model's vertex colors are compiled into its
-[`.amesh`](../spec/amesh.md#color-sets) as **color sets**: named buffers of
+[`.amesh.bin`](../spec/amesh.bin.md#color-sets) as **color sets**: named buffers of
 one RGBA color per vertex, alongside `VERTICES`. A mesh can have several
 sets; a game picks one by the FNV-1a-64 hash of its name.
 
@@ -125,7 +125,7 @@ unchanged.
 How a written set reaches the game:
 
 - **Color buffer** (every set to start with): a color per vertex in the
-  mesh's `COLORS` (see [`amesh.md`](../spec/amesh.md#color-sets)).
+  mesh's `COLORS` (see [`amesh.bin.md`](../spec/amesh.bin.md#color-sets)).
 - **Texture + UV buffer**: for an authored Linear or Radial set that does
   not blend with another. Instead of colors:
   - a **texture** `P/<set>.colors.ktx2` (asset path `P/<set>.colors`, `P`
@@ -134,7 +134,7 @@ How a written set reaches the game:
     color at `(x + 0.5) / 256` as an `.agradient` without dithering computes
     it, no mipmaps;
   - a **UV set** in the mesh's `UVSET` / `UVS` (see
-    [`amesh.md`](../spec/amesh.md#uv-sets)), named as the set, naming the
+    [`amesh.bin.md`](../spec/amesh.bin.md#uv-sets)), named as the set, naming the
     texture's asset ID: per vertex `(t, 0.5)`, `t` the vertex's position
     along the gradient (as [above](#authored-sets)), so sampling the
     texture at the UV gives the set's color, smoothly between vertices.

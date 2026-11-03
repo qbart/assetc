@@ -8,7 +8,7 @@ name and uses its transform.
 
 Locators are the first kind of *enrichment*: data authored in assetc on top
 of a model, kept in the model's [`.amod`](../spec/amod.md#locators) sidecar
-and compiled into its [`.amesh`](../spec/amesh.md#locators). They are edited
+and compiled into its [`.amesh.bin`](../spec/amesh.bin.md#locators). They are edited
 in the Inspector's [Locators tab](#locators-tab) and directly in the
 [3D view](#3d-view).
 
@@ -16,7 +16,7 @@ in the Inspector's [Locators tab](#locators-tab) and directly in the
 
 | Field       | Meaning                                                                 |
 |-------------|-------------------------------------------------------------------------|
-| Name        | Identifies the locator; non-empty and unique within the model. The game finds it by the FNV-1a-64 hash of the name (see [`amesh.md`](../spec/amesh.md#locators)). Case is kept. |
+| Name        | Identifies the locator; non-empty and unique within the model. The game finds it by the FNV-1a-64 hash of the name (see [`amesh.bin.md`](../spec/amesh.bin.md#locators)). Case is kept. |
 | Tags        | Names the game can group locators by (e.g. `weapon`, `left`), none to start with; each non-empty, without commas, at most once. Compiled with the locator. |
 | Joint       | The skin joint it is attached to, by the glTF node's **name**; none puts it in model space. Names survive re-exporting the model, indices do not. |
 | Translation | Offset in the parent's space (the joint's, or the model's), in model units. |
@@ -26,7 +26,7 @@ in the Inspector's [Locators tab](#locators-tab) and directly in the
 | Color       | The color of its marker in the [3D view](#3d-view), as a hint of what it is (e.g. weapons red, effects blue); for assetc only, not compiled. |
 
 - **Model space** is the space of the default scene's root nodes, which is
-  the space of a static model's `.amesh` vertices (see
+  the space of a static model's `.amesh.bin` vertices (see
   [Geometry](models.md#geometry)).
 - **Joint space**: a locator on a joint follows it: its world transform is
   the joint's world transform × the locator's. Joints are the first skin's
@@ -318,8 +318,8 @@ on to start with, disabled when the file has none) is on:
 
 ## Build
 
-A model's locators are written to its `.amesh` as the
-[`LOCATORS` and `LOCNAMES`](../spec/amesh.md#locators) chunks (none when it
+A model's locators are written to its `.amesh.bin` as the
+[`LOCATORS` and `LOCNAMES`](../spec/amesh.bin.md#locators) chunks (none when it
 has no locators), and their tags as `LOCTAGS` (none when no locator has
 tags). A joint is stored as its index in `SKELETON`, `−1` for
 model space; the rotation is normalized.

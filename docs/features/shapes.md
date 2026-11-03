@@ -8,7 +8,7 @@ know what a shape means; its **kind** and **properties** tell the game.
 Shapes are an *enrichment* like [locators](locators.md): kept in the model's
 [`.amod`](../spec/amod.md#shapes) sidecar, edited in the Inspector's
 [Shapes tab](#shapes-tab) and in the [3D view](#3d-view), and compiled into
-its [`.amesh`](../spec/amesh.md#shapes).
+its [`.amesh.bin`](../spec/amesh.bin.md#shapes).
 
 ## Shape
 
@@ -82,8 +82,8 @@ The model's preview draws its visible shapes as wireframes over the model
 
 ## Build
 
-A model's shapes are written to its `.amesh` as the
-[`SHAPES`, `SHAPEPTS` and `SHAPEPRP`](../spec/amesh.md#shapes) chunks (none
+A model's shapes are written to its `.amesh.bin` as the
+[`SHAPES`, `SHAPEPTS` and `SHAPEPRP`](../spec/amesh.bin.md#shapes) chunks (none
 without shapes), their names, kinds and text values in `STRINGS`. A joint is
 its index in `SKELETON`; a hull's points are the hull's corners, in the
 shape's parent space. A shape whose joint is not a named joint of the first

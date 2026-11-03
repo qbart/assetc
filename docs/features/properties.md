@@ -7,7 +7,7 @@ assetc does not know what they mean.
 They are an *enrichment* like [locators](locators.md): kept in the model's
 [`.amod`](../spec/amod.md#properties) sidecar, edited in the Inspector's
 [Properties tab](#properties-tab), and compiled into its
-[`.amesh`](../spec/amesh.md#properties). [Shapes](shapes.md) carry
+[`.amesh.bin`](../spec/amesh.bin.md#properties). [Shapes](shapes.md) carry
 properties of their own, edited the same way.
 
 ## Property
@@ -48,9 +48,9 @@ properties inside its card.
 
 ## Build
 
-The model's properties are written to its `.amesh` as the
-[`PROPS`](../spec/amesh.md#properties) chunk (none without properties), their
-keys and text values in [`STRINGS`](../spec/amesh.md#strings).
+The model's properties are written to its `.amesh.bin` as the
+[`PROPS`](../spec/amesh.bin.md#properties) chunk (none without properties), their
+keys and text values in [`STRINGS`](../spec/amesh.bin.md#strings).
 
 ## Inspector Info
 

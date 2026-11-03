@@ -1,4 +1,4 @@
-# `.agph` compiled graphs
+# `.agraph.bin` compiled graphs
 
 A [directed graph](../features/graphs.md) (`*.agraph`) as the build writes
 it. A [chunked file](chunks.md) with format `AGRAPH`, version `1`.
@@ -10,7 +10,7 @@ it. A [chunked file](chunks.md) with format `AGRAPH`, version `1`.
 | `DESC`    | yes      | [`GraphDesc`](#graphdesc-16-bytes) |
 | `NODES`   | yes      | [`Node`](#node-48-bytes)`[node_count]`, in the file's order |
 | `EDGES`   | yes      | [`Edge`](#edge-32-bytes)`[edge_count]`, in the file's order |
-| `PROPS`   | no       | [`Property`](amesh.md#property-32-bytes)`[]`: nodes' and edges' data, text in `STRINGS` |
+| `PROPS`   | no       | [`Property`](amesh.bin.md#property-32-bytes)`[]`: nodes' and edges' data, text in `STRINGS` |
 | `STRINGS` | yes      | UTF-8 text back to back: ids, labels, property keys and Text values |
 
 Text is `offset` u32 and `len` u32 (bytes) into `STRINGS`.

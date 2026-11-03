@@ -59,5 +59,5 @@ This page only states how assetc writes the files it edits (see
 
 ## Built form
 
-The build compiles a data file to a binary [`.arec`](arec.md) with every
+The build compiles a data file to a binary [`.adata.bin`](adata.bin.md) with every
 field resolved; the `.adata` itself is never written to the output.
