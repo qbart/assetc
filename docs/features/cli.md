@@ -8,6 +8,9 @@ assetc init       Create assetc.toml in the current directory
 assetc build      Compile input into output (the default target), see build.md
 assetc build --target <name>
                   Compile input into the target's output with its settings
+assetc watch      Build, then rebuild what changes until stopped (Ctrl+C)
+assetc watch --target <name>
+                  The same for a target
 assetc --help     Print usage
 assetc --version  Print version
 ```
@@ -33,6 +36,59 @@ assetc --version  Print version
 - An unknown target fails before building: `error: no target "tablet"
   (targets: mobile, preview)`, or `(no targets)`.
 - The GUI's Build button and `Ctrl+B` build the default target.
+
+### `assetc watch`
+
+Keeps the output up to date while you edit the input: a build, then an
+**incremental** build after every change, until stopped with `Ctrl+C`.
+
+- Loads the project and target as [`assetc build`](#assetc-build) does
+  (`--target <name>` the same way); a missing project or an unknown target
+  fails before watching.
+- Prints `Watching <input> into <output> (Ctrl+C to stop)`, then builds
+  everything once and prints the result as `assetc build` does (built lines,
+  `removed …`, `error: …`, the [summary](build.md#summary) with
+  ` into <output>`).
+- **Watching**: every 0.5 s it lists the input directory as the build reads it
+  (entries starting with `.` skipped, symlinks not followed, the output
+  directory left out when it lies inside the input), with each file's size
+  and modification time, plus `assetc.toml`. A difference from the last
+  listing is a **change**. It waits until two listings 0.5 s apart agree (so a
+  save that writes several files builds once), then prints an empty line and
+  builds.
+- **Incremental build**: the build is planned as usual (stale outputs
+  removed, the manifest written), but an asset is compiled again only when
+  - it was not built successfully in this session, or one of its outputs is
+    missing;
+  - its job changed: the settings the plan gives it (color space, mipmaps,
+    mesh options, its `.amod` sidecar with inherited locators, a material's
+    slots);
+  - or a file it reads changed (size or modification time):
+
+    | Asset | Files it reads |
+    |-------|----------------|
+    | texture, LUT, HDR map, font | its source |
+    | ORM texture | its channel sources |
+    | `.glb` model | the file |
+    | `.gltf` model | every file in its folder and below (buffers and images it may refer to) |
+    | atlas | every file in the `.atlas` folder |
+    | schema, graph, tree | its source |
+    | data file | its source and every `*.aschema` in the input |
+    | material | its `.mat.toml` (when it has one) |
+
+  Every other asset is **up to date**: not written, counted in the summary as
+  `<U> up to date` after the skipped count (`Built 1 texture (0 skipped, 16
+  up to date)`), left out when 0. Outputs written along with a model, font
+  or atlas follow it.
+- A change to `assetc.toml` reloads it (and the target); then everything is
+  built again, as on start. An invalid config prints `error: …` and waits for
+  the next change, keeping the last good one.
+- A failed build (`Build failed: …`, or an error that stops it, such as a
+  missing input directory) is printed and watching goes on; failed assets are
+  compiled again on the next change, whatever changed.
+- What it knows about past builds lives only while it runs: the first build
+  of every `assetc watch` compiles everything. `assetc build` always compiles
+  everything.
 
 ### `assetc` (no subcommand)
 

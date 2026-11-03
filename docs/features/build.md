@@ -155,8 +155,9 @@ the build failed.
 ## Summary
 
 After a successful build the CLI's last line and the GUI's status bar read
-`Built <counts> (<M> skipped)`, with `, <K> removed` inside the parentheses
-when stale outputs were removed:
+`Built <counts> (<M> skipped)`, with `, <U> up to date` inside the
+parentheses when an [incremental build](cli.md#assetc-watch) left assets up
+to date, then `, <K> removed` when stale outputs were removed:
 
 - `<counts>`: each kind of asset built at least once, in this order, as
   `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat.bin`),
