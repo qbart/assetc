@@ -15,19 +15,19 @@ pub fn create_folder(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Creates `<name>.noise` (or `<name> 2.noise`, …) in `dir` with the generator's defaults.
+/// Creates `<name>.anoise` (or `<name> 2.anoise`, …) in `dir` with the generator's defaults.
 pub fn create_noise(input: &Path, dir: &Path, kind: GeneratorKind) -> Result<PathBuf, String> {
     check_inside(input, dir, true)?;
-    let path = unique(dir, kind.file_stem(), ".noise");
+    let path = unique(dir, kind.file_stem(), ".anoise");
     fs::write(&path, Noise::new(kind).to_toml()).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
-/// Creates `gradient.gradient` (or `gradient 2.gradient`, …) in `dir`; see
+/// Creates `gradient.agradient` (or `gradient 2.agradient`, …) in `dir`; see
 /// docs/features/gradients.md#creating.
 pub fn create_gradient(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     check_inside(input, dir, true)?;
-    let path = unique(dir, "gradient", ".gradient");
+    let path = unique(dir, "gradient", ".agradient");
     fs::write(&path, Gradients::new().to_toml()).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -75,11 +75,11 @@ pub fn create_data(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// Creates `palette.palette` (or `palette 2.palette`, …) in `dir`; see
+/// Creates `palette.apalette` (or `palette 2.apalette`, …) in `dir`; see
 /// docs/features/palettes.md#creating.
 pub fn create_palette(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     check_inside(input, dir, true)?;
-    let path = unique(dir, "palette", ".palette");
+    let path = unique(dir, "palette", ".apalette");
     fs::write(&path, Palette::new().to_toml()).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -179,17 +179,17 @@ mod tests {
             input.join("New Folder 2")
         );
         let noise = create_noise(&input, &input.join("sub"), GeneratorKind::PerlinWorley).unwrap();
-        assert_eq!(noise, input.join("sub/perlin-worley.noise"));
+        assert_eq!(noise, input.join("sub/perlin-worley.anoise"));
         let again = create_noise(&input, &input.join("sub"), GeneratorKind::PerlinWorley).unwrap();
-        assert_eq!(again, input.join("sub/perlin-worley 2.noise"));
+        assert_eq!(again, input.join("sub/perlin-worley 2.anoise"));
         let parsed = Noise::parse(&fs::read_to_string(&noise).unwrap()).unwrap();
         assert_eq!(parsed, Noise::new(GeneratorKind::PerlinWorley));
         let gradient = create_gradient(&input, &input).unwrap();
-        assert_eq!(gradient, input.join("gradient.gradient"));
+        assert_eq!(gradient, input.join("gradient.agradient"));
         let parsed = Gradients::parse(&fs::read_to_string(&gradient).unwrap()).unwrap();
         assert_eq!(parsed, Gradients::new());
         let palette = create_palette(&input, &input).unwrap();
-        assert_eq!(palette, input.join("palette.palette"));
+        assert_eq!(palette, input.join("palette.apalette"));
         let parsed = Palette::parse(&fs::read_to_string(&palette).unwrap()).unwrap();
         assert_eq!(parsed, Palette::new());
         let schema = create_schema(&input, &input).unwrap();

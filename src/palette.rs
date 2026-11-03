@@ -1,15 +1,15 @@
-//! `.palette` files: named colors, one cell each in a grid of one image; see
-//! docs/spec/palette.md.
+//! `.apalette` files: named colors, one cell each in a grid of one image; see
+//! docs/spec/apalette.md.
 
 use std::path::Path;
 
 use crate::gradient::{CellGrid, Layout, format_color, parse_color, take_grid};
 use crate::texture::Image;
 
-/// Whether `file` is a palette file (`*.palette`, any case).
+/// Whether `file` is a palette file (`*.apalette`, any case).
 pub fn is_palette(file: &Path) -> bool {
     file.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("palette"))
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("apalette"))
 }
 
 /// A named color; `color` is straight (not premultiplied) RGBA.
@@ -19,7 +19,7 @@ pub struct Swatch {
     pub color: [u8; 4],
 }
 
-/// A `.palette` file; see docs/spec/palette.md.
+/// An `.apalette` file; see docs/spec/apalette.md.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Palette {
     pub width: u32,
@@ -92,7 +92,7 @@ impl Palette {
         Ok(palette)
     }
 
-    /// The written form, see docs/spec/palette.md#written-form.
+    /// The written form, see docs/spec/apalette.md#written-form.
     pub fn to_toml(&self) -> String {
         let mut out = self.grid_toml();
         for swatch in &self.colors {

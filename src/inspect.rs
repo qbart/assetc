@@ -641,7 +641,7 @@ fn palette_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     Ok(())
 }
 
-/// Cell, Grid and Layout of a `.gradient` or `.palette` file.
+/// Cell, Grid and Layout of an `.agradient` or `.apalette` file.
 fn grid_rows(grid: &impl CellGrid, out: &mut Inspection) {
     let [_, _, cell_width, cell_height] = grid.grid();
     out.rows
@@ -1458,7 +1458,7 @@ mod tests {
     fn noise_sources() {
         let dir = tempfile::tempdir().unwrap();
         let project = project(dir.path(), Default::default());
-        let file = dir.path().join("assets/clouds.noise");
+        let file = dir.path().join("assets/clouds.anoise");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(
             &file,
@@ -1488,7 +1488,7 @@ mod tests {
     fn gradient_sources() {
         let dir = tempfile::tempdir().unwrap();
         let project = project(dir.path(), Default::default());
-        let file = dir.path().join("assets/sky.gradient");
+        let file = dir.path().join("assets/sky.agradient");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, Gradients::new().to_toml()).unwrap();
         let i = inspect(&project, Location::Input, &file);
@@ -1514,7 +1514,7 @@ mod tests {
     fn palette_sources() {
         let dir = tempfile::tempdir().unwrap();
         let project = project(dir.path(), Default::default());
-        let file = dir.path().join("assets/ui/theme.palette");
+        let file = dir.path().join("assets/ui/theme.apalette");
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, Palette::new().to_toml()).unwrap();
         let i = inspect(&project, Location::Input, &file);

@@ -298,11 +298,11 @@ struct Inspected {
     cubemap: Option<Vec<Image>>,
     uploaded_cubemap: bool,
     lut: Option<Lut>,
-    /// A `.noise` file's parameters: (being edited, as saved), or why they can't be read.
+    /// An `.anoise` file's parameters: (being edited, as saved), or why they can't be read.
     noise: Option<Result<NoiseEdit, String>>,
-    /// A `.gradient` file being edited, or why it can't be read.
+    /// An `.agradient` file being edited, or why it can't be read.
     gradient: Option<Result<GradientEdit, String>>,
-    /// A `.palette` file being edited, or why it can't be read.
+    /// An `.apalette` file being edited, or why it can't be read.
     palette: Option<Result<PaletteEdit, String>>,
     /// An `.aschema` file being edited, or why it can't be read and its text.
     schema: Option<Result<SchemaEdit, (String, String)>>,
@@ -2193,9 +2193,9 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         | "dds" | "ktx2" => Icon::Image,
         "ttf" | "otf" | "woff" | "woff2" => Icon::Type,
         "cube" => Icon::Aperture,
-        "noise" => Icon::ImagePlay,
-        "gradient" => Icon::SwatchBook,
-        "palette" => Icon::Palette,
+        "anoise" => Icon::ImagePlay,
+        "agradient" => Icon::SwatchBook,
+        "apalette" => Icon::Palette,
         "aschema" | "atype" => Icon::Braces,
         "agraph" | "agph" => Icon::GraphStar,
         "adata" | "arec" => Icon::Package,
@@ -2786,7 +2786,7 @@ fn right_sidebar(
         });
 }
 
-/// A `.noise` file being edited in the Parameters / Modifiers tabs.
+/// An `.anoise` file being edited in the Parameters / Modifiers tabs.
 struct NoiseEdit {
     edit: Noise,
     /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
@@ -3452,7 +3452,7 @@ fn mesh_commit(ui: &Ui, edit: &mut MeshEdit) -> Option<Amod> {
     })
 }
 
-/// A `.gradient` file being edited; see docs/features/gradients.md#parameters-tab.
+/// An `.agradient` file being edited; see docs/features/gradients.md#parameters-tab.
 struct GradientEdit {
     edit: Gradients,
     /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
@@ -3526,7 +3526,7 @@ fn gradient_output_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradien
     gradient_commit(ui, edit)
 }
 
-/// The Output section of a `.gradient` or `.palette` file: image size, cells and layout; see
+/// The Output section of an `.agradient` or `.apalette` file: image size, cells and layout; see
 /// docs/features/gradients.md#parameters-tab.
 fn grid_section(ui: &mut Ui, file: &mut impl CellGrid) {
     prop_section(
@@ -3584,7 +3584,7 @@ fn grid_section(ui: &mut Ui, file: &mut impl CellGrid) {
     );
 }
 
-/// A `.palette` file being edited; see docs/features/palettes.md#colors-tab.
+/// An `.apalette` file being edited; see docs/features/palettes.md#colors-tab.
 struct PaletteEdit {
     edit: Palette,
     /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
@@ -4223,7 +4223,7 @@ enum ModifierAction {
     Remove(usize),
 }
 
-/// A `.noise` file's modifiers; see docs/features/noise.md#modifiers-tab.
+/// An `.anoise` file's modifiers; see docs/features/noise.md#modifiers-tab.
 fn modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Noise> {
     let edit = noise_edit(ui, inspected)?;
     modifier_list(ui, &mut edit.edit.modifiers);

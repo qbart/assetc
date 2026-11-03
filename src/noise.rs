@@ -1,5 +1,5 @@
-//! Procedural `.noise` textures: generators, modifiers and the file format.
-//! See docs/spec/noise.md; parameters are declared once per type in tables, and parsing,
+//! Procedural `.anoise` textures: generators, modifiers and the file format.
+//! See docs/spec/anoise.md; parameters are declared once per type in tables, and parsing,
 //! writing and the editor are driven by them.
 
 use std::f64::consts::{FRAC_1_SQRT_2, TAU};
@@ -316,7 +316,7 @@ impl GeneratorKind {
     }
 
     /// The table holding its parameters, e.g. `noise.perlin`; see
-    /// docs/spec/noise.md#generator-sections.
+    /// docs/spec/anoise.md#generator-sections.
     pub fn section(self) -> String {
         self.key().replace('/', ".")
     }
@@ -439,7 +439,7 @@ impl Modifier {
     }
 }
 
-/// A `.noise` file.
+/// An `.anoise` file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Noise {
     pub kind: GeneratorKind,
@@ -648,7 +648,7 @@ impl Noise {
         })
     }
 
-    /// The written form, see docs/spec/noise.md#written-form.
+    /// The written form, see docs/spec/anoise.md#written-form.
     pub fn to_toml(&self) -> String {
         let mut out = format!(
             "type = {}\nsize = {}\n\n[{}]\n",
@@ -676,7 +676,7 @@ impl Noise {
                 .any(|m| m.enabled && m.kind == ModifierKind::Colorize)
     }
 
-    /// The image, see docs/spec/noise.md#generated-image.
+    /// The image, see docs/spec/anoise.md#generated-image.
     pub fn generate(&self) -> Image {
         let size = self.size as usize;
         let mut pixels = generate_field(self.kind, &self.params, size);
@@ -697,7 +697,7 @@ impl Noise {
     }
 }
 
-/// A `modifiers` array of tables, as in `.noise` files and `.amod` sidecars.
+/// A `modifiers` array of tables, as in `.anoise` files and `.amod` sidecars.
 pub fn parse_modifiers(value: toml::Value) -> Result<Vec<Modifier>, String> {
     let toml::Value::Array(items) = value else {
         return Err("modifiers must be an array of tables".into());
@@ -946,7 +946,7 @@ fn simplex4(c: [f64; 4], s: u32) -> f64 {
 }
 
 /// Weighted octave average, octave `o` at periods `periods × lacunarity^o`, seed `seed + o`;
-/// see docs/spec/noise.md#fractal-sum.
+/// see docs/spec/anoise.md#fractal-sum.
 fn fbm(
     noise: impl Fn(Periods, u32) -> f64,
     (p, q): Periods,
@@ -967,7 +967,7 @@ fn fbm(
 
 // ---- Generators -----------------------------------------------------------------------
 
-/// Seeds of the two warp noises, see docs/spec/noise.md#domain.
+/// Seeds of the two warp noises, see docs/spec/anoise.md#domain.
 const WARP_U: u32 = 0x68E31DA4;
 const WARP_V: u32 = 0xB5297A4D;
 
@@ -1260,7 +1260,7 @@ fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], width: usize, height: u
     }
 }
 
-/// HSL (hue in degrees) to RGB; see docs/spec/noise.md#colorize.
+/// HSL (hue in degrees) to RGB; see docs/spec/anoise.md#colorize.
 fn hsl_to_rgb(hue: f64, saturation: f64, l: f64) -> [f64; 3] {
     let c = (1.0 - (2.0 * l - 1.0).abs()) * saturation;
     let h = (hue / 60.0).clamp(0.0, 6.0);

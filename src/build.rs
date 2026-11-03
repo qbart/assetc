@@ -302,7 +302,15 @@ fn remove_stale(output: &Path, produced: &HashSet<String>) -> Result<Vec<String>
 }
 
 /// Texture source extensions, matched case-insensitively: images, and generated noise.
-const TEXTURE_EXTENSIONS: [&str; 7] = ["png", "jpg", "jpeg", "tga", "noise", "gradient", "palette"];
+const TEXTURE_EXTENSIONS: [&str; 7] = [
+    "png",
+    "jpg",
+    "jpeg",
+    "tga",
+    "anoise",
+    "agradient",
+    "apalette",
+];
 
 pub fn is_texture_source(file: &Path) -> bool {
     file.extension().is_some_and(|ext| {
@@ -333,7 +341,7 @@ fn decode(source: &Path) -> Result<image::RgbaImage, String> {
     load_source(source).map(|(image, _)| image)
 }
 
-/// Decodes a texture source, or generates it for a `.noise` file; also returns the
+/// Decodes a texture source, or generates it for an `.anoise` file; also returns the
 /// source's color type (noise is grayscale).
 pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType), String> {
     if is_noise(source) {
@@ -609,7 +617,7 @@ fn compile_lut(source: &Path, dest: &Path, volume: bool) -> Result<usize, String
 
 pub fn is_noise(file: &Path) -> bool {
     file.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("noise"))
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("anoise"))
 }
 
 /// Returns the number of levels written.
@@ -1170,17 +1178,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         fs::create_dir_all(input.join("rock")).unwrap();
-        fs::write(input.join("clouds.noise"), "size = 16\n").unwrap();
+        fs::write(input.join("clouds.anoise"), "size = 16\n").unwrap();
         fs::write(
-            input.join("rock/rock.h.noise"),
+            input.join("rock/rock.h.anoise"),
             "size = 8\ntype = \"noise/voronoi\"\n",
         )
         .unwrap();
-        fs::write(input.join("bad.noise"), "size = 0\n").unwrap();
+        fs::write(input.join("bad.anoise"), "size = 0\n").unwrap();
 
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
-        assert_eq!(outcome.failures[0].source, "bad.noise");
+        assert_eq!(outcome.failures[0].source, "bad.anoise");
         assert!(outcome.failures[0].message.contains("size must be"));
         let (format, pixels) = level0(&output.join("clouds.ktx2"));
         assert_eq!(format, Some(::ktx2::Format::R8G8B8A8_UNORM));

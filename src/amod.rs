@@ -28,7 +28,7 @@ pub struct Amod {
     pub colors: Vec<enrich::ColorSet>,
     /// `[[events]]`: a glTF model's animation events, see docs/features/animation-events.md.
     pub events: Vec<enrich::Event>,
-    /// `[[modifiers]]`: an image's modifier stack, as in `.noise` files.
+    /// `[[modifiers]]`: an image's modifier stack, as in `.anoise` files.
     pub modifiers: Vec<Modifier>,
 }
 
@@ -324,7 +324,7 @@ mod tests {
         assert!(Amod::parse("[mesh]\nmax = 1\n").is_err());
         assert!(Amod::parse("[sound]\n").is_err());
 
-        // Modifiers, after the mesh table, in the .noise form.
+        // Modifiers, after the mesh table, in the .anoise form.
         let mut with_modifiers = amod.clone();
         with_modifiers
             .modifiers

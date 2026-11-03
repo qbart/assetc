@@ -457,9 +457,9 @@ pub fn asset_kind(path: &str) -> Option<&'static str> {
     let ext = lower.rsplit_once('.').map(|(_, e)| e)?;
     Some(match ext {
         "png" | "jpg" | "jpeg" | "tga" => "texture",
-        "noise" => "noise",
-        "gradient" => "gradient",
-        "palette" => "palette",
+        "anoise" => "noise",
+        "agradient" => "gradient",
+        "apalette" => "palette",
         "gltf" | "glb" => "model",
         "ttf" | "otf" => "font",
         "cube" => "lut",

@@ -1,5 +1,5 @@
-//! `.gradient` files: gradients as stops, one vertical cell each in a grid of one image; see
-//! docs/spec/gradient.md. Rendering follows `img/gradient.go` of SoftKiwiGames/cli.
+//! `.agradient` files: gradients as stops, one vertical cell each in a grid of one image; see
+//! docs/spec/agradient.md. Rendering follows `img/gradient.go` of SoftKiwiGames/cli.
 
 use std::path::Path;
 
@@ -20,10 +20,10 @@ const BAYER8: [[u8; 8]; 8] = [
     [63, 31, 55, 23, 61, 29, 53, 21],
 ];
 
-/// Whether `file` is a gradient file (`*.gradient`, any case).
+/// Whether `file` is a gradient file (`*.agradient`, any case).
 pub fn is_gradient(file: &Path) -> bool {
     file.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("gradient"))
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("agradient"))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -89,8 +89,8 @@ impl Layout {
     }
 }
 
-/// An image split into equal cells, filled in `layout` order: `.gradient` and `.palette`
-/// files; see docs/spec/gradient.md#image.
+/// An image split into equal cells, filled in `layout` order: `.agradient` and `.apalette`
+/// files; see docs/spec/agradient.md#image.
 pub trait CellGrid {
     /// Width, height, cell width, cell height, px.
     fn grid(&self) -> [u32; 4];
@@ -216,7 +216,7 @@ pub struct Gradient {
     pub dither: Dither,
     /// At least two, ordered by `at`.
     pub stops: Vec<Stop>,
-    /// Run on this gradient's cell, its color only; see docs/spec/gradient.md#modifiers.
+    /// Run on this gradient's cell, its color only; see docs/spec/agradient.md#modifiers.
     pub modifiers: Vec<crate::noise::Modifier>,
 }
 
@@ -313,7 +313,7 @@ fn position(i: u32, length: u32) -> f64 {
     }
 }
 
-/// The color of pixel `(x, y)` (cell-local) at position `t`; see docs/spec/gradient.md#image.
+/// The color of pixel `(x, y)` (cell-local) at position `t`; see docs/spec/agradient.md#image.
 fn shade(stops: &[Stop], dither: Dither, t: f64, x: u32, y: u32) -> [u8; 4] {
     let mut k = 0;
     while k + 2 < stops.len() && t > stops[k + 1].at {
@@ -353,7 +353,7 @@ fn quantize(v: f64, d: f64) -> u8 {
     (v + d).floor().clamp(0.0, 255.0) as u8
 }
 
-/// A `.gradient` file; see docs/spec/gradient.md.
+/// An `.agradient` file; see docs/spec/agradient.md.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Gradients {
     pub width: u32,
@@ -419,7 +419,7 @@ impl Gradients {
         Ok(gradients)
     }
 
-    /// The written form, see docs/spec/gradient.md#written-form.
+    /// The written form, see docs/spec/agradient.md#written-form.
     pub fn to_toml(&self) -> String {
         let mut out = self.grid_toml();
         for gradient in &self.gradients {
@@ -501,7 +501,7 @@ fn parse_gradient(item: toml::Value) -> Result<Gradient, String> {
     Ok(gradient)
 }
 
-/// `stops = [...]`: at least two stops, ordered by position; see docs/spec/gradient.md.
+/// `stops = [...]`: at least two stops, ordered by position; see docs/spec/agradient.md.
 pub fn parse_stops(value: toml::Value) -> Result<Vec<Stop>, String> {
     let toml::Value::Array(items) = value else {
         return Err("stops must be an array of tables".into());
