@@ -291,7 +291,7 @@ pub(super) struct ConfigDialog {
 pub(super) enum DialogEnd {
     Open,
     Close,
-    Saved(Project),
+    Saved(Box<Project>),
 }
 
 impl ConfigDialog {
@@ -612,7 +612,7 @@ pub(super) fn config_dialog(ctx: &egui::Context, dialog: &mut ConfigDialog) -> D
                             .and_then(|()| {
                                 project_config::load(&dialog.root).map_err(|e| e.to_string())
                             }) {
-                            Ok(project) => DialogEnd::Saved(project),
+                            Ok(project) => DialogEnd::Saved(Box::new(project)),
                             Err(e) => {
                                 dialog.problem = Some(e);
                                 DialogEnd::Open
@@ -630,10 +630,12 @@ pub(super) fn config_dialog(ctx: &egui::Context, dialog: &mut ConfigDialog) -> D
             }
         });
     // Escape cancels the new target's name first; a click outside does nothing.
-    if matches!(end, DialogEnd::Open) && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        if dialog.naming.take().is_none() && !std::mem::take(&mut dialog.confirm_remove) {
-            end = DialogEnd::Close;
-        }
+    if matches!(end, DialogEnd::Open)
+        && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        && dialog.naming.take().is_none()
+        && !std::mem::take(&mut dialog.confirm_remove)
+    {
+        end = DialogEnd::Close;
     }
     end
 }

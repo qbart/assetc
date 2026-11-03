@@ -262,6 +262,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 /// Why a config text does not load.
+#[derive(Debug)]
 pub enum Problem {
     Parse(toml::de::Error),
     /// A target that does not resolve.

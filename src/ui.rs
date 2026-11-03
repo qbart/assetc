@@ -1129,7 +1129,7 @@ fn shell(
             DialogEnd::Close => state.config = None,
             DialogEnd::Saved(loaded) => {
                 state.config = None;
-                *project = loaded;
+                *project = *loaded;
                 state.notice = Some(format!("Saved {}", crate::config::FILE_NAME));
                 state.rescan = true;
             }
