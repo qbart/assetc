@@ -126,6 +126,7 @@ enum Kind {
     CompiledTree,
     CompiledAtlas,
     Manifest,
+    Pack,
     Ignored,
     File,
 }
@@ -157,6 +158,7 @@ impl Kind {
             Self::CompiledTree => "Compiled tree",
             Self::CompiledAtlas => "Compiled atlas",
             Self::Manifest => "Manifest",
+            Self::Pack => "Pack",
             Self::Ignored => "Ignored",
             Self::File => "File",
         }
@@ -239,6 +241,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Output if has_ext(manifest::Kind::Tree.extension()) => Kind::CompiledTree,
         Location::Output if has_ext(manifest::Kind::Atlas.extension()) => Kind::CompiledAtlas,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
+        Location::Output if crate::pack::is_pack(file) => Kind::Pack,
         Location::Output => Kind::File,
     };
     out.rows.push(("Kind", kind.name().into()));
@@ -330,6 +333,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
                 out.compiled_bytes = Some(bytes);
             }),
         Kind::Manifest => manifest(file, &mut out),
+        Kind::Pack => pack_rows(project, file, &mut out),
         Kind::Ignored | Kind::File => Ok(()),
     };
     if let Err(message) = result {
@@ -337,7 +341,11 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         // A LUT has no image to fall back on, so the canvas shows the error itself.
         out.note = matches!(
             kind,
-            Kind::ColorLut | Kind::CompiledMesh | Kind::CompiledMaterial | Kind::Manifest
+            Kind::ColorLut
+                | Kind::CompiledMesh
+                | Kind::CompiledMaterial
+                | Kind::Manifest
+                | Kind::Pack
         )
         .then(|| message.clone());
         out.rows.push(("Error", message));
@@ -1178,6 +1186,74 @@ fn manifest(file: &Path, out: &mut Inspection) -> Result<(), String> {
                         },
                     ],
                     weak: missing,
+                    swatch: None,
+                }
+            })
+            .collect(),
+        filterable: true,
+    });
+    Ok(())
+}
+
+/// A pack's layout, contents by kind and entries; see docs/features/pack.md#inspector.
+fn pack_rows(project: &Project, file: &Path, out: &mut Inspection) -> Result<(), String> {
+    use crate::pack;
+    let contents = pack::read(file)?;
+    let n = contents.entries.len();
+    out.rows
+        .push(("Format", format!("APAK v{}", pack::VERSION)));
+    out.rows.push(("Entries", n.to_string()));
+    out.rows
+        .push(("Alignment", format_size(contents.alignment as u64)));
+    out.rows.push((
+        "Layout",
+        format!(
+            "{} header + {} contents + {} data",
+            format_size(pack::HEADER_SIZE),
+            format_size(contents.toc_bytes),
+            format_size(contents.data())
+        ),
+    ));
+    out.rows.push(("Padding", format_size(contents.padding())));
+    for (kind, count, bytes) in contents.by_kind() {
+        out.rows.push((
+            pack::kind_title(kind).1,
+            format!("{count} · {}", format_size(bytes)),
+        ));
+    }
+    let output = project.output_dir();
+    out.data = Some(DataTable {
+        header: format!(
+            "APAK v{}   {n} entries   {}",
+            pack::VERSION,
+            format_size(contents.bytes)
+        ),
+        columns: vec!["#", "Kind", "Path", "Size", "Offset", "Asset ID"],
+        rows: contents
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                // The loose file the entry was packed from, compared by size.
+                let loose = output
+                    .as_ref()
+                    .map(|dir| fs::metadata(dir.join(&e.path)).map(|m| m.len()));
+                let note = match loose {
+                    Some(Err(_)) => " (missing)",
+                    Some(Ok(len)) if len != e.size => " (changed)",
+                    _ => "",
+                };
+                DataRow {
+                    filter: e.path.to_lowercase(),
+                    cells: vec![
+                        i.to_string(),
+                        pack::kind_title(e.kind).0.into(),
+                        format!("{}{note}", e.path),
+                        format_size(e.size),
+                        e.offset.to_string(),
+                        format!("{:#018x}", e.id),
+                    ],
+                    weak: !note.is_empty(),
                     swatch: None,
                 }
             })

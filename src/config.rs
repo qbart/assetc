@@ -42,11 +42,37 @@ pub struct Config {
     pub textures: Textures,
     pub meshes: Meshes,
     pub locators: Locators,
+    pub pack: Pack,
     /// Named build targets, as written; see docs/spec/assetc.toml.md#targets.
     pub targets: std::collections::BTreeMap<String, toml::Table>,
     /// The file's top-level table, that targets are merged into.
     #[serde(skip)]
     pub raw: toml::Table,
+}
+
+/// How `assetc pack` bundles the output, see docs/spec/assetc.toml.md#pack.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Pack {
+    /// The pack's path, relative to `output`.
+    pub file: String,
+    /// Byte alignment of every packed file.
+    pub alignment: u32,
+    /// Globs of the output files packed.
+    pub include: Vec<String>,
+    /// Globs of the output files left out.
+    pub exclude: Vec<String>,
+}
+
+impl Default for Pack {
+    fn default() -> Self {
+        Self {
+            file: "assetc.pak".into(),
+            alignment: 16,
+            include: vec!["**".into()],
+            exclude: Vec::new(),
+        }
+    }
 }
 
 /// Locators shared between models, see docs/spec/assetc.toml.md#locators.
@@ -140,6 +166,7 @@ impl Default for Config {
             textures: Textures::default(),
             meshes: Meshes::default(),
             locators: Locators::default(),
+            pack: Pack::default(),
             targets: Default::default(),
             raw: toml::Table::new(),
         }
@@ -234,6 +261,33 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// Why a config text does not load.
+pub enum Problem {
+    Parse(toml::de::Error),
+    /// A target that does not resolve.
+    Target(String),
+}
+
+impl fmt::Display for Problem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Parse(e) => write!(f, "{}", e.message()),
+            Self::Target(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+/// Reads a config text as loading `assetc.toml` does: every target must resolve, even when
+/// building the default.
+pub fn parse(text: &str) -> Result<Config, Problem> {
+    let mut config: Config = toml::from_str(text).map_err(Problem::Parse)?;
+    config.raw = toml::from_str(text).map_err(Problem::Parse)?;
+    for name in config.targets.keys() {
+        config.target(name).map_err(Problem::Target)?;
+    }
+    Ok(config)
+}
+
 /// Walks up from `start` and returns the first `assetc.toml` found.
 pub fn find(start: &Path) -> Option<PathBuf> {
     start
@@ -248,14 +302,10 @@ pub fn load(start: &Path) -> Result<Project, Error> {
         return Ok(Project::default());
     };
     let text = fs::read_to_string(&path).map_err(|e| Error::Io(path.clone(), e))?;
-    let mut config: Config = toml::from_str(&text).map_err(|e| Error::Parse(path.clone(), e))?;
-    config.raw = toml::from_str(&text).map_err(|e| Error::Parse(path.clone(), e))?;
-    // Every target must resolve, even when building the default.
-    for name in config.targets.keys() {
-        config
-            .target(name)
-            .map_err(|e| Error::Target(path.clone(), e))?;
-    }
+    let config = parse(&text).map_err(|e| match e {
+        Problem::Parse(e) => Error::Parse(path.clone(), e),
+        Problem::Target(e) => Error::Target(path.clone(), e),
+    })?;
     Ok(Project {
         root: path.parent().map(Path::to_path_buf),
         config,

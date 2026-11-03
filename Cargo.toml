@@ -19,6 +19,7 @@ meshopt-pure = "1.3.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.154", features = ["preserve_order"] }
 toml = "1.1.8"
+toml_edit = "0.25.17"
 ttf-parser = "0.25.1"
 exr = { version = "1.74.2", default-features = false }
 half = "2.7.1"

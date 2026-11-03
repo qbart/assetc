@@ -7,7 +7,8 @@ use egui::{
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -15,7 +16,7 @@ use crate::amesh::{MeshOptions, MeshSettings};
 use crate::amod::{self, Amod};
 use crate::aschema::{self, Body, Schema};
 use crate::assets::Assets;
-use crate::build::{self, Outcome};
+use crate::build;
 use crate::color_picker::{self, Picker};
 use crate::config::Project;
 use crate::enrich::{self, PropValue, Properties, Region, ShapeType};
@@ -46,6 +47,7 @@ use crate::tree::{FileTrees, Listing, Node};
 use crate::vertex_colors;
 
 mod anim;
+mod config_dialog;
 mod curve;
 mod data;
 mod graph;
@@ -54,6 +56,7 @@ use crate::agraph::Graph;
 use crate::vision::Vision;
 use crate::{chart, preview3d};
 use anim::{AnimPlayer, canvas_compiled_animation};
+use config_dialog::{ConfigDialog, DialogEnd, config_dialog};
 use data::{DataEdit, PreparedData, canvas_data, instances_tab};
 use graph::{GraphEdit, GraphView, canvas_graph, graph_tab};
 use schema::{SchemaEdit, canvas_schema, types_tab};
@@ -78,6 +81,11 @@ struct UiState {
     browser_tab: BrowserTab,
     rescan: bool,
     start_build: bool,
+    /// Pack after the build started by `start_build`.
+    pack: bool,
+    /// Open the Config dialog.
+    open_config: bool,
+    config: Option<ConfigDialog>,
     build: BuildStatus,
     selection: Option<Selection>,
     /// Set when the selection changed or the trees were rescanned.
@@ -460,8 +468,9 @@ impl Channels {
 
 enum BuildStatus {
     Idle,
-    /// The build thread and when it started.
-    Running(JoinHandle<Result<Outcome, build::Error>>, Instant),
+    /// The build (and pack) thread with its final message, when it started, and whether it is
+    /// packing by now.
+    Running(JoinHandle<String>, Instant, Arc<AtomicBool>),
     Finished(String),
 }
 
@@ -474,6 +483,9 @@ impl Default for UiState {
             browser_tab: BrowserTab::Input,
             rescan: false,
             start_build: false,
+            pack: false,
+            open_config: false,
+            config: None,
             build: BuildStatus::Idle,
             selection: None,
             reinspect: false,
@@ -712,7 +724,7 @@ fn scan_trees(mut commands: Commands, project: Res<Project>) {
 fn shell(
     mut contexts: EguiContexts,
     mut state: ResMut<UiState>,
-    project: Res<Project>,
+    mut project: ResMut<Project>,
     mut trees: ResMut<FileTrees>,
     mut assets: ResMut<Assets>,
     mut exit: MessageWriter<AppExit>,
@@ -736,14 +748,16 @@ fn shell(
 
     egui::Panel::top("menu_bar")
         .frame(bar_frame().inner_margin(Margin::symmetric(8, 0)))
-        .show(&mut root, |ui| menu_bar(ui, logo, &mut state, &mut exit));
+        .show(&mut root, |ui| {
+            menu_bar(ui, logo, &mut state, project.root.is_some(), &mut exit)
+        });
 
     egui::Panel::bottom("status_bar")
         .frame(bar_frame())
         .show(&mut root, |ui| {
             let busy_since = [
                 match &state.build {
-                    BuildStatus::Running(_, since) => Some(*since),
+                    BuildStatus::Running(_, since, _) => Some(*since),
                     _ => None,
                 },
                 state.inspector.running.as_ref().map(|(_, since, _)| *since),
@@ -1106,9 +1120,26 @@ fn shell(
         state.licenses = licenses_dialog(&ctx);
     }
 
+    if std::mem::take(&mut state.open_config) && project.root.is_some() {
+        state.config = Some(ConfigDialog::open(&project));
+    }
+    if let Some(dialog) = &mut state.config {
+        match config_dialog(&ctx, dialog) {
+            DialogEnd::Open => {}
+            DialogEnd::Close => state.config = None,
+            DialogEnd::Saved(loaded) => {
+                state.config = None;
+                *project = loaded;
+                state.notice = Some(format!("Saved {}", crate::config::FILE_NAME));
+                state.rescan = true;
+            }
+        }
+    }
+
     if std::mem::take(&mut state.start_build) {
         state.notice = None;
-        start_build(&mut state, &project);
+        let pack = std::mem::take(&mut state.pack);
+        start_build(&mut state, &project, pack);
     }
     poll_build(&mut state);
 
@@ -1605,7 +1636,9 @@ fn load_texture(
     ctx.load_texture(name, image, options)
 }
 
-fn start_build(state: &mut UiState, project: &Project) {
+/// Builds, then packs when `pack`, on a thread; see docs/features/build.md#gui and
+/// docs/features/pack.md#gui.
+fn start_build(state: &mut UiState, project: &Project, pack: bool) {
     if matches!(state.build, BuildStatus::Running(..)) {
         return;
     }
@@ -1613,28 +1646,44 @@ fn start_build(state: &mut UiState, project: &Project) {
         return;
     };
     let config = project.config.clone();
-    state.build = BuildStatus::Running(
-        std::thread::spawn(move || build::run(&input, &output, &config)),
-        Instant::now(),
-    );
+    let packing = Arc::new(AtomicBool::new(false));
+    let flag = packing.clone();
+    let run = move || {
+        let settings = match pack.then(|| crate::pack::Settings::new(&config.pack)) {
+            Some(Err(e)) => return format!("Pack failed: {e}"),
+            Some(Ok(settings)) => Some(settings),
+            None => None,
+        };
+        let outcome = match build::run(&input, &output, &config) {
+            Ok(outcome) => outcome,
+            Err(e) => return format!("Build failed: {e}"),
+        };
+        let Some(settings) = settings.filter(|_| outcome.failures.is_empty()) else {
+            return outcome.summary();
+        };
+        flag.store(true, Ordering::Relaxed);
+        match crate::pack::write(&output, &settings) {
+            Ok((_, contents)) => crate::pack::summary(&contents, &settings.file),
+            Err(e) => format!("Pack failed: {e}"),
+        }
+    };
+    state.build = BuildStatus::Running(std::thread::spawn(run), Instant::now(), packing);
 }
 
 fn poll_build(state: &mut UiState) {
-    let BuildStatus::Running(handle, _) = &state.build else {
+    let BuildStatus::Running(handle, ..) = &state.build else {
         return;
     };
     if !handle.is_finished() {
         return;
     }
-    let BuildStatus::Running(handle, _) = std::mem::replace(&mut state.build, BuildStatus::Idle)
+    let BuildStatus::Running(handle, ..) = std::mem::replace(&mut state.build, BuildStatus::Idle)
     else {
         unreachable!();
     };
-    let message = match handle.join() {
-        Ok(Ok(outcome)) => outcome.summary(),
-        Ok(Err(e)) => format!("Build failed: {e}"),
-        Err(_) => "Build failed: build thread panicked".into(),
-    };
+    let message = handle
+        .join()
+        .unwrap_or_else(|_| "Build failed: build thread panicked".into());
     state.build = BuildStatus::Finished(message);
     state.rescan = true;
 }
@@ -1650,11 +1699,18 @@ const BUILD_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::B);
 const RESCAN_SHORTCUT: egui::KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::R);
+const PACK_SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(
+    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+    egui::Key::B,
+);
+const CONFIG_SHORTCUT: egui::KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::Comma);
 
 fn menu_bar(
     ui: &mut Ui,
     logo: &egui::TextureHandle,
     state: &mut UiState,
+    has_project: bool,
     exit: &mut MessageWriter<AppExit>,
 ) {
     // Square, gap-free items as tall as the bar, so the highlight covers the whole item.
@@ -1688,23 +1744,27 @@ fn menu_bar(
         if ui.input_mut(|i| i.consume_shortcut(&quit)) {
             exit.write(AppExit::Success);
         }
-        // Build and rescan; see docs/features/build.md#gui and docs/features/gui.md#file-browser.
-        if ui.input_mut(|i| i.consume_shortcut(&BUILD_SHORTCUT)) {
-            state.start_build = true;
-        }
-        if ui.input_mut(|i| i.consume_shortcut(&RESCAN_SHORTCUT)) {
-            state.rescan = true;
+        // Build, pack, config and rescan; see docs/features/build.md#gui,
+        // docs/features/pack.md#gui, docs/features/config.md and docs/features/gui.md#file-browser.
+        // Not while a dialog is open; pack first, as its shortcut holds the build's.
+        let building = matches!(state.build, BuildStatus::Running(..));
+        if state.config.is_none() {
+            if ui.input_mut(|i| i.consume_shortcut(&PACK_SHORTCUT)) {
+                state.start_build = true;
+                state.pack = true;
+            }
+            if ui.input_mut(|i| i.consume_shortcut(&BUILD_SHORTCUT)) {
+                state.start_build = true;
+            }
+            if ui.input_mut(|i| i.consume_shortcut(&CONFIG_SHORTCUT)) {
+                state.open_config = true;
+            }
+            if ui.input_mut(|i| i.consume_shortcut(&RESCAN_SHORTCUT)) {
+                state.rescan = true;
+            }
         }
         ui.menu_button("File", |ui| {
-            let response = menu_row(ui, "Quit", None, true);
-            ui.painter().text(
-                pos2(response.rect.right() - 12.0, response.rect.center().y),
-                Align2::RIGHT_CENTER,
-                ui.ctx().format_shortcut(&quit),
-                FontId::proportional(14.0),
-                TEXT_WEAK,
-            );
-            if response.clicked() {
+            if shortcut_row(ui, "Quit", &quit, true).clicked() {
                 exit.write(AppExit::Success);
             }
         });
@@ -1719,6 +1779,19 @@ fn menu_bar(
             let right = &mut state.show_right_sidebar;
             if menu_item(ui, "Right Sidebar", Some(*right)).clicked() {
                 *right = !*right;
+            }
+        });
+        ui.menu_button("Build", |ui| {
+            if shortcut_row(ui, "Config…", &CONFIG_SHORTCUT, has_project).clicked() {
+                state.open_config = true;
+            }
+            let can_build = has_project && !building;
+            if shortcut_row(ui, "Build", &BUILD_SHORTCUT, can_build).clicked() {
+                state.start_build = true;
+            }
+            if shortcut_row(ui, "Pack", &PACK_SHORTCUT, can_build).clicked() {
+                state.start_build = true;
+                state.pack = true;
             }
         });
         ui.menu_button("Help", |ui| {
@@ -1781,6 +1854,24 @@ fn licenses_dialog(ctx: &egui::Context) -> bool {
     open && !modal.should_close()
 }
 
+/// A dropdown row with its shortcut right-aligned; disabled rows are weak and not clickable.
+fn shortcut_row(
+    ui: &mut Ui,
+    label: &str,
+    shortcut: &egui::KeyboardShortcut,
+    enabled: bool,
+) -> Response {
+    let response = menu_row(ui, label, None, enabled);
+    ui.painter().text(
+        pos2(response.rect.right() - 12.0, response.rect.center().y),
+        Align2::RIGHT_CENTER,
+        ui.ctx().format_shortcut(shortcut),
+        FontId::proportional(14.0),
+        TEXT_WEAK,
+    );
+    response
+}
+
 /// Full-width dropdown row; `check` is `Some` for toggles.
 fn menu_item(ui: &mut Ui, label: &str, check: Option<bool>) -> Response {
     menu_row(ui, label, check, true)
@@ -1838,6 +1929,9 @@ fn status_bar(
         }
         match build {
             _ if let Some(notice) = notice => ui.label(notice),
+            BuildStatus::Running(_, _, packing) if packing.load(Ordering::Relaxed) => {
+                ui.label("Packing…")
+            }
             BuildStatus::Running(..) => ui.label("Building…"),
             _ if busy => ui.label("Processing…"),
             BuildStatus::Finished(message) => ui.label(message),
@@ -2195,7 +2289,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "apalette" => Icon::Palette,
         "aschema" => Icon::Braces,
         "agraph" => Icon::GraphStar,
-        "adata" => Icon::Package,
+        "adata" | "pak" => Icon::Package,
         "atree" => Icon::ListTree,
         "aatlas" => Icon::Map,
         "amod" => Icon::Settings2,

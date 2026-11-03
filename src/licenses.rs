@@ -172,7 +172,7 @@ mod tests {
         fn part_of(name: &str) -> &str {
             match name {
                 "egui_extras" => "egui",
-                "serde" | "serde_json" | "toml" => "serde and toml",
+                "serde" | "serde_json" | "toml" | "toml_edit" => "serde and toml",
                 other => other,
             }
         }

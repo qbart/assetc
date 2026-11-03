@@ -31,6 +31,7 @@ mod manifest;
 mod material;
 mod model;
 mod noise;
+mod pack;
 mod palette;
 mod path;
 mod plan;
@@ -71,6 +72,12 @@ enum Command {
         #[arg(long)]
         target: Option<String>,
     },
+    /// Build, then bundle the output into one .pak file
+    Pack {
+        /// Pack this target of assetc.toml instead of the default
+        #[arg(long)]
+        target: Option<String>,
+    },
     /// Build, then rebuild what changes until stopped
     Watch {
         /// Watch this target of assetc.toml instead of the default
@@ -83,6 +90,7 @@ fn main() -> ExitCode {
     let result = match Cli::parse().command {
         Some(Command::Init) => init(),
         Some(Command::Build { target }) => build(target.as_deref()),
+        Some(Command::Pack { target }) => pack(target.as_deref()),
         Some(Command::Watch { target }) => watch(target.as_deref()),
         None => open(),
     };
@@ -141,6 +149,19 @@ fn build(target: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         return Err(outcome.summary().into());
     }
     println!("{} into {}", outcome.summary(), output.display());
+    Ok(())
+}
+
+/// Builds, then packs the output; see docs/features/pack.md#cli.
+fn pack(target: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let (project, _, output) = load_target(target)?;
+    let settings = pack::Settings::new(&project.config.pack)?;
+    build(target)?;
+    let (file, contents) = pack::write(&output, &settings)?;
+    println!("{}", pack::summary(&contents, &file.display().to_string()));
+    for line in pack::stats(&contents) {
+        println!("{line}");
+    }
     Ok(())
 }
 
