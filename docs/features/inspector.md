@@ -203,7 +203,7 @@ Compiled schemas, data, graphs and trees (`.aschema.bin`, `.adata.bin`, `.agraph
 
 - **Info**: Kind (`Compiled schema`, `Compiled data`, `Compiled graph`,
   `Compiled tree`), Size, the counts of its descriptor (Types, Fields and
-  Values; Types and Instances and Values; Nodes, Edges and Properties;
+  Values; Instances, Values, Types and References; Nodes, Edges and Properties;
   Nodes, Properties and Depth), Asset path and Asset ID.
 - The canvas: its [Chunks view](models.md#chunks-view), every chunk as a
   table: one row per record, one column per field of the record's spec

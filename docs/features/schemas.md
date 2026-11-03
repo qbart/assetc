@@ -146,7 +146,7 @@ sets the field's type (the text field stays editable for anything else):
 | Curve     | `curve` |
 | Struct    | the file's structs, in the Types tab's order (disabled when there are none) |
 | Enum      | the file's enums, likewise |
-| Reference | the [asset kinds](../aschema.md#asset-references): Texture, Noise, Gradient, Palette, Model, Font, Color LUT, HDR map, Atlas, Material, Graph, Tree, Data; each sets `asset<texture>`, `asset<noise>`, … |
+| Reference | the [asset kinds](../aschema.md#asset-references): Texture, Noise, Gradient, Palette, Model, Font, Color LUT, HDR map, Atlas, Material, Graph, Tree, Data; each sets `asset<texture>`, `asset<noise>`, …; then, after a separator, **Instance ▸**: the file's structs (disabled when there are none), each setting `ref<S>`, a [reference to an instance](instances.md#references) |
 | List      | the Value, Color, Curve, Struct, Enum and Reference submenus again; an item `T` there sets `list<T>` |
 
 The current type is marked with a `check` in its submenu.
@@ -201,8 +201,13 @@ in the type's data encoding:
 - `asset<K>`: a dropdown of `—` (`""`) and every file of kind `K` in the
   input directory, by input-relative path, sorted; a path that is none of
   them stays shown.
-- Refs, and values that do not have their type's JSON shape (a list default
-  that is not an array, a struct default that is not an object): JSON text.
+- `ref<S>`: a dropdown of `—` (`""`) and the ids of every instance of `S`
+  in the data files whose `$schema` is this schema (as the
+  [project](instances.md#references) finds them), each with its file's
+  input-relative path right-aligned in `TEXT_WEAK`; a stored id that is
+  none of them stays shown.
+- Values that do not have their type's JSON shape (a list default that is
+  not an array, a struct default that is not an object): JSON text.
 
 A default that does not encode as the type is kept as typed and reported as
 a problem.

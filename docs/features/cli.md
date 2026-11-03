@@ -86,7 +86,7 @@ Keeps the output up to date while you edit the input: a build, then an
     | `.gltf` model | every file in its folder and below (buffers and images it may refer to) |
     | atlas | every file in the `.atlas` folder |
     | schema, graph, tree | its source |
-    | data file | its source and every `*.aschema` in the input |
+    | data file | its source, every `*.aschema` and every `*.adata` in the input (its [refs](instances.md#references) name other files' instances) |
     | material | its `.mat.toml` (when it has one) |
 
   Every other asset is **up to date**: not written, counted in the summary as

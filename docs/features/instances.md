@@ -163,25 +163,51 @@ rules:
     checkboxes); what an item does not set falls back to its struct's
     defaults.
   - A list item: `n items` and its own items under it.
-- `ref<S>`: a dropdown of `—` (`""`) and the ids of this file's instances of
-  `S`, in file order; a stored id that is none of them stays shown.
+- `ref<S>`: a dropdown of `—` (`""`) and every instance of `S` in the
+  [project](#references): this file's first, in file order, then the other
+  files', by file path then file order, each with its file's
+  input-relative path right-aligned in `TEXT_WEAK`; a stored id that is
+  none of them stays shown. After it, **Go to** (`link-2`, 16 px icon
+  button, `TEXT_WEAK`, tooltip `Go to <file>: <id>`; only when the id is
+  found) chooses the target: in this file, that instance; in another, it
+  selects that file in the Input tree with that instance chosen.
 - `asset<K>`: a dropdown of `—` (`""`) and every file of kind `K` in the
   input directory (input-relative paths, sorted), as for schema defaults.
 
+## References
+
+A `ref<S>` field points at an instance instead of holding a copy of its
+values: a `Monster`'s `weapon` names the `Weapon` instance `rusty_sword`,
+and editing the sword reaches every monster that uses it. The struct is
+chosen in the schema with **Type ▸ Reference ▸ Instance**
+([type menu](schemas.md#type-menu)); data stores the target's `$id`
+([§4.3](../aschema.md#43-refs)).
+
+**The project** of a data file is every `.adata` file in the input
+directory whose `$schema` names the same schema file (compared as resolved
+paths), found as the file browser lists files (entries starting with `.`
+skipped, symlinks not followed). A ref may name an instance of any of
+them, and ids are unique per type across all of them
+([§4.1](../aschema.md#41-ids-and-the-project)). The project is read from
+disk whenever the file is inspected, with the edited file's own instances
+taken as edited.
+
 ## Problems
 
-Every data check of [§5](../aschema.md#5-validation) that one file can
-make is checked whenever the file or its schema changes:
+Every data check of [§5](../aschema.md#5-validation) is checked whenever
+the file or its schema changes, against the [project](#references) for
+ids and refs:
 
 | Check | Level |
 |-------|-------|
 | `$type` not a struct of the schema; `$id` missing or not an identifier | error |
 | The same `$type` and `$id` twice in the file | error |
+| An instance whose `$type` and `$id` an instance of another file of the project has (`Weapon/sword is also in <file>`) | error |
 | A value that does not encode as its field's type (a `null` is fine in an optional field; an `asset<K>` path not of kind `K`) | error |
 | A number outside the field's `min` / `max` | warning |
 | A ref field without a default left out or `""` (not optional) | warning |
 | An `asset<K>` path that does not exist in the input | warning |
-| A ref to an id that no instance of that type in the file has | warning |
+| A ref to an id that no instance of that type in the project has (`no Weapon "sword" in the project`) | warning |
 | A key that is not a field of its struct (on an instance or a nested struct value); kept | warning |
 
 The problem icon is `bug`, 16 px: `CHANNEL_R` when there is an error,
@@ -206,10 +232,17 @@ errors, fails the build: `<message>` of the first error, `(and <n> more)`
 when there are more; warnings do not. The CLI line reads `<source> ->
 <output> (<n> instances)`.
 
+Each ref is compiled with where its target is: the asset ID of the
+`.adata.bin` holding it and its index there (the `REFS` chunk), so a game
+loads the files a data file depends on and follows a ref without looking
+ids up. Since that index changes when another file of the project
+changes, an [incremental build](cli.md#assetc-watch) compiles a data file
+again whenever any `.adata` file changes.
+
 ## Not yet
 
-- The project index: ids across every data file of a schema, refs into
-  other files, renaming an id everywhere.
+- Renaming an id everywhere it is referenced; listing what references an
+  instance.
 - Applying schema refactorings (renamed fields, values, types) to data
   files.
 - Undo.
