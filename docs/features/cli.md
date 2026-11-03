@@ -9,6 +9,9 @@ assetc build      Compile input into output (the default target), see build.md
 assetc build --target <name>
                   Compile input into the target's output with its settings
 assetc watch      Build, then rebuild what changes until stopped (Ctrl+C)
+assetc pack       Build, then bundle the output into one .pak file, see pack.md
+assetc pack --target <name>
+                  The same for a target
 assetc watch --target <name>
                   The same for a target
 assetc --help     Print usage
@@ -36,6 +39,12 @@ assetc --version  Print version
 - An unknown target fails before building: `error: no target "tablet"
   (targets: mobile, preview)`, or `(no targets)`.
 - The GUI's Build button and `Ctrl+B` build the default target.
+
+### `assetc pack`
+
+Builds as `assetc build` does (`--target <name>` the same way), then bundles
+the output into one [`.pak`](../spec/pak.md) file and prints its contents by
+kind; see [`pack.md`](pack.md#cli).
 
 ### `assetc watch`
 

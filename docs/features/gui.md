@@ -10,7 +10,7 @@ the platform's default size.
 
 ```
 +--------------------------------------------------------------+
-| ◆  File  Edit  View  Help                         (menu bar) |
+| ◆  File  Edit  View  Build  Help                  (menu bar) |
 +-------------+------------------------------+-----------------+
 | Input|Output|                              | Inspector       |
 |             |                              |-----------------|
@@ -23,7 +23,7 @@ the platform's default size.
 ```
 
 - **Menu bar** (top, fixed height): logo (see [Logo](#logo)) followed by the
-  `File`, `Edit`, `View`, `Help` menus. See [Menus](#menus).
+  `File`, `Edit`, `View`, `Build`, `Help` menus. See [Menus](#menus).
 - **Left sidebar** (resizable, default width 260 px, min 200 px): file
   browser with two tabs in its header row, **Input** and **Output**, plus
   build (`hammer` icon, see [`build.md`](build.md#gui)) and rescan
@@ -43,7 +43,7 @@ the platform's default size.
   inspection, such as the one after an edit is saved), the message is
   `Processing…` instead of `Ready` or the last build's result; a failed
   file operation's message still comes first, and a build shows
-  `Building…`
+  `Building…` (a pack `Building…`, then `Packing…`)
   (see [`cli.md`](cli.md) and [`build.md`](build.md#gui)), `assetc <version>` on the right in weak text.
 - **Center**: the canvas, previewing the selected file in 2D (zoom, pan,
   tiling) or 3D (on a rotating shape), with a view bar on top; see
@@ -64,11 +64,18 @@ the platform's default size.
   macOS), works anywhere, even while a text field has focus, and is shown
   right-aligned in the item in `TEXT_WEAK`.
 - Global shortcuts (see [`KEYS.md`](../../KEYS.md#global)): `Ctrl+Q` quit,
-  `Ctrl+B` [build](build.md#gui), `Ctrl+R` rescan (`Cmd` on macOS); each
-  works anywhere, even while a text field has focus.
+  `Ctrl+B` [build](build.md#gui), `Ctrl+Shift+B` [pack](pack.md#gui),
+  `Ctrl+,` [config](config.md), `Ctrl+R` rescan (`Cmd` on macOS); each
+  works anywhere, even while a text field has focus (not while a dialog is
+  open).
 - `Edit` contains no items yet (button shown disabled).
 - `View → Left Sidebar` / `View → Right Sidebar` toggle each sidebar (check
   shown when visible); the menu stays open after toggling.
+- `Build` holds **Config…** (opens the [Config dialog](config.md)),
+  **Build** ([build](build.md#gui)) and **Pack** ([pack](pack.md#gui)),
+  each with its shortcut right-aligned in `TEXT_WEAK` like `Quit`. All are
+  disabled without a project; Build and Pack also while a build or pack
+  runs.
 - `Help` shows the application name and version as a non-interactive weak
   row, then **Licenses**, which opens the [Open source](#open-source) dialog.
 
@@ -167,6 +174,7 @@ The icon follows the entry's type, by extension (any case):
 | schema: `aschema`, `aschema.bin`              | `braces`                  |
 | directed graph: `agraph`, `agraph.bin`        | `graph-star`              |
 | data: `adata`, `adata.bin`                    | `package`                 |
+| pack: `pak`                                   | `package`                 |
 | tree: `atree`, `atree.bin`                    | `list-tree`               |
 | atlas folder (`*.atlas`), atlas: `aatlas.bin` | `map`                     |
 | palette: `apalette`                           | `palette`                 |

@@ -19,6 +19,8 @@ a valid config and uses the defaults below.
 | `output` | string | `"build"`  | Directory compiled assets are written to.       |
 | `textures` | table | empty     | Per-texture settings, see below.                |
 | `meshes` | table   | see below  | Mesh build settings, see below.                 |
+| `locators` | table | empty     | Shared locators, see [`[locators]`](#locators). |
+| `pack`   | table   | see below  | Pack settings, see [`[pack]`](#pack).            |
 | `targets` | table  | empty      | Named build targets, see [`[targets]`](#targets). |
 
 ### `[textures]`
@@ -114,6 +116,27 @@ from = "characters/hero.glb"
 match = ["characters/**"]
 ```
 
+### `[pack]`
+
+How [`assetc pack`](../features/pack.md) bundles the output into one
+[`.pak`](pak.md) file.
+
+| Key         | Type             | Default        | Meaning |
+|-------------|------------------|----------------|---------|
+| `file`      | string           | `"assetc.pak"` | Path of the pack, relative to `output`; must end in `.pak` and stay inside `output` |
+| `alignment` | integer          | `16`           | Byte alignment of every packed file: a power of two, 16–65536 (4096 suits page-sized memory mapping) |
+| `include`   | array of strings | `["**"]`       | Globs of the output files to pack, matched against their `output`-relative path (`models/Fox.amesh.bin`), with the syntax of `[textures]` |
+| `exclude`   | array of strings | `[]`           | Globs of output files left out, even when included |
+
+```toml
+[pack]
+alignment = 4096
+exclude = ["**/*.orm.ktx2"]
+```
+
+A bad value or glob fails the pack (not the build) with
+`assetc.toml [pack]: <problem>`.
+
 ### `[targets]`
 
 A **build target** is a named variant of the settings, built with
@@ -128,7 +151,7 @@ settings. Each `[targets.<name>]` table (the name: letters, digits, `_` and
   `<top-level output>-<name>` (`build-mobile`), a sibling of the default
   output, so each target's [stale outputs](../features/build.md#removing-stale-outputs)
   are its own.
-- `textures`, `meshes` and `locators` are merged **key by key** into the
+- `textures`, `meshes`, `locators` and `pack` are merged **key by key** into the
   top-level tables: a key the target gives replaces the same key (a list
   replaces the whole list, `meshes.overrides` too); keys it leaves out keep
   their top-level values.

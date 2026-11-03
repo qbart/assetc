@@ -94,6 +94,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `*.afont.bin`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
 | Output | `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin` | Compiled schema, data, graph or tree, see [Compiled data](#compiled-data) |
 | Output | `assetc.aman.bin` at the output root | Manifest, see [Manifest view](#manifest-view) |
+| Output | `*.pak` (any case)         | Pack, see [`pack.md`](pack.md#inspector) |
 | Output | anything else              | File               |
 | either | folder named `*.env` (any case) | Environment map |
 | Input  | folder named `*.atlas` (any case) | Atlas, see [`atlases.md`](atlases.md#inspector) |

@@ -13,7 +13,19 @@ See [`docs/features/gui.md`](docs/features/gui.md#menus).
 |-------------------------------|--------|
 | `Ctrl+Q` (`Cmd+Q` on macOS)   | Quit   |
 | `Ctrl+B` (`Cmd+B` on macOS)   | Build (see [`docs/features/build.md`](docs/features/build.md#gui)) |
+| `Ctrl+Shift+B` (`Cmd+Shift+B` on macOS) | Build and pack (see [`docs/features/pack.md`](docs/features/pack.md#gui)) |
+| `Ctrl+,` (`Cmd+,` on macOS)   | Open the Config dialog (see [`docs/features/config.md`](docs/features/config.md)) |
 | `Ctrl+R` (`Cmd+R` on macOS)   | Rescan the Input and Output trees |
+
+## Config dialog
+
+See [`docs/features/config.md`](docs/features/config.md).
+
+| Input              | Action |
+|--------------------|--------|
+| `Ctrl+S` (`Cmd+S`) | Save (when the file has no problem) |
+| `Escape`           | Close without saving; while naming a new target: cancel the name |
+| `Enter`            | While naming a new target: add it |
 
 ## File browser (Input tree)
 
