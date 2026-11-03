@@ -818,6 +818,7 @@ fn type_menu(
         }
         // References to instances; see docs/features/instances.md#references.
         ui.separator();
+        ui.spacing_mut().button_padding = vec2(24.0, 7.0);
         let structs = named(false);
         ui.add_enabled_ui(!structs.is_empty(), |ui| {
             ui.menu_button(RichText::new("Instance").size(14.0).color(TEXT), |ui| {
@@ -935,16 +936,17 @@ fn ref_editor(
                 *value = Value::String(String::new());
             }
             for t in refs.clone() {
-                let response = ui.selectable_label(t.id == current, &t.id);
+                let selected = t.id == current;
+                let response = ui.selectable_label(selected, &t.id);
                 if t.file != editors.here {
-                    // The file it is in, right-aligned.
+                    // The file it is in, right-aligned, readable on the selected fill.
                     let rect = response.rect.shrink2(vec2(6.0, 0.0));
                     ui.painter().text(
                         rect.right_center(),
                         Align2::RIGHT_CENTER,
                         &t.file,
                         egui::FontId::proportional(12.0),
-                        TEXT_WEAK,
+                        if selected { BG_BAR } else { TEXT_WEAK },
                     );
                 }
                 if response.clicked() {

@@ -742,6 +742,7 @@ pub fn describe(name: &str) -> &'static str {
         "FIELDS" => "Fields",
         "VALUES" => "Values",
         "INSTANCE" => "Instances",
+        "REFS" => "References",
         "NODES" => "Nodes",
         "EDGES" => "Edges",
         "PROPS" => "Properties",
