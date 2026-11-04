@@ -286,6 +286,9 @@ the canvas 3D view (orbit, zoom and reset as in
   and metallic packed into one ORM texture like the build
   ([ORM packing](#orm-packing)). Each texture is scaled down to at most
   2048 px on its longer side.
+- **Normal scale, occlusion strength and height midlevel** do not change the
+  preview: Bevy's standard material has no such values. They are still
+  written and built.
 - **Height** is shown as parallax (Bevy's depth map is `1 - height`, scaled
   by `height_scale`), also in Displacement mode; the shape is not displaced.
 - **Problems**: when a texture cannot be used (a missing or undecodable file,
@@ -296,10 +299,11 @@ the canvas 3D view (orbit, zoom and reset as in
   (Box, Sphere, Cylinder, Torus; Sphere by default, remembered for all
   materials during the session, apart from the image 3D view's shape) and
   the color vision group.
-- **Lighting**: a drop-down in the canvas' top-left corner, 8 px from the
-  edges, labeled with the current choice: **Studio** (the default light of
+- **Lighting**: a drop-down on a `BG_BAR` card (6 px corners) in the canvas'
+  bottom-right corner, 8 px from the edges, labeled with the current choice: **Studio** (the default light of
   the 3D view) or any HDR environment map (`*.exr`) in `input`, by input
-  path. Choosing a map loads it in the background, like an inspection. An environment map lights the shape and shows as the
+  path. Choosing a map loads it in the background, like an inspection. It is
+  not shown while the file cannot be read. An environment map lights the shape and shows as the
   background, as in [`hdr.md`](hdr.md#preview-and-inspector). The choice is
   kept for the session.
 - The shape turns slowly about its vertical axis, as images do in 3D.
