@@ -195,8 +195,8 @@ the status bar:
   is marked with its model.
 - Selection, hover and rename look as usual; while renaming, the name is
   not colored.
-- Marks are replaced when the next build finishes and cleared when the
-  project is reloaded. A rescan keeps them (an entry renamed or deleted
+- Marks are replaced when the next build finishes and cleared when
+  `assetc.toml` is saved from the Config dialog. A rescan keeps them (an entry renamed or deleted
   since loses its mark).
 - The Output tree is not marked.
 
