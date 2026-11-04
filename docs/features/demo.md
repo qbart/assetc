@@ -55,7 +55,7 @@ A 2D scene (Textures, Atlases, Fonts, Data, Graphs) is laid out for the
 window it was shown in and scrolls when it does not fit:
 
 - Its **content** is the box around everything it draws (sprites, text and
-  graph boxes) plus a 28 px margin. The view never leaves it: scrolling
+  graph boxes) plus a 12 px margin. The view never leaves it: scrolling
   stops at the content's edges, so nothing can be scrolled out of sight.
 - A **scrollbar** shows along the right edge (vertical) and above the
   status line (horizontal) whenever the content is taller or wider than
