@@ -58,6 +58,9 @@ pub struct AtlasConfig {
     pub trim: bool,
     pub power_of_two: bool,
     pub max_size: u32,
+    /// Attached structs and their values; see docs/features/structs.md.
+    pub structs: Vec<crate::structs::Attachment>,
+    pub values: crate::structs::Values,
 }
 
 impl Default for AtlasConfig {
@@ -72,6 +75,8 @@ impl Default for AtlasConfig {
             trim: false,
             power_of_two: false,
             max_size: 4096,
+            structs: Vec::new(),
+            values: crate::structs::Values::new(),
         }
     }
 }
@@ -81,7 +86,11 @@ impl AtlasConfig {
         let mut table: toml::Table = text
             .parse()
             .map_err(|e: toml::de::Error| e.message().to_owned())?;
-        let mut config = Self::default();
+        let mut config = Self {
+            structs: crate::structs::take_toml_attachments(&mut table, "structs")?,
+            values: crate::structs::take_toml_values(&mut table)?,
+            ..Self::default()
+        };
         if let Some(v) = table.remove("packing") {
             let key = v.as_str().ok_or("packing must be a string")?;
             config.packing = Packing::ALL
@@ -127,7 +136,7 @@ impl AtlasConfig {
 
     /// The written form; see docs/spec/atlas.toml.md.
     pub fn to_toml(&self) -> String {
-        format!(
+        let mut out = format!(
             "packing = \"{}\"\ncell_width = {}\ncell_height = {}\ncolumns = {}\npadding = {}\n\
              extrude = {}\ntrim = {}\npower_of_two = {}\nmax_size = {}\n",
             self.packing.key(),
@@ -139,7 +148,10 @@ impl AtlasConfig {
             self.trim,
             self.power_of_two,
             self.max_size
-        )
+        );
+        crate::structs::write_toml_attachments(&mut out, "structs", &self.structs);
+        crate::structs::write_toml_values(&mut out, "values", &self.values);
+        out
     }
 
     /// The folder's `atlas.toml`, or the defaults without one.

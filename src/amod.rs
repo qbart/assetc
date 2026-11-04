@@ -30,6 +30,10 @@ pub struct Amod {
     pub events: Vec<enrich::Event>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.anoise` files.
     pub modifiers: Vec<Modifier>,
+    /// `[[structs]]` and `[values]`: a glTF model's attached structs and their values, see
+    /// docs/features/structs.md.
+    pub structs: Vec<crate::structs::Attachment>,
+    pub values: crate::structs::Values,
 }
 
 /// A named transform on a model, in its joint's space or the model's.
@@ -134,6 +138,8 @@ impl Amod {
             && self.colors.is_empty()
             && self.events.is_empty()
             && self.modifiers.is_empty()
+            && self.structs.is_empty()
+            && self.values.is_empty()
     }
 
     pub fn parse(text: &str) -> Result<Self, String> {
@@ -174,6 +180,8 @@ impl Amod {
             .map(enrich::parse_events)
             .transpose()?
             .unwrap_or_default();
+        let structs = crate::structs::take_toml_attachments(&mut table, "structs")?;
+        let values = crate::structs::take_toml_values(&mut table)?;
         let Tables { mesh, locators } = toml::Value::Table(table)
             .try_into()
             .map_err(|e: toml::de::Error| e.message().to_owned())?;
@@ -223,6 +231,8 @@ impl Amod {
             colors,
             events,
             modifiers,
+            structs,
+            values,
         })
     }
 
@@ -271,6 +281,8 @@ impl Amod {
         enrich::write_colors(&self.colors, &mut out);
         enrich::write_events(&self.events, &mut out);
         noise::write_modifiers(&self.modifiers, &mut out);
+        crate::structs::write_toml_attachments(&mut out, "structs", &self.structs);
+        crate::structs::write_toml_values(&mut out, "values", &self.values);
         // Each table after a blank line, but not the first.
         out.trim_start_matches('\n').to_owned()
     }

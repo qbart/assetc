@@ -445,6 +445,36 @@ fn resolve_items(schema: &Schema, ty: &Ty, v: &Value) -> Value {
     )
 }
 
+/// Problems of `values` as a value of struct `si` (an attached struct's, see
+/// docs/features/structs.md#problems), messages starting with `path`: refs checked against
+/// `ids` (type and id of the project's instances), asset paths against `assets` when given.
+/// Each is `(top-level field, message, warning)`.
+pub fn check_values(
+    schema: &Schema,
+    si: usize,
+    values: &Map<String, Value>,
+    path: &str,
+    ids: HashSet<(&str, &str)>,
+    assets: Option<&[String]>,
+) -> Vec<(Option<String>, String, bool)> {
+    let known = Known { ids, assets };
+    let mut out = Vec::new();
+    check_struct(schema, si, values, path, &known, &mut out);
+    if let Body::Struct { fields, .. } = &schema.types[si].body {
+        for f in fields {
+            if !f.optional
+                && f.default.is_none()
+                && matches!(parse_type(&f.ty), Ok(Ty::Ref(_)))
+                && values.get(&f.name).is_none_or(|v| v == "")
+            {
+                let message = format!("{path}/{}: the ref is not set", f.name);
+                out.push((Some(f.name.clone()), message, true));
+            }
+        }
+    }
+    out
+}
+
 /// What values may point at: the file's instances, and the input's files when known.
 struct Known<'a> {
     ids: HashSet<(&'a str, &'a str)>,

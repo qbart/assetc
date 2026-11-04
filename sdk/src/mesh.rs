@@ -3,6 +3,7 @@
 use crate::Result;
 use crate::chunks::ChunkFile;
 use crate::read::Bytes;
+use crate::structs::Structs;
 
 const FILE: &str = "amesh.bin";
 const VERTEX: usize = 28;
@@ -257,6 +258,8 @@ pub struct Mesh {
     /// Per triangle of [`Mesh::indices`], its regions as bits (region `i` is `1 << i`).
     pub triangle_regions: Vec<u32>,
     pub paths: Vec<Path>,
+    /// Attached structs: [`Scope::Asset`](crate::structs::Scope::Asset) the model.
+    pub structs: Structs,
 }
 
 impl Mesh {
@@ -627,6 +630,7 @@ impl Mesh {
             regions,
             triangle_regions,
             paths,
+            structs: Structs::from_chunks(&file, FILE)?,
         })
     }
 

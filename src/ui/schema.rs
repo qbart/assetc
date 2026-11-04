@@ -1323,6 +1323,7 @@ fn gradient_default(ui: &mut Ui, value: &mut Value, card: &mut GradientCard) {
             .map(|(at, color)| Stop { at, color })
             .collect(),
         modifiers: Vec::new(),
+        ..Gradient::default()
     };
     let before = g.stops.clone();
     ui.push_id("gradient_default", |ui| gradient_editor(ui, &mut g, card));

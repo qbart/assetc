@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config;
 use crate::gradient::{Gradients, is_gradient};
+use crate::ktx2::Usage;
 use crate::manifest::{self, Kind};
 use crate::material;
 use crate::noise::Noise;
@@ -81,6 +82,8 @@ impl Outcome {
                         Kind::Graph => ("graph", "graphs"),
                         Kind::Tree => ("tree", "trees"),
                         Kind::Atlas => ("atlas", "atlases"),
+                        Kind::Gradient => ("gradient", "gradients"),
+                        Kind::Palette => ("palette", "palettes"),
                     };
                     (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
                 })
@@ -204,10 +207,17 @@ pub fn run_cached(
             Job::Texture {
                 source,
                 color,
+                usage,
                 mipmaps,
                 flip_green,
-            } => compile_texture(&input.join(source), &dest, *color, *mipmaps, *flip_green)
-                .map(|levels| levels_detail(*color, levels)),
+            } => compile_texture(
+                &input.join(source),
+                &dest,
+                (*color, *usage),
+                *mipmaps,
+                *flip_green,
+            )
+            .map(|levels| levels_detail(*color, levels)),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
             Job::Model {
@@ -234,9 +244,14 @@ pub fn run_cached(
                     format!("{size}³ LUT {layout}, linear, 1 level")
                 })
             }
-            Job::Material { material, .. } => {
-                write(&dest, &material::encode(material)).map(|()| material_detail(material))
-            }
+            Job::Material {
+                source,
+                material,
+                structs,
+                values,
+            } => compile_material(input, source, material, structs, values)
+                .and_then(|bytes| write(&dest, &bytes))
+                .map(|()| material_detail(material)),
         };
         match result {
             Ok(detail) => {
@@ -329,6 +344,17 @@ fn material_detail(m: &material::Material) -> String {
 /// docs/features/cli.md#assetc-watch. `schemas` holds the input's schemas and data files once
 /// listed.
 fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
+    // Attached structs depend on every schema and data file; see
+    // docs/features/structs.md#build. A source that mentions them is taken to have some.
+    let mentions =
+        |file: PathBuf| fs::read_to_string(file).is_ok_and(|text| text.contains("structs"));
+    let structs = match job {
+        Job::Model { sidecar, .. } => !sidecar.structs.is_empty(),
+        Job::Material { structs, .. } => !structs.is_empty(),
+        Job::Atlas { source, .. } => mentions(input.join(source).join(crate::atlas::CONFIG)),
+        Job::Data { source, kind } => *kind != Kind::Schema && mentions(input.join(source)),
+        _ => false,
+    };
     let mut reads: Vec<PathBuf> = match job {
         Job::Texture { source, .. }
         | Job::Lut { source, .. }
@@ -340,25 +366,7 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
         }
         Job::Model { source, .. } => vec![input.join(source)],
         Job::Atlas { source, .. } => files_under(&input.join(source)),
-        Job::Data { source, kind } => {
-            let mut reads = vec![input.join(source)];
-            if *kind == Kind::Data {
-                reads.extend(
-                    schemas
-                        .get_or_insert_with(|| {
-                            files_under(input)
-                                .into_iter()
-                                .filter(|f| {
-                                    crate::aschema::is_schema(f) || crate::adata::is_data(f)
-                                })
-                                .collect()
-                        })
-                        .iter()
-                        .cloned(),
-                );
-            }
-            reads
-        }
+        Job::Data { source, .. } => vec![input.join(source)],
         Job::Material { source, .. } if source.ends_with(material::SOURCE_SUFFIX) => {
             vec![input.join(source)]
         }
@@ -367,6 +375,27 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
         | Job::FontPart { .. }
         | Job::AtlasPart { .. } => Vec::new(),
     };
+    if structs
+        || matches!(
+            job,
+            Job::Data {
+                kind: Kind::Data,
+                ..
+            }
+        )
+    {
+        reads.extend(
+            schemas
+                .get_or_insert_with(|| {
+                    files_under(input)
+                        .into_iter()
+                        .filter(|f| crate::aschema::is_schema(f) || crate::adata::is_data(f))
+                        .collect()
+                })
+                .iter()
+                .cloned(),
+        );
+    }
     reads.sort();
     let mut text = format!("{job:?}");
     for file in reads {
@@ -574,7 +603,19 @@ fn compile_model(
 ) -> Result<String, String> {
     let p = strip_extension(source);
     let model = crate::model::compile(&input.join(source), p, options, sidecar)?;
-    write(&output.join(format!("{p}.amesh.bin")), &model.mesh)?;
+    // Attached structs; see docs/features/structs.md#build.
+    let scopes = [crate::structs::Scope {
+        scope: crate::structs::ASSET,
+        attachments: &sidecar.structs,
+        owners: vec![crate::structs::Owner {
+            item: 0,
+            label: "model".into(),
+            values: &sidecar.values,
+        }],
+    }];
+    let structs = crate::structs::compile(dir_of(&input.join(source)), input, &scopes)?;
+    let mesh = crate::chunks::with_chunks(model.mesh, crate::amesh::FORMAT, structs)?;
+    write(&output.join(format!("{p}.amesh.bin")), &mesh)?;
     if let Some(animation) = &model.animation {
         write(&output.join(format!("{p}.aanim.bin")), animation)?;
     }
@@ -585,15 +626,21 @@ fn compile_model(
         )?;
     }
     for (name, image, color) in model.images {
-        write_texture(image, &output.join(format!("{p}/{name}.ktx2")), color, true)?;
+        // A glTF's linear images are its normal maps; see docs/features/models.md#build.
+        let usage = match color {
+            ColorSpace::Srgb => Usage::Color,
+            ColorSpace::Linear => Usage::Normal,
+        };
+        let dest = output.join(format!("{p}/{name}.ktx2"));
+        write_texture(image, &dest, (color, usage), true)?;
     }
     for (name, image) in model.orm {
         let dest = output.join(format!("{p}/{name}.orm.ktx2"));
-        write_texture(image, &dest, ColorSpace::Linear, true)?;
+        write_texture(image, &dest, (ColorSpace::Linear, Usage::Orm), true)?;
     }
     for (name, image) in model.color_textures {
         let dest = output.join(format!("{p}/{name}.colors.ktx2"));
-        write_texture(image, &dest, ColorSpace::Srgb, false)?;
+        write_texture(image, &dest, (ColorSpace::Srgb, Usage::Color), false)?;
     }
     Ok(model.detail)
 }
@@ -612,11 +659,23 @@ fn compile_atlas(
     let (width, height) = packed.image.dimensions();
     let frames = packed.frames.len();
     let meta = crate::atlas::encode(&config, &packed, crate::hash::fnv1a64(p.as_bytes()));
+    // Attached structs, kept in its atlas.toml; see docs/features/structs.md#build.
+    let scopes = [crate::structs::Scope {
+        scope: crate::structs::ASSET,
+        attachments: &config.structs,
+        owners: vec![crate::structs::Owner {
+            item: 0,
+            label: "atlas".into(),
+            values: &config.values,
+        }],
+    }];
+    let structs = crate::structs::compile(&input.join(source), input, &scopes)?;
+    let meta = crate::chunks::with_chunks(meta, crate::atlas::FORMAT, structs)?;
     write(&output.join(format!("{p}.aatlas.bin")), &meta)?;
     write_texture(
         packed.image,
         &output.join(format!("{p}.ktx2")),
-        color,
+        (color, Usage::Atlas),
         mipmaps,
     )?;
     Ok(format!("{frames} frames, {width} × {height} px, {summary}"))
@@ -638,6 +697,39 @@ fn first_problem(problems: &[String]) -> Result<(), String> {
         [one] => Err(one.clone()),
         [one, rest @ ..] => Err(format!("{one} (and {} more)", rest.len())),
     }
+}
+
+/// A material's record, then its attached structs as an `ASTRUCT` file; see
+/// docs/spec/amat.bin.md#struct-data.
+fn compile_material(
+    input: &Path,
+    source: &str,
+    m: &material::Material,
+    structs: &[crate::structs::Attachment],
+    values: &crate::structs::Values,
+) -> Result<Vec<u8>, String> {
+    let mut bytes = material::encode(m);
+    let scopes = [crate::structs::Scope {
+        scope: crate::structs::ASSET,
+        attachments: structs,
+        owners: vec![crate::structs::Owner {
+            item: 0,
+            label: "material".into(),
+            values,
+        }],
+    }];
+    let chunks = crate::structs::compile(dir_of(&input.join(source)), input, &scopes)?;
+    if !chunks.is_empty() {
+        let mut writer = crate::chunks::Writer::new(material::ASTRUCT, 1);
+        crate::compiled::put_structs(&mut writer, chunks);
+        bytes.extend(writer.finish());
+    }
+    Ok(bytes)
+}
+
+/// The folder of `file`.
+fn dir_of(file: &Path) -> &Path {
+    file.parent().unwrap_or(Path::new(""))
 }
 
 /// Compiles a schema, data file (resolved), graph or tree to its binary; see
@@ -682,11 +774,32 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
                 format!("{n} instances"),
             )
         }
+        Kind::Gradient => {
+            let file = crate::gradient::Gradients::parse(&text)?;
+            let texture = crate::hash::fnv1a64(strip_extension(rel).as_bytes());
+            let structs = crate::structs::compile(dir_of(source), input, &file.scopes())?;
+            let n = file.gradients.len();
+            (
+                compiled::encode_gradients(&file, texture, structs),
+                format!("{n} gradients"),
+            )
+        }
+        Kind::Palette => {
+            let file = crate::palette::Palette::parse(&text)?;
+            let texture = crate::hash::fnv1a64(strip_extension(rel).as_bytes());
+            let structs = crate::structs::compile(dir_of(source), input, &file.scopes())?;
+            let n = file.colors.len();
+            (
+                compiled::encode_palette(&file, texture, structs),
+                format!("{n} colors"),
+            )
+        }
         Kind::Graph => {
             let graph = crate::agraph::Graph::parse(&text)?;
             first_problem(&graph.check())?;
             let detail = format!("{} nodes, {} edges", graph.nodes.len(), graph.edges.len());
-            (compiled::encode_graph(&graph), detail)
+            let structs = crate::structs::compile(dir_of(source), input, &graph.scopes(None))?;
+            (compiled::encode_graph(&graph, structs), detail)
         }
         _ => {
             let tree = crate::atree::parse(&text)?;
@@ -696,7 +809,13 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
                 tree.nodes.len(),
                 crate::atree::depth(&tree)
             );
-            (compiled::encode_tree(&tree), detail)
+            let mut places = vec![0u32; tree.nodes.len()];
+            for (place, (node, _, _)) in compiled::breadth_first(&tree).into_iter().enumerate() {
+                places[node] = place as u32;
+            }
+            let scopes = tree.scopes(Some(&places));
+            let structs = crate::structs::compile(dir_of(source), input, &scopes)?;
+            (compiled::encode_tree(&tree, structs), detail)
         }
     };
     write(dest, &written)?;
@@ -715,7 +834,7 @@ fn compile_font(input: &Path, source: &str, output: &Path) -> Result<String, Str
     write_texture(
         atlas,
         &output.join(format!("{p}.ktx2")),
-        ColorSpace::Linear,
+        (ColorSpace::Linear, Usage::Font),
         false,
     )?;
     Ok(format!(
@@ -744,9 +863,9 @@ fn compile_lut(source: &Path, dest: &Path, volume: bool) -> Result<usize, String
     let lut = crate::lut::Lut::parse(&text)?;
     let bytes = if volume {
         let n = lut.size as u32;
-        crate::ktx2::encode_rgba8_volume(ColorSpace::Linear, [n, n, n], &lut.volume())
+        crate::ktx2::encode_rgba8_volume(ColorSpace::Linear, Usage::Lut, [n, n, n], &lut.volume())
     } else {
-        crate::ktx2::encode_rgba8(ColorSpace::Linear, &[lut.strip()?])
+        crate::ktx2::encode_rgba8(ColorSpace::Linear, Usage::Lut, &[lut.strip()?])
     };
     write(dest, &bytes)?;
     Ok(lut.size)
@@ -761,7 +880,7 @@ pub fn is_noise(file: &Path) -> bool {
 fn compile_texture(
     source: &Path,
     dest: &Path,
-    color: ColorSpace,
+    color: (ColorSpace, Usage),
     mipmaps: bool,
     flip_green: bool,
 ) -> Result<usize, String> {
@@ -806,13 +925,13 @@ fn compile_orm(input: &Path, sources: &[Option<String>; 3], dest: &Path) -> Resu
             out[*channel] = src[0];
         }
     }
-    write_texture(packed, dest, ColorSpace::Linear, true)
+    write_texture(packed, dest, (ColorSpace::Linear, Usage::Orm), true)
 }
 
 fn write_texture(
     image: image::RgbaImage,
     dest: &Path,
-    color: ColorSpace,
+    (color, usage): (ColorSpace, Usage),
     mipmaps: bool,
 ) -> Result<usize, String> {
     let base = texture::Image {
@@ -825,7 +944,7 @@ fn write_texture(
     } else {
         vec![base]
     };
-    write(dest, &crate::ktx2::encode_rgba8(color, &levels))?;
+    write(dest, &crate::ktx2::encode_rgba8(color, usage, &levels))?;
     Ok(levels.len())
 }
 

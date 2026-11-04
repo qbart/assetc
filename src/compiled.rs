@@ -15,6 +15,8 @@ pub const ASCHEMA: &str = "ASCHEMA";
 pub const ADATA: &str = "ADATA";
 pub const AGRAPH: &str = "AGRAPH";
 pub const ATREE: &str = "ATREE";
+pub const AGRAD: &str = "AGRAD";
+pub const APALETTE: &str = "APALETTE";
 pub const VERSION: u32 = 1;
 /// The `.adata.bin` version: 2 added `REFS`; see docs/spec/adata.bin.md.
 pub const DATA_VERSION: u32 = 2;
@@ -349,6 +351,224 @@ pub fn encode_data(
     writer.finish()
 }
 
+/// The struct chunks of attached structs, every owner's values resolved; see
+/// docs/spec/astruct.md. Every attachment must name a struct of a schema that was read.
+pub fn encode_structs(
+    scopes: &[crate::structs::Scope],
+    schemas: &crate::structs::Schemas,
+) -> Vec<(&'static str, Vec<u8>)> {
+    use crate::structs::{resolve_attachment, schema_id};
+    let resolved: Vec<_> = scopes
+        .iter()
+        .flat_map(|s| s.attachments)
+        .filter_map(|a| resolve_attachment(a, schemas).ok())
+        .collect();
+    let Some(&(first, _)) = resolved.first() else {
+        return Vec::new();
+    };
+    // Each schema's project, for refs.
+    let targets: HashMap<&str, HashMap<(&str, &str), (u64, u32)>> = schemas
+        .iter()
+        .map(|(key, loaded)| {
+            let map = loaded
+                .targets
+                .iter()
+                .map(|t| {
+                    let at = (crate::aschema::asset_id(&t.file), t.index as u32);
+                    ((t.ty.as_str(), t.id.as_str()), at)
+                })
+                .collect();
+            (key.as_str(), map)
+        })
+        .collect();
+    let mut rec = Rec {
+        schema: first,
+        values: Vec::new(),
+        strings: Strings::default(),
+        targets: HashMap::new(),
+        refs: Vec::new(),
+    };
+    let mut records = Bytes::default();
+    let mut order: Vec<&crate::structs::Scope> = scopes.iter().collect();
+    order.sort_by_key(|s| s.scope);
+    for scope in order {
+        let mut owners: Vec<&crate::structs::Owner> = scope.owners.iter().collect();
+        owners.sort_by_key(|o| o.item);
+        for owner in owners {
+            for a in scope.attachments {
+                let Ok((schema, si)) = resolve_attachment(a, schemas) else {
+                    continue;
+                };
+                rec.schema = schema;
+                rec.targets = targets.get(a.schema.as_str()).cloned().unwrap_or_default();
+                let empty = serde_json::Map::new();
+                let set = owner
+                    .values
+                    .get(&a.ty)
+                    .and_then(Value::as_object)
+                    .unwrap_or(&empty);
+                let value = crate::adata::resolve(schema, si, set, None);
+                let slot = rec.reserve(1);
+                rec.value(
+                    slot,
+                    0,
+                    Some(&Ty::Named(a.ty.clone())),
+                    &Value::Object(value),
+                );
+                records
+                    .u32(scope.scope)
+                    .u32(owner.item)
+                    .u64(fnv1a64(a.ty.as_bytes()));
+                let (at, len) = rec.strings.add(&a.ty);
+                let rel = &schemas[&a.schema].rel;
+                records
+                    .u32(at)
+                    .u32(len)
+                    .u64(schema_id(rel))
+                    .u32(slot as u32)
+                    .u32(0);
+            }
+        }
+    }
+    let mut refs = Bytes::default();
+    for (file, id, instance) in &rec.refs {
+        refs.u64(*file).u64(*id).u32(*instance).u32(0);
+    }
+    vec![
+        ("STRUCTS", records.take()),
+        ("SVALUES", rec.values.concat()),
+        ("SREFS", refs.take()),
+        ("SSTRINGS", rec.strings.0),
+    ]
+}
+
+/// Adds struct chunks to `writer`.
+pub fn put_structs(writer: &mut Writer, chunks: Vec<(&'static str, Vec<u8>)>) {
+    for (name, payload) in chunks {
+        writer.chunk(name, payload);
+    }
+}
+
+/// Cell `i` of `grid` as 0–1 texture coordinates `u0 v0 u1 v1`.
+fn cell_uv(grid: &impl crate::gradient::CellGrid, i: usize) -> [f32; 4] {
+    let [width, height, cell_width, cell_height] = grid.grid();
+    let (column, row) = grid.cell(i);
+    let (left, top) = (column * cell_width, row * cell_height);
+    [
+        left as f32 / width as f32,
+        top as f32 / height as f32,
+        (left + cell_width) as f32 / width as f32,
+        (top + cell_height) as f32 / height as f32,
+    ]
+}
+
+/// The shared head of `.agradient.bin` and `.apalette.bin`: the grid and the texture.
+fn grid_desc(out: &mut Bytes, grid: &impl crate::gradient::CellGrid, texture: u64) {
+    let [width, height, cell_width, cell_height] = grid.grid();
+    let layout = match grid.layout() {
+        crate::gradient::Layout::Rows => 0,
+        crate::gradient::Layout::Columns => 1,
+    };
+    out.u32(width)
+        .u32(height)
+        .u32(cell_width)
+        .u32(cell_height)
+        .u32(grid.columns())
+        .u32(grid.rows())
+        .u32(layout)
+        .u32(0)
+        .u64(texture);
+}
+
+/// A color as sRGB bytes and as linear floats.
+fn put_color(bytes: &mut Bytes, floats: &mut Bytes, rgba: [u8; 4]) {
+    bytes.0.extend_from_slice(&rgba);
+    let channel = |c: u8| crate::texture::srgb_to_linear(f32::from(c) / 255.0);
+    floats.f32s(&[
+        channel(rgba[0]),
+        channel(rgba[1]),
+        channel(rgba[2]),
+        f32::from(rgba[3]) / 255.0,
+    ]);
+}
+
+/// An `.agradient` file's gradients as an `.agradient.bin`, `texture` its image's asset ID;
+/// see docs/spec/agradient.bin.md.
+pub fn encode_gradients(
+    file: &crate::gradient::Gradients,
+    texture: u64,
+    structs: Vec<(&'static str, Vec<u8>)>,
+) -> Vec<u8> {
+    use crate::gradient::Dither;
+    let (mut gradients, mut stops) = (Bytes::default(), Bytes::default());
+    let (mut rgba8, mut rgbaf) = (Bytes::default(), Bytes::default());
+    let mut strings = Strings::default();
+    let mut stop_count = 0u32;
+    for (i, g) in file.gradients.iter().enumerate() {
+        gradients.u64(fnv1a64(g.name.as_bytes()));
+        text(&mut gradients, &mut strings, &g.name);
+        let dither = match g.dither {
+            Dither::None => 0,
+            Dither::Crosshatch => 1,
+            Dither::Pixel => 2,
+        };
+        gradients
+            .u32(stop_count)
+            .u32(g.stops.len() as u32)
+            .u32(dither)
+            .u32(0)
+            .f32s(&cell_uv(file, i));
+        for stop in &g.stops {
+            stops.f32s(&[stop.at as f32]);
+            put_color(&mut rgba8, &mut rgbaf, stop.color);
+        }
+        stop_count += g.stops.len() as u32;
+    }
+    let mut desc = Bytes::default();
+    desc.u32(file.gradients.len() as u32).u32(stop_count);
+    grid_desc(&mut desc, file, texture);
+    let mut writer = Writer::new(AGRAD, VERSION);
+    writer
+        .chunk("DESC", desc.take())
+        .chunk("GRADIENT", gradients.take())
+        .chunk("STOPS", stops.take())
+        .chunk("RGBA8", rgba8.take())
+        .chunk("RGBAF", rgbaf.take())
+        .chunk("STRINGS", strings.0);
+    put_structs(&mut writer, structs);
+    writer.finish()
+}
+
+/// An `.apalette` file's colors as an `.apalette.bin`, `texture` its image's asset ID; see
+/// docs/spec/apalette.bin.md.
+pub fn encode_palette(
+    file: &crate::palette::Palette,
+    texture: u64,
+    structs: Vec<(&'static str, Vec<u8>)>,
+) -> Vec<u8> {
+    let mut colors = Bytes::default();
+    let (mut rgba8, mut rgbaf) = (Bytes::default(), Bytes::default());
+    let mut strings = Strings::default();
+    for (i, c) in file.colors.iter().enumerate() {
+        colors.u64(fnv1a64(c.name.as_bytes()));
+        text(&mut colors, &mut strings, &c.name);
+        colors.f32s(&cell_uv(file, i));
+        put_color(&mut rgba8, &mut rgbaf, c.color);
+    }
+    let mut desc = Bytes::default();
+    desc.u32(file.colors.len() as u32).u32(0);
+    grid_desc(&mut desc, file, texture);
+    let mut writer = Writer::new(APALETTE, VERSION);
+    writer
+        .chunk("DESC", desc.take())
+        .chunk("COLORS", colors.take())
+        .chunk("RGBA8", rgba8.take())
+        .chunk("RGBAF", rgbaf.take())
+        .chunk("STRINGS", strings.0);
+    put_structs(&mut writer, structs);
+    writer.finish()
+}
+
 /// A node's shared head: id hash, id, label, position and color.
 fn node_head(out: &mut Bytes, strings: &mut Strings, n: &crate::agraph::Node) {
     out.u64(fnv1a64(n.id.as_bytes()));
@@ -358,8 +578,8 @@ fn node_head(out: &mut Bytes, strings: &mut Strings, n: &crate::agraph::Node) {
     out.0.extend_from_slice(&color_bytes(n.color.as_deref()));
 }
 
-/// A graph as an `.agraph.bin`; see docs/spec/agraph.bin.md.
-pub fn encode_graph(graph: &Graph) -> Vec<u8> {
+/// A graph as an `.agraph.bin`, with its struct chunks; see docs/spec/agraph.bin.md.
+pub fn encode_graph(graph: &Graph, structs: Vec<(&'static str, Vec<u8>)>) -> Vec<u8> {
     let (mut nodes, mut edges, mut props) = (Bytes::default(), Bytes::default(), Bytes::default());
     let mut strings = Strings::default();
     let mut property_count = 0u32;
@@ -391,13 +611,14 @@ pub fn encode_graph(graph: &Graph) -> Vec<u8> {
         writer.chunk("PROPS", props.take());
     }
     writer.chunk("STRINGS", strings.0);
+    put_structs(&mut writer, structs);
     writer.finish()
 }
 
-/// A tree as an `.atree.bin`, nodes breadth first; see docs/spec/atree.bin.md.
-pub fn encode_tree(tree: &Graph) -> Vec<u8> {
-    use crate::atree::{children, depth};
-    // Breadth first, with each node's depth and parent (by place in the order).
+/// A tree's nodes breadth first: each node, its parent's place in the order (`-1` for the
+/// root) and its depth.
+pub fn breadth_first(tree: &Graph) -> Vec<(usize, i32, u32)> {
+    use crate::atree::children;
     let mut order: Vec<(usize, i32, u32)> = Vec::new();
     if !tree.nodes.is_empty() {
         order.push((0, -1, 0));
@@ -412,6 +633,13 @@ pub fn encode_tree(tree: &Graph) -> Vec<u8> {
         }
         k += 1;
     }
+    order
+}
+
+/// A tree as an `.atree.bin`, nodes breadth first, with its struct chunks; see
+/// docs/spec/atree.bin.md.
+pub fn encode_tree(tree: &Graph, structs: Vec<(&'static str, Vec<u8>)>) -> Vec<u8> {
+    let order = breadth_first(tree);
     let (mut nodes, mut props) = (Bytes::default(), Bytes::default());
     let mut strings = Strings::default();
     let mut property_count = 0u32;
@@ -437,7 +665,7 @@ pub fn encode_tree(tree: &Graph) -> Vec<u8> {
     let mut desc = Bytes::default();
     desc.u32(order.len() as u32)
         .u32(property_count)
-        .u32(depth(tree) as u32)
+        .u32(crate::atree::depth(tree) as u32)
         .u32(0);
     let mut writer = Writer::new(ATREE, VERSION);
     writer
@@ -447,6 +675,7 @@ pub fn encode_tree(tree: &Graph) -> Vec<u8> {
         writer.chunk("PROPS", props.take());
     }
     writer.chunk("STRINGS", strings.0);
+    put_structs(&mut writer, structs);
     writer.finish()
 }
 
@@ -991,7 +1220,7 @@ mod tests {
               { "id": "b", "x": 1, "y": 1, "color": "#ef4444", "data": { "cost": 2 } } ] } }"##,
         )
         .unwrap();
-        let bytes = encode_tree(&tree);
+        let bytes = encode_tree(&tree, Vec::new());
         let ids: Vec<String> = (0..4).map(|r| cell(&bytes, "NODES", r, 1)).collect();
         assert_eq!(ids, ["r", "a", "b", "a1"]);
         // Root: children 1 and 2; a: child 3.
@@ -1003,7 +1232,7 @@ mod tests {
         assert_eq!(cell(&bytes, "PROPS", 0, 3), "2");
         let graph = crate::agraph::Graph::new();
         assert_eq!(
-            rows(&encode_graph(&graph)).unwrap()[0],
+            rows(&encode_graph(&graph, Vec::new())).unwrap()[0],
             ("Nodes", "1".into())
         );
     }

@@ -12,7 +12,10 @@ pub const SOURCE_SUFFIX: &str = ".amat";
 pub const OLD_SUFFIX: &str = ".mat.toml";
 pub const SIZE: usize = 112;
 const MAGIC: [u8; 4] = *b"ACMT";
-const VERSION: u32 = 1;
+/// 2: struct data may follow the record; see docs/spec/amat.bin.md#struct-data.
+const VERSION: u32 = 2;
+/// The format of the struct data after the record.
+pub const ASTRUCT: &str = "ASTRUCT";
 
 /// Whether `path` is a material source, `<name>.amat`.
 pub fn is_source(path: &std::path::Path) -> bool {
@@ -177,6 +180,11 @@ pub struct Source {
     pub alpha_cutoff: Option<f32>,
     pub double_sided: Option<bool>,
     pub textures: SourceTextures,
+    /// Attached structs and their values; see docs/features/structs.md.
+    #[serde(skip)]
+    pub structs: Vec<crate::structs::Attachment>,
+    #[serde(skip)]
+    pub values: crate::structs::Values,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize)]
@@ -220,9 +228,20 @@ impl SourceTextures {
 
 impl Source {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let source: Self = toml::from_str(text).map_err(|e| e.message().to_owned())?;
+        let mut table: toml::Table = text
+            .parse()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
+        let structs = crate::structs::take_toml_attachments(&mut table, "structs")?;
+        let values = crate::structs::take_toml_values(&mut table)?;
+        let source: Self = toml::Value::Table(table)
+            .try_into()
+            .map_err(|e: toml::de::Error| e.message().to_owned())?;
         source.validate()?;
-        Ok(source)
+        Ok(Self {
+            structs,
+            values,
+            ..source
+        })
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -348,7 +367,9 @@ impl Source {
                 out += &format!("{} = {}\n", slot.name(), quoted(path));
             }
         }
-        out
+        crate::structs::write_toml_attachments(&mut out, "structs", &self.structs);
+        crate::structs::write_toml_values(&mut out, "values", &self.values);
+        out.trim_start_matches('\n').to_owned()
     }
 }
 
@@ -434,10 +455,17 @@ pub fn encode(m: &Material) -> Vec<u8> {
     out
 }
 
+/// The `ASTRUCT` file after a material's record, if there is one; see
+/// docs/spec/amat.bin.md#struct-data.
+pub fn struct_data(bytes: &[u8]) -> Option<&[u8]> {
+    bytes.get(SIZE..).filter(|rest| !rest.is_empty())
+}
+
+/// The record of an `.amat.bin`, its struct data checked to be an `ASTRUCT` file.
 pub fn decode(bytes: &[u8]) -> Result<Material, String> {
-    if bytes.len() != SIZE {
+    if bytes.len() < SIZE {
         return Err(format!(
-            "invalid material: size {} is not {SIZE}",
+            "invalid material: size {} is below {SIZE}",
             bytes.len()
         ));
     }
@@ -447,8 +475,16 @@ pub fn decode(bytes: &[u8]) -> Result<Material, String> {
     let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     let f32_at = |at: usize| f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
     let u64_at = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
-    if u32_at(4) != VERSION {
-        return Err("invalid material: unsupported version".into());
+    match (u32_at(4), struct_data(bytes)) {
+        (1, None) | (VERSION, _) => {}
+        (1, Some(_)) => {
+            return Err("invalid material: version 1 with bytes after the record".into());
+        }
+        _ => return Err("invalid material: unsupported version".into()),
+    }
+    if let Some(rest) = struct_data(bytes) {
+        crate::chunks::Reader::parse(rest, ASTRUCT)
+            .map_err(|e| format!("invalid material: struct data: {e}"))?;
     }
     let flags = u32_at(68);
     let alpha_mode = match flags & 3 {
@@ -488,6 +524,17 @@ pub fn decode(bytes: &[u8]) -> Result<Material, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structs_round_trip() {
+        let text = "roughness = 0.5\n\n[[structs]]\nschema = \"game.aschema\"\ntype = \"Surface\"\n\n[values.Surface]\nsound = \"stone\"\n";
+        let source = Source::parse(text).unwrap();
+        assert_eq!(source.structs[0].ty, "Surface");
+        assert_eq!(source.values["Surface"]["sound"], "stone");
+        assert_eq!(source.to_toml(), text);
+        let only = "[[structs]]\nschema = \"game.aschema\"\ntype = \"Surface\"\n";
+        assert_eq!(Source::parse(only).unwrap().to_toml(), only);
+    }
 
     #[test]
     fn suffixes_round_trip() {
@@ -603,7 +650,7 @@ mod tests {
         m.height_mode = HeightMode::Displacement;
         let bytes = encode(&m);
         assert_eq!(bytes.len(), SIZE);
-        assert_eq!(&bytes[..8], b"ACMT\x01\0\0\0");
+        assert_eq!(&bytes[..8], b"ACMT\x02\0\0\0");
         assert_eq!(bytes[68], 2 | 4 | 8);
         assert_eq!(bytes[88], 3);
         assert_eq!(decode(&bytes).unwrap(), m);
@@ -612,5 +659,19 @@ mod tests {
         bad[68] = 3;
         assert!(decode(&bad).is_err());
         assert!(decode(&bytes[..100]).is_err());
+
+        // Struct data after the record must be an ASTRUCT file; version 1 has none.
+        let mut with = bytes.clone();
+        with.extend(crate::chunks::Writer::new(ASTRUCT, 1).finish());
+        assert_eq!(decode(&with).unwrap(), m);
+        assert!(struct_data(&with).is_some());
+        let mut junk = bytes.clone();
+        junk.extend([1, 2, 3]);
+        assert!(decode(&junk).is_err());
+        let mut old = with.clone();
+        old[4] = 1;
+        assert!(decode(&old).is_err());
+        old.truncate(SIZE);
+        assert_eq!(decode(&old).unwrap(), m);
     }
 }

@@ -10,15 +10,18 @@ pub mod chunks;
 pub mod data;
 mod error;
 pub mod font;
+pub mod gradient;
 pub mod graph;
 pub mod hash;
 pub mod manifest;
 pub mod material;
 pub mod mesh;
 pub mod pack;
+pub mod palette;
 pub mod property;
 mod read;
 pub mod schema;
+pub mod structs;
 pub mod texture;
 pub mod tree;
 
@@ -28,13 +31,16 @@ pub use atlas::Atlas;
 pub use data::Data;
 pub use error::{Error, Result};
 pub use font::Font;
+pub use gradient::GradientSet;
 pub use graph::Graph;
 pub use manifest::Manifest;
 pub use material::Material;
 pub use mesh::Mesh;
 pub use pack::Pack;
+pub use palette::Palette;
 pub use property::{Property, PropertyValue};
 pub use schema::Schema;
+pub use structs::{Attached, Scope, Structs};
 pub use texture::Texture;
 pub use tree::Tree;
 
@@ -51,6 +57,10 @@ pub enum Kind {
     Graph,
     Tree,
     Atlas,
+    /// `.agradient.bin`.
+    Gradient,
+    /// `.apalette.bin`.
+    Palette,
     /// `assetc.aman.bin` (packs only).
     Manifest,
     Other,
@@ -70,6 +80,8 @@ impl Kind {
             8 => Self::Tree,
             9 => Self::Atlas,
             10 => Self::Manifest,
+            11 => Self::Gradient,
+            12 => Self::Palette,
             _ => Self::Other,
         }
     }
@@ -92,9 +104,26 @@ impl Kind {
             (".agraph.bin", Self::Graph),
             (".atree.bin", Self::Tree),
             (".aatlas.bin", Self::Atlas),
+            (".agradient.bin", Self::Gradient),
+            (".apalette.bin", Self::Palette),
         ]
         .into_iter()
         .find(|(ext, _)| lower.ends_with(ext))
         .map_or(Self::Other, |(_, kind)| kind)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Kind;
+
+    #[test]
+    fn kinds_by_value_and_path() {
+        assert_eq!(Kind::from_u8(11), Kind::Gradient);
+        assert_eq!(Kind::from_u8(12), Kind::Palette);
+        assert_eq!(Kind::from_u8(13), Kind::Other);
+        assert_eq!(Kind::of_path("ui/fire.agradient.bin"), Kind::Gradient);
+        assert_eq!(Kind::of_path("ui/Base.apalette.bin"), Kind::Palette);
+        assert_eq!(Kind::of_path("ui/fire.ktx2"), Kind::Texture);
     }
 }

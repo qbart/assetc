@@ -2,7 +2,9 @@
 
 use crate::Result;
 use crate::read::Bytes;
+use crate::structs::Structs;
 
+const FILE: &str = "amat.bin";
 const SIZE: usize = 112;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -55,21 +57,30 @@ pub struct Material {
     pub double_sided: bool,
     pub height_mode: HeightMode,
     pub textures: TextureIds,
+    /// Attached structs (version 2, from the `ASTRUCT` file after the record):
+    /// [`Scope::Asset`](crate::structs::Scope::Asset) the material.
+    pub structs: Structs,
 }
 
 impl Material {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        let b = Bytes::new(bytes, "amat.bin");
-        if bytes.len() != SIZE {
-            return Err(b.err(format!("size {} is not {SIZE}", bytes.len())));
+        let b = Bytes::new(bytes, FILE);
+        if bytes.len() < SIZE {
+            return Err(b.err(format!("size {} is below {SIZE}", bytes.len())));
         }
         if b.slice(0, 4)? != b"ACMT" {
             return Err(b.err("bad magic"));
         }
-        let version = b.u32(4)?;
-        if version != 1 {
-            return Err(b.err(format!("unsupported version {version}")));
-        }
+        let (record, rest) = bytes.split_at(SIZE);
+        let b = Bytes::new(record, FILE);
+        // Version 2 may carry an `ASTRUCT` file after the record; version 1 ends with it.
+        let structs = match b.u32(4)? {
+            1 if rest.is_empty() => Structs::default(),
+            1 => return Err(b.err(format!("version 1 is {} bytes, not {SIZE}", bytes.len()))),
+            2 if rest.is_empty() => Structs::default(),
+            2 => Structs::decode(rest).map_err(|e| e.in_file(FILE))?,
+            version => return Err(b.err(format!("unsupported version {version}"))),
+        };
         let flags = b.u32(68)?;
         let alpha_mode = match flags & 3 {
             0 => AlphaMode::Opaque,
@@ -102,6 +113,57 @@ impl Material {
                 emissive: b.u64(96)?,
                 height: b.u64(104)?,
             },
+            structs,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::data::Value;
+    use crate::structs::Scope;
+
+    /// A material record of `version`: a mask, double-sided, base color texture `7`.
+    fn record(version: u32) -> Vec<u8> {
+        let mut out = b"ACMT".to_vec();
+        out.extend(version.to_le_bytes());
+        for v in [1.0f32, 0.5, 0.25, 1.0] {
+            out.extend(v.to_le_bytes());
+        }
+        out.resize(68, 0);
+        out.extend((1u32 | 4).to_le_bytes());
+        out.extend(7u64.to_le_bytes());
+        out.resize(SIZE, 0);
+        out
+    }
+
+    #[test]
+    fn reads_version_1_and_2() {
+        for version in [1, 2] {
+            let m = Material::decode(&record(version)).unwrap();
+            assert_eq!(m.base_color, [1.0, 0.5, 0.25, 1.0]);
+            assert_eq!((m.alpha_mode, m.double_sided), (AlphaMode::Mask, true));
+            assert_eq!(m.textures.base_color, 7);
+            assert!(m.structs.is_empty());
+        }
+        assert!(Material::decode(&record(3)).is_err());
+        assert!(Material::decode(&record(1)[..SIZE - 1]).is_err());
+    }
+
+    #[test]
+    fn reads_struct_data_after_the_record() {
+        let mut bytes = record(2);
+        bytes.extend(crate::structs::tests::astruct());
+        let m = Material::decode(&bytes).unwrap();
+        let meta = m.structs.get(Scope::Asset, 0, "Meta").unwrap();
+        assert_eq!(meta.get("tier").and_then(Value::as_int), Some(3));
+        // Version 1 ends with the record; bytes after a version 2 record must be ASTRUCT.
+        let mut v1 = record(1);
+        v1.extend(crate::structs::tests::astruct());
+        assert!(Material::decode(&v1).is_err());
+        let mut junk = record(2);
+        junk.extend([0; 40]);
+        assert!(Material::decode(&junk).is_err());
     }
 }

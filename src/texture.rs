@@ -140,6 +140,15 @@ static SRGB_TO_LINEAR: LazyLock<[f32; 256]> = LazyLock::new(|| {
     })
 });
 
+/// An sRGB-encoded channel (0–1) as linear light.
+pub fn srgb_to_linear(v: f32) -> f32 {
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
 pub fn linear_to_srgb(v: f32) -> f32 {
     if v <= 0.0031308 {
         v * 12.92

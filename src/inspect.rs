@@ -68,6 +68,9 @@ pub struct Inspection {
     pub animations: Vec<(String, f32)>,
     /// A model's first skin's named joints, for its locators.
     pub joints: Vec<String>,
+    /// A compiled texture's type and usage (`2D, normal`), for the Assets tab; see
+    /// docs/features/inspector.md#assets-tab.
+    pub texture_type: Option<String>,
     /// The other glTF models of the input, input-relative and sorted, for locator previews.
     pub models: Vec<String>,
 }
@@ -440,6 +443,10 @@ fn source_texture(
 fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), String> {
     let bytes = fs::read(file).map_err(|e| e.to_string())?;
     let info = ktx2::read(&bytes)?;
+    let usage = info.usage.clone().unwrap_or_else(|| "—".into());
+    out.texture_type = Some(format!("{}, {usage}", info.type_name()));
+    out.rows.push(("Type", info.type_name()));
+    out.rows.push(("Usage", usage));
     out.rows.push((
         "Dimensions",
         if info.depth > 0 {
@@ -449,10 +456,14 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
         },
     ));
     out.rows.push(("Format", info.format_name()));
-    if info.faces == 6 {
-        out.rows.push(("Faces", "6".into()));
-    }
+    out.rows.push((
+        "Color space",
+        if info.srgb { "sRGB" } else { "linear" }.into(),
+    ));
     out.rows.push(("Mip levels", info.levels.to_string()));
+    if let Some(writer) = &info.writer {
+        out.rows.push(("Writer", writer.clone()));
+    }
     asset_rows(strip_extension(rel), out);
 
     match info.level0 {

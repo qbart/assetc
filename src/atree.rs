@@ -43,8 +43,14 @@ pub fn parse(text: &str) -> Result<Graph, String> {
         },
         _ => return Err("no $dialect".into()),
     }
+    let structs = crate::structs::take_attachments(&mut top, "structs")?;
+    let node_structs = crate::structs::take_attachments(&mut top, "node_structs")?;
+    let values = crate::structs::take_values(&mut top)?;
     let root = top.shift_remove("root").ok_or("no root")?;
     let mut graph = Graph {
+        structs,
+        node_structs,
+        values,
         extra: top,
         ..Graph::default()
     };
@@ -85,6 +91,9 @@ fn add(graph: &mut Graph, value: Value, parent: Option<usize>) -> Result<(), Str
 pub fn to_json(graph: &Graph) -> String {
     let mut top = Map::new();
     top.insert("$dialect".into(), DIALECT.into());
+    crate::structs::put_attachments(&mut top, "structs", &graph.structs);
+    crate::structs::put_attachments(&mut top, "node_structs", &graph.node_structs);
+    crate::structs::put_values(&mut top, &graph.values);
     if !graph.nodes.is_empty() {
         let mut seen = vec![false; graph.nodes.len()];
         top.insert("root".into(), write(graph, 0, &mut seen));

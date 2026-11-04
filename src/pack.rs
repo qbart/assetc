@@ -509,6 +509,8 @@ mod sdk_conformance {
             Kind::Graph => assets.load::<sdk::Graph>(entry.id).map(drop),
             Kind::Tree => assets.load::<sdk::Tree>(entry.id).map(drop),
             Kind::Atlas => assets.load::<sdk::Atlas>(entry.id).map(drop),
+            Kind::Gradient => assets.load::<sdk::GradientSet>(entry.id).map(drop),
+            Kind::Palette => assets.load::<sdk::Palette>(entry.id).map(drop),
             Kind::Manifest => assets.load::<sdk::Manifest>(entry.id).map(drop),
             Kind::Other => Ok(()),
         }
@@ -545,6 +547,8 @@ mod sdk_conformance {
             Kind::Graph,
             Kind::Tree,
             Kind::Atlas,
+            Kind::Gradient,
+            Kind::Palette,
         ] {
             assert!(packed.of_kind(kind).next().is_some(), "{kind:?}");
         }

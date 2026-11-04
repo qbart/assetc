@@ -7,6 +7,7 @@ use crate::chunks::ChunkFile;
 use crate::hash::fnv1a64;
 use crate::property::{Property, PropertyValue, property, read_properties};
 use crate::read::Bytes;
+use crate::structs::Structs;
 
 const FILE: &str = "atree.bin";
 
@@ -49,6 +50,9 @@ pub struct Tree {
     pub nodes: Vec<Node>,
     /// Levels; the root alone is `1`.
     pub depth: u32,
+    /// Attached structs: [`Scope::Asset`](crate::structs::Scope::Asset) the tree,
+    /// [`Scope::Item`](crate::structs::Scope::Item) each node, by index into `nodes`.
+    pub structs: Structs,
 }
 
 impl Tree {
@@ -86,7 +90,11 @@ impl Tree {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self { nodes, depth })
+        Ok(Self {
+            nodes,
+            depth,
+            structs: Structs::from_chunks(&file, FILE)?,
+        })
     }
 
     /// The root, unless the tree is empty.

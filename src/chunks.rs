@@ -149,6 +149,27 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// The chunked file `bytes` (of `format`) with `extra` chunks added after its own; `bytes`
+/// itself when there are none.
+pub fn with_chunks(
+    bytes: Vec<u8>,
+    format: &str,
+    extra: Vec<(&'static str, Vec<u8>)>,
+) -> Result<Vec<u8>, String> {
+    if extra.is_empty() {
+        return Ok(bytes);
+    }
+    let reader = Reader::parse(&bytes, format)?;
+    let mut writer = Writer::new(format, reader.version);
+    for (name, payload) in &reader.chunks {
+        writer.chunks.push((*name, payload.to_vec()));
+    }
+    for (name, payload) in extra {
+        writer.chunk(name, payload);
+    }
+    Ok(writer.finish())
+}
+
 fn show(name: &[u8; 8]) -> String {
     String::from_utf8_lossy(name)
         .trim_end_matches('\0')

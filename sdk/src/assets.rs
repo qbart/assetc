@@ -43,7 +43,9 @@ decode!(
     crate::Schema,
     crate::Data,
     crate::Graph,
-    crate::Tree
+    crate::Tree,
+    crate::GradientSet,
+    crate::Palette
 );
 
 enum Source {

@@ -47,6 +47,8 @@ pub enum Job {
         /// Relative to `input`.
         source: String,
         color: ColorSpace,
+        /// What it is for; see docs/spec/ktx2.md#keyvalue-data.
+        usage: crate::ktx2::Usage,
         mipmaps: bool,
         /// DirectX normal map: invert green.
         flip_green: bool,
@@ -90,6 +92,9 @@ pub enum Job {
         /// `<name>.amat`, or `<name>.*` without one.
         source: String,
         material: Material,
+        /// Its `.amat`'s attached structs and their values; see docs/features/structs.md.
+        structs: Vec<crate::structs::Attachment>,
+        values: crate::structs::Values,
     },
 }
 
@@ -406,6 +411,8 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
 
     let known: HashSet<&str> = sources.iter().map(String::as_str).collect();
     let mut claims: HashMap<String, Claim> = HashMap::new();
+    // Textures a material uses as a normal or height map, for their usage.
+    let mut maps: HashMap<String, crate::ktx2::Usage> = HashMap::new();
     let mut orm_inputs = HashSet::new();
     let mut materials = Vec::new();
     for ((dir, name), group) in &groups {
@@ -492,6 +499,14 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 }
                 _ => {
                     claims.insert(rel.clone(), claim);
+                    let usage = match slot {
+                        Slot::Normal => Some(crate::ktx2::Usage::Normal),
+                        Slot::Height => Some(crate::ktx2::Usage::Height),
+                        _ => None,
+                    };
+                    if let Some(usage) = usage {
+                        maps.insert(rel.clone(), usage);
+                    }
                 }
             }
         }
@@ -501,12 +516,43 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
     }
 
     for rel in &sources {
+        // Gradients and palettes are data too; see docs/features/gradients.md#build.
+        let kind = if is_gradient(Path::new(rel)) {
+            Some(Kind::Gradient)
+        } else if crate::palette::is_palette(Path::new(rel)) {
+            Some(Kind::Palette)
+        } else {
+            None
+        };
+        if let Some(kind) = kind {
+            let asset_path = format!("{}.{}", strip_extension(rel), kind.extension());
+            plan.assets.push(Asset {
+                id: fnv1a64(asset_path.as_bytes()),
+                kind,
+                output: kind.output_path(&asset_path),
+                asset_path,
+                job: Job::Data {
+                    source: rel.clone(),
+                    kind,
+                },
+            });
+        }
         let (color, flip_green) = match claims.get(rel) {
             Some(claim) => (claim.color, claim.flip_green),
             None if orm_inputs.contains(rel) => continue,
             // Noise is data: linear unless a material slot says otherwise.
             None if is_noise(Path::new(rel)) => (ColorSpace::Linear, false),
             None => (settings.color_space(rel), false),
+        };
+        // See docs/spec/ktx2.md#keyvalue-data.
+        let usage = match kind {
+            Some(Kind::Gradient) => crate::ktx2::Usage::Gradient,
+            Some(_) => crate::ktx2::Usage::Palette,
+            None if is_noise(Path::new(rel)) => crate::ktx2::Usage::Noise,
+            None => maps
+                .get(rel)
+                .copied()
+                .unwrap_or(crate::ktx2::Usage::of(color)),
         };
         let asset_path = strip_extension(rel).to_owned();
         plan.assets.push(Asset {
@@ -517,6 +563,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             job: Job::Texture {
                 source: rel.clone(),
                 color,
+                usage,
                 // Smaller levels would blend neighbouring gradient or palette cells.
                 mipmaps: settings.mipmaps(rel)
                     && !is_gradient(Path::new(rel))
@@ -564,6 +611,8 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             job: Job::Material {
                 source: label,
                 material: source.material(&maps, ids),
+                structs: source.structs,
+                values: source.values,
             },
         });
     }

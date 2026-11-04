@@ -10,7 +10,8 @@ use crate::read::Bytes;
 use crate::schema::Schema;
 
 const FILE: &str = "adata.bin";
-const VALUE: usize = 24;
+pub(crate) const VALUE: usize = 24;
+pub(crate) const TARGET: usize = 24;
 /// Deeper values than this are rejected rather than recursed into.
 const MAX_DEPTH: usize = 256;
 
@@ -34,8 +35,9 @@ pub enum Value {
     /// `list<T>`; also a `curve` (points, each a list of `x y in out`) and a `gradient` (stops,
     /// each a list of `t` and a color).
     List(Vec<Value>),
-    /// `ref<S>`: the target's id and its index in [`Data::refs`]; `None` when the ref is `""`
-    /// or names no instance of the project.
+    /// `ref<S>`: the target's id and its index in the file's targets ([`Data::refs`],
+    /// [`Structs::refs`](crate::structs::Structs::refs)); `None` when the ref is `""` or names
+    /// no instance of the project.
     Ref {
         id: String,
         target: Option<u32>,
@@ -210,6 +212,17 @@ pub struct Target {
     pub instance: u32,
 }
 
+impl Target {
+    /// A 24-byte `Target` record (`REFS` of `.adata.bin`, `SREFS` of the struct chunks).
+    pub(crate) fn read(r: &Bytes<'_>) -> Result<Self> {
+        Ok(Self {
+            file: r.u64(0)?,
+            id_hash: r.u64(8)?,
+            instance: r.u32(16)?,
+        })
+    }
+}
+
 /// A data file's instances, in the file's order.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Data {
@@ -239,29 +252,14 @@ impl Data {
         // Version 1 has no REFS and no `ref_count`.
         let refs = if file.version >= 2 {
             Bytes::new(file.require("REFS", FILE)?, FILE)
-                .records_n(24, desc.u32(12)? as usize)?
-                .map(|r| {
-                    Ok(Target {
-                        file: r.u64(0)?,
-                        id_hash: r.u64(8)?,
-                        instance: r.u32(16)?,
-                    })
-                })
+                .records_n(TARGET, desc.u32(12)? as usize)?
+                .map(|r| Target::read(&r))
                 .collect::<Result<Vec<_>>>()?
         } else {
             Vec::new()
         };
         let values = Bytes::new(file.require("VALUES", FILE)?, FILE);
-        let needed = value_count
-            .checked_mul(VALUE)
-            .ok_or_else(|| values.err("value count overflows"))?;
-        let mut reader = Reader {
-            values: Bytes::new(values.slice(0, needed)?, FILE),
-            strings,
-            value_count,
-            ref_count: refs.len(),
-            budget: value_count,
-        };
+        let mut reader = Values::new(values, value_count, strings, refs.len())?;
         let instances = Bytes::new(file.require("INSTANCE", FILE)?, FILE)
             .records_n(32, instance_count)?
             .map(|r| {
@@ -271,7 +269,7 @@ impl Data {
                     .ok_or_else(|| r.err(format!("type {type_index} is not in TYPES")))?
                     .name
                     .clone();
-                let (_, value) = reader.value(r.u32(4)? as usize, 0)?;
+                let value = reader.read(r.u32(4)? as usize)?;
                 Ok(Instance {
                     type_index,
                     type_name,
@@ -312,8 +310,8 @@ impl Data {
     }
 }
 
-/// Reads `VALUES` into trees; each value is read once (`budget`), children after their parent.
-struct Reader<'a> {
+/// Reads `Value` records (`VALUES` of `.adata.bin`, `SVALUES` of the struct chunks) into trees; each value is read once (`budget`), children after their parent.
+pub(crate) struct Values<'a> {
     values: Bytes<'a>,
     strings: Bytes<'a>,
     value_count: usize,
@@ -321,7 +319,32 @@ struct Reader<'a> {
     budget: usize,
 }
 
-impl Reader<'_> {
+impl<'a> Values<'a> {
+    /// The first `value_count` records of `values`, text in `strings`, ref targets below
+    /// `ref_count`.
+    pub fn new(
+        values: Bytes<'a>,
+        value_count: usize,
+        strings: Bytes<'a>,
+        ref_count: usize,
+    ) -> Result<Self> {
+        let needed = value_count
+            .checked_mul(VALUE)
+            .ok_or_else(|| values.err("value count overflows"))?;
+        Ok(Self {
+            values: Bytes::new(values.slice(0, needed)?, values.file),
+            strings,
+            value_count,
+            ref_count,
+            budget: value_count,
+        })
+    }
+
+    /// The value tree at `slot`.
+    pub fn read(&mut self, slot: usize) -> Result<Value> {
+        self.value(slot, 0).map(|(_, value)| value)
+    }
+
     /// The value in `slot` and its name hash.
     fn value(&mut self, slot: usize, depth: usize) -> Result<(u64, Value)> {
         if depth > MAX_DEPTH {
@@ -334,7 +357,7 @@ impl Reader<'_> {
         let at = slot
             .checked_mul(VALUE)
             .ok_or_else(|| self.values.err("value index overflows"))?;
-        let r = Bytes::new(self.values.slice(at, VALUE)?, FILE);
+        let r = Bytes::new(self.values.slice(at, VALUE)?, self.values.file);
         let (kind, count) = (r.u32(8)?, r.u32(12)?);
         let value = match kind {
             0 => Value::Null,
@@ -381,12 +404,12 @@ impl Reader<'_> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::chunks::tests::file;
     use crate::graph::tests::text;
 
-    fn value(name: &str, kind: u32, count: u32, payload: [u32; 2]) -> Vec<u8> {
+    pub(crate) fn value(name: &str, kind: u32, count: u32, payload: [u32; 2]) -> Vec<u8> {
         let hash = if name.is_empty() {
             0
         } else {
@@ -399,7 +422,7 @@ mod tests {
         out
     }
 
-    fn raw(name: &str, kind: u32, payload: [u8; 8]) -> Vec<u8> {
+    pub(crate) fn raw(name: &str, kind: u32, payload: [u8; 8]) -> Vec<u8> {
         let mut out = value(name, kind, 0, [0, 0]);
         out[16..].copy_from_slice(&payload);
         out

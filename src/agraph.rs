@@ -7,6 +7,7 @@ use serde_json::{Map, Number, Value};
 
 use crate::aschema::{is_identifier, json_number};
 use crate::enrich::{PropValue, Properties};
+use crate::structs::{self, Attachment, Values};
 
 pub const DIALECT: &str = "agraph/1";
 
@@ -18,6 +19,12 @@ pub fn is_graph(file: &Path) -> bool {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Graph {
+    /// Structs attached to the graph (a tree), every node and every edge, and the graph's own
+    /// values; see docs/features/structs.md.
+    pub structs: Vec<Attachment>,
+    pub node_structs: Vec<Attachment>,
+    pub edge_structs: Vec<Attachment>,
+    pub values: Values,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
     /// Other top-level keys, kept.
@@ -34,6 +41,7 @@ pub struct Node {
     pub x: f64,
     pub y: f64,
     pub data: Properties,
+    pub values: Values,
     pub extra: Map<String, Value>,
 }
 
@@ -45,6 +53,7 @@ pub struct Edge {
     pub label: String,
     pub weight: i32,
     pub data: Properties,
+    pub values: Values,
     pub extra: Map<String, Value>,
 }
 
@@ -56,6 +65,7 @@ impl Edge {
             label: String::new(),
             weight: 1,
             data: Properties::new(),
+            values: Values::new(),
             extra: Map::new(),
         }
     }
@@ -149,6 +159,10 @@ impl Graph {
             },
             _ => return Err("no $dialect".into()),
         }
+        let structs = structs::take_attachments(&mut top, "structs")?;
+        let node_structs = structs::take_attachments(&mut top, "node_structs")?;
+        let edge_structs = structs::take_attachments(&mut top, "edge_structs")?;
+        let values = structs::take_values(&mut top)?;
         let array = |top: &mut Map<String, Value>, key: &str| match top.shift_remove(key) {
             Some(Value::Array(items)) => Ok(items),
             _ => Err(format!("no {key} array")),
@@ -164,6 +178,10 @@ impl Graph {
             .map(|(i, v)| parse_edge(v).map_err(|e| format!("edge {}: {e}", i + 1)))
             .collect::<Result<_, _>>()?;
         Ok(Self {
+            structs,
+            node_structs,
+            edge_structs,
+            values,
             nodes,
             edges,
             extra: top,
@@ -174,6 +192,10 @@ impl Graph {
     pub fn to_json(&self) -> String {
         let mut top = Map::new();
         top.insert("$dialect".into(), DIALECT.into());
+        structs::put_attachments(&mut top, "structs", &self.structs);
+        structs::put_attachments(&mut top, "node_structs", &self.node_structs);
+        structs::put_attachments(&mut top, "edge_structs", &self.edge_structs);
+        structs::put_values(&mut top, &self.values);
         let nodes = self
             .nodes
             .iter()
@@ -194,6 +216,7 @@ impl Graph {
                 o.insert("label".into(), e.label.clone().into());
                 o.insert("weight".into(), e.weight.into());
                 write_data(&mut o, &e.data);
+                structs::put_values(&mut o, &e.values);
                 o.extend(e.extra.clone());
                 Value::Object(o)
             })
@@ -203,6 +226,55 @@ impl Graph {
         let mut text = serde_json::to_string_pretty(&Value::Object(top)).unwrap_or_default();
         text.push('\n');
         text
+    }
+
+    /// The scopes of its attached structs: the graph, its nodes and its edges; see
+    /// docs/features/structs.md#scopes. A tree's nodes are numbered by `places` (each node's
+    /// place in its binary), and it has no edge scope.
+    pub fn scopes(&self, places: Option<&[u32]>) -> Vec<structs::Scope<'_>> {
+        let name = if places.is_some() { "tree" } else { "graph" };
+        let mut out = vec![
+            structs::Scope {
+                scope: structs::ASSET,
+                attachments: &self.structs,
+                owners: vec![structs::Owner {
+                    item: 0,
+                    label: name.into(),
+                    values: &self.values,
+                }],
+            },
+            structs::Scope {
+                scope: structs::ITEM,
+                attachments: &self.node_structs,
+                owners: self
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| structs::Owner {
+                        item: places.and_then(|p| p.get(i).copied()).unwrap_or(i as u32),
+                        label: format!("node {}", n.id),
+                        values: &n.values,
+                    })
+                    .collect(),
+            },
+        ];
+        if places.is_none() {
+            out.push(structs::Scope {
+                scope: structs::EDGE,
+                attachments: &self.edge_structs,
+                owners: self
+                    .edges
+                    .iter()
+                    .enumerate()
+                    .map(|(k, e)| structs::Owner {
+                        item: k as u32,
+                        label: format!("edge {} -> {}", e.from, e.to),
+                        values: &e.values,
+                    })
+                    .collect(),
+            });
+        }
+        out
     }
 
     /// Ids and edges that break the rules of docs/spec/agraph.md; loops and repeated edges
@@ -299,6 +371,7 @@ pub(crate) fn write_node(n: &Node) -> Map<String, Value> {
     o.insert("x".into(), json_number(n.x));
     o.insert("y".into(), json_number(n.y));
     write_data(&mut o, &n.data);
+    structs::put_values(&mut o, &n.values);
     o
 }
 
@@ -318,6 +391,7 @@ pub(crate) fn parse_node(value: Value) -> Result<Node, String> {
         x: number(&mut o, "x")?,
         y: number(&mut o, "y")?,
         data: parse_data(&mut o)?,
+        values: structs::take_values(&mut o)?,
         extra: o,
     })
 }
@@ -339,6 +413,7 @@ fn parse_edge(value: Value) -> Result<Edge, String> {
         label: text(&mut o, "label", false)?,
         weight,
         data: parse_data(&mut o)?,
+        values: structs::take_values(&mut o)?,
         extra: o,
     })
 }
@@ -346,6 +421,60 @@ fn parse_edge(value: Value) -> Result<Edge, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structs_round_trip() {
+        let text = r##"{
+  "$dialect": "agraph/1",
+  "structs": [
+    {
+      "schema": "game.aschema",
+      "type": "Quest"
+    }
+  ],
+  "node_structs": [
+    {
+      "schema": "game.aschema",
+      "type": "Step"
+    }
+  ],
+  "values": {
+    "Quest": {
+      "title": "Fox Hunt"
+    }
+  },
+  "nodes": [
+    {
+      "id": "start",
+      "x": 0,
+      "y": 0,
+      "values": {
+        "Step": {
+          "cost": 2
+        }
+      }
+    }
+  ],
+  "edges": []
+}
+"##;
+        let graph = Graph::parse(text).unwrap();
+        assert_eq!(graph.structs[0].ty, "Quest");
+        assert_eq!(graph.node_structs[0].schema, "game.aschema");
+        assert!(graph.edge_structs.is_empty());
+        assert_eq!(graph.nodes[0].values["Step"]["cost"], 2);
+        assert_eq!(graph.to_json(), text);
+        let scopes = graph.scopes(None);
+        assert_eq!(scopes.len(), 3);
+        assert_eq!(scopes[1].owners[0].label, "node start");
+        assert!(
+            Graph::parse(&text.replace(
+                "\"values\": {\n        \"Step\"",
+                "\"values\": {\n        \"Step\": 1, \"X\""
+            ))
+            .is_err()
+        );
+    }
 
     #[test]
     fn graphs_round_trip() {

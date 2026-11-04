@@ -3053,8 +3053,9 @@ fn right_sidebar(
                     }
                 }
                 (InspectorTab::Info, Some(inspected), _) => info(ui, &inspected.inspection),
-                (InspectorTab::Assets, _, Some(selection)) => {
-                    assets_tab(ui, assets, &selection.path)
+                (InspectorTab::Assets, Some(inspected), Some(selection)) => {
+                    let texture = inspected.inspection.texture_type.as_deref();
+                    assets_tab(ui, assets, &selection.path, texture)
                 }
             }
         });
@@ -4073,6 +4074,7 @@ fn colors_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Palette> {
                     file.colors.push(Swatch {
                         name: format!("Color {}", file.colors.len() + 1),
                         color,
+                        ..Swatch::default()
                     });
                     edit.selected = file.colors.len() - 1;
                 }
@@ -4500,6 +4502,7 @@ fn gradient_color_at(stops: &[Stop], at: f64) -> [u8; 4] {
         dither: Dither::None,
         stops: stops.to_vec(),
         modifiers: Vec::new(),
+        ..Gradient::default()
     }
     .color_at(at)
 }
@@ -5017,7 +5020,8 @@ fn choice_rows(ui: &mut Ui, rows: &[(String, String)], chosen: Option<usize>) ->
     clicked
 }
 
-fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
+/// `texture`: a compiled texture's type and usage, shown after its kind.
+fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path, texture: Option<&str>) {
     match assets {
         Assets::NoProject | Assets::NotBuilt => return placeholder(ui, "Not built yet"),
         Assets::Failed(e) => return placeholder(ui, e),
@@ -5044,12 +5048,17 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path) {
                             Kind::Graph => Icon::GraphStar,
                             Kind::Tree => Icon::ListTree,
                             Kind::Atlas => Icon::Map,
+                            Kind::Gradient => Icon::SwatchBook,
+                            Kind::Palette => Icon::Palette,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {
                             ui.label(RichText::new(&asset.asset_path).strong());
                             ui.horizontal(|ui| {
-                                ui.weak(asset.kind.name());
+                                match texture.filter(|_| asset.kind == Kind::Texture) {
+                                    Some(t) => ui.weak(format!("{}, {t}", asset.kind.name())),
+                                    None => ui.weak(asset.kind.name()),
+                                };
                                 ui.weak(format!("{:#018x}", asset.id));
                             });
                         });
@@ -9041,6 +9050,7 @@ fn color_set_preview(
             dither: Dither::None,
             stops: set.stops.clone(),
             modifiers: Vec::new(),
+            ..Gradient::default()
         };
         let texture = gradient_texture(ui, mini, &gradient, rect.size());
         egui::Image::from_texture((texture.id(), rect.size()))
@@ -9170,6 +9180,7 @@ fn color_set_fields(
         dither: Dither::None,
         stops: std::mem::take(&mut set.stops),
         modifiers: Vec::new(),
+        ..Gradient::default()
     };
     ui.push_id("color_gradient", |ui| {
         gradient_editor(ui, &mut gradient, card)

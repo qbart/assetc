@@ -5,6 +5,7 @@ use crate::Result;
 use crate::chunks::ChunkFile;
 use crate::hash::fnv1a64;
 use crate::read::Bytes;
+use crate::structs::Structs;
 
 const FILE: &str = "aatlas.bin";
 
@@ -55,6 +56,8 @@ pub struct Atlas {
     pub texture: u64,
     /// In name order.
     pub frames: Vec<Frame>,
+    /// Attached structs: [`Scope::Asset`](crate::structs::Scope::Asset) the atlas.
+    pub structs: Structs,
 }
 
 impl Atlas {
@@ -95,6 +98,7 @@ impl Atlas {
             padding: desc.u32(28)?,
             texture: desc.u64(32)?,
             frames,
+            structs: Structs::from_chunks(&file, FILE)?,
         })
     }
 

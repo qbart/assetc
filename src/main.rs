@@ -37,6 +37,7 @@ mod path;
 mod plan;
 mod presets;
 mod preview3d;
+mod structs;
 mod texture;
 mod theme;
 mod tree;

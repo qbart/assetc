@@ -210,7 +210,7 @@ pub struct Stop {
     pub color: [u8; 4],
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct Gradient {
     pub name: String,
     pub dither: Dither,
@@ -218,6 +218,8 @@ pub struct Gradient {
     pub stops: Vec<Stop>,
     /// Run on this gradient's cell, its color only; see docs/spec/agradient.md#modifiers.
     pub modifiers: Vec<crate::noise::Modifier>,
+    /// Its values of the file's gradient structs; see docs/features/structs.md.
+    pub values: crate::structs::Values,
 }
 
 impl Gradient {
@@ -237,6 +239,7 @@ impl Gradient {
                 },
             ],
             modifiers: Vec::new(),
+            values: crate::structs::Values::new(),
         }
     }
 
@@ -361,6 +364,11 @@ pub struct Gradients {
     pub cell_width: u32,
     pub cell_height: u32,
     pub layout: Layout,
+    /// Structs attached to the file and to every gradient, and the file's values; see
+    /// docs/features/structs.md.
+    pub structs: Vec<crate::structs::Attachment>,
+    pub gradient_structs: Vec<crate::structs::Attachment>,
+    pub values: crate::structs::Values,
     pub gradients: Vec<Gradient>,
 }
 
@@ -373,6 +381,9 @@ impl Gradients {
             cell_width: 16,
             cell_height: 64,
             layout: Layout::Rows,
+            structs: Vec::new(),
+            gradient_structs: Vec::new(),
+            values: crate::structs::Values::new(),
             gradients: vec![Gradient::new("Gradient 1".into())],
         }
     }
@@ -380,6 +391,37 @@ impl Gradients {
     /// Whether some stop is not opaque.
     pub fn has_alpha(&self) -> bool {
         !self.gradients.iter().all(Gradient::is_opaque)
+    }
+
+    /// The scopes of its attached structs: the file and each gradient; see
+    /// docs/features/structs.md#scopes.
+    pub fn scopes(&self) -> Vec<crate::structs::Scope<'_>> {
+        use crate::structs::{ASSET, ITEM, Owner, Scope};
+        vec![
+            Scope {
+                scope: ASSET,
+                attachments: &self.structs,
+                owners: vec![Owner {
+                    item: 0,
+                    label: "file".into(),
+                    values: &self.values,
+                }],
+            },
+            Scope {
+                scope: ITEM,
+                attachments: &self.gradient_structs,
+                owners: self
+                    .gradients
+                    .iter()
+                    .enumerate()
+                    .map(|(i, g)| Owner {
+                        item: i as u32,
+                        label: format!("gradient {}", i + 1),
+                        values: &g.values,
+                    })
+                    .collect(),
+            },
+        ]
     }
 
     /// The image: one cell per gradient, in layout order, the rest transparent.
@@ -393,6 +435,10 @@ impl Gradients {
             .map_err(|e: toml::de::Error| e.message().to_owned())?;
         let ([width, height, cell_width, cell_height], layout) =
             take_grid(&mut table, [256, 256, 16, 64])?;
+        let structs = crate::structs::take_toml_attachments(&mut table, "structs")?;
+        let gradient_structs =
+            crate::structs::take_toml_attachments(&mut table, "gradient_structs")?;
+        let values = crate::structs::take_toml_values(&mut table)?;
         let gradients = match table.remove("gradients") {
             None => Vec::new(),
             Some(toml::Value::Array(items)) => items
@@ -413,6 +459,9 @@ impl Gradients {
             cell_width,
             cell_height,
             layout,
+            structs,
+            gradient_structs,
+            values,
             gradients,
         };
         gradients.validate()?;
@@ -422,11 +471,19 @@ impl Gradients {
     /// The written form, see docs/spec/agradient.md#written-form.
     pub fn to_toml(&self) -> String {
         let mut out = self.grid_toml();
+        crate::structs::write_toml_attachments(&mut out, "structs", &self.structs);
+        crate::structs::write_toml_attachments(
+            &mut out,
+            "gradient_structs",
+            &self.gradient_structs,
+        );
+        crate::structs::write_toml_values(&mut out, "values", &self.values);
         for gradient in &self.gradients {
             out += "\n[[gradients]]\n";
             out += &format!("name = {}\n", toml::Value::String(gradient.name.clone()));
             out += &format!("dither = \"{}\"\n", gradient.dither.key());
             write_stops(&gradient.stops, &mut out);
+            crate::structs::write_toml_values(&mut out, "gradients.values", &gradient.values);
             crate::noise::write_modifier_tables(
                 &gradient.modifiers,
                 "gradients.modifiers",
@@ -488,6 +545,7 @@ fn parse_gradient(item: toml::Value) -> Result<Gradient, String> {
         .map(crate::noise::parse_modifiers)
         .transpose()?
         .unwrap_or_default();
+    let values = crate::structs::take_toml_values(&mut table)?;
     if let Some(key) = table.keys().next() {
         return Err(format!("unknown key {key}"));
     }
@@ -496,6 +554,7 @@ fn parse_gradient(item: toml::Value) -> Result<Gradient, String> {
         dither,
         stops,
         modifiers,
+        values,
     };
     gradient.sort();
     Ok(gradient)
@@ -602,6 +661,48 @@ fn in_range(key: &str, v: i64, min: i64, max: i64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structs_round_trip() {
+        let text = r##"width = 32
+height = 64
+cell_width = 16
+cell_height = 64
+layout = "rows"
+
+[[structs]]
+schema = "game.aschema"
+type = "Theme"
+
+[[gradient_structs]]
+schema = "game.aschema"
+type = "Biome"
+
+[values.Theme]
+name = "Night"
+
+[[gradients]]
+name = "Sky"
+dither = "none"
+stops = [
+    { at = 0.0, color = "#000000" },
+    { at = 1.0, color = "#ffffff" },
+]
+
+[gradients.values.Biome]
+heat = { max = 2.5, min = 1 }
+wet = true
+"##;
+        let file = Gradients::parse(text).unwrap();
+        assert_eq!(file.structs[0].ty, "Theme");
+        assert_eq!(file.gradient_structs[0].ty, "Biome");
+        assert_eq!(file.values["Theme"]["name"], "Night");
+        assert_eq!(file.gradients[0].values["Biome"]["heat"]["max"], 2.5);
+        assert_eq!(file.to_toml(), text);
+        assert!(
+            Gradients::parse(&text.replace("type = \"Theme\"", "type = \"Theme\"\nx = 1")).is_err()
+        );
+    }
 
     const SAMPLE: &str = r##"width = 32
 height = 64

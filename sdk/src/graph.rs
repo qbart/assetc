@@ -4,6 +4,7 @@ use crate::Result;
 use crate::chunks::ChunkFile;
 use crate::hash::fnv1a64;
 use crate::read::Bytes;
+use crate::structs::Structs;
 
 const FILE: &str = "agraph.bin";
 
@@ -55,6 +56,10 @@ impl Edge {
 pub struct Graph {
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// Attached structs: [`Scope::Asset`](crate::structs::Scope::Asset) the graph,
+    /// [`Scope::Item`](crate::structs::Scope::Item) each node and
+    /// [`Scope::Edge`](crate::structs::Scope::Edge) each edge, by index.
+    pub structs: Structs,
 }
 
 impl Graph {
@@ -95,7 +100,11 @@ impl Graph {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Self { nodes, edges })
+        Ok(Self {
+            nodes,
+            edges,
+            structs: Structs::from_chunks(&file, FILE)?,
+        })
     }
 
     /// The index of the node with `id`.
@@ -158,6 +167,10 @@ pub(crate) mod tests {
     }
 
     fn sample(drop: Option<&str>) -> Vec<u8> {
+        sample_with(drop, &[])
+    }
+
+    fn sample_with(drop: Option<&str>, extra: &[(&str, Vec<u8>)]) -> Vec<u8> {
         let mut strings = Vec::new();
         let mut nodes = node(&mut strings, "a", 1.0, 0, 1);
         nodes.extend(node(&mut strings, "b", 3.0, 1, 0));
@@ -189,6 +202,7 @@ pub(crate) mod tests {
             ("STRINGS", &strings[..]),
         ]
         .into_iter()
+        .chain(extra.iter().map(|(name, payload)| (*name, &payload[..])))
         .filter(|(name, _)| Some(*name) != drop)
         .collect();
         file("AGRAPH", 1, &chunks)
@@ -213,6 +227,24 @@ pub(crate) mod tests {
         assert_eq!(graph.node_index("b"), Some(1));
         assert_eq!(graph.edges_from(0).count(), 1);
         assert_eq!(graph.edges_to(0).count(), 0);
+    }
+
+    #[test]
+    fn reads_attached_structs() {
+        use crate::data::Value;
+        use crate::structs::Scope;
+        assert!(Graph::decode(&sample(None)).unwrap().structs.is_empty());
+        // Scope 2: the struct on edge 1.
+        let extra = crate::structs::tests::chunks(2);
+        let graph = Graph::decode(&sample_with(None, &extra)).unwrap();
+        assert_eq!(graph.structs.all().len(), 2);
+        let meta = graph.structs.get(Scope::Asset, 0, "Meta").unwrap();
+        assert_eq!(meta.get("tier"), Some(&Value::Int(3)));
+        let step = graph.structs.of(Scope::Edge, 1).next().unwrap();
+        assert_eq!(step.type_name, "Step");
+        assert_eq!(step.get("speed").and_then(Value::as_float), Some(2.5));
+        // With STRUCTS, the other struct chunks are required.
+        assert!(Graph::decode(&sample_with(Some("SREFS"), &extra)).is_err());
     }
 
     #[test]
