@@ -200,3 +200,18 @@ See [`docs/features/lut.md`](docs/features/lut.md#views).
 | Compare | Left click / drag  | Move the before / after divider     |
 | Cube    | as Canvas (3D)     | Orbit, move closer / farther, reset |
 | Cube    | Hold `Space`       | Show Before (untransformed cube)    |
+
+## Demo
+
+The [demo](docs/features/demo.md) app (`cargo run -p assetc-demo`), not the
+assetc GUI.
+
+| Input                       | Action                                   |
+|-----------------------------|------------------------------------------|
+| `1`–`7`, click on a tab     | Show that scene                          |
+| `Tab` / `Shift+Tab`         | Next / previous scene                    |
+| Left drag (3D scenes)       | Orbit the camera                         |
+| Scroll wheel                | 3D scenes: move closer / farther; 2D scenes: scroll |
+| `Space` (Models)            | Next animation clip                      |
+| `Escape`                    | Quit                                     |
+

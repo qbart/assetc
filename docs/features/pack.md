@@ -93,7 +93,8 @@ Selecting a `*.pak` file in the Output tree:
   **Alignment** (`16 B`), **Layout** (`32 B header + 1.1 KiB contents +
   6.2 MiB data`), **Padding** (alignment bytes), then one row per kind
   with entries, as `<count> · <size>` (`Textures  13 · 5.9 MiB`).
-- **Canvas**: a [data table](inspector.md#data-tables) of its entries, header
+- **Canvas**: one of the [views](#views) below; **Entries** by default: a
+  [data table](inspector.md#data-tables) of its entries, header
   `APAK v1   <n> entries   <size>` and a **Filter path…** field: columns
   **#**, **Kind**, **Path**, **Size**, **Offset** (byte offset in the pack),
   **Asset ID** (`0x` + 16 hex digits); rows in contents order (by path). An
@@ -103,3 +104,93 @@ Selecting a `*.pak` file in the Output tree:
 - A pack that does not read (bad magic, unknown version, an entry beyond the
   end of the file) shows its error as the canvas message.
 - The file tree shows `*.pak` files with the `package` icon.
+
+## Views
+
+The canvas view bar (see [`canvas.md`](canvas.md#view-bar)) offers four views
+of a selected pack, like the 2D / 3D / Chunks choice of other files:
+**Entries**, **Summary**, **Layout** and **Treemap**. The choice is kept for
+the session, for every pack. The idea follows the pack tabs of
+[assetc-cpp](https://github.com/qbart/assetc-cpp)'s viewer; the three new
+views show how the file is occupied, and by what.
+
+Every view colors bytes by what they are:
+
+| Bytes | Color |
+|-------|-------|
+| header | `#78787F` |
+| contents table | `#5F5F96` |
+| alignment padding | `BG_HEADER` (Layout only) |
+| texture | `#45BFC7` |
+| material | `#EB9645` |
+| mesh | `#5996EB` |
+| animation | `#59C778` |
+| font | `#E078AB` |
+| schema | `#E0CC59` |
+| data | `#A68CE0` |
+| graph | `#8CC7A6` |
+| tree | `#C7A68C` |
+| atlas | `#5FB3E0` |
+| manifest | `#B578DB` |
+| other | `#838383` |
+
+In Summary, Layout and Treemap:
+
+- Hovering an entry's block shows a tooltip: its kind (in its color), path,
+  size, and in Layout its byte offset (`@4096`).
+- Clicking an entry's block selects that file in the Output tree (opening
+  the folders above it and scrolling to it), when the loose file still
+  exists; otherwise nothing happens.
+- The entry selected in the Output tree before is not marked: a pack view
+  only shows while the pack itself is selected.
+- A pack that does not read shows its error as the canvas message, in every
+  view.
+
+### Summary
+
+From the top, 16 px from the canvas edges:
+
+1. A title line: the file name in `TEXT` 14 px, then in `TEXT_WEAK`
+   `APAK v1 · <size> · <n> entries · alignment <a>`.
+2. The **region bar**, 16 px tall across the width: header, contents table,
+   data (the entries' bytes) and padding, each as wide as its share of the
+   file, in their colors (data in `#50A05A`).
+3. A caption: `header 32 B   contents 1.1 KiB   data 6.1 MiB   padding 2.3 KiB
+   (0.1% overhead)`, overhead being header, contents and padding over the
+   file size.
+4. One row per kind with entries, in the [CLI](#cli) order: the kind's name
+   (plural, in its color) in a 110 px column, a bar as long as the kind's share
+   of the data (on a `BG_HEADER` track), and `<size> (<count>)` in a 140 px
+   column.
+
+### Layout
+
+A memory map of the whole file, offset 0 at the top left, read like text:
+
+- The file is cut into rows of equal bytes, 20 px tall with 4 px between
+  them, as many as fit in the canvas below the legend (at least 1, at most
+  one row per 64 bytes). Each row spans the canvas width minus 16 px on
+  each side; its byte range shows in `TEXT_WEAK` 11 px monospace at its
+  left (`0x00000000`), in a 90 px column.
+- The header, the contents table and each entry are drawn as a block from
+  their first to their last byte, wrapping from row to row; alignment gaps
+  stay `BG_HEADER`. A block narrower than 1 px is drawn 1 px wide. Each
+  entry starts with a 1 px `BG_CENTER` line, so neighbours of one kind stay
+  apart.
+- The legend above the rows: a 12 px chip and name for header, contents and
+  each kind with entries.
+
+### Treemap
+
+The data only (no header, contents or padding), in the canvas minus 16 px
+on each side:
+
+- One column per kind with entries, in the [CLI](#cli) order, as wide as its
+  share of the data; the kind's name in `TEXT` at the top left of the column
+  when the column is at least 40 px wide.
+- In each column, one tile per entry, largest first from the top, as tall as
+  its share of the kind's bytes; tiles alternate between the kind's color and
+  the same color at 82% brightness, with a 1 px `BG_CENTER` outline. A tile at
+  least 46 × 16 px shows the file name (without folders) in `BG_CENTER`,
+  clipped to the tile.
+

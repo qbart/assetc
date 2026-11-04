@@ -13,6 +13,9 @@ A [tree](../features/trees.md) (`*.atree`) as the build writes it, nodes in
 | `PROPS`   | no       | [`Property`](amesh.bin.md#property-32-bytes)`[]`: the nodes' data, text in `STRINGS` |
 | `STRINGS` | yes      | UTF-8 text back to back: ids, labels, property keys and Text values |
 
+Text is `offset` u32 and `len` u32 (bytes) into `STRINGS`, as in
+[`.agraph.bin`](agraph.bin.md); empty text has length `0`.
+
 ## TreeDesc (16 bytes)
 
 | Offset | Size | Field            | Notes |
