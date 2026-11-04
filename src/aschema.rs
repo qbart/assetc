@@ -451,9 +451,6 @@ pub const ASSET_KINDS: [(&str, &str); 13] = [
 /// The asset kind of an input path, by its name.
 pub fn asset_kind(path: &str) -> Option<&'static str> {
     let lower = path.to_ascii_lowercase();
-    if lower.ends_with(".mat.toml") {
-        return Some("material");
-    }
     let ext = lower.rsplit_once('.').map(|(_, e)| e)?;
     Some(match ext {
         "png" | "jpg" | "jpeg" | "tga" => "texture",
@@ -465,6 +462,7 @@ pub fn asset_kind(path: &str) -> Option<&'static str> {
         "cube" => "lut",
         "exr" => "hdr",
         "atlas" => "atlas",
+        "amat" => "material",
         "agraph" => "graph",
         "atree" => "tree",
         "adata" => "data",
@@ -480,7 +478,7 @@ pub fn asset_id(path: &str) -> u64 {
     }
     let stem = |p: &str| p.rsplit_once('.').map_or(p, |(s, _)| s).to_owned();
     let asset_path = match asset_kind(path) {
-        Some("material") => format!("{}.amat.bin", &path[..path.len() - ".mat.toml".len()]),
+        Some("material") => format!("{path}.bin"),
         Some("model") => format!("{}.amesh.bin", stem(path)),
         Some("font") => format!("{}.afont.bin", stem(path)),
         Some("atlas") => format!("{}.aatlas.bin", stem(path)),
@@ -1255,7 +1253,8 @@ mod tests {
                 .contains("unknown asset kind")
         );
         assert_eq!(asset_kind("a/b.GLB"), Some("model"));
-        assert_eq!(asset_kind("brick/brick.mat.toml"), Some("material"));
+        assert_eq!(asset_kind("brick/brick.amat"), Some("material"));
+        assert_eq!(asset_kind("brick/brick.mat.toml"), None);
         assert_eq!(asset_kind("fx/boom.atlas"), Some("atlas"));
         assert_eq!(
             asset_id("textures/grass.png"),
@@ -1263,7 +1262,7 @@ mod tests {
         );
         assert_eq!(asset_id("Fox.glb"), crate::hash::fnv1a64(b"Fox.amesh.bin"));
         assert_eq!(
-            asset_id("brick/brick.mat.toml"),
+            asset_id("brick/brick.amat"),
             crate::hash::fnv1a64(b"brick/brick.amat.bin")
         );
         assert_eq!(asset_id(""), 0);

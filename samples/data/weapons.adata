@@ -92,7 +92,7 @@
           "#ff5a1f00"
         ]
       ],
-      "material": "materials/lava.mat.toml"
+      "material": "materials/lava.amat"
     },
     {
       "$type": "Weapon",
@@ -108,7 +108,7 @@
         "unique"
       ],
       "tint": "#ffd34d",
-      "material": "materials/gold.mat.toml",
+      "material": "materials/gold.amat",
       "offset": {
         "x": 0.25,
         "y": 0.1

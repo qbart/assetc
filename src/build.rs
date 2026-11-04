@@ -1559,14 +1559,14 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         fs::create_dir_all(&input).unwrap();
         fs::write(
-            input.join("gold.mat.toml"),
+            input.join("gold.amat"),
             "metallic = 1.0\nroughness = 0.3\n",
         )
         .unwrap();
 
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
-        assert_eq!(outcome.built[0].source, "gold.mat.toml");
+        assert_eq!(outcome.built[0].source, "gold.amat");
         assert_eq!(outcome.built[0].detail, "material: no textures");
         assert_eq!(outcome.summary(), "Built 1 material (0 skipped)");
         let m = material::decode(&fs::read(output.join("gold.amat.bin")).unwrap()).unwrap();
@@ -1587,7 +1587,7 @@ mod tests {
         gray(&input.join("wall/wall.ao.png"), 1, 1, 10);
         gray(&input.join("shared/ao.png"), 1, 1, 90);
         fs::write(
-            input.join("wall/wall.mat.toml"),
+            input.join("wall/wall.amat"),
             "normal_y = \"dx\"\n[textures]\nocclusion = \"../shared/ao.png\"\n",
         )
         .unwrap();
@@ -1606,20 +1606,24 @@ mod tests {
 
     #[test]
     fn material_failures() {
-        let cases: [(&[(&str, &str)], &str); 4] = [
-            (&[("m.mat.toml", "roughness = 2.0")], "out of range"),
+        let cases: [(&[(&str, &str)], &str); 5] = [
+            (&[("m.amat", "roughness = 2.0")], "out of range"),
             (
-                &[("m.mat.toml", "[textures]\nnormal = \"../../x.png\"")],
+                &[("m.mat.toml", "roughness = 0.5")],
+                "rename m.mat.toml to m.amat",
+            ),
+            (
+                &[("m.amat", "[textures]\nnormal = \"../../x.png\"")],
                 "not a texture source",
             ),
             (
-                &[("m.mat.toml", "[textures]\nnormal = \"missing.png\"")],
+                &[("m.amat", "[textures]\nnormal = \"missing.png\"")],
                 "not a texture source",
             ),
             (
                 &[
-                    ("m.mat.toml", "[textures]\nnormal = \"shared.png\""),
-                    ("k.mat.toml", "[textures]\nbase_color = \"shared.png\""),
+                    ("m.amat", "[textures]\nnormal = \"shared.png\""),
+                    ("k.amat", "[textures]\nbase_color = \"shared.png\""),
                 ],
                 "differently by another material",
             ),
@@ -1676,9 +1680,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         fs::create_dir_all(&input).unwrap();
-        fs::write(input.join("a.mat.toml"), "").unwrap();
+        fs::write(input.join("a.amat"), "").unwrap();
         run(&input, &output, &config::Config::default()).unwrap();
-        fs::remove_file(input.join("a.mat.toml")).unwrap();
+        fs::remove_file(input.join("a.amat")).unwrap();
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.removed, ["a.amat.bin"]);
     }

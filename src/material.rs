@@ -1,12 +1,15 @@
-//! PBR materials: `.mat.toml` sources and `.amat.bin` files, see docs/features/materials.md
-//! and docs/spec/material.md.
+//! PBR materials: `.amat` sources and `.amat.bin` files, see docs/features/materials.md,
+//! docs/spec/amat.md and docs/spec/amat.bin.md.
 
 use serde::Deserialize;
 
 use crate::texture::ColorSpace;
 
-/// Suffix of material source files: `<name>.mat.toml`.
-pub const SOURCE_SUFFIX: &str = ".mat.toml";
+/// Suffix of material source files: `<name>.amat`.
+pub const SOURCE_SUFFIX: &str = ".amat";
+/// Suffix materials used to have, rejected with a hint; see
+/// docs/features/materials.md#old-mattoml-files.
+pub const OLD_SUFFIX: &str = ".mat.toml";
 pub const SIZE: usize = 112;
 const MAGIC: [u8; 4] = *b"ACMT";
 const VERSION: u32 = 1;
@@ -59,6 +62,19 @@ impl Slot {
         }
     }
 
+    /// Name shown in the Material tab.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::BaseColor => "Base color",
+            Self::Normal => "Normal",
+            Self::Roughness => "Roughness",
+            Self::Metallic => "Metallic",
+            Self::Occlusion => "Occlusion",
+            Self::Emissive => "Emissive",
+            Self::Height => "Height",
+        }
+    }
+
     pub fn from_suffix(suffix: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|s| s.suffix() == Some(suffix))
     }
@@ -89,12 +105,34 @@ pub enum NormalY {
     Dx,
 }
 
+impl NormalY {
+    pub const ALL: [Self; 2] = [Self::Gl, Self::Dx];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Gl => "gl",
+            Self::Dx => "dx",
+        }
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum HeightMode {
     #[default]
     Parallax,
     Displacement,
+}
+
+impl HeightMode {
+    pub const ALL: [Self; 2] = [Self::Parallax, Self::Displacement];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Parallax => "parallax",
+            Self::Displacement => "displacement",
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -106,8 +144,20 @@ pub enum AlphaMode {
     Blend,
 }
 
-/// A parsed `<name>.mat.toml`; see docs/spec/mat.toml.md.
-#[derive(Debug, Default, Deserialize)]
+impl AlphaMode {
+    pub const ALL: [Self; 3] = [Self::Opaque, Self::Mask, Self::Blend];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Opaque => "opaque",
+            Self::Mask => "mask",
+            Self::Blend => "blend",
+        }
+    }
+}
+
+/// A parsed `<name>.amat`; see docs/spec/amat.md.
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Source {
     pub base_color: Option<[f32; 4]>,
@@ -115,19 +165,19 @@ pub struct Source {
     pub roughness: Option<f32>,
     pub occlusion_strength: Option<f32>,
     pub normal_scale: Option<f32>,
-    pub normal_y: NormalY,
+    pub normal_y: Option<NormalY>,
     pub emissive: Option<[f32; 3]>,
     pub emissive_strength: Option<f32>,
-    pub height_mode: HeightMode,
+    pub height_mode: Option<HeightMode>,
     pub height_scale: Option<f32>,
     pub height_midlevel: Option<f32>,
-    pub alpha_mode: AlphaMode,
+    pub alpha_mode: Option<AlphaMode>,
     pub alpha_cutoff: Option<f32>,
-    pub double_sided: bool,
+    pub double_sided: Option<bool>,
     pub textures: SourceTextures,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct SourceTextures {
     base_color: Option<String>,
@@ -151,6 +201,18 @@ impl SourceTextures {
             Slot::Height => &self.height,
         }
         .as_deref()
+    }
+
+    pub fn set(&mut self, slot: Slot, path: Option<String>) {
+        *match slot {
+            Slot::BaseColor => &mut self.base_color,
+            Slot::Normal => &mut self.normal,
+            Slot::Roughness => &mut self.roughness,
+            Slot::Metallic => &mut self.metallic,
+            Slot::Occlusion => &mut self.occlusion,
+            Slot::Emissive => &mut self.emissive,
+            Slot::Height => &mut self.height,
+        } = path;
     }
 }
 
@@ -209,11 +271,93 @@ impl Source {
             height_scale: self.height_scale.unwrap_or(0.05),
             height_midlevel: self.height_midlevel.unwrap_or(0.5),
             alpha_cutoff: self.alpha_cutoff.unwrap_or(0.5),
-            alpha_mode: self.alpha_mode,
-            double_sided: self.double_sided,
-            height_mode: self.height_mode,
+            alpha_mode: self.alpha_mode.unwrap_or_default(),
+            double_sided: self.double_sided.unwrap_or_default(),
+            height_mode: self.height_mode.unwrap_or_default(),
             textures,
         }
+    }
+
+    /// The file's text: the keys that are set, in spec order; see
+    /// docs/spec/amat.md#written-by-assetc.
+    pub fn to_toml(&self) -> String {
+        let mut out = String::new();
+        let mut line = |key: &str, value: String| out += &format!("{key} = {value}\n");
+        let list = |values: &[f32]| {
+            let values: Vec<String> = values.iter().map(|v| float(*v)).collect();
+            format!("[{}]", values.join(", "))
+        };
+        let quoted = |s: &str| format!("{s:?}");
+        if let Some(v) = self.base_color {
+            line("base_color", list(&v));
+        }
+        for (key, v) in [("metallic", self.metallic), ("roughness", self.roughness)] {
+            if let Some(v) = v {
+                line(key, float(v));
+            }
+        }
+        for (key, v) in [
+            ("occlusion_strength", self.occlusion_strength),
+            ("normal_scale", self.normal_scale),
+        ] {
+            if let Some(v) = v {
+                line(key, float(v));
+            }
+        }
+        if let Some(v) = self.normal_y {
+            line("normal_y", quoted(v.key()));
+        }
+        if let Some(v) = self.emissive {
+            line("emissive", list(&v));
+        }
+        if let Some(v) = self.emissive_strength {
+            line("emissive_strength", float(v));
+        }
+        if let Some(v) = self.height_mode {
+            line("height_mode", quoted(v.key()));
+        }
+        for (key, v) in [
+            ("height_scale", self.height_scale),
+            ("height_midlevel", self.height_midlevel),
+        ] {
+            if let Some(v) = v {
+                line(key, float(v));
+            }
+        }
+        if let Some(v) = self.alpha_mode {
+            line("alpha_mode", quoted(v.key()));
+        }
+        if let Some(v) = self.alpha_cutoff {
+            line("alpha_cutoff", float(v));
+        }
+        if let Some(v) = self.double_sided {
+            line("double_sided", v.to_string());
+        }
+        let textures: Vec<_> = Slot::ALL
+            .into_iter()
+            .filter_map(|slot| Some((slot, self.textures.get(slot)?)))
+            .collect();
+        if !textures.is_empty() {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out += "[textures]\n";
+            for (slot, path) in textures {
+                out += &format!("{} = {}\n", slot.name(), quoted(path));
+            }
+        }
+        out
+    }
+}
+
+/// `v` rounded to 4 decimals, always with a decimal point (`1.0`, `0.25`).
+fn float(v: f32) -> String {
+    let rounded = (f64::from(v) * 1e4).round() / 1e4;
+    let text = format!("{rounded}");
+    if text.contains(['.', 'e', 'N', 'i']) {
+        text
+    } else {
+        format!("{text}.0")
     }
 }
 
@@ -390,7 +534,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(s.normal_y, NormalY::Dx);
+        assert_eq!(s.normal_y, Some(NormalY::Dx));
         assert_eq!(s.textures.get(Slot::Occlusion), Some("../shared/ao.png"));
         assert_eq!(s.textures.get(Slot::Normal), None);
         let m = s.material(&[], TextureIds::default());
@@ -399,6 +543,23 @@ mod tests {
         assert!(m.double_sided);
         assert_eq!(m.alpha_mode, AlphaMode::Mask);
         assert_eq!(m.height_mode, HeightMode::Displacement);
+    }
+
+    #[test]
+    fn writes_set_keys_in_spec_order() {
+        assert_eq!(Source::default().to_toml(), "");
+        let text = "base_color = [0.8, 0.8, 0.8, 1.0]\nroughness = 0.5\nnormal_y = \"dx\"\n\
+                    alpha_mode = \"mask\"\ndouble_sided = true\n\n[textures]\n\
+                    normal = \"../n.png\"\nheight = \"h.png\"\n";
+        let mut s = Source::parse(text).unwrap();
+        assert_eq!(s.to_toml(), text);
+        s.metallic = Some(0.123_456);
+        s.textures.set(Slot::Normal, None);
+        let written = s.to_toml();
+        assert!(written.contains("metallic = 0.1235\nroughness"), "{written}");
+        assert_eq!(Source::parse(&written).unwrap().textures.get(Slot::Normal), None);
+        assert_eq!(float(1.0), "1.0");
+        assert_eq!(float(-2.5), "-2.5");
     }
 
     #[test]

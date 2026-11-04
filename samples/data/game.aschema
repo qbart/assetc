@@ -269,7 +269,7 @@
         {
           "name": "ground",
           "type": "asset<material>",
-          "default": "brick/brick.mat.toml"
+          "default": "brick/brick.amat"
         },
         {
           "name": "ground_detail",

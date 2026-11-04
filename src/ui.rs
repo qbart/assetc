@@ -2304,6 +2304,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "adata" | "pak" => Icon::Package,
         "atree" => Icon::ListTree,
         "aatlas" => Icon::Map,
+        "amat" => Icon::Gem,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,

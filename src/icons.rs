@@ -32,6 +32,7 @@ pub enum Icon {
     FlipHorizontal2,
     Folder,
     FolderOpen,
+    Gem,
     Globe,
     GraphStar,
     GripHorizontal,
@@ -80,7 +81,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 72] = [
+const SVGS: [(&str, &str); 73] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -135,6 +136,7 @@ const SVGS: [(&str, &str); 72] = [
         "folder-open",
         include_str!("../assets/icons/folder-open.svg"),
     ),
+    ("gem", include_str!("../assets/icons/gem.svg")),
     ("globe", include_str!("../assets/icons/globe.svg")),
     ("graph-star", include_str!("../assets/icons/graph-star.svg")),
     (

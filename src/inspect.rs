@@ -1728,7 +1728,7 @@ name = \"x\"\n",
         png(&dir.path().join("assets/brick/brick.png"), 4, 4);
         png(&dir.path().join("assets/brick/brick.r.png"), 4, 4);
         fs::write(
-            dir.path().join("assets/brick/brick.mat.toml"),
+            dir.path().join("assets/brick/brick.amat"),
             "roughness = 0.5\nalpha_mode = \"mask\"\n",
         )
         .unwrap();
@@ -1747,7 +1747,7 @@ name = \"x\"\n",
         let toml = inspect(
             &project,
             Location::Input,
-            &file("assets/brick/brick.mat.toml"),
+            &file("assets/brick/brick.amat"),
         );
         assert_eq!(row(&toml, "Kind"), "Material source");
         assert_eq!(row(&toml, "Asset path"), "brick/brick.amat.bin");
@@ -1796,11 +1796,11 @@ name = \"x\"\n",
         assert_eq!(field("normal_texture").cells[2], "—");
         assert!(field("base_color").swatch.is_some());
 
-        fs::write(file("assets/brick/brick.mat.toml"), "roughness = 3.0").unwrap();
+        fs::write(file("assets/brick/brick.amat"), "roughness = 3.0").unwrap();
         let bad = inspect(
             &project,
             Location::Input,
-            &file("assets/brick/brick.mat.toml"),
+            &file("assets/brick/brick.amat"),
         );
         assert!(row(&bad, "Error").contains("out of range"));
     }

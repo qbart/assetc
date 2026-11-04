@@ -87,7 +87,7 @@ pub enum Job {
     /// see docs/features/build.md#inputs.
     Data { source: String, kind: Kind },
     Material {
-        /// `<name>.mat.toml`, or `<name>.*` without one.
+        /// `<name>.amat`, or `<name>.*` without one.
         source: String,
         material: Material,
     },
@@ -137,7 +137,7 @@ impl Plan {
     }
 }
 
-/// Files of one directory sharing a name: `<name>.<ext>`, `<name>.<suffix>.<ext>`, `<name>.mat.toml`.
+/// Files of one directory sharing a name: `<name>.<ext>`, `<name>.<suffix>.<ext>`, `<name>.amat`.
 #[derive(Default)]
 struct Group {
     base: Option<String>,
@@ -284,7 +284,17 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             }
         };
         let (dir, name) = split_dir(&rel);
-        if let Some(material) = name.strip_suffix(material::SOURCE_SUFFIX)
+        if let Some(material) = name.strip_suffix(material::OLD_SUFFIX)
+            && !material.is_empty()
+        {
+            // See docs/features/materials.md#old-mattoml-files.
+            plan.failures.push(Failure {
+                message: format!(
+                    "materials are <name>.amat files now: rename {name} to {material}.amat"
+                ),
+                source: rel,
+            });
+        } else if let Some(material) = name.strip_suffix(material::SOURCE_SUFFIX)
             && !material.is_empty()
         {
             let key = (dir.to_owned(), material.to_owned());
@@ -469,7 +479,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             }
             let claim = Claim {
                 color: slot.color_space(),
-                flip_green: slot == Slot::Normal && source.normal_y == NormalY::Dx,
+                flip_green: slot == Slot::Normal && source.normal_y == Some(NormalY::Dx),
             };
             match claims.get(rel) {
                 Some(existing) if *existing != claim => {
