@@ -1229,7 +1229,7 @@ struct Inspector {
 }
 
 /// A model's sidecar, project mesh settings and inherited locators, see [`Prepared::mesh`].
-type PreparedMesh = (Amod, MeshOptions, Vec<Inherited>);
+type PreparedMesh = (Amod, MeshOptions, Vec<Inherited>, HeldLocators);
 
 /// The part of an [`Inspected`] made off the UI thread.
 struct Prepared {
@@ -1410,7 +1410,12 @@ fn prepare(
                 None => Vec::new(),
             };
             amod.locators = presets::merged(&inherited, &amod.locators);
-            Ok((amod, settings.options(&rel), inherited))
+            let held = HeldLocators {
+                input: project.input_dir(),
+                presets: project.config.locators.clone(),
+                models: HashMap::new(),
+            };
+            Ok((amod, settings.options(&rel), inherited, held))
         });
     // Images carry modifiers in their sidecar; see docs/features/textures.md#modifiers.
     let sidecar = (selection.location == Location::Input && build::is_image(&selection.path))
@@ -1617,10 +1622,11 @@ fn inspected(
         })
     });
     let mesh = prepared.mesh.map(|parsed| {
-        parsed.map(|(amod, project, inherited)| match kept_mesh {
+        parsed.map(|(amod, project, inherited, held)| match kept_mesh {
             Some(edit) if edit.saved == amod => MeshEdit {
                 project,
                 inherited,
+                held,
                 ..edit
             },
             _ => MeshEdit {
@@ -1637,6 +1643,7 @@ fn inspected(
                 color_end: 0,
                 color_cards: Vec::new(),
                 inherited,
+                held,
             },
         })
     });
@@ -3388,6 +3395,50 @@ struct MeshEdit {
     /// The locators the model has without its sidecar; `edit` and `saved` hold every locator,
     /// and only what differs from these is written.
     inherited: Vec<Inherited>,
+    /// The locators of the models shown at its locators.
+    held: HeldLocators,
+}
+
+/// The locators of models shown at locators, by input-relative path, each read when first
+/// needed; see docs/features/locators.md#attachment-preview.
+#[derive(Default)]
+struct HeldLocators {
+    input: Option<PathBuf>,
+    presets: crate::config::Locators,
+    models: HashMap<String, Result<Vec<amod::Locator>, String>>,
+}
+
+impl HeldLocators {
+    fn get(&mut self, rel: &str) -> &Result<Vec<amod::Locator>, String> {
+        let Self {
+            input,
+            presets,
+            models,
+        } = self;
+        models.entry(rel.to_owned()).or_insert_with(|| match input {
+            Some(input) => presets::model_locators(presets, input, rel),
+            None => Err("the project has no input folder".into()),
+        })
+    }
+
+    /// `rel`'s locator `name`: its joint and transform there.
+    fn find(
+        &mut self,
+        rel: &str,
+        name: &str,
+    ) -> Option<(Option<String>, bevy::prelude::Transform)> {
+        let found = self
+            .get(rel)
+            .as_ref()
+            .ok()?
+            .iter()
+            .find(|l| l.name == name)?;
+        let local = bevy::math::Mat4::from(gizmo::local(found));
+        Some((
+            found.joint.clone(),
+            bevy::prelude::Transform::from_matrix(local),
+        ))
+    }
 }
 
 impl MeshEdit {
@@ -6638,8 +6689,9 @@ fn canvas_model(
     }
 
     // Models shown at visible locators; see docs/features/locators.md#attachment-preview.
-    if let Some(edit) = &edit {
-        for l in &edit.edit.locators {
+    if let Some(edit) = &mut edit {
+        let MeshEdit { edit, held, .. } = &mut **edit;
+        for l in &edit.locators {
             if let Some(path) = &l.preview
                 && show_locators
                 && !hidden.contains(&l.name)
@@ -6648,6 +6700,10 @@ fn canvas_model(
                     path: path.into(),
                     joint: l.joint.clone(),
                     transform: Transform::from_matrix(Mat4::from(gizmo::local(l))),
+                    held: l
+                        .preview_locator
+                        .as_ref()
+                        .and_then(|at| held.find(path, at)),
                 });
             }
         }
@@ -7464,6 +7520,51 @@ fn locator_fields(
             });
         if preview != locator.preview {
             locator.preview = preview;
+            locator.preview_locator = None;
+        }
+    });
+    prop_row(ui, "Attach by", |ui, width| {
+        let names: Result<Vec<String>, String> = match &locator.preview {
+            Some(path) => match edit.held.get(path) {
+                Ok(held) => Ok(held.iter().map(|l| l.name.clone()).collect()),
+                Err(e) => Err(e.clone()),
+            },
+            None => Ok(Vec::new()),
+        };
+        let missing = locator
+            .preview_locator
+            .clone()
+            .filter(|name| !names.as_ref().is_ok_and(|n| n.contains(name)));
+        let mut at = locator.preview_locator.clone();
+        let selected = match (&at, &missing) {
+            (None, _) => "Origin".to_owned(),
+            (Some(name), Some(_)) => format!("{name} (missing)"),
+            (Some(name), None) => name.clone(),
+        };
+        ui.add_enabled_ui(locator.preview.is_some(), |ui| {
+            let response = egui::ComboBox::from_id_salt("locator_attach")
+                .width(width - 8.0)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut at, None, "Origin");
+                    if let Some(name) = &missing {
+                        ui.selectable_value(
+                            &mut at,
+                            Some(name.clone()),
+                            format!("{name} (missing)"),
+                        );
+                    }
+                    for name in names.iter().flatten() {
+                        ui.selectable_value(&mut at, Some(name.clone()), name);
+                    }
+                })
+                .response;
+            if let Err(e) = &names {
+                response.on_hover_text(e);
+            }
+        });
+        if at != locator.preview_locator {
+            locator.preview_locator = at;
         }
     });
 

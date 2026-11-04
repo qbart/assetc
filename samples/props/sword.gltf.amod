@@ -1,0 +1,7 @@
+[[locators]]
+name = "grip"
+tags = ["attach"]
+translation = [0.0, 6.0, 0.0]
+rotation = [0.0, 0.0, 0.0, 1.0]
+scale = [1.0, 1.0, 1.0]
+color = "#38bdf8"

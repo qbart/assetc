@@ -52,6 +52,9 @@ pub struct Locator {
     /// An input-relative glTF model the 3D view shows at the locator; not compiled.
     #[serde(default)]
     pub preview: Option<String>,
+    /// The `preview` model's locator put on this one; `None` is its origin.
+    #[serde(default)]
+    pub preview_locator: Option<String>,
     /// `#rrggbb`, the marker's color in the 3D view; not compiled.
     #[serde(default)]
     pub color: Option<String>,
@@ -76,6 +79,7 @@ impl Locator {
             rotation: identity(),
             scale: unit(),
             preview: None,
+            preview_locator: None,
             color: None,
         }
     }
@@ -188,6 +192,18 @@ impl Amod {
                     ));
                 }
             }
+            match (&locator.preview_locator, &locator.preview) {
+                (Some(at), _) if at.is_empty() => {
+                    return Err(format!("locator {:?}: empty preview_locator", locator.name));
+                }
+                (Some(_), None) => {
+                    return Err(format!(
+                        "locator {:?}: preview_locator without preview",
+                        locator.name
+                    ));
+                }
+                _ => {}
+            }
             if let Some(color) = &locator.color
                 && locator_color(color).is_none()
             {
@@ -241,6 +257,9 @@ impl Amod {
             out += &format!("scale = {}\n", floats(&locator.scale));
             if let Some(preview) = &locator.preview {
                 out += &format!("preview = {}\n", toml::Value::from(preview.as_str()));
+            }
+            if let Some(at) = &locator.preview_locator {
+                out += &format!("preview_locator = {}\n", toml::Value::from(at.as_str()));
             }
             if let Some(color) = &locator.color {
                 out += &format!("color = {}\n", toml::Value::from(color.as_str()));
@@ -354,6 +373,7 @@ mod tests {
             locators: vec![
                 Locator {
                     preview: Some("weapons/sword.glb".into()),
+                    preview_locator: Some("grip".into()),
                     ..hand
                 },
                 Locator::new("muzzle".into()),
@@ -362,7 +382,7 @@ mod tests {
         };
         let text = amod.to_toml();
         assert!(text.contains(
-            "\n\n[[locators]]\nname = 'hand \"r\"'\njoint = \"RightHand\"\ntranslation = [0.02, 0.08, 0.0]\nrotation = [0.0, 0.0, 0.70710677, 0.70710677]\nscale = [1.0, 1.0, 1.0]\npreview = \"weapons/sword.glb\"\n"
+            "\n\n[[locators]]\nname = 'hand \"r\"'\njoint = \"RightHand\"\ntranslation = [0.02, 0.08, 0.0]\nrotation = [0.0, 0.0, 0.70710677, 0.70710677]\nscale = [1.0, 1.0, 1.0]\npreview = \"weapons/sword.glb\"\npreview_locator = \"grip\"\n"
         ), "{text}");
         assert!(text.ends_with("\n\n[[locators]]\nname = \"muzzle\"\ntranslation = [0.0, 0.0, 0.0]\nrotation = [0.0, 0.0, 0.0, 1.0]\nscale = [1.0, 1.0, 1.0]\n"));
         assert_eq!(Amod::parse(&text).unwrap(), amod);
@@ -383,6 +403,13 @@ mod tests {
         );
         assert!(colored.to_toml().ends_with("color = \"#22c55e\"\n"));
         assert!(Amod::parse("[[locators]]\nname = \"a\"\ncolor = \"red\"\n").is_err());
+        assert!(Amod::parse("[[locators]]\nname = \"a\"\npreview_locator = \"grip\"\n").is_err());
+        assert!(
+            Amod::parse(
+                "[[locators]]\nname = \"a\"\npreview = \"s.glb\"\npreview_locator = \"\"\n"
+            )
+            .is_err()
+        );
 
         // Tags: written after the name, typed with commas.
         let tagged = Amod {

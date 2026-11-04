@@ -106,6 +106,20 @@ pub fn merged(inherited: &[Inherited], sidecar: &[Locator]) -> Vec<Locator> {
     out
 }
 
+/// Every locator of the input model `rel`: its file's, its presets' and its sidecar's; see
+/// docs/features/locators.md#attachment-preview.
+pub fn model_locators(
+    presets: &config::Locators,
+    input: &Path,
+    rel: &str,
+) -> Result<Vec<Locator>, String> {
+    let path = input.join(rel);
+    let data = std::fs::read(&path).map_err(|e| format!("{rel}: {e}"))?;
+    let inherited = inherited(presets, input, rel, &data)?;
+    let sidecar = amod::read(&path)?.map(|a| a.locators).unwrap_or_default();
+    Ok(merged(&inherited, &sidecar))
+}
+
 /// What the sidecar must hold for the model to have `locators`: those not inherited, or that
 /// differ from what they replace.
 pub fn sidecar_part(locators: &[Locator], inherited: &[Inherited]) -> Vec<Locator> {
@@ -238,5 +252,24 @@ mod tests {
             err.starts_with("assetc.toml [[locators.presets]] 1: nope.glb"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn a_models_locators_include_its_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("sword.gltf"), rig("Hand")).unwrap();
+        std::fs::write(
+            dir.path().join("sword.gltf.amod"),
+            "[[locators]]\nname = \"grip\"\ntranslation = [0.0, 6.0, 0.0]\n\n[[locators]]\nname = \"tip\"\n",
+        )
+        .unwrap();
+        let got = model_locators(&config::Locators::default(), dir.path(), "sword.gltf").unwrap();
+        let names: Vec<_> = got.iter().map(|l| l.name.as_str()).collect();
+        assert_eq!(names, ["grip", "Eye", "muzzle", "tip"]);
+        // The sidecar's grip replaces the file's, in model space.
+        assert_eq!(got[0].joint, None);
+        assert_eq!(got[0].translation, [0.0, 6.0, 0.0]);
+        let err = model_locators(&config::Locators::default(), dir.path(), "nope.glb").unwrap_err();
+        assert!(err.starts_with("nope.glb: "), "{err}");
     }
 }

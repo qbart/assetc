@@ -303,6 +303,9 @@ pub struct Attachment {
     pub joint: Option<String>,
     /// The locator's transform in that space.
     pub transform: Transform,
+    /// The attached model's own locator put on this one: its joint in the attached model (by
+    /// name; `None` is its model space) and its transform there. `None` holds it by its origin.
+    pub held: Option<(Option<String>, Transform)>,
 }
 
 /// World transforms of a shown model's spaces, as posed this frame; see
@@ -1909,7 +1912,8 @@ fn sync_attachments(
     gltfs: Res<Assets<Gltf>>,
     mut spawned: Local<Vec<Spawned>>,
     (children, skins, names, roots): AttachmentQueries,
-    mut transforms: Query<&mut Transform, With<AttachmentRoot>>,
+    mut transforms: Query<(&mut Transform, &mut Visibility), With<AttachmentRoot>>,
+    globals: Query<&GlobalTransform>,
 ) {
     let fit = loaded
         .0
@@ -1948,10 +1952,39 @@ fn sync_attachments(
                 scene: false,
             }
         });
-        if let Ok(mut transform) = transforms.get_mut(item.entity)
-            && *transform != wanted.transform
-        {
-            *transform = wanted.transform;
+        // Held by its own locator: that locator's model-space transform undone, once its joint
+        // is loaded.
+        let placed = match &wanted.held {
+            None => Some(wanted.transform),
+            Some((joint, local)) => {
+                let in_model = match joint {
+                    None => Some(Affine3A::IDENTITY),
+                    Some(name) => find_joint(item.entity, name, &children, &skins, &names)
+                        .and_then(|joint| {
+                            let root = globals.get(item.entity).ok()?.affine();
+                            Some(root.inverse() * globals.get(joint).ok()?.affine())
+                        }),
+                };
+                in_model.map(|m| {
+                    let held = m * local.compute_affine();
+                    Transform::from_matrix(Mat4::from(
+                        wanted.transform.compute_affine() * held.inverse(),
+                    ))
+                })
+            }
+        };
+        if let Ok((mut transform, mut visibility)) = transforms.get_mut(item.entity) {
+            if let Some(placed) = placed
+                && *transform != placed
+            {
+                *transform = placed;
+            }
+            let shown = if placed.is_some() {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            visibility.set_if_neq(shown);
         }
         if !item.scene
             && let Some(gltf) = gltfs.get(&item.gltf)

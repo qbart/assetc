@@ -24,6 +24,7 @@ translation = [6.0, 0.0, 0.0]
 rotation = [0.0, 0.0, -0.70710677, 0.70710677]
 scale = [0.5, 0.5, 0.5]
 preview = "props/sword.gltf"
+preview_locator = "grip"
 color = "#38bdf8"
 
 [[locators]]
