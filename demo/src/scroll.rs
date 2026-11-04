@@ -9,7 +9,7 @@ use bevy::window::WindowResized;
 use crate::{ACCENT, BAR, Camera2dMarker, Current, InScene, TEXT_WEAK};
 
 /// Space kept around the content, in logical pixels.
-const MARGIN: f32 = 28.0;
+const MARGIN: f32 = 12.0;
 /// Width of a scrollbar.
 const THICKNESS: f32 = 10.0;
 const MIN_THUMB: f32 = 24.0;
