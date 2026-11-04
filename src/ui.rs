@@ -2066,36 +2066,36 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
     }
 }
 
-/// Moves the selection or folds a folder by key; see docs/features/gui.md#file-browser.
+/// Moves the selection or folds a folder by key; see docs/features/gui.md#file-browser. Every
+/// press counts, also several in one frame.
 fn tree_keys(ui: &mut Ui, state: &mut UiState, nodes: &[Node], location: Location) {
-    let Some(key) = tree_nav::KEYS
-        .into_iter()
-        .find(|&k| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, k)))
-    else {
-        return;
-    };
-    let rows = tree_nav::visible_rows(nodes, &state.open);
-    let selected = state
-        .selection
-        .as_ref()
-        .filter(|s| s.location == location)
-        .map(|s| s.path.as_path());
     // The rows that fit in the view, minus one.
     let page = ((ui.available_height() / 22.0) as usize)
         .saturating_sub(1)
         .max(1);
-    match tree_nav::navigate(&rows, selected, key, page) {
-        Some(tree_nav::Move::Select(path)) => {
-            select(state, location, path);
-            state.tree_scroll = true;
+    for key in tree_nav::KEYS {
+        let presses = ui.input_mut(|i| i.count_and_consume_key(egui::Modifiers::NONE, key));
+        for _ in 0..presses {
+            let rows = tree_nav::visible_rows(nodes, &state.open);
+            let selected = state
+                .selection
+                .as_ref()
+                .filter(|s| s.location == location)
+                .map(|s| s.path.as_path());
+            match tree_nav::navigate(&rows, selected, key, page) {
+                Some(tree_nav::Move::Select(path)) => {
+                    select(state, location, path);
+                    state.tree_scroll = true;
+                }
+                Some(tree_nav::Move::Fold(path, true)) => {
+                    state.open.insert(path);
+                }
+                Some(tree_nav::Move::Fold(path, false)) => {
+                    state.open.remove(&path);
+                }
+                None => {}
+            }
         }
-        Some(tree_nav::Move::Fold(path, true)) => {
-            state.open.insert(path);
-        }
-        Some(tree_nav::Move::Fold(path, false)) => {
-            state.open.remove(&path);
-        }
-        None => {}
     }
 }
 
