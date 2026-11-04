@@ -96,7 +96,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Output | `*.amesh.bin`                  | Compiled mesh, see [`models.md`](models.md#inspector) |
 | Output | `*.aanim.bin`                  | Compiled animation, see [`models.md`](models.md#inspector) |
 | Output | `*.afont.bin`                  | Compiled font, see [`fonts.md`](fonts.md#compiled-fonts) |
-| Output | `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin` | Compiled schema, data, graph or tree, see [Compiled data](#compiled-data) |
+| Output | `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin`, `*.agradient.bin`, `*.apalette.bin` | Compiled schema, data, graph, tree, gradients or palette, see [Compiled data](#compiled-data) |
 | Output | `assetc.aman.bin` at the output root | Manifest, see [Manifest view](#manifest-view) |
 | Output | `*.pak` (any case)         | Pack, see [`pack.md`](pack.md#inspector) |
 | Output | anything else              | File               |
@@ -173,13 +173,16 @@ Selecting `assetc.aman.bin` (Output tree root) shows its entries:
 Selecting a compiled material (`*.amat.bin`) shows the record field by field, in
 the [spec](../spec/amat.bin.md)'s order:
 
-- Header line: `ACMT v1   <size>`.
+- Header line: `ACMT v<version>   <size>`.
 - Columns: **Offset** (bytes), **Field** (the spec's name), **Value**:
   floats with 3 decimals; `base_color` and `emissive` start with a 12 × 12 px
   swatch of the color (sRGB-encoded, alpha ignored); `flags` as `0x05` and
   their meaning, e.g. `(mask, double-sided, parallax)`; texture IDs as
   `0x…` followed by the file the manifest maps them to, `(not in manifest)`,
   or `—` for `0`.
+- After the record, one row per [attached struct](structs.md): Offset (of
+  its `STRUCTS` record in the file), **Field** `struct <Type>`, **Value**
+  its fields' values in field order, joined by `, `.
 - A material that does not decode shows its error as the canvas message.
 
 **Folder:** Kind and Items (number of direct entries, hidden ones excluded);
@@ -206,13 +209,19 @@ manifest), the details show the rows that are still known (Kind, Size) and an
 
 ## Compiled data
 
-Compiled schemas, data, graphs and trees (`.aschema.bin`, `.adata.bin`, `.agraph.bin`,
-`.atree.bin` in the Output tree) are read only. Selecting one shows:
+Compiled schemas, data, graphs, trees, gradients and palettes (`.aschema.bin`,
+`.adata.bin`, `.agraph.bin`, `.atree.bin`, `.agradient.bin`, `.apalette.bin`
+in the Output tree) are read only. Selecting one shows:
 
 - **Info**: Kind (`Compiled schema`, `Compiled data`, `Compiled graph`,
-  `Compiled tree`), Size, the counts of its descriptor (Types, Fields and
-  Values; Instances, Values, Types and References; Nodes, Edges and Properties;
-  Nodes, Properties and Depth), Asset path and Asset ID.
+  `Compiled tree`, `Compiled gradients`, `Compiled palette`), Size, the
+  counts of its descriptor (Types, Fields and Values; Instances, Values,
+  Types and References; Nodes, Edges and Properties; Nodes, Properties and
+  Depth; Gradients, Stops and Size; Colors and Size), Asset path and Asset
+  ID.
+- [Struct chunks](../spec/astruct.md) show in every Chunks view (also a
+  mesh's and an atlas's): `STRUCTS` (Type, Scope, Item, Hash, Schema,
+  Value), `SVALUES` and `SREFS` as `VALUES` and `REFS`, `SSTRINGS` as text.
 - The canvas: its [Chunks view](models.md#chunks-view), every chunk as a
   table: one row per record, one column per field of the record's spec
   (hashes in hex, text read from `STRINGS`, colors as `#rrggbbaa`, a

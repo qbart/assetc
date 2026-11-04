@@ -93,7 +93,7 @@ to the owner's scope:
     (`material`, `atlas`).
   - An owner whose scope has no attachments: a weak `No structs attached to
     <scope>s` (`No structs attached to nodes`) instead of cards.
-- **A card** (`BG_PANEL`, 6 px corners, 8 px padding, 8 px apart): the
+- **A card** (`BG_HEADER`, 6 px corners, 8 px padding, 8 px apart): the
   struct's name (14 px, its `doc` on hover) and the schema path
   (`TEXT_WEAK`), then its fields as an instance's
   [fields](instances.md#canvas) are edited: sorted by `order`, in groups,
