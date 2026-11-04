@@ -107,6 +107,9 @@ tangent, bit 0 of the stored x is then set to `1` when the tangent's `w` is
 negative and cleared otherwise. A zero vector encodes as `(0, 0)` (a zero
 normal decodes to `+Z`).
 
+To decode a tangent, read the handedness from bit 0 of x, then clear that bit
+before decoding the direction like a normal.
+
 ## SubMesh (64 bytes)
 
 One glTF primitive (as placed in the scene): a contiguous range of indices
@@ -164,7 +167,7 @@ full mesh only). `LODTABLE` is an 8-byte header followed by
 
 | Offset | Size | Field           | Notes                                       |
 |-------:|-----:|-----------------|---------------------------------------------|
-|      0 |    4 | `lod_count`     | u32, reduced levels per submesh (`2`)       |
+|      0 |    4 | `lod_count`     | u32, reduced levels per submesh (the number of `lod_ratios`, `2` by default) |
 |      4 |    4 | `submesh_count` | u32, equals `DESC.submesh_count`            |
 |      8 |  8 × n | ranges        | `first_index` u32 (into `LODIDX`), `index_count` u32 |
 
@@ -243,7 +246,7 @@ sidecar lists them. A tag used by several locators appears once per locator.
 
 ## Strings
 
-`STRINGS` holds the text of color sets (names), properties (keys and Text values), shapes
+`STRINGS` holds the text of color sets and UV sets (names), properties (keys and Text values), shapes
 (names and kinds), regions (names and tags) and paths (names and kinds), UTF-8, back to back, without
 terminators. Records point into it with a byte offset and length. Locators
 keep theirs in `LOCNAMES`.
