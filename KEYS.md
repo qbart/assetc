@@ -27,16 +27,25 @@ See [`docs/features/config.md`](docs/features/config.md).
 | `Escape`           | Close without saving; while naming a new target: cancel the name |
 | `Enter`            | While naming a new target: add it |
 
-## File browser (Input tree)
+## File browser
 
-See [`docs/features/file-operations.md`](docs/features/file-operations.md).
+See [`docs/features/gui.md`](docs/features/gui.md#file-browser) and
+[`docs/features/file-operations.md`](docs/features/file-operations.md). All
+keys act after a mouse press in the left sidebar; the arrow keys, `Home`,
+`End`, `Page Up`, `Page Down` and `Enter` in both the Input and Output
+trees, the others in the Input tree only.
 
 | Input           | Action                                     |
 |-----------------|--------------------------------------------|
+| `Up` / `Down`   | Select the row above / below (nothing selected: the first / last row) |
+| `Left`          | Close the open folder, else select the row it is listed under |
+| `Right`         | Open the closed folder, else select an open folder's first row |
+| `Home` / `End`  | Select the first / last row                |
+| `Page Up` / `Page Down` | Move the selection by a page of rows |
+| `Enter`         | On a folder: open / close it; while renaming: commit |
 | Right click     | File operations menu                       |
 | `F2`            | Rename the selected entry (after a press in the sidebar) |
 | `Delete`        | Delete the selected entry, asks first (after a press in the sidebar) |
-| `Enter`         | While renaming: commit                     |
 | `Escape`        | While renaming: cancel                     |
 
 ## Canvas (2D)

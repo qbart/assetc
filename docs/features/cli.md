@@ -87,7 +87,7 @@ Keeps the output up to date while you edit the input: a build, then an
     | atlas | every file in the `.atlas` folder |
     | schema, graph, tree | its source |
     | data file | its source, every `*.aschema` and every `*.adata` in the input (its [refs](instances.md#references) name other files' instances) |
-    | material | its `.mat.toml` (when it has one) |
+    | material | its `.amat` (when it has one) |
 
   Every other asset is **up to date**: not written, counted in the summary as
   `<U> up to date` after the skipped count (`Built 1 texture (0 skipped, 16

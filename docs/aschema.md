@@ -228,7 +228,7 @@ textures, models, fonts, graphs… a game should load with it. `K` is one of:
 | `lut`      | `*.cube` |
 | `hdr`      | `*.exr` |
 | `atlas`    | folders `*.atlas` |
-| `material` | `*.mat.toml` |
+| `material` | `*.amat` |
 | `graph`    | `*.agraph` |
 | `tree`     | `*.atree` |
 | `data`     | `*.adata` |

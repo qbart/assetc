@@ -1,7 +1,7 @@
 # `.amat.bin` materials
 
 One compiled PBR material (glTF 2.0 metallic-roughness), written to
-`<output>/<dir>/<name>.amat.bin` (from `*.mat.toml` and texture groups), or
+`<output>/<dir>/<name>.amat.bin` (from `*.amat` and texture groups), or
 `<output>/<model>/<material>.amat.bin` (from a glTF model); see
 [`docs/features/materials.md`](../features/materials.md) and
 [`docs/features/models.md`](../features/models.md#build).

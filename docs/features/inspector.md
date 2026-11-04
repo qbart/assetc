@@ -19,7 +19,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Twenty icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Twenty-one icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.anoise`, `.agradient`, `.apalette` and model files,
 **Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
 (`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`swatch-book`) and
@@ -36,13 +36,15 @@ shown for compiled meshes with color sets (see
 `.aschema` files, **Graph** (`graph-star`) for `.agraph` files,
 **Tree** (`list-tree`) for `.atree` files, **Atlas** (`map`) for `*.atlas`
 folders,
-**Instances** (`package`) for `.adata` files, all nine only
+**Instances** (`package`) for `.adata` files, **Material** (`gem`) for
+`.amat` files, all ten only
 in the Input tree
 (see [`noise.md`](noise.md#parameters-tab),
 [`gradients.md`](gradients.md#parameters-tab),
 [`palettes.md`](palettes.md#colors-tab),
 [`schemas.md`](schemas.md#types-tab), [`graphs.md`](graphs.md#graph-tab),
-[`trees.md`](trees.md#tree-tab), [`atlases.md`](atlases.md#inspector), [`instances.md`](instances.md#instances-tab)),
+[`trees.md`](trees.md#tree-tab), [`atlases.md`](atlases.md#inspector), [`instances.md`](instances.md#instances-tab),
+[`materials.md`](materials.md#material-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
 compiled textures with more than one mip level (see
@@ -78,7 +80,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Tab    | File                       | Kind               |
 |--------|----------------------------|--------------------|
 | Input  | `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | Source texture |
-| Input  | `*.mat.toml`               | Material source    |
+| Input  | `*.amat`                   | Material source, see [`materials.md`](materials.md#inspector) |
 | Input  | `*.cube` (any case)        | Color LUT, see [`lut.md`](lut.md#inspector) |
 | Input  | `*.exr` (any case)         | HDR environment map, see [`hdr.md`](hdr.md#preview-and-inspector) |
 | Input  | `*.anoise` (any case)       | Noise, see [`noise.md`](noise.md#inspector-info) |

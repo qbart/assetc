@@ -149,6 +149,23 @@ Each tab shows a tree of the directory configured in `assetc.toml`
 - Directories are scanned when the app opens, when the rescan button is
   clicked (tooltip `Rescan (Ctrl+R)`) and on `Ctrl+R` (`Cmd+R` on macOS),
   which works anywhere, like `Ctrl+Q`; there is no live file watching.
+- **Keyboard**: once the left sidebar has the keys (the last mouse press
+  landed in it) and no text field has focus, the arrow keys move through the
+  shown tree's rows, in both tabs. The rows are the ones on screen, in order:
+  folded folders' contents are skipped, sidecars count as rows.
+
+  | Key | Action |
+  |-----|--------|
+  | `Up` / `Down` | Select the row above / below; with nothing selected in this tree, the first / last row. Stops at the ends. |
+  | `Left` | On an open folder: close it. Otherwise select the row it is listed under (a file's folder, a sidecar's file); nothing at the top level. |
+  | `Right` | On a closed folder: open it. On an open folder: select its first row. Nothing on files. |
+  | `Home` / `End` | Select the first / last row. |
+  | `Page Up` / `Page Down` | Move the selection by the rows that fit in the tree's view, minus one; stops at the ends. |
+  | `Enter` | On a folder: open / close it. Nothing on files. |
+
+  A row selected by key is inspected as if clicked, and the tree scrolls just
+  enough to show it. Held keys repeat. Selecting a folder by key does not
+  open it.
 - Placeholders (weak text) instead of a tree:
   - no project: "No project open"
   - directory missing: "<path> does not exist"
@@ -175,6 +192,7 @@ The icon follows the entry's type, by extension (any case):
 | tree: `atree`, `atree.bin`                    | `list-tree`               |
 | atlas folder (`*.atlas`), atlas: `aatlas.bin` | `map`                     |
 | palette: `apalette`                           | `palette`                 |
+| material: `amat`, `amat.bin`                  | `gem`                     |
 | mesh: `gltf`, `glb`, `obj`, `amesh.bin`       | `torus`                   |
 | animation: `aanim.bin`                        | `film`                    |
 | per-file settings: `amod`                     | `settings-2` (dimmed)     |
@@ -213,7 +231,7 @@ gizmo modes), `crosshair` (placing locators on the surface),
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
 `paint-bucket` (Inspector Regions tab), `paintbrush`, `eraser` (painting and erasing regions),
 `spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
-points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `graph-star` (`.agraph` files, Inspector Graph tab), `package` (`.adata` files, Inspector Instances tab), `list-tree` (`.atree` files, Inspector Tree tab), `map` (atlases, Inspector Atlas tab), `rotate-ccw` (resetting an instance's field), `bug` (schema problems), `settings` (schema field details), `play`, `pause` (animation timeline, curve editor playhead), `plus`, `trash-2`, `link-2`, `unlink-2` (curve editor points, joining and splitting slopes),
+points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `graph-star` (`.agraph` files, Inspector Graph tab), `package` (`.adata` files, Inspector Instances tab), `list-tree` (`.atree` files, Inspector Tree tab), `map` (atlases, Inspector Atlas tab), `gem` (`.amat` and `.amat.bin` files, Inspector Material tab), `rotate-ccw` (resetting an instance's field or a material's key), `bug` (schema problems), `settings` (schema field details), `play`, `pause` (animation timeline, curve editor playhead), `plus`, `trash-2`, `link-2`, `unlink-2` (curve editor points, joining and splitting slopes),
 `database` (Inspector Properties tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
 (canvas 3D shapes), `palette` (LUT reference chart, Inspector Gradients and Colors tabs, `.apalette` files), `eye`, `eye-off` (LUT cube before / after, locator visibility),
@@ -306,4 +324,5 @@ contrast; a focused text field is marked by its caret
 
 ## Keybindings
 
-`Ctrl+Q` / `Cmd+Q` quits; see [`KEYS.md`](../../KEYS.md).
+`Ctrl+Q` / `Cmd+Q` quits; the arrow keys and friends move through the file
+browser (see [File browser](#file-browser)); see [`KEYS.md`](../../KEYS.md).

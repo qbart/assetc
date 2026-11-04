@@ -39,7 +39,7 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | folder `*.atlas` (any case) | texture and atlas | `<asset path>.ktx2` and `<asset path>.aatlas.bin`, see [`atlases.md`](atlases.md#build) |
 | `*.exr` (any case) | texture, cubemap | `<asset path>.ktx2`, see [`hdr.md`](hdr.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
-| `*.mat.toml`, plus suffixed texture groups | material | `<dir>/<name>.amat.bin`, see [`materials.md`](materials.md) |
+| `*.amat`, plus suffixed texture groups | material | `<dir>/<name>.amat.bin`, see [`materials.md`](materials.md) |
 | `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh.bin` and more, see [`models.md`](models.md#build) |
 | `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont.bin` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
 | `*.aschema` (any case) | schema | `<asset path>.aschema.bin`, see [`schemas.md`](schemas.md#build) |

@@ -1,7 +1,7 @@
 # File operations
 
 The **Input** tree can change the files it shows: create folders, noise
-textures, gradients and palettes, rename, and delete. These are real file-system operations on the
+textures, gradients, palettes, materials and data files, rename, and delete. These are real file-system operations on the
 project's `input` directory. The **Output** tree is read-only (the build owns
 it).
 
@@ -17,6 +17,7 @@ Right-clicking an Input row, or the empty area below the last row (the
 | New Pattern ▸ (the `pattern/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
 | New Color ▸ Gradient | as New Folder, see [`gradients.md`](gradients.md#creating) | always |
 | New Color ▸ Palette  | as New Folder, see [`palettes.md`](palettes.md#creating) | always |
+| New Material         | as New Folder, see [`materials.md`](materials.md#creating) | always |
 | New Data ▸ Schema    | as New Folder, see [`schemas.md`](schemas.md#creating) | always |
 | New Data ▸ Directed Graph | as New Folder, see [`graphs.md`](graphs.md#creating) | always |
 | New Data ▸ Instance  | as New Folder, see [`instances.md`](instances.md#creating) | always |
@@ -72,7 +73,8 @@ last build result) until the next operation or build.
 ## Keybindings
 
 F2 (rename), Delete (delete), Enter / Escape while renaming; see
-[`KEYS.md`](../../KEYS.md). The keys only act when no text field has focus
+[`KEYS.md`](../../KEYS.md). Moving the selection with the arrow keys is
+described in [`gui.md`](gui.md#file-browser). The keys only act when no text field has focus
 and the left sidebar has the keys: the last mouse press landed in it (not
 in the canvas or the Inspector). So `Delete` after clicking a graph's node
 in the canvas removes the node, not the file.

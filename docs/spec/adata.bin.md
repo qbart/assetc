@@ -76,8 +76,8 @@ build gives the referenced file's main output, so a game finds it in
 `texture`, `noise`, `gradient`, `palette`, `lut` and `hdr` (their `.ktx2`);
 with `.amesh.bin` for `model`, `.afont.bin` for `font`, `.aatlas.bin` for `atlas` (the
 folder's path without `.atlas`), `.agraph.bin` for `graph`, `.atree.bin` for `tree`,
-`.adata.bin` for `data`; and `<dir>/<name>.amat.bin` for a `material`
-`<dir>/<name>.mat.toml`.
+`.adata.bin` for `data`; and `.bin` appended for a `material`
+(`<dir>/<name>.amat` → `<dir>/<name>.amat.bin`).
 
 ## Target (24 bytes)
 
