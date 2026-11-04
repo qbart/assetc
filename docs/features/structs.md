@@ -85,14 +85,15 @@ to the owner's scope:
   - Graphs and trees: what the canvas (or the Graph / Tree tab) has chosen: `Values of graph` (`tree`)
     with nothing chosen, `Values of node <id>`, `Values of edge <from> ->
     <to>`. Choose another in the canvas or the [Graph tab](graphs.md#graph-tab).
-  - Gradient files and palettes: a dropdown after the header: `File`, then
-    each gradient (color) as `<n>  <name>` (from 1; `<n>` alone without a
-    name). `File` to start with; the choice is kept per file for the
+  - Gradient files and palettes: the header is `Values of` and a dropdown
+    after it: `File`, then each gradient (color) as `<n>  <name>` (from 1;
+    `<n>` alone without a name). `File` to start with; the choice is kept per file for the
     session.
   - Models, materials and atlases: the asset itself, `Values of model`
     (`material`, `atlas`).
   - An owner whose scope has no attachments: a weak `No structs attached to
-    <scope>s` (`No structs attached to nodes`) instead of cards.
+    the <asset>` (`No structs attached to the graph`) or `No structs attached
+    to <item>s` (`No structs attached to nodes`) instead of cards.
 - **A card** (`BG_HEADER`, 6 px corners, 8 px padding, 8 px apart): the
   struct's name (14 px, its `doc` on hover) and the schema path
   (`TEXT_WEAK`), then its fields as an instance's
