@@ -73,13 +73,13 @@ pub fn spawn(s: &mut Spawn) {
             );
         text_2d(
             &mut s.commands,
-            corner + Vec2::new(cell.x / 2.0, -8.0),
+            corner + Vec2::new(cell.x / 2.0, -16.0),
             path,
             14.0,
             TEXT,
         );
         let area = Rect::from_corners(
-            corner + Vec2::new(24.0, -40.0),
+            corner + Vec2::new(24.0, -48.0),
             corner + Vec2::new(cell.x - 24.0, -cell.y + 16.0),
         );
         // Grid units to the area: fit the node centers, keeping the aspect.
