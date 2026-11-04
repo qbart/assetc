@@ -17,6 +17,8 @@ $ cargo run --release -p assetc-demo -- [path]
   the pack of this repository's `assetc.toml`.
 - When it cannot open the assets, the window shows the error and
   `Run: cargo run -- pack` instead of the scenes.
+- `make demo` does both steps: packs the samples (`cargo run --release --
+  pack`), then runs the demo on that pack.
 - Lives in `demo/`, a member of the Cargo workspace. Its only dependencies
   are `assetc-sdk` and `bevy`.
 
