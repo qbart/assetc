@@ -17,15 +17,20 @@ $ cargo run --release -p assetc-demo -- [path]
   the pack of this repository's `assetc.toml`.
 - When it cannot open the assets, the window shows the error and
   `Run: cargo run -- pack` instead of the scenes.
+- The SDK reads a pack and an output directory the same way, so the demo
+  shows the same scenes from either: `tmp/build/assetc.pak` or the loose
+  `*.bin` and `*.ktx2` files of `tmp/build`.
 - `make demo` does both steps: packs the samples (`cargo run --release --
-  pack`), then runs the demo on that pack.
+  pack`), then runs the demo on that pack. `make demo ASSETS=tmp/build`
+  runs it on the output directory instead.
 - Lives in `demo/`, a member of the Cargo workspace. Its only dependencies
   are `assetc-sdk` and `bevy`.
 
 ## Layout
 
 A full window: a bar of scene tabs along the top, the scene below it, and a
-status line at the bottom (`<n> assets from <path>` and the scene's hint).
+status line at the bottom (`<n> assets from <path> (pack)` or
+`(directory)`, by what was opened).
 Colors follow the GUI's look (dark background, `#F0883E` accent).
 
 ## Scenes
@@ -44,6 +49,26 @@ The **sky** is the pack's cubemap textures (`*.ktx2` with 6 faces, the
 first by path): it is the 3D scenes' skybox and environment light. Without
 one, the 3D scenes use a plain background and a directional light.
 
+## Scrolling
+
+A 2D scene (Textures, Atlases, Fonts, Data, Graphs) is laid out for the
+window it was shown in and scrolls when it does not fit:
+
+- Its **content** is the box around everything it draws (sprites, text and
+  graph boxes) plus a 28 px margin. The view never leaves it: scrolling
+  stops at the content's edges, so nothing can be scrolled out of sight.
+- A **scrollbar** shows along the right edge (vertical) and above the
+  status line (horizontal) whenever the content is taller or wider than
+  the view, and hides otherwise. The thumb's length is the visible part of
+  the content and its place is where the view is.
+- Drag the thumb to scroll; click the track beside it to move one page
+  toward the click. The thumb turns the accent color while hovered or
+  dragged.
+- Resizing the window lays the scene out again for the new size, from the
+  top.
+
+The 3D scenes (Materials, Models) have no scrollbars.
+
 ## Controls
 
 | Input | Action |
@@ -51,7 +76,11 @@ one, the 3D scenes use a plain background and a directional light.
 | `1`–`7`, click on a tab | Show that scene |
 | `Tab` / `Shift+Tab` | Next / previous scene |
 | Left drag (3D scenes) | Orbit the camera |
-| Scroll wheel | 3D scenes: move closer / farther; 2D scenes: scroll |
+| Scroll wheel | 3D scenes: move closer / farther; 2D scenes: scroll up / down |
+| `Shift` + scroll wheel, horizontal wheel (2D scenes) | Scroll left / right |
+| `PageUp` / `PageDown` (2D scenes) | Scroll one page up / down |
+| `Home` / `End` (2D scenes) | Scroll to the top / bottom |
+| Drag a scrollbar thumb, click its track (2D scenes) | Scroll; one page toward the click |
 | `Space` (Models) | Next animation clip |
 | `Escape` | Quit |
 

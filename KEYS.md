@@ -211,7 +211,11 @@ assetc GUI.
 | `1`–`7`, click on a tab     | Show that scene                          |
 | `Tab` / `Shift+Tab`         | Next / previous scene                    |
 | Left drag (3D scenes)       | Orbit the camera                         |
-| Scroll wheel                | 3D scenes: move closer / farther; 2D scenes: scroll |
+| Scroll wheel                | 3D scenes: move closer / farther; 2D scenes: scroll up / down |
+| `Shift` + scroll wheel, horizontal wheel (2D scenes) | Scroll left / right |
+| `PageUp` / `PageDown` (2D scenes) | Scroll one page up / down             |
+| `Home` / `End` (2D scenes)  | Scroll to the top / bottom               |
+| Drag a scrollbar thumb, click its track (2D scenes) | Scroll; one page toward the click |
 | `Space` (Models)            | Next animation clip                      |
 | `Escape`                    | Quit                                     |
 
