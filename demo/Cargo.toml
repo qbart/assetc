@@ -2,7 +2,38 @@
 name = "assetc-demo"
 version = "0.1.0"
 edition = "2024"
+description = "Shows every sample through assetc-sdk, the way a game loads them"
 publish = false
 
 [dependencies]
 assetc-sdk = { path = "../sdk" }
+
+[dependencies.bevy]
+version = "0.20.1"
+default-features = false
+# The same features as assetc, so the workspace builds Bevy once.
+# Bevy defaults (2d, 3d, ui, audio) with default_platform expanded minus bevy_gilrs (gamepad).
+features = [
+    "default_app",
+    "2d_bevy_render",
+    "3d_bevy_render",
+    "ui_api",
+    "ui_bevy_render",
+    "bevy_ui_widgets",
+    "scene",
+    "picking",
+    "audio",
+    "std",
+    "bevy_winit",
+    "bevy_clipboard",
+    "default_font",
+    "multi_threaded",
+    "webgl2",
+    "x11",
+    "wayland",
+    "custom_cursor",
+    "sysinfo_plugin",
+    "keyboard",
+    "mouse",
+    "touch",
+]
