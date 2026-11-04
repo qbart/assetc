@@ -142,6 +142,9 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   dimmed: icon and name in `TEXT_WEAK`. A sidecar whose file is missing stays
   in name order, still dimmed. Sidecar rows select, rename and delete like any
   file.
+- An atlas folder's settings file (`atlas.toml` directly inside a `*.atlas`
+  folder, any case) is dimmed the same way, in its name order among the
+  frames, with the `settings-2` icon.
 - Folders are collapsible (collapsed by default) and listed before files;
   each group is sorted by name, case-insensitively.
 - Entries whose name starts with `.` are hidden.
@@ -184,18 +187,19 @@ The icon follows the entry's type, by extension (any case):
 | font: `ttf`, `otf`, `woff`, `woff2`, `afont.bin` | `type`                 |
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `anoise`                     | `image-play`              |
-| gradient: `agradient`                         | `swatch-book`             |
+| gradient: `agradient`, `agradient.bin`        | `swatch-book`             |
 | schema: `aschema`, `aschema.bin`              | `braces`                  |
 | directed graph: `agraph`, `agraph.bin`        | `graph-star`              |
 | data: `adata`, `adata.bin`                    | `package`                 |
 | pack: `pak`                                   | `package`                 |
 | tree: `atree`, `atree.bin`                    | `list-tree`               |
 | atlas folder (`*.atlas`), atlas: `aatlas.bin` | `map`                     |
-| palette: `apalette`                           | `palette`                 |
+| palette: `apalette`, `apalette.bin`           | `palette`                 |
 | material: `amat`, `amat.bin`                  | `gem`                     |
 | mesh: `gltf`, `glb`, `obj`, `amesh.bin`       | `torus`                   |
 | animation: `aanim.bin`                        | `film`                    |
 | per-file settings: `amod`                     | `settings-2` (dimmed)     |
+| an atlas's settings: `atlas.toml` inside a `*.atlas` folder | `settings-2` (dimmed) |
 | anything else                                 | `file`                    |
 
 ## Tabs

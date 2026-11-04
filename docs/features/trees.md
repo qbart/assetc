@@ -83,6 +83,13 @@ The Inspector's **Tree** tab (`list-tree`), in the
   root), **Data**, its **Children** (one row each, clicking one chooses
   it) and **Add child** (a child 1 unit below it).
 
+### Structs tab
+
+The [Structs tab](structs.md#structs-tab) (`boxes`) attaches
+[structs](structs.md) to the tree and to every node (Tree and Node
+structs), and edits the values of what is chosen: the tree's with nothing
+chosen, else the chosen node's.
+
 ## Problems
 
 Reading checks ids (identifiers, unique). A file with problems is still
@@ -93,6 +100,7 @@ px).
 
 Each tree is compiled to `<asset path>.atree.bin` (asset kind `tree`, asset
 path its input-relative path without the extension, plus `.atree.bin`), a
-[binary file](../spec/atree.bin.md) of its nodes, breadth first. A file that cannot be read,
-or has [problems](#problems), fails the build with the first one (`(and <n>
+[binary file](../spec/atree.bin.md) of its nodes, breadth first, with its
+[attached structs](structs.md#build). A file that cannot be read,
+or has [problems](#problems) or struct errors, fails the build with the first one (`(and <n>
 more)`). The CLI line reads `<source> -> <output> (<n> nodes, depth <d>)`.

@@ -10,6 +10,9 @@ of the [a/1 property format](../aschema.md): every file is valid JSON,
 | Key        | Required | Value |
 |------------|----------|-------|
 | `$dialect` | yes      | `"atree/1"`; a missing or other dialect, or a newer major version, makes the file unreadable |
+| `structs`  | no       | Array of [attachments](agraph.md#structs): the tree's own structs; written only when not empty |
+| `node_structs` | no   | Array of attachments every node has; written only when not empty |
+| `values`   | no       | The tree's [struct values](agraph.md#structs); written only when not empty |
 | `root`     | yes      | The root [node](#node) |
 
 Other top-level keys are kept, after these.
@@ -24,13 +27,21 @@ Other top-level keys are kept, after these.
 | `x`        | yes      | Number: the center's X, in grid units (right is positive) |
 | `y`        | yes      | Number: the center's Y, in grid units (down is positive) |
 | `data`     | no       | Object of values, as in [`.agraph`](agraph.md#data); written only when not empty |
+| `values`   | no       | The node's [struct values](#structs); written only when not empty |
 | `children` | no       | Array of nodes under it, in order; written only when not empty |
+
+## Structs
+
+[Attached structs](../features/structs.md) are kept as in
+[`.agraph`](agraph.md#structs): `structs` and the top-level `values` are
+the tree's, `node_structs` and each node's `values` the nodes'.
 
 ## Written form
 
 UTF-8, 2-space indent, one property or array item per line, `\n` line
 endings and a trailing newline; keys in the order of the tables above, then
-any other keys the object had. Positions are written as numbers, integers
+any other keys the object had; an attachment as one line, as in
+[`.agraph`](agraph.md#written-form). Positions are written as numbers, integers
 without a decimal point (`2`, `1.25`).
 
 ```json

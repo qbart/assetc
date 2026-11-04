@@ -80,16 +80,38 @@ Sample layout: `bitOffset` u16, `bitLength` u8, `channelType` u8,
 
 ## Key/value data
 
-One entry, `KTXwriter` = `assetc <version>`:
+Two entries, sorted by key as KTX2 requires: `KTXwriter` =
+`assetc <version>`, then `assetc.usage` = what the texture is for. Each is
 
 ```
-keyAndValueByteLength u32   = len("KTXwriter") + 1 + len("assetc <version>") + 1
-key                         "KTXwriter\0"
-value                       "assetc <version>\0"
+keyAndValueByteLength u32   = len(key) + 1 + len(value) + 1
+key                         "<key>\0"
+value                       "<value>\0"
 padding                     zero bytes to a multiple of 4
 ```
 
 `kvdByteLength` includes the padding.
+
+`assetc.usage` tells a game, or a tool, what the texture holds, so it does
+not have to guess from the name or the format:
+
+| Value | Textures |
+|-------|----------|
+| `noise` | generated from an `.anoise` file |
+| `gradient` | generated from an `.agradient` file |
+| `palette` | generated from an `.apalette` file |
+| `normal` | normal maps: a material's `normal` slot, a glTF material's normal texture |
+| `orm` | packed occlusion, roughness, metallic (`<name>.orm.ktx2`, a glTF material's) |
+| `height` | a material's `height` slot |
+| `atlas` | an atlas's texture |
+| `font` | a font's signed distance field atlas |
+| `lut` | a color LUT, strip or volume |
+| `environment` | an HDR environment map (cubemap) |
+| `color` | any other sRGB texture (images, base color, emissive) |
+| `data` | any other linear texture |
+
+The first that applies, in this order, wins: a noise used as a normal map
+is `noise`.
 
 ## Cubemaps
 

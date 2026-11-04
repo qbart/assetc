@@ -12,6 +12,7 @@ it. A [chunked file](chunks.md) with format `AGRAPH`, version `1`.
 | `EDGES`   | yes      | [`Edge`](#edge-32-bytes)`[edge_count]`, in the file's order |
 | `PROPS`   | no       | [`Property`](amesh.bin.md#property-32-bytes)`[]`: nodes' and edges' data, text in `STRINGS` |
 | `STRINGS` | yes      | UTF-8 text back to back: ids, labels, property keys and Text values |
+| [`STRUCTS`, `SVALUES`, `SREFS`, `SSTRINGS`](astruct.md) | no | [attached structs](../features/structs.md): scope `0` the graph, `1` each node (index into `NODES`), `2` each edge (index into `EDGES`) |
 
 Text is `offset` u32 and `len` u32 (bytes) into `STRINGS`.
 

@@ -10,6 +10,10 @@ of the [a/1 property format](../aschema.md): every file is valid JSON,
 | Key        | Required | Value |
 |------------|----------|-------|
 | `$dialect` | yes      | `"agraph/1"`; a missing or other dialect, or a newer major version, makes the file unreadable |
+| `structs`  | no       | Array of [attachments](#structs): the graph's own structs; written only when not empty |
+| `node_structs` | no   | Array of attachments every node has; written only when not empty |
+| `edge_structs` | no   | Array of attachments every edge has; written only when not empty |
+| `values`   | no       | The graph's [struct values](#structs); written only when not empty |
 | `nodes`    | yes      | Array of [nodes](#node), in the order they were added |
 | `edges`    | yes      | Array of [edges](#edge), in the order they were added |
 
@@ -25,6 +29,7 @@ Other top-level keys are kept, after these.
 | `x`     | yes      | Number: the center's X, in grid units (right is positive) |
 | `y`     | yes      | Number: the center's Y, in grid units (down is positive) |
 | `data`  | no       | Object of [values](#data); written only when not empty |
+| `values` | no      | The node's [struct values](#structs); written only when not empty |
 
 ## Edge
 
@@ -35,6 +40,7 @@ Other top-level keys are kept, after these.
 | `label`  | no       | String; `""` when missing; always written |
 | `weight` | no       | Integer from −2147483648 to 2147483647 (`i32`); `1` when missing; always written |
 | `data`   | no       | Object of [values](#data); written only when not empty |
+| `values` | no       | The edge's [struct values](#structs); written only when not empty |
 
 Edges are told apart by their place in `edges`: any number of edges may
 have the same `from` and `to`.
@@ -46,11 +52,32 @@ JSON integer (Int, `i64`), a JSON number with a fraction or exponent (Float,
 `f64`, written with a decimal point, e.g. `1.0`), or a string (Text).
 Keys are written sorted.
 
+## Structs
+
+[Attached structs](../features/structs.md) and their values:
+
+- An **attachment** is an object `{ "schema": <path>, "type": <name> }`:
+  the schema's path relative to this file's folder (forward slashes) and
+  the struct's name, both strings. Other keys are kept.
+- **`values`** is an object with a key per attached struct's name, each an
+  object of the struct's field values, as an
+  [instance](adata.md#written-form) writes them (sparse, normalised; a
+  struct with nothing set left out). `values` on the top level are the
+  graph's (`structs`), on a node the node's (`node_structs`), on an edge
+  the edge's (`edge_structs`).
+
+```json
+  "node_structs": [
+    { "schema": "game.aschema", "type": "QuestStep" }
+  ],
+```
+
 ## Written form
 
 UTF-8, 2-space indent, one property or array item per line, `\n` line
 endings and a trailing newline; keys in the order of the tables above, then
-any other keys the object had. Positions are written as numbers, integers
+any other keys the object had; an attachment as one line,
+`{ "schema": "…", "type": "…" }`. Positions are written as numbers, integers
 without a decimal point (`2`, `1.25`).
 
 ```json

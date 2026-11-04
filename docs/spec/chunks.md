@@ -3,7 +3,9 @@
 assetc's own binary formats for structured data ([`.amesh.bin`](amesh.bin.md),
 [`.aanim.bin`](aanim.bin.md), [`.afont.bin`](afont.bin.md), [`.aschema.bin`](aschema.bin.md),
 [`.adata.bin`](adata.bin.md), [`.agraph.bin`](agraph.bin.md), [`.atree.bin`](atree.bin.md),
-[`.aatlas.bin`](aatlas.bin.md)) share one
+[`.aatlas.bin`](aatlas.bin.md), [`.agradient.bin`](agradient.bin.md),
+[`.apalette.bin`](apalette.bin.md), and the [`ASTRUCT`](astruct.md#astruct-files) file
+after a material's record) share one
 container: a header, a table of chunks, then
 the chunks' payloads. Each payload is a plain array (or one record) that a
 loader can memory-map and cast directly, using the counts and strides a
@@ -29,7 +31,7 @@ All integers are little-endian. Floats are IEEE 754 `f32`.
 
 | Offset | Size | Field         | Notes                                                  |
 |-------:|-----:|---------------|--------------------------------------------------------|
-|      0 |    8 | `format`      | ASCII format name, zero-padded: `AMESH`, `AANIM`, `AFONT`, `ASCHEMA`, `ADATA`, `AGRAPH`, `ATREE`, `AATLAS` |
+|      0 |    8 | `format`      | ASCII format name, zero-padded: `AMESH`, `AANIM`, `AFONT`, `ASCHEMA`, `ADATA`, `AGRAPH`, `ATREE`, `AATLAS`, `AGRAD`, `APALETTE`, `ASTRUCT` |
 |      8 |    4 | `version`     | u32, per format (see each format's spec)               |
 |     12 |    4 | `chunk_count` | u32, entries in the chunk table (`N`)                  |
 |     16 |    4 | `flags`       | u32, reserved, `0`                                     |

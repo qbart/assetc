@@ -12,6 +12,7 @@ A [tree](../features/trees.md) (`*.atree`) as the build writes it, nodes in
 | `NODES`   | yes      | [`Node`](#node-64-bytes)`[node_count]`: the root first, then level by level, each node's children in order |
 | `PROPS`   | no       | [`Property`](amesh.bin.md#property-32-bytes)`[]`: the nodes' data, text in `STRINGS` |
 | `STRINGS` | yes      | UTF-8 text back to back: ids, labels, property keys and Text values |
+| [`STRUCTS`, `SVALUES`, `SREFS`, `SSTRINGS`](astruct.md) | no | [attached structs](../features/structs.md): scope `0` the tree, `1` each node (index into `NODES`, breadth first) |
 
 Text is `offset` u32 and `len` u32 (bytes) into `STRINGS`, as in
 [`.agraph.bin`](agraph.bin.md); empty text has length `0`.

@@ -416,7 +416,9 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 | `P.aanim.bin`                   | animation  | `P.aanim.bin`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.bin.md)) |
 
 The `.amesh.bin` also carries the model's [properties](properties.md),
-[shapes](shapes.md), [regions](regions.md) and [paths](paths.md), and its
+[shapes](shapes.md), [regions](regions.md) and [paths](paths.md), its
+[attached structs](structs.md) (the [Structs tab](structs.md#structs-tab),
+kept in the sidecar), and its
 [locators](locators.md#build): its
 sidecar's, its file's `SOCKET_*` nodes and presets' (see
 [Inherited locators](locators.md#inherited-locators)).

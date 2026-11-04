@@ -34,8 +34,8 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 |--------------------|------------|-----------------------------------------------|
 | `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
 | `*.anoise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
-| `*.agradient` (any case) | texture, generated | `<asset path>.ktx2`, see [`gradients.md`](gradients.md#build) |
-| `*.apalette` (any case) | texture, generated | `<asset path>.ktx2`, see [`palettes.md`](palettes.md#build) |
+| `*.agradient` (any case) | texture, generated, and gradient | `<asset path>.ktx2` and `<asset path>.agradient.bin`, see [`gradients.md`](gradients.md#build) |
+| `*.apalette` (any case) | texture, generated, and palette | `<asset path>.ktx2` and `<asset path>.apalette.bin`, see [`palettes.md`](palettes.md#build) |
 | folder `*.atlas` (any case) | texture and atlas | `<asset path>.ktx2` and `<asset path>.aatlas.bin`, see [`atlases.md`](atlases.md#build) |
 | `*.exr` (any case) | texture, cubemap | `<asset path>.ktx2`, see [`hdr.md`](hdr.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
@@ -67,8 +67,10 @@ grayscale or color-mapped, with either origin). Color space and mipmaps follow t
   <model>.amesh.bin          one per glTF model, with <model>/… for its materials and textures
   <model>.aanim.bin          one per skinned, animated glTF model
   <font>.afont.bin           one per font, beside its atlas <font>.ktx2
-  <path>.aschema.bin         one per schema, data file, graph, tree and atlas
-  (.adata.bin, .agraph.bin, .atree.bin, .aatlas.bin)
+  <path>.aschema.bin         one per schema, data file, graph, tree, atlas, gradient file
+  (.adata.bin, .agraph.bin,  and palette, beside their textures where they have one
+  .atree.bin, .aatlas.bin,
+  .agradient.bin, .apalette.bin)
 ```
 
 - **Naming**: every file in assetc's own binary formats ends in `.bin`, after
@@ -102,6 +104,8 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | graph      | `*.agraph.bin` |
   | tree       | `*.atree.bin`  |
   | atlas      | `*.aatlas.bin` |
+  | gradient   | `*.agradient.bin` |
+  | palette    | `*.apalette.bin` |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assetc.aman.bin` is rewritten, never removed; a leftover
@@ -163,7 +167,8 @@ to date, then `, <K> removed` when stale outputs were removed:
   `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat.bin`),
   meshes (`.amesh.bin`), animations (`.aanim.bin`), fonts (`.afont.bin`), schemas
   (`.aschema.bin`), data files (`.adata.bin`), graphs (`.agraph.bin`), trees (`.atree.bin`),
-  atlases (`.aatlas.bin`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
+  atlases (`.aatlas.bin`), gradients (`.agradient.bin`), palettes
+  (`.apalette.bin`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
   `nothing` when nothing was built.
 - Outputs written along with a model or font count too (a model's `.aanim.bin`,
   `.amat.bin`s and textures, a font's atlas), though the CLI prints one line for

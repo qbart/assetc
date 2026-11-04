@@ -63,6 +63,10 @@ back.
 |     7 | graph    | [`agraph.bin.md`](agraph.bin.md)         |
 |     8 | tree     | [`atree.bin.md`](atree.bin.md)         |
 |     9 | atlas    | [`aatlas.bin.md`](aatlas.bin.md)     |
+|    11 | gradient | [`agradient.bin.md`](agradient.bin.md) |
+|    12 | palette  | [`apalette.bin.md`](apalette.bin.md) |
+
+`10` is not used (a [pack](pak.md#contents) uses it for the manifest).
 
 Other values are reserved. Readers should skip entries with unknown kinds.
 

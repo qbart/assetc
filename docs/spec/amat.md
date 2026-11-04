@@ -18,7 +18,8 @@ are the same.
 ## Schema
 
 Every key is optional; an empty file is a valid material that uses the
-defaults. Unknown keys are rejected.
+defaults. Unknown keys are rejected; `[[structs]]` and `[values]` hold
+[attached structs](#structs).
 
 | Key                  | Type               | Range / values                  | Default (see materials.md) |
 |----------------------|--------------------|---------------------------------|----------------------------|
@@ -52,6 +53,34 @@ Keys are slot names: `base_color`, `normal`, `roughness`, `metallic`,
 
 A key here replaces the convention file for that slot.
 
+## Structs
+
+[Attached structs](../features/structs.md) of the material:
+
+- **`[[structs]]`**: one table per attachment, in order: `schema` (the
+  schema's path relative to this file's folder, forward slashes) and `type`
+  (the struct's name), both strings; any other key is an error.
+- **`[values.<Type>]`**: the material's values of the attached struct `<Type>`,
+  one key per field it sets, sparse and normalised as an
+  [instance's](adata.md#written-form), each value in
+  [TOML form](../features/structs.md#values-in-toml) (struct values and
+  lists inline, `null` as `{ "$null" = true }`). A struct with nothing set
+  has no table.
+
+assetc writes the `[[structs]]` tables, then the `[values.<Type>]` tables in
+attachment order (struct values inline), each after a blank line:
+
+```toml
+[[structs]]
+schema = "game.aschema"
+type = "Pickup"
+
+[values.Pickup]
+mass = 2.5
+tags = ["loot", "rare"]
+stats = { hp = 40, armor = 2 }
+```
+
 ## Written by assetc
 
 The Material tab (see
@@ -61,7 +90,7 @@ file:
 - only the keys that are set, in the order of the [schema](#schema) table,
   then `[textures]` (only when it has a key) with its keys in slot order
   (`base_color`, `normal`, `roughness`, `metallic`, `occlusion`, `emissive`,
-  `height`);
+  `height`), then the [structs](#structs);
 - floats rounded to 4 decimals and written in their shortest form with a
   decimal point (`0.5`, `1.0`);
 - strings in double quotes; arrays inline (`[0.8, 0.8, 0.8, 1.0]`);

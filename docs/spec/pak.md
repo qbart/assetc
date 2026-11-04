@@ -58,6 +58,7 @@ A record is `28 + path_len` bytes.
   |------:|------|-------|
   | 0–9 | as in the [manifest](aman.bin.md): texture, material, mesh, animation, font, schema, data, graph, tree, atlas | `*.ktx2`, `*.amat.bin`, `*.amesh.bin`, `*.aanim.bin`, `*.afont.bin`, `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin`, `*.aatlas.bin` |
   | 10 | manifest | `assetc.aman.bin` at the root |
+  | 11, 12 | as in the manifest: gradient, palette | `*.agradient.bin`, `*.apalette.bin` |
   | 255 | other | anything else |
 
 ## Data

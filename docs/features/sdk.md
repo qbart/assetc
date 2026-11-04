@@ -44,7 +44,7 @@ to textures and materials by these IDs, so `assets.load::<Texture>(id)`
 resolves any reference found in another asset.
 
 `Kind` is `Texture`, `Material`, `Mesh`, `Animation`, `Font`, `Schema`,
-`Data`, `Graph`, `Tree`, `Atlas`, `Manifest` or `Other`, with the values of
+`Data`, `Graph`, `Tree`, `Atlas`, `Gradient`, `Palette`, `Manifest` or `Other`, with the values of
 [`.pak`](../spec/pak.md#contents).
 
 ## Formats
@@ -58,8 +58,8 @@ into string tables are resolved to `String`s, hashes are kept as `u64`.
 | `pack` | `Pack`, `PackEntry` | `*.pak` | [`pak.md`](../spec/pak.md) |
 | `manifest` | `Manifest`, `ManifestEntry` | `assetc.aman.bin` | [`aman.bin.md`](../spec/aman.bin.md) |
 | `chunks` | `ChunkFile` | any chunked file: format name, version, chunks by name | [`chunks.md`](../spec/chunks.md) |
-| `texture` | `Texture` | `*.ktx2`: format (`Rgba8Srgb`, `Rgba8Unorm`, `Rgba16Float`), size, depth, faces, every mip level's bytes | [`ktx2.md`](../spec/ktx2.md) |
-| `material` | `Material` | `*.amat.bin` | [`amat.bin.md`](../spec/amat.bin.md) |
+| `texture` | `Texture` | `*.ktx2`: format (`Rgba8Srgb`, `Rgba8Unorm`, `Rgba16Float`), size, depth, faces, layers, every mip level's bytes, and its `usage` (`assetc.usage`, `None` without it) | [`ktx2.md`](../spec/ktx2.md) |
+| `material` | `Material` | `*.amat.bin` (version 1 or 2), with its struct data | [`amat.bin.md`](../spec/amat.bin.md) |
 | `mesh` | `Mesh` | `*.amesh.bin`: vertices (normals and tangents unpacked to `f32`), indices, submeshes, material IDs, meshlets, levels of detail, skin, skeleton, locators, color and UV sets, properties, shapes, regions, paths | [`amesh.bin.md`](../spec/amesh.bin.md) |
 | `anim` | `Animation` | `*.aanim.bin`: clips, channels with their keys, events; plus sampling a channel at a time | [`aanim.bin.md`](../spec/aanim.bin.md) |
 | `font` | `Font` | `*.afont.bin`: metrics, glyphs by codepoint, kerning; plus laying out a line of text | [`afont.bin.md`](../spec/afont.bin.md) |
@@ -68,7 +68,23 @@ into string tables are resolved to `String`s, hashes are kept as `u64`.
 | `data` | `Data` | `*.adata.bin`: instances as trees of typed values, ref targets | [`adata.bin.md`](../spec/adata.bin.md) |
 | `graph` | `Graph` | `*.agraph.bin` | [`agraph.bin.md`](../spec/agraph.bin.md) |
 | `tree` | `Tree` | `*.atree.bin` | [`atree.bin.md`](../spec/atree.bin.md) |
+| `gradient` | `GradientSet` | `*.agradient.bin`: gradients by name with their stops (sRGB bytes and linear floats), cells; plus sampling a gradient at `t` | [`agradient.bin.md`](../spec/agradient.bin.md) |
+| `palette` | `Palette` | `*.apalette.bin`: colors by name (sRGB bytes and linear floats), cells | [`apalette.bin.md`](../spec/apalette.bin.md) |
+| `structs` | `Structs` | the [struct chunks](../spec/astruct.md) of any format above | [`astruct.md`](../spec/astruct.md) |
 | `hash` | `fnv1a64(bytes)` | the hash behind every asset ID and name hash | [`build.md`](build.md#asset-ids) |
+
+## Attached structs
+
+Every format that can carry [attached structs](structs.md) (`Graph`,
+`Tree`, `Mesh`, `Material`, `Atlas`, `GradientSet`, `Palette`) has a
+`structs: Structs` field, empty without them:
+
+| Call | Gives |
+|------|-------|
+| `structs.all()` | every `Attached { scope, item, type_name, type_hash, schema, value }`, in file order |
+| `structs.of(scope, item)` | the structs of one owner: `Scope::Asset` (item `0`), `Scope::Item` (nodes, gradients, colors) or `Scope::Edge` |
+| `structs.get(scope, item, "Type")` | one struct of one owner, by name |
+| `attached.value` | the struct's value, a [`data::Value`](#formats) `Struct` with every field resolved; `named(&schema)` names its fields with the struct's schema, loaded by `attached.schema` |
 
 ## Errors
 

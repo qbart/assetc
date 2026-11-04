@@ -131,6 +131,8 @@ Every view colors bytes by what they are:
 | graph | `#8CC7A6` |
 | tree | `#C7A68C` |
 | atlas | `#5FB3E0` |
+| gradient | `#D98C73` |
+| palette | `#8CD973` |
 | manifest | `#B578DB` |
 | other | `#838383` |
 

@@ -168,6 +168,34 @@ and the modifier's parameters, see
 [`docs/spec/anoise.md`](anoise.md#modifiers). They run in order on the image
 whenever assetc loads it.
 
+## Structs
+
+[Attached structs](../features/structs.md) of the model:
+
+- **`[[structs]]`**: one table per attachment, in order: `schema` (the
+  schema's path relative to this file's folder, forward slashes) and `type`
+  (the struct's name), both strings; any other key is an error.
+- **`[values.<Type>]`**: the model's values of the attached struct `<Type>`,
+  one key per field it sets, sparse and normalised as an
+  [instance's](adata.md#written-form), each value in
+  [TOML form](../features/structs.md#values-in-toml) (struct values and
+  lists inline, `null` as `{ "$null" = true }`). A struct with nothing set
+  has no table.
+
+assetc writes the `[[structs]]` tables, then the `[values.<Type>]` tables in
+attachment order (struct values inline), each after a blank line:
+
+```toml
+[[structs]]
+schema = "game.aschema"
+type = "Pickup"
+
+[values.Pickup]
+mass = 2.5
+tags = ["loot", "rare"]
+stats = { hp = 40, armor = 2 }
+```
+
 ## Written form
 
 assetc writes the `[mesh]` keys that are set, in the order listed, then
@@ -190,8 +218,8 @@ authored one `fill`, then `color` for a solid set or `from`, `to` and
 when not `"colors"`, then `blend` when set, with all three keys), then each event as an `[[events]]` table
 (`animation`, `name`, `time`, then its `[events.properties]` when it has
 any), then each modifier as a `[[modifiers]]` table (`type`, `enabled`, then every
-parameter, as `.anoise` files write them), each table preceded by a blank line
-except the first:
+parameter, as `.anoise` files write them), then the [structs](#structs),
+each table preceded by a blank line except the first:
 
 ```toml
 [mesh]

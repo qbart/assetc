@@ -18,7 +18,7 @@ Little-endian, 112 bytes, no padding other than listed. Floats are IEEE 754
 | Offset | Size | Field                | Notes                                         |
 |-------:|-----:|----------------------|-----------------------------------------------|
 |      0 |    4 | `magic`              | ASCII `ACMT` (`41 43 4D 54`)                  |
-|      4 |    4 | `version`            | u32 `1`                                       |
+|      4 |    4 | `version`            | u32 `2` (`1` before [struct data](#struct-data)) |
 |      8 |   16 | `base_color`         | f32 × 4, linear RGBA factor                   |
 |     24 |   12 | `emissive`           | f32 × 3, linear RGB factor                    |
 |     36 |    4 | `emissive_strength`  | f32                                           |
@@ -48,10 +48,20 @@ if any asset path hashes to it.
 | 3    | height mode: `0` parallax, `1` displacement                 |
 | 4–31 | reserved, `0`                                               |
 
+## Struct data
+
+A material with [attached structs](../features/structs.md) has them right
+after the record, at offset 112: an [`ASTRUCT` file](astruct.md#astruct-files)
+(a chunked file holding the struct chunks, scope `0` the material). Without
+attached structs the file ends with the record. Readers that only want the
+record read its 112 bytes and ignore the rest.
+
 ## Validation
 
-A reader should reject the file when its size is not 112, the magic or
-version does not match, or the alpha mode is `3`.
+A reader should reject the file when it is shorter than 112 bytes, the magic
+does not match, the version is not `1` or `2`, a version `1` file is longer
+than 112 bytes, bytes after the record are not an `ASTRUCT` file, or the
+alpha mode is `3`.
 
 ## Shading notes
 

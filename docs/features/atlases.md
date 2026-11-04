@@ -58,7 +58,10 @@ larger than the max size fail the build. The CLI line reads
 ## Inspector
 
 - The file tree shows `*.atlas` folders and `.aatlas.bin` files with the `map`
-  icon; the frames inside show as usual.
+  icon; the frames inside show as usual, and `atlas.toml` dimmed with the
+  `settings-2` icon, as a sidecar (see [`gui.md`](gui.md#file-browser)).
+- The [Structs tab](structs.md#structs-tab) attaches structs to the atlas;
+  they are kept in `atlas.toml` and compiled into the `.aatlas.bin`.
 - **Info** for an atlas folder: Kind `Atlas`, **Frames** (count), **Size**
   (`W × H px` of the packed atlas), **Packing** (`grid 4 × 3` or `pack`),
   Asset path, Asset ID, Color, Mip levels and **Output** (as for

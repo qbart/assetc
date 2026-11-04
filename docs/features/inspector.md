@@ -19,7 +19,7 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Twenty-one icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Twenty-two icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.anoise`, `.agradient`, `.apalette` and model files,
 **Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
 (`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`swatch-book`) and
@@ -37,14 +37,16 @@ shown for compiled meshes with color sets (see
 **Tree** (`list-tree`) for `.atree` files, **Atlas** (`map`) for `*.atlas`
 folders,
 **Instances** (`package`) for `.adata` files, **Material** (`gem`) for
-`.amat` files, all ten only
-in the Input tree
+`.amat` files, **Structs** (`boxes`) for `.agraph`, `.atree`, model,
+`.amat`, `.agradient` and `.apalette` files and `*.atlas` folders, all
+eleven only in the Input tree
 (see [`noise.md`](noise.md#parameters-tab),
 [`gradients.md`](gradients.md#parameters-tab),
 [`palettes.md`](palettes.md#colors-tab),
 [`schemas.md`](schemas.md#types-tab), [`graphs.md`](graphs.md#graph-tab),
 [`trees.md`](trees.md#tree-tab), [`atlases.md`](atlases.md#inspector), [`instances.md`](instances.md#instances-tab),
-[`materials.md`](materials.md#material-tab)),
+[`materials.md`](materials.md#material-tab),
+[`structs.md`](structs.md#structs-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
 compiled textures with more than one mip level (see
@@ -125,9 +127,13 @@ instead.
 
 | Row        | Value                                                               |
 |------------|---------------------------------------------------------------------|
+| Type       | what the container holds, from its header: `2D`, `Cubemap` (6 faces), `3D` (`pixelDepth` > 0), or `2D array` / `Cubemap array` (`layerCount` > 0, with ` of <n>` layers) |
+| Usage      | what the texture is for, the [`assetc.usage`](../spec/ktx2.md#keyvalue-data) key: `color`, `data`, `normal`, `orm`, `height`, `noise`, `gradient`, `palette`, `atlas`, `font`, `lut`, `environment`; `—` without the key (another writer, or an older build) |
 | Dimensions | `W × H` px (level 0), or `W × H × D` px for a 3D texture (shown as its slices side by side) |
-| Format     | `R8G8B8A8_SRGB`, `R8G8B8A8_UNORM`, or `vkFormat <n>` for any other  |
+| Format     | `R8G8B8A8_SRGB`, `R8G8B8A8_UNORM`, `R16G16B16A16_SFLOAT`, or `vkFormat <n>` for any other |
+| Color space | the data format descriptor's transfer function: `sRGB` or `linear` |
 | Mip levels | `levelCount`                                                        |
+| Writer     | the `KTXwriter` value (`assetc 0.1.0`), when there is one            |
 | Asset path | output-relative path without extension                              |
 | Asset ID   | as above                                                            |
 
@@ -247,7 +253,8 @@ Lists the assets a file contains, as recorded in `<output>/assetc.aman.bin`
   tab reflects the last successful build.
 - One row per manifest entry whose output path is the selected file: `image`
   icon (textures) or `file` icon (materials), the asset path (strong), then
-  weak kind (`Texture`, `Material`) and the asset
+  weak kind (`Texture`, `Material`; a texture with its type and usage,
+  `Texture, cubemap, environment`, `Texture, 2D, normal`) and the asset
   ID (`0x` + 16 hex digits, selectable). Rows sorted by asset path.
 - Placeholders (weak text) instead of rows:
   - no manifest: "Not built yet"

@@ -201,6 +201,11 @@ Renaming it to the name of existing textures (e.g. `brick.amat` next to
   and each texture slot's asset ID (or `—`). The canvas shows the file's
   fields as a table, see [Material view](inspector.md#material-view).
 - The Assets tab is enabled for `.amat.bin` files too and lists the material.
+- The [Structs tab](structs.md#structs-tab) (`boxes`) attaches
+  [structs](structs.md) to a material source; they are kept in the `.amat`
+  and compiled after the `.amat.bin` record (see
+  [Struct data](../spec/amat.bin.md#struct-data)). The Material view lists
+  the struct records after the record's fields.
 
 ## Material tab
 

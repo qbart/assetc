@@ -25,8 +25,9 @@ color = "#9fd8ff80"
 ```
 
 assetc writes files exactly in this form: `width`, `height`, `cell_width`,
-`cell_height`, `layout`, then one `[[colors]]` table per color, each preceded
-by a blank line, with `name` and `color`.
+`cell_height`, `layout`, then the [structs](#structs) when there are any,
+then one `[[colors]]` table per color, each preceded by a blank line, with
+`name` and `color`, then its `[colors.values.<Type>]` tables.
 
 ## Top level
 
@@ -42,7 +43,8 @@ by a blank line, with `name` and `color`.
 The grid has `columns = floor(width / cell_width)` and
 `rows = floor(height / cell_height)`; `colors.len()` must not exceed
 `columns × rows` (`<n> colors need <n> cells but the grid has <m>`). Any
-other key is an error (`unknown key <key>`).
+other key is an error (`unknown key <key>`), but for the
+[structs](#structs) keys `structs`, `color_structs` and `values`.
 
 ## Color
 
@@ -50,6 +52,7 @@ other key is an error (`unknown key <key>`).
 |---------|--------|---------|----------------------------------------------------------|
 | `name`  | string | `""`    | label shown in the editor; not used by the image         |
 | `color` | string | —       | `#rrggbb` or `#rrggbbaa`, hex digits in any case, straight (not premultiplied) alpha; `ff` when left out |
+| `values` | table | none    | this color's [struct values](#structs) |
 
 Errors (counting colors from 1): `color <n>: missing color`,
 `color <n>: invalid color "<text>" (use #rrggbb or #rrggbbaa)`,
@@ -71,3 +74,34 @@ Unused cells, and any columns or rows the grid does not cover, stay
 transparent. A cell 1 × 1 px wide gives a plain lookup strip: e.g.
 `width = 16`, `height = 1`, `cell_width = 1`, `cell_height = 1` holds 16
 colors, texel `i` being color `i`.
+
+## Structs
+
+[Attached structs](../features/structs.md) of the file and of each color:
+
+- **`[[structs]]`**: one table per attachment, in order: `schema` (the
+  schema's path relative to this file's folder, forward slashes) and `type`
+  (the struct's name), both strings; any other key is an error.
+- **`[values.<Type>]`**: the file's values of the attached struct `<Type>`,
+  one key per field it sets, sparse and normalised as an
+  [instance's](adata.md#written-form), each value in
+  [TOML form](../features/structs.md#values-in-toml) (struct values and
+  lists inline, `null` as `{ "$null" = true }`). A struct with nothing set
+  has no table.
+- **`[[color_structs]]`**: attachments every color has, as `[[structs]]`;
+  each color's values are its **`[colors.values.<Type>]`** tables, written
+  after its `color`.
+
+assetc writes them after the top-level keys, before the first `[[colors]]`: the `[[structs]]` tables, the `[[color_structs]]` tables, then the `[values.<Type>]` tables in
+attachment order (struct values inline), each after a blank line:
+
+```toml
+[[structs]]
+schema = "game.aschema"
+type = "Pickup"
+
+[values.Pickup]
+mass = 2.5
+tags = ["loot", "rare"]
+stats = { hp = 40, armor = 2 }
+```

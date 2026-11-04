@@ -46,6 +46,7 @@ width are in `DESC`.
 | `PATHPTS`  | no       | `f32[3][]`: the paths' control points |
 | `PATHSMP`  | no       | [`PathSample`](#pathsample-32-bytes)`[]`: the paths' samples |
 | `PATHPRP`  | no       | [`Property`](#property-32-bytes)`[]`: the paths' properties |
+| [`STRUCTS`, `SVALUES`, `SREFS`, `SSTRINGS`](astruct.md) | no | [attached structs](../features/structs.md): scope `0` the model |
 
 assetc writes the chunks in the order above; `LODIDX` and `LODTABLE` appear
 together, as do `SKIN` and `SKELETON` (only for skinned meshes), and

@@ -10,6 +10,7 @@ Where each frame of an [atlas](../features/atlases.md) is in its texture. A
 | `DESC`    | yes      | [`AtlasDesc`](#atlasdesc-48-bytes) |
 | `FRAMES`  | yes      | [`Frame`](#frame-64-bytes)`[frame_count]`, in name order |
 | `STRINGS` | yes      | UTF-8 frame names back to back |
+| [`STRUCTS`, `SVALUES`, `SREFS`, `SSTRINGS`](astruct.md) | no | [attached structs](../features/structs.md): scope `0` the atlas |
 
 ## AtlasDesc (48 bytes)
 

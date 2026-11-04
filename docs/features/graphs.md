@@ -167,6 +167,13 @@ canvas, in the [property editor](gui.md#property-editor) look:
 - Edits are saved like gradients: once nothing is being dragged or typed,
   then the file is inspected again.
 
+### Structs tab
+
+The [Structs tab](structs.md#structs-tab) (`boxes`) attaches
+[structs](structs.md) to the graph, to every node and to every edge (Graph,
+Node and Edge structs), and edits the values of what the canvas has chosen:
+the graph's with nothing chosen, else the chosen node's or edge's.
+
 ## Problems
 
 Reading checks ids (identifiers, unique) and edges (known nodes). Loops and
@@ -178,12 +185,11 @@ Graph tab (`CHANNEL_R`, 12 px).
 
 Each graph is compiled to `<asset path>.agraph.bin` (asset kind `graph`, asset
 path its input-relative path without the extension, plus `.agraph.bin`), a
-[binary file](../spec/agraph.bin.md) of its nodes, edges and data. A file that cannot be read,
-or has [problems](#problems), fails the build with the first one (`(and <n>
+[binary file](../spec/agraph.bin.md) of its nodes, edges and data, with
+its [attached structs](structs.md#build). A file that cannot be read,
+or has [problems](#problems) or struct errors, fails the build with the first one (`(and <n>
 more)`). The CLI line reads `<source> -> <output> (<n> nodes, <m> edges)`.
 
 ## Not yet
 
-- Building graphs into a binary for games, and data typed by a
-  [schema](schemas.md).
 - Moving several nodes at once, and undo.

@@ -39,9 +39,10 @@ gamma = 1.5
 ```
 
 assetc writes files exactly in this form: `width`, `height`, `cell_width`,
-`cell_height`, `layout`, a blank line, then one `[[gradients]]` table per gradient (separated by blank
+`cell_height`, `layout`, a blank line, the [structs](#structs) (each table
+after a blank line) when there are any, then one `[[gradients]]` table per gradient (separated by blank
 lines) with `name`, `dither` and `stops` (one inline table per line, sorted
-by `at`), then its modifiers as `[[gradients.modifiers]]` tables (each after
+by `at`), then its `[gradients.values.<Type>]` tables, then its modifiers as `[[gradients.modifiers]]` tables (each after
 a blank line: `type`, `enabled`, then the parameters that differ from their
 defaults, as `.anoise` files write them). Numbers are written in their shortest form that reads back to the
 same value (`0.0`, `0.25`, `0.333`).
@@ -60,7 +61,8 @@ same value (`0.0`, `0.25`, `0.333`).
 The grid has `columns = floor(width / cell_width)` and
 `rows = floor(height / cell_height)`; `gradients.len()` must not exceed
 `columns × rows` (`<n> gradients need <n> cells but the grid has <m>`).
-Any other key is an error (`unknown key <key>`).
+Any other key is an error (`unknown key <key>`), but for the
+[structs](#structs) keys `structs`, `gradient_structs` and `values`.
 
 ## Gradient
 
@@ -70,6 +72,7 @@ Any other key is an error (`unknown key <key>`).
 | `dither` | string | `"none"` | `none`, `crosshatch` or `pixel`, see [Dithering](#dithering) |
 | `stops`  | array of tables | — | at least two stops                                 |
 | `modifiers` | array of tables | none | this gradient's [modifiers](anoise.md#modifiers), in order; see [Modifiers](#modifiers) |
+| `values` | table | none | this gradient's [struct values](#structs) |
 
 Any other key is an error (`gradient <n>: unknown key <key>`, counting from
 1).
@@ -167,3 +170,34 @@ This matches the `gradient` command of the `img` toolkit in
 [SoftKiwiGames/cli](https://github.com/SoftKiwiGames/cli) (`img/gradient.go`):
 the same vertical cells (its default cell is 16 × 64), placed on a grid like
 its `--position`, stored with straight alpha.
+
+## Structs
+
+[Attached structs](../features/structs.md) of the file and of each gradient:
+
+- **`[[structs]]`**: one table per attachment, in order: `schema` (the
+  schema's path relative to this file's folder, forward slashes) and `type`
+  (the struct's name), both strings; any other key is an error.
+- **`[values.<Type>]`**: the file's values of the attached struct `<Type>`,
+  one key per field it sets, sparse and normalised as an
+  [instance's](adata.md#written-form), each value in
+  [TOML form](../features/structs.md#values-in-toml) (struct values and
+  lists inline, `null` as `{ "$null" = true }`). A struct with nothing set
+  has no table.
+- **`[[gradient_structs]]`**: attachments every gradient has, as
+  `[[structs]]`; each gradient's values are its **`[gradients.values.<Type>]`**
+  tables, written after its `stops` and before its modifiers.
+
+assetc writes them after the top-level keys, before the first `[[gradients]]`: the `[[structs]]` tables, the `[[gradient_structs]]` tables, then the `[values.<Type>]` tables in
+attachment order (struct values inline), each after a blank line:
+
+```toml
+[[structs]]
+schema = "game.aschema"
+type = "Pickup"
+
+[values.Pickup]
+mass = 2.5
+tags = ["loot", "rare"]
+stats = { hp = 40, armor = 2 }
+```

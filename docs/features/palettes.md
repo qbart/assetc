@@ -77,6 +77,13 @@ Output). An invalid file shows an **Error** row and no image.
 - The image has an alpha channel only if some color is not opaque.
 - An invalid file fails like an undecodable image: the build reports
   `<path>: <error>` and writes no manifest.
+- Each file also gives a **`<asset path>.apalette.bin`** (asset kind `palette`,
+  asset path `ui/theme.apalette.bin`): its colors as data, every color both as
+  sRGB bytes and as linear floats in parallel chunks, its cell's place in
+  the image, and its [attached structs](structs.md); see
+  [`apalette.bin.md`](../spec/apalette.bin.md). The image and the data are
+  built together; the CLI line reads `<source> -> <asset path>.ktx2 (srgb,
+  1 level)` as before, and the summary counts both.
 
 ## Keybindings
 
