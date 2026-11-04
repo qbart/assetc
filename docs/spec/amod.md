@@ -43,11 +43,14 @@ A list of locators, one table each:
 | `rotation`    | array of 4 floats | `[0, 0, 0, 1]` | quaternion `x y z w`, normalized when built; not all zero |
 | `scale`       | array of 3 floats | `[1, 1, 1]`    | per axis                                          |
 | `preview`     | string            | (none)         | input-relative path of a glTF model shown at the locator by the 3D view; not compiled |
+| `preview_locator` | string        | (none)         | name of one of the `preview` model's locators put on this locator; left out: the model's origin; not compiled |
 | `color`       | string            | (none)         | `#rrggbb`, the marker's color in the 3D view; not compiled |
 
 An empty or repeated `name`, a missing one, a wrong array length, an empty,
 repeated or comma-holding tag, a `color` that is not `#` and six hex digits,
-or an unknown key is an error. A locator named like one the model inherits (from
+an empty `preview_locator` or one without `preview`, or an unknown key is
+an error. Whether the `preview` model has `preview_locator` is not checked
+(the 3D view falls back to its origin). A locator named like one the model inherits (from
 its file or a preset) replaces it, see
 [Inherited locators](../features/locators.md#inherited-locators). Whether `joint` exists is checked when the model
 builds.
@@ -172,7 +175,7 @@ assetc writes the `[mesh]` keys that are set, in the order listed, then
 locator as a `[[locators]]` table (`name`, `tags` when there are any,
 `joint` when set, `translation`,
 `rotation`, `scale`, always all three, floats in Rust's shortest form,
-`preview` and `color` when set), then each shape as a `[[shapes]]` table
+`preview`, `preview_locator` and `color` when set), then each shape as a `[[shapes]]` table
 (`name`, `kind` when not empty, `type`, `joint` when set, `translation`,
 `rotation` and the sizes of its type, `color` when set, then its
 `[shapes.properties]` when it has any), then each region as a `[[regions]]`

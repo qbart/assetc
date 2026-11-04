@@ -23,6 +23,7 @@ in the Inspector's [Locators tab](#locators-tab) and directly in the
 | Rotation    | Unit quaternion `x y z w` relative to the parent. The Inspector edits it as Euler angles in degrees (X, then Y, then Z). |
 | Scale       | Per axis, relative to the parent.                                        |
 | Preview     | Another glTF model of the Input tree shown at the locator in the [3D view](#attachment-preview), e.g. the sword in the hand; for assetc only, not compiled. |
+| Attach by   | Which point of the Preview model is put on the locator: its **origin** (the default) or one of **its own locators**, by name, e.g. the sword's `grip`; see [Attachment preview](#attachment-preview). For assetc only, not compiled. |
 | Color       | The color of its marker in the [3D view](#3d-view), as a hint of what it is (e.g. weapons red, effects blue); for assetc only, not compiled. |
 
 - **Model space** is the space of the default scene's root nodes, which is
@@ -164,7 +165,14 @@ the top:
     itself keeps its precision.
   - **Preview**: a dropdown with `None` and every glTF model in the Input
     tree (input-relative paths, sorted, without the model itself); see
-    [Attachment preview](#attachment-preview).
+    [Attachment preview](#attachment-preview). Choosing another model (or
+    `None`) resets Attach by to `Origin`.
+  - **Attach by**: a dropdown with `Origin` and the Preview model's
+    locators (its file's, presets' and sidecar's, in that order, by name);
+    disabled without a Preview. A name the Preview model does not have
+    shows as `<name> (missing)` and is listed until another is chosen; the
+    preview is then shown by its origin. When the Preview model cannot be
+    read, the dropdown only has `Origin` and its tooltip is the error.
   - **Mirror**: a **Mirror** button (`flip-horizontal-2`) and a dropdown of the
     plane to mirror across: `X` (the default), `Y` or `Z`, in model space
     (the dropdown's choice lasts for the session). See [Mirroring](#mirroring).
@@ -209,7 +217,7 @@ it when it exists:
 - **Transform**: the locator's transform in model space, at the pose shown,
   reflected across the chosen plane through the origin (`S · T · S`, with `S`
   negating that axis, so the result is not mirrored itself), then put in the
-  new joint's space. Scale and preview are copied.
+  new joint's space. Scale, preview and attach by are copied.
 - The counterpart is the locator with the mirrored name: it is replaced in
   place, or added after the others when there is none. It becomes the
   chosen locator.
@@ -300,6 +308,19 @@ socket can be checked with what it will hold:
   (joint or model) and scaled with the shown model's fit, so it keeps its
   units relative to the model; it follows joints and animations. Its own
   animations do not play.
+- **Attach by** chooses the point of the model that sits on the locator:
+  - `Origin`: the model's origin, with its axes along the locator's.
+  - One of the model's own locators (e.g. a sword's `grip`): that locator
+    is put on this one, position and axes: the model is placed by this
+    locator's transform × the inverse of its locator's transform in its
+    model space. A locator of the model on one of its joints is in model
+    space by the joint's rest (scene) transform × the locator's; the model
+    is shown once that joint is loaded. Its scale counts too, so a grip
+    scaled 2 shows the model at half size.
+  - The model's locators are read from its file, presets and sidecar when
+    the Attach by dropdown or the 3D view first needs them for the
+    inspected model; changes to that model's files show after selecting the
+    inspected model again.
 - It is shown only while the locator is visible and the shown model is
   fitted; a file that does not load shows nothing.
 - It is not compiled: the game attaches what it wants.
