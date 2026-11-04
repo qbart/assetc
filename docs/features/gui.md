@@ -145,6 +145,7 @@ Each tab shows a tree of the directory configured in `assetc.toml`
 - An atlas folder's settings file (`atlas.toml` directly inside a `*.atlas`
   folder, any case) is dimmed the same way, in its name order among the
   frames, with the `settings-2` icon.
+- **Build marks**: see [Build marks](#build-marks).
 - Folders are collapsible (collapsed by default) and listed before files;
   each group is sorted by name, case-insensitively.
 - Entries whose name starts with `.` are hidden.
@@ -174,6 +175,30 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   - directory missing: "<path> does not exist"
   - directory empty: "Empty"
   - read error: the error message
+
+### Build marks
+
+After each build in the GUI, the Input tree shows what the build could not
+compile, so a source broken by a change elsewhere (a schema whose struct
+an asset attaches, a texture a material names) is found without reading
+the status bar:
+
+- A source that **failed** has its name (not its icon) in `CHANNEL_R`; one
+  with only **warnings** in `ACCENT`. Hovering its row lists the messages,
+  one per line (`error: …`, `warning: …`).
+- A folder holding a marked source, at any depth, has its name marked too
+  (red over orange), so marks show while it is folded; hovering lists how
+  many: `2 errors, 1 warning below`.
+- A failure's source is the build's (`error: <source>`): an input file, an
+  atlas folder, or a model; a material made of a texture group
+  (`brick/brick.*`, no `.amat`) marks its folder only. A model's sidecar
+  is marked with its model.
+- Selection, hover and rename look as usual; while renaming, the name is
+  not colored.
+- Marks are replaced when the next build finishes and cleared when the
+  project is reloaded. A rescan keeps them (an entry renamed or deleted
+  since loses its mark).
+- The Output tree is not marked.
 
 ### Tree icons
 

@@ -156,12 +156,20 @@ counts what was built by kind, see [Summary](#summary).
 Errors are printed as `error: <source>: <message>`; exit code is non-zero if
 the build failed.
 
+**Warnings** do not fail the build; each is printed as `warning: <source>:
+<message>` after its asset's line. They are the problems a check reports as
+warnings: a [data file's](instances.md#problems) and its
+[attached structs'](structs.md#problems) (out-of-range numbers, unset
+required refs, refs to no instance, missing asset paths, unknown keys,
+values of structs that are not attached).
+
 ## Summary
 
 After a successful build the CLI's last line and the GUI's status bar read
 `Built <counts> (<M> skipped)`, with `, <U> up to date` inside the
 parentheses when an [incremental build](cli.md#assetc-watch) left assets up
-to date, then `, <K> removed` when stale outputs were removed:
+to date, then `, <K> removed` when stale outputs were removed, then `, <W>
+warnings` (`1 warning`) when there were warnings:
 
 - `<counts>`: each kind of asset built at least once, in this order, as
   `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat.bin`),
@@ -188,3 +196,5 @@ to date, then `, <K> removed` when stale outputs were removed:
   [summary](#summary) or `Build failed: <first error>` (with the error count
   when more than one).
 - When the build finishes, both file trees are rescanned.
+- The Input tree [marks](gui.md#build-marks) the sources that failed and
+  those with warnings, until the next build.
