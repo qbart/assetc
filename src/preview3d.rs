@@ -51,7 +51,14 @@ impl Plugin for Preview3dPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    (sync_compiled, sync, sync_model, sync_playback, sync_vision)
+                    (
+                        sync_compiled,
+                        sync,
+                        sync_material,
+                        sync_model,
+                        sync_playback,
+                        sync_vision,
+                    )
                         .chain()
                         .before(TransformSystems::Propagate),
                     (sync_attachments, sync_region_view, sync_grid)
@@ -205,6 +212,13 @@ pub struct Preview3d {
     pub overlays: [bool; 6],
     /// The color vision the view simulates; `None` is normal vision.
     pub vision: Option<Vision>,
+    /// An `.amat` being edited: its values this frame (`None` when no material is shown); see
+    /// docs/features/materials.md#3d-preview.
+    pub material: Option<crate::material::Material>,
+    /// Its textures, sent once per inspection.
+    pub material_textures: Option<MaterialTextures>,
+    /// The shape materials are shown on; `None` is a sphere.
+    pub material_shape: Option<Shape>,
     /// Where the shown model's locators hang, once it is fitted; written by [`report_frames`].
     pub frames: Option<ModelFrames>,
     /// A ray (origin, unit direction) to cast against the shown model, taken by
@@ -495,6 +509,21 @@ impl Preview3d {
     pub fn environment_shape(&self) -> Shape {
         self.environment_shape.unwrap_or(Shape::Sphere)
     }
+
+    pub fn material_shape(&self) -> Shape {
+        self.material_shape.unwrap_or(Shape::Sphere)
+    }
+}
+
+/// An edited material's textures, as the build would use them: base color and emissive sRGB,
+/// the rest linear; `depth` is `1 - height`.
+#[derive(Clone, Default)]
+pub struct MaterialTextures {
+    pub base_color: Option<crate::texture::Image>,
+    pub normal: Option<crate::texture::Image>,
+    pub orm: Option<crate::texture::Image>,
+    pub emissive: Option<crate::texture::Image>,
+    pub depth: Option<crate::texture::Image>,
 }
 
 /// Six square RGBA8 sRGB faces in cube layer order (+X, −X, +Y, −Y, +Z, −Z), concatenated.
@@ -527,6 +556,9 @@ struct Scene {
     /// Unlit lines for wireframes.
     wire: Handle<StandardMaterial>,
     cubemap: Option<Handle<Image>>,
+    /// The `.amat` being edited, and the textures it owns.
+    edited: Handle<StandardMaterial>,
+    edited_images: Vec<Handle<Image>>,
 }
 
 /// Skybox and image-based lighting strength for environment maps, cd/m².
@@ -625,17 +657,20 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let [r, g, b, _] = BG_CENTER.to_array();
+    // Tangents, for a material's normal and depth maps.
+    let mut add = |mut mesh: Mesh| {
+        let _ = mesh.generate_tangents();
+        meshes.add(mesh)
+    };
     let meshes = [
-        meshes.add(cube(1.2)),
+        add(cube(1.2)),
         // Bevy's UV sphere has its poles on Z; stand it up so rows of the image run around.
-        meshes.add(
-            Sphere::new(0.75)
-                .mesh()
-                .uv(48, 24)
-                .rotated_by(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-        ),
-        meshes.add(CylinderMeshBuilder::new(0.6, 1.4, 48)),
-        meshes.add(Torus::new(0.35, 0.85)),
+        add(Sphere::new(0.75)
+            .mesh()
+            .uv(48, 24)
+            .rotated_by(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2))),
+        add(CylinderMeshBuilder::new(0.6, 1.4, 48).build()),
+        add(Torus::new(0.35, 0.85).mesh().build()),
     ];
     let material = materials.add(StandardMaterial {
         perceptual_roughness: 0.8,
@@ -697,7 +732,10 @@ fn setup(
         MeshMaterial3d(material.clone()),
         Transform::default(),
     ));
+    let edited = materials.add(StandardMaterial::default());
     commands.insert_resource(Scene {
+        edited,
+        edited_images: Vec::new(),
         meshes,
         material,
         chrome,
@@ -859,7 +897,9 @@ fn sync(
     if **visibility != wanted_visibility {
         **visibility = wanted_visibility;
     }
-    let current = if environment {
+    let current = if preview.material.is_some() {
+        preview.material_shape()
+    } else if environment {
         preview.environment_shape()
     } else {
         preview.shape
@@ -876,6 +916,7 @@ fn sync(
             let cube = if preview.colors_before { before } else { after };
             (cube, &scene.unlit)
         }
+        _ if preview.material.is_some() => (&scene.meshes[index], &scene.edited),
         _ if environment => (&scene.meshes[index], &scene.chrome),
         _ => (&scene.meshes[index], &scene.material),
     };
@@ -891,6 +932,62 @@ fn sync(
     } else if active && !preview.dragging {
         transform.rotate_y(SPIN * time.delta_secs());
     }
+}
+
+/// Gives the edited material its textures and values; see
+/// docs/features/materials.md#3d-preview.
+fn sync_material(
+    mut preview: ResMut<Preview3d>,
+    mut scene: ResMut<Scene>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut shown: Local<Option<crate::material::Material>>,
+) {
+    let edited = scene.edited.clone();
+    if let Some(textures) = preview.material_textures.take()
+        && let Some(mut m) = materials.get_mut(&edited)
+    {
+        for old in scene.edited_images.drain(..) {
+            images.remove(&old);
+        }
+        let mut add = |image: Option<crate::texture::Image>, srgb: bool| {
+            image.map(|i| {
+                let handle = images.add(bevy_image(&i, srgb));
+                scene.edited_images.push(handle.clone());
+                handle
+            })
+        };
+        let orm = add(textures.orm, false);
+        m.base_color_texture = add(textures.base_color, true);
+        m.normal_map_texture = add(textures.normal, false);
+        m.metallic_roughness_texture = orm.clone();
+        m.occlusion_texture = orm;
+        m.emissive_texture = add(textures.emissive, true);
+        m.depth_map = add(textures.depth, false);
+    }
+    let Some(a) = preview.material.clone() else {
+        return;
+    };
+    if shown.as_ref() == Some(&a) {
+        return;
+    }
+    if let Some(mut m) = materials.get_mut(&edited) {
+        let [r, g, b, alpha] = a.base_color;
+        let [er, eg, eb] = a.emissive.map(|c| c * a.emissive_strength);
+        m.base_color = Color::linear_rgba(r, g, b, alpha);
+        m.metallic = a.metallic;
+        m.perceptual_roughness = a.roughness;
+        m.emissive = LinearRgba::rgb(er, eg, eb);
+        m.parallax_depth_scale = a.height_scale;
+        m.alpha_mode = match a.alpha_mode {
+            crate::material::AlphaMode::Opaque => AlphaMode::Opaque,
+            crate::material::AlphaMode::Mask => AlphaMode::Mask(a.alpha_cutoff),
+            crate::material::AlphaMode::Blend => AlphaMode::Blend,
+        };
+        m.double_sided = a.double_sided;
+        m.cull_mode = (!a.double_sided).then_some(bevy::render::render_resource::Face::Back);
+    }
+    *shown = Some(a);
 }
 
 /// Uploads a compiled mesh and shows its material parts in the Material mode; see

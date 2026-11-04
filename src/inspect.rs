@@ -540,7 +540,17 @@ fn hdr_rows(project: &Project, file: &Path, rel: &str, out: &mut Inspection) -> 
     let asset_path = strip_extension(rel);
     asset_rows(asset_path, out);
     output_row(project, &format!("{asset_path}.ktx2"), "", out);
-    // The preview's faces: at most 512 px, clamped to 0–1, sRGB.
+    out.cubemap = Some(preview_faces(&hdr));
+    Ok(())
+}
+
+/// An HDR environment map's cube faces for the 3D view: at most 512 px, clamped to 0–1, sRGB.
+pub fn hdr_faces(file: &Path) -> Result<Vec<Image>, String> {
+    Ok(preview_faces(&crate::hdr::read(file)?))
+}
+
+fn preview_faces(hdr: &crate::hdr::Hdr) -> Vec<Image> {
+    let size = crate::hdr::face_size(hdr.height);
     let preview = hdr.cubemap(size.min(512));
     let encode = |l: f32| {
         let l = l.clamp(0.0, 1.0);
@@ -552,21 +562,18 @@ fn hdr_rows(project: &Project, file: &Path, rel: &str, out: &mut Inspection) -> 
         (s * 255.0).round() as u8
     };
     let level = &preview[0];
-    out.cubemap = Some(
-        level
-            .faces
-            .iter()
-            .map(|face| Image {
-                width: level.size as u32,
-                height: level.size as u32,
-                pixels: face
-                    .iter()
-                    .flat_map(|t| [encode(t[0]), encode(t[1]), encode(t[2]), 255])
-                    .collect(),
-            })
-            .collect(),
-    );
-    Ok(())
+    level
+        .faces
+        .iter()
+        .map(|face| Image {
+            width: level.size as u32,
+            height: level.size as u32,
+            pixels: face
+                .iter()
+                .flat_map(|t| [encode(t[0]), encode(t[1]), encode(t[2]), 255])
+                .collect(),
+        })
+        .collect()
 }
 
 /// See docs/features/instances.md#info-tab.

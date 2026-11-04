@@ -75,6 +75,16 @@ pub fn create_data(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Creates `material.amat` (or `material 2.amat`, …) in `dir`; see
+/// docs/features/materials.md#creating.
+pub fn create_material(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "material", crate::material::SOURCE_SUFFIX);
+    let text = "base_color = [0.8, 0.8, 0.8, 1.0]\nroughness = 0.5\n";
+    fs::write(&path, text).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Creates `palette.apalette` (or `palette 2.apalette`, …) in `dir`; see
 /// docs/features/palettes.md#creating.
 pub fn create_palette(input: &Path, dir: &Path) -> Result<PathBuf, String> {

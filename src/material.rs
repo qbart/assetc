@@ -14,6 +14,14 @@ pub const SIZE: usize = 112;
 const MAGIC: [u8; 4] = *b"ACMT";
 const VERSION: u32 = 1;
 
+/// Whether `path` is a material source, `<name>.amat`.
+pub fn is_source(path: &std::path::Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.strip_suffix(SOURCE_SUFFIX))
+        .is_some_and(|name| !name.is_empty())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Slot {
     BaseColor,
@@ -106,8 +114,6 @@ pub enum NormalY {
 }
 
 impl NormalY {
-    pub const ALL: [Self; 2] = [Self::Gl, Self::Dx];
-
     pub fn key(self) -> &'static str {
         match self {
             Self::Gl => "gl",
@@ -125,8 +131,6 @@ pub enum HeightMode {
 }
 
 impl HeightMode {
-    pub const ALL: [Self; 2] = [Self::Parallax, Self::Displacement];
-
     pub fn key(self) -> &'static str {
         match self {
             Self::Parallax => "parallax",
@@ -145,8 +149,6 @@ pub enum AlphaMode {
 }
 
 impl AlphaMode {
-    pub const ALL: [Self; 3] = [Self::Opaque, Self::Mask, Self::Blend];
-
     pub fn key(self) -> &'static str {
         match self {
             Self::Opaque => "opaque",

@@ -51,6 +51,7 @@ mod config_dialog;
 mod curve;
 mod data;
 mod graph;
+mod material_edit;
 mod schema;
 mod tree_nav;
 use crate::agraph::Graph;
@@ -60,6 +61,7 @@ use anim::{AnimPlayer, canvas_compiled_animation};
 use config_dialog::{ConfigDialog, DialogEnd, config_dialog};
 use data::{DataEdit, PreparedData, canvas_data, instances_tab};
 use graph::{GraphEdit, GraphView, canvas_graph, graph_tab};
+use material_edit::{MaterialEdit, PreparedMaterial, canvas_material, material_tab};
 use schema::{SchemaEdit, canvas_schema, types_tab};
 
 pub struct UiPlugin;
@@ -145,6 +147,8 @@ struct UiState {
     keys: KeyArea,
     /// The selection moved by key: its tree row scrolls into view on the next frame.
     tree_scroll: bool,
+    /// The HDR map (input-relative) lighting material previews; `None` is the studio light.
+    material_light: Option<String>,
 }
 
 /// The areas keys belong to; see KEYS.md.
@@ -325,6 +329,10 @@ struct Inspected {
     data: Option<Result<DataEdit, (String, String)>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
     mesh: Option<Result<MeshEdit, String>>,
+    /// An `.amat` being edited, or why it can't be read; and whether the 3D view has its
+    /// textures.
+    material: Option<Result<MaterialEdit, String>>,
+    uploaded_material: bool,
     /// An image's `.amod` (its modifiers) being edited, or why it can't be read.
     sidecar: Option<Result<SidecarEdit, String>>,
     lut_compare: Option<CompareCache>,
@@ -519,6 +527,7 @@ impl Default for UiState {
             licenses: false,
             keys: KeyArea::default(),
             tree_scroll: false,
+            material_light: None,
         }
     }
 }
@@ -565,6 +574,7 @@ enum InspectorTab {
     Tree,
     Atlas,
     Instances,
+    Material,
     Animations,
     Mipmaps,
     Lods,
@@ -572,7 +582,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 20] = [
+    const ALL: [Self; 21] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -589,6 +599,7 @@ impl InspectorTab {
         Self::Tree,
         Self::Atlas,
         Self::Instances,
+        Self::Material,
         Self::Animations,
         Self::Mipmaps,
         Self::Lods,
@@ -612,6 +623,7 @@ impl InspectorTab {
             Self::Tree => Icon::ListTree,
             Self::Atlas => Icon::Map,
             Self::Instances => Icon::Package,
+            Self::Material => Icon::Gem,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
             Self::Lods => Icon::BringToFront,
@@ -637,6 +649,7 @@ impl InspectorTab {
             Self::Tree => "Tree",
             Self::Atlas => "Atlas",
             Self::Instances => "Instances",
+            Self::Material => "Material",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
             Self::Lods => "Levels of detail",
@@ -705,6 +718,11 @@ impl InspectorTab {
             Self::Types => selection.is_some_and(|s| {
                 s.location == Location::Input
                     && crate::aschema::is_schema(&s.path)
+                    && s.path.is_file()
+            }),
+            Self::Material => selection.is_some_and(|s| {
+                s.location == Location::Input
+                    && crate::material::is_source(&s.path)
                     && s.path.is_file()
             }),
             // Only compiled files are asset containers for now.
@@ -827,11 +845,12 @@ fn shell(
     preview3d.model = None;
     preview3d.compiled_shown = false;
     preview3d.attachments.clear();
+    preview3d.material = None;
     preview3d.vision = state.vision;
     let shown = Shown::of(state.inspected.as_ref());
     let show_3d = match shown {
         Shown::Image => state.mode == ViewMode::ThreeD,
-        Shown::Environment | Shown::Model => true,
+        Shown::Environment | Shown::Model | Shown::Material => true,
         Shown::CompiledMesh => state.mesh_in_3d,
         Shown::CompiledAnimation => {
             !state.anim_chunks
@@ -882,6 +901,7 @@ fn shell(
                     true,
                 ),
                 Shown::Environment
+                | Shown::Material
                 | Shown::Specimen
                 | Shown::Model
                 | Shown::Data
@@ -917,6 +937,21 @@ fn shell(
                 return;
             }
             match (shown, state.mode) {
+                (Shown::Material, _) => {
+                    if let Some(inspected) = state.inspected.as_mut()
+                        && let Some(light) = canvas_material(
+                            ui,
+                            rect,
+                            inspected,
+                            &mut preview3d,
+                            &mut state.vision,
+                            &state.material_light,
+                        )
+                    {
+                        state.material_light = light;
+                        state.reinspect = true;
+                    }
+                }
                 (Shown::Environment, _) => canvas_environment(
                     ui,
                     rect,
@@ -1206,6 +1241,7 @@ struct Prepared {
     compiled_mesh: Option<crate::amesh::Preview>,
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
     compiled_bytes: Option<Vec<u8>>,
+    material: Option<Result<PreparedMaterial, String>>,
 }
 
 fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
@@ -1225,7 +1261,8 @@ fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Projec
     if state.inspector.running.is_some() {
         state.inspector.waiting = Some(selection);
     } else {
-        start_inspection(ctx, &mut state.inspector, project, selection);
+        let light = state.material_light.clone();
+        start_inspection(ctx, &mut state.inspector, project, selection, light);
     }
 }
 
@@ -1249,20 +1286,38 @@ fn prepare_data(project: &Project, file: &Path) -> Result<PreparedData, (String,
     Ok((data, schema, schemas, text))
 }
 
+/// Inspects `selection` on a thread; `light` lights a material's preview.
 fn start_inspection(
     ctx: &egui::Context,
     inspector: &mut Inspector,
     project: &Project,
     selection: Selection,
+    light: Option<String>,
 ) {
     let max_side = ctx.input(|i| i.max_texture_side) as u32;
     let (project, job) = (project.clone(), selection.clone());
-    let handle = std::thread::spawn(move || prepare(&project, &job, max_side));
+    let handle = std::thread::spawn(move || prepare(&project, &job, max_side, light.as_deref()));
     inspector.running = Some((selection, Instant::now(), handle));
 }
 
-fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared {
+fn prepare(
+    project: &Project,
+    selection: &Selection,
+    max_side: u32,
+    light: Option<&str>,
+) -> Prepared {
     let mut inspection = inspect::inspect(project, selection.location, &selection.path);
+    // See docs/features/materials.md#material-tab.
+    let (material, light_faces) = match project.input_dir() {
+        Some(input)
+            if selection.location == Location::Input
+                && crate::material::is_source(&selection.path) =>
+        {
+            let (material, faces) = material_edit::prepare(&input, &selection.path, light);
+            (Some(material), faces)
+        }
+        _ => (None, None),
+    };
     let noise =
         (selection.location == Location::Input && build::is_noise(&selection.path)).then(|| {
             std::fs::read_to_string(&selection.path)
@@ -1384,7 +1439,8 @@ fn prepare(project: &Project, selection: &Selection, max_side: u32) -> Prepared 
             .preview
             .take()
             .map(|image| inspect::fit_within(image, max_side)),
-        cubemap: inspection.cubemap.take(),
+        cubemap: inspection.cubemap.take().or(light_faces),
+        material,
         mips: std::mem::take(&mut inspection.mips)
             .into_iter()
             .map(|image| inspect::fit_within(image, max_side))
@@ -1409,7 +1465,8 @@ fn poll_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) 
     let prepared = handle.join();
     // A newer request supersedes this result.
     if let Some(next) = state.inspector.waiting.take() {
-        start_inspection(ctx, &mut state.inspector, project, next);
+        let light = state.material_light.clone();
+        start_inspection(ctx, &mut state.inspector, project, next, light);
         return;
     }
     if state.selection.as_ref() != Some(&selection) {
@@ -1463,6 +1520,13 @@ fn inspected(
         .as_mut()
         .and_then(|p| p.data.take())
         .and_then(Result::ok);
+    let kept_material = previous
+        .as_mut()
+        .and_then(|p| p.material.take())
+        .and_then(Result::ok);
+    let material = prepared
+        .material
+        .map(|parsed| parsed.map(|p| MaterialEdit::new(p, kept_material)));
     let data = prepared.data.map(|parsed| {
         parsed.map(|p| {
             let mut edit = DataEdit::new(p, kept_data);
@@ -1605,6 +1669,8 @@ fn inspected(
         data,
         mesh,
         sidecar,
+        material,
+        uploaded_material: false,
         compiled_mesh: prepared.compiled_mesh,
         compiled_materials: prepared.compiled_materials,
         uploaded_lod: None,
@@ -2241,6 +2307,7 @@ enum FileOp {
     NewGraph(PathBuf),
     NewData(PathBuf),
     NewTree(PathBuf),
+    NewMaterial(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -2304,6 +2371,10 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
             ui.close();
         }
     });
+    if menu_item(ui, "New Material", None).clicked() {
+        *action = Some(TreeAction::Op(FileOp::NewMaterial(dir.to_path_buf())));
+        ui.close();
+    }
     ui.menu_button(RichText::new("New Data").size(14.0).color(TEXT), |ui| {
         if menu_item(ui, "Schema", None).clicked() {
             *action = Some(TreeAction::Op(FileOp::NewSchema(dir.to_path_buf())));
@@ -2541,6 +2612,9 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             .map(|path| (dir, path)),
         FileOp::NewTree(dir) => fileops::create_tree(&input, &dir)
             .map_err(|e| ("New Tree", e))
+            .map(|path| (dir, path)),
+        FileOp::NewMaterial(dir) => fileops::create_material(&input, &dir)
+            .map_err(|e| ("New Material", e))
             .map(|path| (dir, path)),
         FileOp::NewData(dir) => fileops::create_data(&input, &dir)
             .map_err(|e| ("New Instance", e))
@@ -2897,6 +2971,14 @@ fn right_sidebar(
                         .or_default();
                     if let Some(schema) = types_tab(ui, inspected, chosen) {
                         match std::fs::write(&inspected.path, schema.to_json()) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
+                (InspectorTab::Material, Some(inspected), Some(_)) => {
+                    if let Some(source) = material_tab(ui, inspected) {
+                        match std::fs::write(&inspected.path, source.to_toml()) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
@@ -5000,12 +5082,15 @@ enum Shown {
     Graph,
     /// An `.adata`'s instance editor.
     Instances,
+    /// An `.amat` on a shape in 3D.
+    Material,
     Other,
 }
 
 impl Shown {
     fn of(inspected: Option<&Inspected>) -> Self {
         match inspected {
+            Some(i) if i.material.is_some() => Self::Material,
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.model.is_some() => Self::Model,
             Some(i) if i.inspection.compiled_animation.is_some() => Self::CompiledAnimation,
