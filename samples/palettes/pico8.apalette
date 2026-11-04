@@ -4,9 +4,17 @@ cell_width = 16
 cell_height = 16
 layout = "rows"
 
+[[color_structs]]
+schema = "../data/game.aschema"
+type = "ColorRole"
+
 [[colors]]
 name = "Black"
 color = "#000000"
+
+[colors.values.ColorRole]
+role = "outline"
+ui = true
 
 [[colors]]
 name = "Dark blue"
@@ -39,6 +47,10 @@ color = "#fff1e8"
 [[colors]]
 name = "Red"
 color = "#ff004d"
+
+[colors.values.ColorRole]
+role = "danger"
+ui = true
 
 [[colors]]
 name = "Orange"

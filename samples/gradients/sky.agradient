@@ -4,6 +4,10 @@ cell_width = 16
 cell_height = 64
 layout = "rows"
 
+[[gradient_structs]]
+schema = "../data/game.aschema"
+type = "TimeOfDay"
+
 [[gradients]]
 name = "Day sky"
 dither = "none"
@@ -12,6 +16,10 @@ stops = [
     { at = 0.55, color = "#7fb8f0" },
     { at = 1.0, color = "#2b5fa8" },
 ]
+
+[gradients.values.TimeOfDay]
+hour = 12.0
+sun = "#fff4d6"
 
 [[gradients]]
 name = "Sunset"
@@ -22,6 +30,10 @@ stops = [
     { at = 0.6, color = "#ff6b35" },
     { at = 1.0, color = "#ffe66d" },
 ]
+
+[gradients.values.TimeOfDay]
+hour = 19.5
+sun = "#ff8a3d"
 
 [[gradients]]
 name = "Night"

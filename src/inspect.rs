@@ -130,6 +130,8 @@ enum Kind {
     CompiledGraph,
     CompiledTree,
     CompiledAtlas,
+    CompiledGradient,
+    CompiledPalette,
     Manifest,
     Pack,
     Ignored,
@@ -162,6 +164,8 @@ impl Kind {
             Self::CompiledGraph => "Compiled graph",
             Self::CompiledTree => "Compiled tree",
             Self::CompiledAtlas => "Compiled atlas",
+            Self::CompiledGradient => "Compiled gradients",
+            Self::CompiledPalette => "Compiled palette",
             Self::Manifest => "Manifest",
             Self::Pack => "Pack",
             Self::Ignored => "Ignored",
@@ -245,6 +249,8 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Output if has_ext(manifest::Kind::Graph.extension()) => Kind::CompiledGraph,
         Location::Output if has_ext(manifest::Kind::Tree.extension()) => Kind::CompiledTree,
         Location::Output if has_ext(manifest::Kind::Atlas.extension()) => Kind::CompiledAtlas,
+        Location::Output if has_ext(manifest::Kind::Gradient.extension()) => Kind::CompiledGradient,
+        Location::Output if has_ext(manifest::Kind::Palette.extension()) => Kind::CompiledPalette,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output if crate::pack::is_pack(file) => Kind::Pack,
         Location::Output => Kind::File,
@@ -328,7 +334,9 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         | Kind::CompiledData
         | Kind::CompiledGraph
         | Kind::CompiledTree
-        | Kind::CompiledAtlas => fs::read(file)
+        | Kind::CompiledAtlas
+        | Kind::CompiledGradient
+        | Kind::CompiledPalette => fs::read(file)
             .map_err(|e| e.to_string())
             .and_then(|bytes| Ok((crate::compiled::rows(&bytes)?, bytes)))
             .map(|(rows, bytes)| {
@@ -1375,6 +1383,32 @@ fn material_table(bytes: &[u8], entries: Option<&[manifest::Entry]>) -> DataTabl
         (104, "height_texture"),
     ] {
         rows.push(row(at, name, texture(at), false));
+    }
+    // Attached structs after the record: each as its type and its fields' values; see
+    // docs/spec/amat.bin.md#struct-data.
+    let trailer = crate::material::struct_data(bytes);
+    let astruct = crate::material::ASTRUCT;
+    if let Some(trailer) = trailer
+        && let Ok(reader) = crate::chunks::Reader::parse(trailer, astruct)
+    {
+        let start = reader
+            .entries()
+            .iter()
+            .find(|e| e.name == "STRUCTS")
+            .map_or(0, |e| e.offset as usize);
+        let records = reader.chunk("STRUCTS").unwrap_or_default();
+        let values = reader.chunk("SVALUES").unwrap_or_default();
+        for i in 0..records.len() / 40 {
+            let ty = crate::compiled::cell_in(trailer, astruct, "STRUCTS", i, 1);
+            let slot = crate::chunks::u32_at(records, i, 40, 32).unwrap_or(0) as usize;
+            let count = crate::chunks::u32_at(values, slot, 24, 12).unwrap_or(0) as usize;
+            let first = crate::chunks::u32_at(values, slot, 24, 16).unwrap_or(0) as usize;
+            let fields: Vec<String> = (first..first + count)
+                .map(|k| crate::compiled::cell_in(trailer, astruct, "SVALUES", k, 4))
+                .collect();
+            let at = crate::material::SIZE + start + i * 40;
+            rows.push(row(at, &format!("struct {ty}"), fields.join(", "), false));
+        }
     }
     DataTable {
         header: format!(

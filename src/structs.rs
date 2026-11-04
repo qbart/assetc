@@ -3,7 +3,7 @@
 //! docs/spec/astruct.md.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::{Map, Number, Value};
 
@@ -271,7 +271,6 @@ fn toml_key(key: &str) -> String {
 
 /// An attachment's schema as read, with the project's instances its refs can name.
 pub struct Loaded {
-    pub path: PathBuf,
     pub schema: Result<Schema, String>,
     pub targets: Vec<Target>,
     /// Input-relative, for the schema's asset ID.
@@ -316,7 +315,6 @@ pub fn load(dir: &Path, input: Option<&Path>, scopes: &[Scope]) -> Schemas {
         out.insert(
             a.schema.clone(),
             Loaded {
-                path,
                 schema,
                 targets,
                 rel,
@@ -432,28 +430,6 @@ pub fn check(scopes: &[Scope], schemas: &Schemas, assets: Option<&[String]>) -> 
         }
     }
     out
-}
-
-/// `values` normalised against their structs, as an instance's are when written: what equals
-/// what it would inherit left out, structs with nothing set left out. Values of structs that
-/// cannot be read are kept as they are.
-pub fn normalise(values: &Values, attachments: &[Attachment], schemas: &Schemas) -> Values {
-    values
-        .iter()
-        .filter_map(|(ty, v)| {
-            let resolved = attachments
-                .iter()
-                .find(|a| a.ty == *ty)
-                .and_then(|a| resolve_attachment(a, schemas).ok());
-            match (resolved, v) {
-                (Some((schema, si)), Value::Object(o)) => {
-                    let o = adata::normalise(schema, si, o, None);
-                    (!o.is_empty()).then(|| (ty.clone(), Value::Object(o)))
-                }
-                _ => Some((ty.clone(), v.clone())),
-            }
-        })
-        .collect()
 }
 
 /// The struct chunks of `scopes` (none without attachments), or the first error; see
@@ -581,11 +557,6 @@ mod tests {
         );
         let err = compile(dir.path(), dir.path(), &scopes).unwrap_err();
         assert_eq!(err, "Mode is not a struct of game.aschema (and 1 more)");
-
-        // Normalised: a value equal to the default is left out, then the struct.
-        let mut set = Values::new();
-        set.insert("Step".into(), serde_json::json!({ "cost": 1 }));
-        assert!(normalise(&set, &attachments, &schemas).is_empty());
 
         // Only Step: one record per owner, resolved.
         let attachments = &attachments[..1];

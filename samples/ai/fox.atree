@@ -1,5 +1,11 @@
 {
   "$dialect": "atree/1",
+  "node_structs": [
+    {
+      "schema": "../data/game.aschema",
+      "type": "Behaviour"
+    }
+  ],
   "root": {
     "id": "root",
     "label": "Selector",
@@ -40,7 +46,13 @@
               "speed": 1.5
             }
           }
-        ]
+        ],
+        "values": {
+          "Behaviour": {
+            "priority": 10,
+            "interruptible": false
+          }
+        }
       },
       {
         "id": "hunt",
@@ -82,7 +94,13 @@
               "skill": "pounce"
             }
           }
-        ]
+        ],
+        "values": {
+          "Behaviour": {
+            "priority": 5,
+            "cooldown": 1.5
+          }
+        }
       },
       {
         "id": "wander",

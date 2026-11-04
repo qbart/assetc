@@ -2,3 +2,12 @@ base_color = [0.08, 0.02, 0.01, 1.0]
 roughness = 0.7
 emissive = [1.0, 0.35, 0.05]
 emissive_strength = 4.0
+
+[[structs]]
+schema = "../data/game.aschema"
+type = "Surface"
+
+[values.Surface]
+footstep = "lava"
+friction = 0.3
+damage_per_second = 15.0

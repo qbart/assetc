@@ -1593,6 +1593,7 @@ pub fn describe(name: &str) -> &'static str {
         "PATHPTS" => "Path points",
         "PATHSMP" => "Path samples",
         "PATHPRP" => "Path properties",
+        name if crate::compiled::is_struct_chunk(name) => crate::compiled::describe(name),
         _ => "Unknown chunk",
     }
 }
@@ -1621,6 +1622,9 @@ const DESC_FIELDS: [&str; 10] = [
 const BOUNDS_FIELDS: [&str; 4] = ["aabb_min", "aabb_max", "sphere_center", "sphere_radius"];
 
 pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
+    if crate::compiled::is_struct_chunk(name) {
+        return crate::compiled::table_in(bytes, FORMAT, name);
+    }
     let reader = chunks::Reader::parse(bytes, FORMAT).ok()?;
     let payload = reader.chunk(name)?;
     let wide = reader.chunk("DESC").and_then(|d| d.get(22)) == Some(&4);
@@ -1758,6 +1762,9 @@ fn vector(values: &[f32]) -> String {
 
 /// The text of a cell of a chunk's table (`column` 0 is `#` for numbered tables).
 pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
+    if crate::compiled::is_struct_chunk(name) {
+        return crate::compiled::cell_in(bytes, FORMAT, name, row, column);
+    }
     let Ok(reader) = chunks::Reader::parse(bytes, FORMAT) else {
         return String::new();
     };

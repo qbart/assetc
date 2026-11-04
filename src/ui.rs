@@ -54,6 +54,7 @@ mod graph;
 mod material_edit;
 mod pack_view;
 mod schema;
+mod structs_edit;
 mod tree_nav;
 use crate::agraph::Graph;
 use crate::vision::Vision;
@@ -123,6 +124,8 @@ struct UiState {
     /// The instance each data file's editor shows, by path; see
     /// docs/features/instances.md#instances-tab.
     data_instances: HashMap<PathBuf, usize>,
+    /// The Structs tab's state, by file; see docs/features/structs.md#structs-tab.
+    structs_views: HashMap<PathBuf, structs_edit::StructsView>,
     /// Each graph's view, by path; see docs/features/graphs.md#canvas.
     graph_views: HashMap<PathBuf, GraphView>,
     /// The animation timeline under a model; see docs/features/animation-events.md#timeline.
@@ -353,6 +356,8 @@ struct Inspected {
     geometry: Option<model::ModelGeometry>,
     /// Convex hulls computed for shapes, by joint (`None` for model space).
     hulls: HashMap<Option<String>, Option<crate::hull::Hull>>,
+    /// What the Structs tab read; see docs/features/structs.md#structs-tab.
+    structs_cache: Option<structs_edit::StructsCache>,
 }
 
 /// Before / after textures of the LUT compare view for one source image.
@@ -518,6 +523,7 @@ impl Default for UiState {
             mesh_colors: HashMap::new(),
             schema_types: HashMap::new(),
             data_instances: HashMap::new(),
+            structs_views: HashMap::new(),
             graph_views: HashMap::new(),
             timeline: Timeline::default(),
             mesh_in_3d: true,
@@ -580,6 +586,7 @@ enum InspectorTab {
     Atlas,
     Instances,
     Material,
+    Structs,
     Animations,
     Mipmaps,
     Lods,
@@ -587,7 +594,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 21] = [
+    const ALL: [Self; 22] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -605,6 +612,7 @@ impl InspectorTab {
         Self::Atlas,
         Self::Instances,
         Self::Material,
+        Self::Structs,
         Self::Animations,
         Self::Mipmaps,
         Self::Lods,
@@ -629,6 +637,7 @@ impl InspectorTab {
             Self::Atlas => Icon::Map,
             Self::Instances => Icon::Package,
             Self::Material => Icon::Gem,
+            Self::Structs => Icon::Boxes,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
             Self::Lods => Icon::BringToFront,
@@ -655,6 +664,7 @@ impl InspectorTab {
             Self::Atlas => "Atlas",
             Self::Instances => "Instances",
             Self::Material => "Material",
+            Self::Structs => "Structs",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
             Self::Lods => "Levels of detail",
@@ -729,6 +739,19 @@ impl InspectorTab {
                 s.location == Location::Input
                     && crate::material::is_source(&s.path)
                     && s.path.is_file()
+            }),
+            // See docs/features/structs.md#scopes.
+            Self::Structs => selection.is_some_and(|s| {
+                let p = &s.path;
+                s.location == Location::Input
+                    && ((p.is_file()
+                        && (crate::agraph::is_graph(p)
+                            || crate::atree::is_tree(p)
+                            || model::is_model(p)
+                            || crate::material::is_source(p)
+                            || gradient::is_gradient(p)
+                            || palette::is_palette(p)))
+                        || (p.is_dir() && crate::atlas::is_atlas(p)))
             }),
             // Only compiled files are asset containers for now.
             Self::Assets => selection.is_some_and(|s| {
@@ -819,6 +842,7 @@ fn shell(
             right_sidebar(
                 ui,
                 &mut state,
+                project.input_dir(),
                 &assets,
                 preview3d.frames.as_ref(),
                 preview3d.animation_time,
@@ -1707,6 +1731,7 @@ fn inspected(
         compiled_bytes: prepared.compiled_bytes,
         geometry: prepared.geometry,
         hulls: HashMap::new(),
+        structs_cache: None,
         lut_compare: None,
         uploaded_color_cube: false,
         model: prepared.model,
@@ -2440,6 +2465,13 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
 }
 
 /// The row icon by type, see docs/features/gui.md#tree-icons.
+/// An atlas folder's `atlas.toml`, dimmed like a sidecar; see docs/features/gui.md#file-browser.
+fn is_atlas_config(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case(crate::atlas::CONFIG))
+        && path.parent().is_some_and(crate::atlas::is_atlas)
+}
+
 fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
     if is_dir {
         if crate::atlas::is_atlas(path) {
@@ -2450,6 +2482,9 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
             (false, true) => Icon::FolderOpen,
             (false, false) => Icon::Folder,
         };
+    }
+    if is_atlas_config(path) {
+        return Icon::Settings2;
     }
     // A compiled `<name>.<format>.bin` takes the icon of its format.
     let name = path
@@ -2514,7 +2549,7 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     let open = cx.open.contains(&node.path);
     let icon = tree_icon(&node.path, is_dir, open);
     // Sidecars are dimmed.
-    let dim = !is_dir && amod::is_sidecar(&node.path);
+    let dim = !is_dir && (amod::is_sidecar(&node.path) || is_atlas_config(&node.path));
     let selected = cx
         .selection
         .is_some_and(|s| s.location == cx.location && s.path == node.path);
@@ -2811,6 +2846,7 @@ fn confirm_delete(ctx: &egui::Context, state: &mut UiState, project: &Project) {
 fn right_sidebar(
     ui: &mut Ui,
     state: &mut UiState,
+    input: Option<PathBuf>,
     assets: &Assets,
     frames: Option<&ModelFrames>,
     playhead: Option<f32>,
@@ -3018,6 +3054,33 @@ fn right_sidebar(
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
+                    }
+                }
+                (InspectorTab::Structs, Some(inspected), Some(_)) => {
+                    let view = state
+                        .structs_views
+                        .entry(inspected.path.clone())
+                        .or_default();
+                    let save = structs_edit::structs_tab(ui, inspected, view, input.as_deref());
+                    let written = match save {
+                        None => None,
+                        Some(structs_edit::StructsSave::File(text)) => {
+                            Some(std::fs::write(&inspected.path, text).map_err(|e| e.to_string()))
+                        }
+                        Some(structs_edit::StructsSave::Atlas(text)) => {
+                            let path = inspected.path.join(crate::atlas::CONFIG);
+                            Some(std::fs::write(path, text).map_err(|e| e.to_string()))
+                        }
+                        Some(structs_edit::StructsSave::Sidecar(amod)) => {
+                            state.rescan = true;
+                            state.keep_model = true;
+                            Some(amod::write(&inspected.path, &amod).map_err(|e| e.to_string()))
+                        }
+                    };
+                    match written {
+                        Some(Ok(())) => state.reinspect = true,
+                        Some(Err(e)) => state.notice = Some(format!("Saving failed: {e}")),
+                        None => {}
                     }
                 }
                 (InspectorTab::Material, Some(inspected), Some(_)) => {

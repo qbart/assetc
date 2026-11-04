@@ -99,7 +99,11 @@ fn data_commit(ui: &Ui, edit: &mut DataEdit) -> Option<String> {
 }
 
 /// The problem icon, red for errors and `ACCENT` for warnings only; hovering lists them.
-fn issues(ui: &mut Ui, salt: impl std::hash::Hash + std::fmt::Debug, problems: &[&DataProblem]) {
+pub(super) fn issues(
+    ui: &mut Ui,
+    salt: impl std::hash::Hash + std::fmt::Debug,
+    problems: &[&DataProblem],
+) {
     if problems.is_empty() {
         return;
     }
@@ -417,6 +421,70 @@ pub(super) fn canvas_data(
         fields(ui, &mut cx, si, values, None, "", Some(folded));
     });
     data_commit(ui, edit)
+}
+
+/// The editor state of struct values edited outside a data file (attached structs): folded
+/// groups, unfolded values and the pickers' and curve editors' state, by owner key.
+#[derive(Default)]
+pub(super) struct FieldsState {
+    folded: HashSet<(usize, String)>,
+    open: HashSet<(usize, String)>,
+    picker: Picker,
+    curves: HashMap<(usize, String), CurveState>,
+    curve_settings: CurveSettings,
+    gradients: HashMap<(usize, String), GradientCard>,
+    started: HashSet<usize>,
+}
+
+/// Struct `si`'s fields in `values` (what is set), edited as an instance's are (see
+/// docs/features/instances.md#canvas); `key` tells apart the struct values one `state` edits.
+/// `refs` are the instances `ref<S>` values can name, `assets` the files `asset<K>` can.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn struct_fields(
+    ui: &mut Ui,
+    state: &mut FieldsState,
+    key: usize,
+    schema: &Schema,
+    si: usize,
+    values: &mut Map<String, Value>,
+    problems: &[&DataProblem],
+    (assets, refs): (&[String], &[Target]),
+) {
+    if state.started.insert(key)
+        && let Body::Struct { groups, .. } = &schema.types[si].body
+    {
+        for g in groups.iter().filter(|g| g.collapsed) {
+            state.folded.insert((key, g.name.clone()));
+        }
+    }
+    let FieldsState {
+        folded,
+        open,
+        picker,
+        curves,
+        curve_settings,
+        gradients,
+        ..
+    } = state;
+    let mut cx = Cx {
+        schema,
+        problems,
+        open,
+        instance: key,
+        left: ui.cursor().left(),
+        editors: ValueEditors {
+            picker,
+            curves,
+            curve_settings,
+            gradients,
+            assets,
+            refs,
+            here: "",
+            go: None,
+            ti: key,
+        },
+    };
+    fields(ui, &mut cx, si, values, None, "", Some(folded));
 }
 
 /// An error and the file's text, read only.

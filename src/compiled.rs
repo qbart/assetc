@@ -351,6 +351,9 @@ pub fn encode_data(
     writer.finish()
 }
 
+/// Where the instances refs can name are: by type and id, their file's asset ID and index.
+type Targets<'a> = HashMap<(&'a str, &'a str), (u64, u32)>;
+
 /// The struct chunks of attached structs, every owner's values resolved; see
 /// docs/spec/astruct.md. Every attachment must name a struct of a schema that was read.
 pub fn encode_structs(
@@ -367,7 +370,7 @@ pub fn encode_structs(
         return Vec::new();
     };
     // Each schema's project, for refs.
-    let targets: HashMap<&str, HashMap<(&str, &str), (u64, u32)>> = schemas
+    let targets: HashMap<&str, Targets> = schemas
         .iter()
         .map(|(key, loaded)| {
             let map = loaded
@@ -688,6 +691,8 @@ pub fn format_of(bytes: &[u8]) -> Option<&'static str> {
         ATREE,
         crate::aanim::FORMAT,
         crate::atlas::FORMAT,
+        AGRAD,
+        APALETTE,
     ]
     .into_iter()
     .find(|f| chunks::Reader::parse(bytes, f).is_ok())
@@ -710,6 +715,21 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             ("Size", format!("{} × {} px", u(0), u(4))),
             ("Packing", packing),
         ]);
+    }
+    let size = |at| {
+        let u = |a| chunks::u32_at(desc, 0, 48, a).unwrap_or(0);
+        format!("{} × {} px", u(at), u(at + 4))
+    };
+    match format {
+        AGRAD => {
+            return Ok(vec![
+                ("Gradients", field(0)),
+                ("Stops", field(4)),
+                ("Size", size(8)),
+            ]);
+        }
+        APALETTE => return Ok(vec![("Colors", field(0)), ("Size", size(8))]),
+        _ => {}
     }
     let names: &[&'static str] = match format {
         ASCHEMA => &["Types", "Fields", "Values"],
@@ -959,6 +979,79 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
             32,
             vec![("Key", Text(8)), ("Type", PropType), ("Value", PropValue)],
         ),
+        // Any format's attached structs; see docs/spec/astruct.md.
+        (_, "STRUCTS") => (
+            40,
+            vec![
+                ("Type", Text(16)),
+                ("Scope", U32(0)),
+                ("Item", U32(4)),
+                ("Hash", Hex(8)),
+                ("Schema", Hex(24)),
+                ("Value", U32(32)),
+            ],
+        ),
+        (_, "SVALUES") => (
+            24,
+            vec![
+                ("Name hash", Hex(0)),
+                ("Kind", ValueKind),
+                ("Count", U32(12)),
+                ("Value", ValuePayload),
+            ],
+        ),
+        (_, "SREFS") => (
+            24,
+            vec![("File", Hex(0)), ("Id hash", Hex(8)), ("Instance", U32(16))],
+        ),
+        (AGRAD | APALETTE, "DESC") => {
+            let mut columns = match format {
+                AGRAD => vec![("gradient_count", U32(0)), ("stop_count", U32(4))],
+                _ => vec![("color_count", U32(0))],
+            };
+            columns.extend([
+                ("width", U32(8)),
+                ("height", U32(12)),
+                ("cell_width", U32(16)),
+                ("cell_height", U32(20)),
+                ("columns", U32(24)),
+                ("rows", U32(28)),
+                ("layout", U32(32)),
+                ("texture", Hex(40)),
+            ]);
+            (48, columns)
+        }
+        (AGRAD, "GRADIENT") => (
+            48,
+            vec![
+                ("Name", Text(8)),
+                ("Hash", Hex(0)),
+                ("First stop", U32(16)),
+                ("Stops", U32(20)),
+                ("Dither", U32(24)),
+                ("U0", F32(32)),
+                ("V0", F32(36)),
+                ("U1", F32(40)),
+                ("V1", F32(44)),
+            ],
+        ),
+        (AGRAD, "STOPS") => (4, vec![("At", F32(0))]),
+        (APALETTE, "COLORS") => (
+            32,
+            vec![
+                ("Name", Text(8)),
+                ("Hash", Hex(0)),
+                ("U0", F32(16)),
+                ("V0", F32(20)),
+                ("U1", F32(24)),
+                ("V1", F32(28)),
+            ],
+        ),
+        (AGRAD | APALETTE, "RGBA8") => (4, vec![("Color", Color(0))]),
+        (AGRAD | APALETTE, "RGBAF") => (
+            16,
+            vec![("R", F32(0)), ("G", F32(4)), ("B", F32(8)), ("A", F32(12))],
+        ),
         _ => return None,
     })
 }
@@ -984,20 +1077,34 @@ pub fn describe(name: &str) -> &'static str {
         "EVPROPS" => "Event properties",
         "EVTEXT" => "Event text",
         "FRAMES" => "Frames",
+        "STRUCTS" => "Attached structs",
+        "SVALUES" => "Struct values",
+        "SREFS" => "Struct references",
+        "SSTRINGS" => "Struct strings",
+        "GRADIENT" => "Gradients",
+        "STOPS" => "Stop positions",
+        "COLORS" => "Colors",
+        "RGBA8" => "Colors, sRGB bytes",
+        "RGBAF" => "Colors, linear floats",
         _ => "Unknown chunk",
     }
 }
 
 /// Chunks of text, shown as rows of bytes.
 fn is_text(name: &str) -> bool {
-    matches!(name, "STRINGS" | "NAMES" | "EVTEXT")
+    matches!(name, "STRINGS" | "NAMES" | "EVTEXT" | "SSTRINGS")
 }
 
 /// Text chunks as rows of this many bytes.
 const STRING_ROW: usize = 48;
 
 pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
-    let format = format_of(bytes)?;
+    table_in(bytes, format_of(bytes)?, name)
+}
+
+/// A chunk's table in a file of `format`; other formats' views use it for their struct
+/// chunks.
+pub fn table_in(bytes: &[u8], format: &str, name: &str) -> Option<Table> {
     let reader = chunks::Reader::parse(bytes, format).ok()?;
     let payload = reader.chunk(name)?;
     if is_text(name) {
@@ -1016,15 +1123,26 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
 }
 
 pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
-    let Some(format) = format_of(bytes) else {
-        return String::new();
-    };
+    match format_of(bytes) {
+        Some(format) => cell_in(bytes, format, name, row, column),
+        None => String::new(),
+    }
+}
+
+/// Whether a chunk is one of the struct chunks of docs/spec/astruct.md.
+pub fn is_struct_chunk(name: &str) -> bool {
+    matches!(name, "STRUCTS" | "SVALUES" | "SREFS" | "SSTRINGS")
+}
+
+/// A cell of a chunk's table in a file of `format`.
+pub fn cell_in(bytes: &[u8], format: &str, name: &str, row: usize, column: usize) -> String {
     let Ok(reader) = chunks::Reader::parse(bytes, format) else {
         return String::new();
     };
     let text_chunk = match name {
         "CLIPS" => "NAMES",
         "EVENTS" | "EVPROPS" => "EVTEXT",
+        "STRUCTS" | "SVALUES" => "SSTRINGS",
         _ => "STRINGS",
     };
     let (Some(p), strings) = (

@@ -53,6 +53,14 @@ pub(super) struct GraphEdit {
 }
 
 impl GraphEdit {
+    /// What the canvas has chosen, if it is still there.
+    pub(super) fn chosen(&self) -> Option<Chosen> {
+        self.chosen.filter(|c| match *c {
+            Chosen::Node(i) => i < self.edit.nodes.len(),
+            Chosen::Edge(k) => k < self.edit.edges.len(),
+        })
+    }
+
     /// `graph` as read (a tree when `tree`), keeping `previous`'s choice.
     pub(super) fn new(graph: Graph, tree: bool, previous: GraphEdit) -> Self {
         // The chosen node by id: a tree is read back depth first, so its places change.
@@ -102,7 +110,7 @@ impl Default for GraphView {
 }
 
 /// The text to write once nothing is being dragged or typed into.
-fn graph_commit(ui: &Ui, edit: &mut GraphEdit) -> Option<String> {
+pub(super) fn graph_commit(ui: &Ui, edit: &mut GraphEdit) -> Option<String> {
     let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
     (!busy && edit.edit != edit.saved).then(|| {
         edit.saved = edit.edit.clone();

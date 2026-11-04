@@ -1,5 +1,29 @@
 {
   "$dialect": "agraph/1",
+  "structs": [
+    {
+      "schema": "../data/game.aschema",
+      "type": "Questline"
+    }
+  ],
+  "node_structs": [
+    {
+      "schema": "../data/game.aschema",
+      "type": "QuestStep"
+    }
+  ],
+  "edge_structs": [
+    {
+      "schema": "../data/game.aschema",
+      "type": "Route"
+    }
+  ],
+  "values": {
+    "Questline": {
+      "title": "The Fox Hunt",
+      "min_level": 3
+    }
+  },
   "nodes": [
     {
       "id": "village",
@@ -9,6 +33,11 @@
       "y": 0,
       "data": {
         "safe": true
+      },
+      "values": {
+        "QuestStep": {
+          "objective": "Talk to the elder"
+        }
       }
     },
     {
@@ -19,6 +48,13 @@
       "y": 0,
       "data": {
         "level": 3
+      },
+      "values": {
+        "QuestStep": {
+          "objective": "Track the foxes",
+          "enemy": "fox",
+          "reward_gold": 20
+        }
       }
     },
     {
@@ -59,7 +95,12 @@
       "from": "village",
       "to": "forest",
       "label": "road",
-      "weight": 1
+      "weight": 1,
+      "values": {
+        "Route": {
+          "travel_time": 2.5
+        }
+      }
     },
     {
       "from": "forest",

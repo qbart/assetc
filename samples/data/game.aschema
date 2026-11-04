@@ -343,6 +343,187 @@
           "default": "#9fb4d080"
         }
       ]
+    },
+    "Questline": {
+      "kind": "struct",
+      "doc": "A quest graph's own data.",
+      "fields": [
+        {
+          "name": "title",
+          "type": "string"
+        },
+        {
+          "name": "min_level",
+          "type": "u8",
+          "default": 1,
+          "min": 1,
+          "max": 60
+        }
+      ]
+    },
+    "QuestStep": {
+      "kind": "struct",
+      "doc": "One place of a questline.",
+      "fields": [
+        {
+          "name": "objective",
+          "type": "string"
+        },
+        {
+          "name": "enemy",
+          "type": "ref<Enemy>",
+          "optional": true
+        },
+        {
+          "name": "reward_gold",
+          "type": "u32",
+          "default": 0
+        },
+        {
+          "name": "music",
+          "type": "string"
+        }
+      ]
+    },
+    "Route": {
+      "kind": "struct",
+      "doc": "A way between two places.",
+      "fields": [
+        {
+          "name": "travel_time",
+          "type": "f32",
+          "default": 1.0,
+          "min": 0
+        },
+        {
+          "name": "locked",
+          "type": "bool",
+          "default": false
+        }
+      ]
+    },
+    "Behaviour": {
+      "kind": "struct",
+      "doc": "How an AI node runs.",
+      "fields": [
+        {
+          "name": "priority",
+          "type": "i32",
+          "default": 0
+        },
+        {
+          "name": "cooldown",
+          "type": "f32",
+          "default": 0.0,
+          "min": 0
+        },
+        {
+          "name": "interruptible",
+          "type": "bool",
+          "default": true
+        }
+      ]
+    },
+    "Pickup": {
+      "kind": "struct",
+      "doc": "A model that can be picked up.",
+      "fields": [
+        {
+          "name": "weight",
+          "type": "f32",
+          "default": 1.0,
+          "min": 0
+        },
+        {
+          "name": "value",
+          "type": "u32",
+          "default": 0
+        },
+        {
+          "name": "weapon",
+          "type": "ref<Weapon>",
+          "optional": true
+        }
+      ]
+    },
+    "Surface": {
+      "kind": "struct",
+      "doc": "How a material feels in the game.",
+      "fields": [
+        {
+          "name": "footstep",
+          "type": "string",
+          "default": "stone"
+        },
+        {
+          "name": "friction",
+          "type": "f32",
+          "default": 0.6,
+          "min": 0,
+          "max": 1
+        },
+        {
+          "name": "damage_per_second",
+          "type": "f32",
+          "default": 0.0,
+          "min": 0
+        }
+      ]
+    },
+    "Effect": {
+      "kind": "struct",
+      "doc": "How a flipbook atlas plays.",
+      "fields": [
+        {
+          "name": "fps",
+          "type": "f32",
+          "default": 12.0,
+          "min": 1
+        },
+        {
+          "name": "additive",
+          "type": "bool",
+          "default": false
+        },
+        {
+          "name": "tint",
+          "type": "rgba",
+          "default": "#ffffffff"
+        }
+      ]
+    },
+    "TimeOfDay": {
+      "kind": "struct",
+      "doc": "When a sky gradient is used.",
+      "fields": [
+        {
+          "name": "hour",
+          "type": "f32",
+          "default": 12.0,
+          "min": 0,
+          "max": 24
+        },
+        {
+          "name": "sun",
+          "type": "rgb",
+          "default": "#ffffff"
+        }
+      ]
+    },
+    "ColorRole": {
+      "kind": "struct",
+      "doc": "What a palette color is for.",
+      "fields": [
+        {
+          "name": "role",
+          "type": "string"
+        },
+        {
+          "name": "ui",
+          "type": "bool",
+          "default": false
+        }
+      ]
     }
   }
 }

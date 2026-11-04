@@ -254,6 +254,13 @@ pub struct MaterialEdit {
 }
 
 impl MaterialEdit {
+    /// The source being edited.
+    pub(super) fn source_mut(&mut self) -> &mut Source {
+        &mut self.edit
+    }
+}
+
+impl MaterialEdit {
     /// The edit of a fresh inspection; `kept` (the previous one of the same file) stays when the
     /// file still holds what it saved, so edits in progress survive.
     pub fn new(prepared: PreparedMaterial, kept: Option<MaterialEdit>) -> Self {
@@ -402,6 +409,11 @@ pub fn material_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Source> {
                 textures_section(ui, edit);
             });
         });
+    material_commit(ui, edit)
+}
+
+/// The source to write once nothing is being dragged or typed into.
+pub(super) fn material_commit(ui: &Ui, edit: &mut MaterialEdit) -> Option<Source> {
     let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
     (!busy && edit.edit != edit.saved).then(|| {
         edit.saved = edit.edit.clone();

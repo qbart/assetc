@@ -7,3 +7,11 @@ extrude = 1
 trim = false
 power_of_two = true
 max_size = 4096
+
+[[structs]]
+schema = "../../data/game.aschema"
+type = "Effect"
+
+[values.Effect]
+additive = true
+tint = "#ffd28cff"
