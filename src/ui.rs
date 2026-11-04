@@ -52,6 +52,7 @@ mod curve;
 mod data;
 mod graph;
 mod schema;
+mod tree_nav;
 use crate::agraph::Graph;
 use crate::vision::Vision;
 use crate::{chart, preview3d};
@@ -142,6 +143,8 @@ struct UiState {
     licenses: bool,
     /// Where the last mouse press landed: that area's keys act.
     keys: KeyArea,
+    /// The selection moved by key: its tree row scrolls into view on the next frame.
+    tree_scroll: bool,
 }
 
 /// The areas keys belong to; see KEYS.md.
@@ -515,6 +518,7 @@ impl Default for UiState {
             keep_model: false,
             licenses: false,
             keys: KeyArea::default(),
+            tree_scroll: false,
         }
     }
 }
@@ -1994,6 +1998,19 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
         Listing::Failed(e) => placeholder(ui, e),
         Listing::Loaded(nodes) => {
             let editable = location == Location::Input;
+            // Not while renaming or while a dialog is open.
+            let keys_free = state.keys == KeyArea::Tree
+                && state.rename.is_none()
+                && state.confirm_delete.is_none()
+                && state.config.is_none()
+                && !state.licenses
+                && !ui.ctx().egui_wants_keyboard_input();
+            if keys_free {
+                tree_keys(ui, state, nodes, location);
+            }
+            let scroll_to = std::mem::take(&mut state.tree_scroll)
+                .then(|| state.selection.as_ref().map(|s| s.path.clone()))
+                .flatten();
             let mut cx = TreeCx {
                 location,
                 selection: state.selection.as_ref(),
@@ -2002,6 +2019,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                 rename: &mut state.rename,
                 rename_done: None,
                 action: None,
+                scroll_to,
             };
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
@@ -2045,6 +2063,39 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                 }
             }
         }
+    }
+}
+
+/// Moves the selection or folds a folder by key; see docs/features/gui.md#file-browser.
+fn tree_keys(ui: &mut Ui, state: &mut UiState, nodes: &[Node], location: Location) {
+    let Some(key) = tree_nav::KEYS
+        .into_iter()
+        .find(|&k| ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, k)))
+    else {
+        return;
+    };
+    let rows = tree_nav::visible_rows(nodes, &state.open);
+    let selected = state
+        .selection
+        .as_ref()
+        .filter(|s| s.location == location)
+        .map(|s| s.path.as_path());
+    // The rows that fit in the view, minus one.
+    let page = ((ui.available_height() / 22.0) as usize)
+        .saturating_sub(1)
+        .max(1);
+    match tree_nav::navigate(&rows, selected, key, page) {
+        Some(tree_nav::Move::Select(path)) => {
+            select(state, location, path);
+            state.tree_scroll = true;
+        }
+        Some(tree_nav::Move::Fold(path, true)) => {
+            state.open.insert(path);
+        }
+        Some(tree_nav::Move::Fold(path, false)) => {
+            state.open.remove(&path);
+        }
+        None => {}
     }
 }
 
@@ -2218,6 +2269,8 @@ struct TreeCx<'a> {
     /// Set when a rename should be committed (`Some(true)`) or cancelled (`Some(false)`).
     rename_done: Option<bool>,
     action: Option<TreeAction>,
+    /// The row to scroll into view.
+    scroll_to: Option<PathBuf>,
 }
 
 /// Menu items creating something in `dir`.
@@ -2316,25 +2369,13 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
 
 fn tree(ui: &mut Ui, nodes: &[Node], depth: usize, cx: &mut TreeCx) {
     // A file's `.amod` sidecar sits right below it; see docs/features/gui.md#file-browser.
-    let sidecar_of = |file: &Node| {
-        nodes.iter().find(|n| {
-            n.children.is_none() && n.name.strip_suffix(".amod") == Some(file.name.as_str())
-        })
-    };
-    let nested = |node: &Node| {
-        node.children.is_none()
-            && node
-                .name
-                .strip_suffix(".amod")
-                .is_some_and(|main| nodes.iter().any(|n| n.children.is_none() && n.name == main))
-    };
     for node in nodes {
-        if nested(node) {
+        if tree_nav::nested(nodes, node) {
             continue;
         }
         let is_dir = node.children.is_some();
         let open = cx.open.contains(&node.path);
-        let sidecar = if is_dir { None } else { sidecar_of(node) };
+        let sidecar = tree_nav::sidecar_of(nodes, node);
         let chevron = match (is_dir, open) {
             (true, true) => Some(Icon::ChevronDown),
             (true, false) => Some(Icon::ChevronRight),
@@ -2368,6 +2409,9 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     );
     if done.is_some() {
         cx.rename_done = done;
+    }
+    if cx.scroll_to.as_ref() == Some(&node.path) {
+        response.scroll_to_me(None);
     }
     if response.clicked() {
         if is_dir && !cx.open.remove(&node.path) {

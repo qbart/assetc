@@ -1558,11 +1558,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         fs::create_dir_all(&input).unwrap();
-        fs::write(
-            input.join("gold.amat"),
-            "metallic = 1.0\nroughness = 0.3\n",
-        )
-        .unwrap();
+        fs::write(input.join("gold.amat"), "metallic = 1.0\nroughness = 0.3\n").unwrap();
 
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);

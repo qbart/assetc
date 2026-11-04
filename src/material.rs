@@ -556,8 +556,14 @@ mod tests {
         s.metallic = Some(0.123_456);
         s.textures.set(Slot::Normal, None);
         let written = s.to_toml();
-        assert!(written.contains("metallic = 0.1235\nroughness"), "{written}");
-        assert_eq!(Source::parse(&written).unwrap().textures.get(Slot::Normal), None);
+        assert!(
+            written.contains("metallic = 0.1235\nroughness"),
+            "{written}"
+        );
+        assert_eq!(
+            Source::parse(&written).unwrap().textures.get(Slot::Normal),
+            None
+        );
         assert_eq!(float(1.0), "1.0");
         assert_eq!(float(-2.5), "-2.5");
     }

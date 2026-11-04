@@ -1744,11 +1744,7 @@ name = \"x\"\n",
         let base = inspect(&project, Location::Input, &file("assets/brick/brick.png"));
         assert_eq!(row(&base, "Material"), "brick/brick.amat.bin (base_color)");
         assert_eq!(row(&base, "Color"), "sRGB");
-        let toml = inspect(
-            &project,
-            Location::Input,
-            &file("assets/brick/brick.amat"),
-        );
+        let toml = inspect(&project, Location::Input, &file("assets/brick/brick.amat"));
         assert_eq!(row(&toml, "Kind"), "Material source");
         assert_eq!(row(&toml, "Asset path"), "brick/brick.amat.bin");
         assert_eq!(row(&toml, "Output"), "brick/brick.amat.bin (not built)");
@@ -1797,11 +1793,7 @@ name = \"x\"\n",
         assert!(field("base_color").swatch.is_some());
 
         fs::write(file("assets/brick/brick.amat"), "roughness = 3.0").unwrap();
-        let bad = inspect(
-            &project,
-            Location::Input,
-            &file("assets/brick/brick.amat"),
-        );
+        let bad = inspect(&project, Location::Input, &file("assets/brick/brick.amat"));
         assert!(row(&bad, "Error").contains("out of range"));
     }
 
