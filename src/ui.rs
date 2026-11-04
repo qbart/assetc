@@ -124,6 +124,8 @@ struct UiState {
     /// The instance each data file's editor shows, by path; see
     /// docs/features/instances.md#instances-tab.
     data_instances: HashMap<PathBuf, usize>,
+    /// What the last build reported; see docs/features/gui.md#build-marks.
+    build_marks: BuildMarks,
     /// The Structs tab's state, by file; see docs/features/structs.md#structs-tab.
     structs_views: HashMap<PathBuf, structs_edit::StructsView>,
     /// Each graph's view, by path; see docs/features/graphs.md#canvas.
@@ -488,8 +490,90 @@ enum BuildStatus {
     Idle,
     /// The build (and pack) thread with its final message, when it started, and whether it is
     /// packing by now.
-    Running(JoinHandle<String>, Instant, Arc<AtomicBool>),
+    Running(JoinHandle<(String, BuildMarks)>, Instant, Arc<AtomicBool>),
     Finished(String),
+}
+
+/// What the last build could not compile, or compiled with warnings, by input path; see
+/// docs/features/gui.md#build-marks.
+#[derive(Default)]
+struct BuildMarks {
+    /// Each marked source's messages, `true` for an error.
+    files: HashMap<PathBuf, Vec<(bool, String)>>,
+    /// Folders holding marked sources: their errors and warnings below.
+    folders: HashMap<PathBuf, (usize, usize)>,
+}
+
+impl BuildMarks {
+    fn new(input: &Path, outcome: &build::Outcome) -> Self {
+        let mut marks = Self::default();
+        let found = (outcome.failures.iter().map(|f| (true, f)))
+            .chain(outcome.warnings.iter().map(|w| (false, w)));
+        for (error, problem) in found {
+            let message = format!(
+                "{}: {}",
+                if error { "error" } else { "warning" },
+                problem.message
+            );
+            // A texture group (`brick/brick.*`) is no one file: its folder is marked.
+            let path = input.join(&problem.source);
+            let mut at = Vec::new();
+            if !problem.source.contains('*') && path.exists() {
+                if model::is_model(&path) {
+                    at.push(amod::path_for(&path));
+                }
+                at.push(path.clone());
+            }
+            for file in &at {
+                marks
+                    .files
+                    .entry(file.clone())
+                    .or_default()
+                    .push((error, message.clone()));
+            }
+            for dir in path.ancestors().skip(1) {
+                if !dir.starts_with(input) || dir == input {
+                    break;
+                }
+                let count = marks.folders.entry(dir.to_path_buf()).or_default();
+                if error {
+                    count.0 += 1;
+                } else {
+                    count.1 += 1;
+                }
+            }
+        }
+        // Errors first.
+        for messages in marks.files.values_mut() {
+            messages.sort_by_key(|(error, _)| !error);
+        }
+        marks
+    }
+
+    /// A row's mark: its color and what hovering it lists.
+    fn of(&self, path: &Path) -> Option<(egui::Color32, String)> {
+        if let Some(messages) = self.files.get(path) {
+            let color = if messages.iter().any(|(e, _)| *e) {
+                CHANNEL_R
+            } else {
+                ACCENT
+            };
+            let text: Vec<&str> = messages.iter().map(|(_, m)| m.as_str()).collect();
+            return Some((color, text.join("\n")));
+        }
+        let &(errors, warnings) = self.folders.get(path)?;
+        let plural = |n: usize, word: &str| match n {
+            1 => format!("1 {word}"),
+            n => format!("{n} {word}s"),
+        };
+        let counts: Vec<String> = [(errors, "error"), (warnings, "warning")]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, word)| plural(n, word))
+            .collect();
+        let color = if errors > 0 { CHANNEL_R } else { ACCENT };
+        Some((color, format!("{} below", counts.join(", "))))
+    }
 }
 
 impl Default for UiState {
@@ -523,6 +607,7 @@ impl Default for UiState {
             mesh_colors: HashMap::new(),
             schema_types: HashMap::new(),
             data_instances: HashMap::new(),
+            build_marks: BuildMarks::default(),
             structs_views: HashMap::new(),
             graph_views: HashMap::new(),
             timeline: Timeline::default(),
@@ -1217,6 +1302,7 @@ fn shell(
             DialogEnd::Saved(loaded) => {
                 state.config = None;
                 *project = *loaded;
+                state.build_marks = BuildMarks::default();
                 state.notice = Some(format!("Saved {}", crate::config::FILE_NAME));
                 state.rescan = true;
             }
@@ -1798,22 +1884,24 @@ fn start_build(state: &mut UiState, project: &Project, pack: bool) {
     let flag = packing.clone();
     let run = move || {
         let settings = match pack.then(|| crate::pack::Settings::new(&config.pack)) {
-            Some(Err(e)) => return format!("Pack failed: {e}"),
+            Some(Err(e)) => return (format!("Pack failed: {e}"), BuildMarks::default()),
             Some(Ok(settings)) => Some(settings),
             None => None,
         };
         let outcome = match build::run(&input, &output, &config) {
             Ok(outcome) => outcome,
-            Err(e) => return format!("Build failed: {e}"),
+            Err(e) => return (format!("Build failed: {e}"), BuildMarks::default()),
         };
+        let marks = BuildMarks::new(&input, &outcome);
         let Some(settings) = settings.filter(|_| outcome.failures.is_empty()) else {
-            return outcome.summary();
+            return (outcome.summary(), marks);
         };
         flag.store(true, Ordering::Relaxed);
-        match crate::pack::write(&output, &settings) {
+        let message = match crate::pack::write(&output, &settings) {
             Ok((_, contents)) => crate::pack::summary(&contents, &settings.file),
             Err(e) => format!("Pack failed: {e}"),
-        }
+        };
+        (message, marks)
     };
     state.build = BuildStatus::Running(std::thread::spawn(run), Instant::now(), packing);
 }
@@ -1829,10 +1917,12 @@ fn poll_build(state: &mut UiState) {
     else {
         unreachable!();
     };
-    let message = handle
-        .join()
-        .unwrap_or_else(|_| "Build failed: build thread panicked".into());
+    let (message, marks) = handle.join().unwrap_or_else(|_| {
+        let message = "Build failed: build thread panicked".to_owned();
+        (message, BuildMarks::default())
+    });
     state.build = BuildStatus::Finished(message);
+    state.build_marks = marks;
     state.rescan = true;
 }
 
@@ -2139,6 +2229,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                 rename_done: None,
                 action: None,
                 scroll_to,
+                marks: (location == Location::Input).then_some(&state.build_marks),
             };
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
@@ -2407,6 +2498,8 @@ struct TreeCx<'a> {
     action: Option<TreeAction>,
     /// The row to scroll into view.
     scroll_to: Option<PathBuf>,
+    /// The last build's marks, in the Input tree only.
+    marks: Option<&'a BuildMarks>,
 }
 
 /// Menu items creating something in `dir`.
@@ -2554,9 +2647,21 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
         .selection
         .is_some_and(|s| s.location == cx.location && s.path == node.path);
     let renaming = cx.rename.as_mut().filter(|r| r.path == node.path);
+    let mark = cx.marks.and_then(|m| m.of(&node.path));
     let (response, done) = tree_row(
-        ui, depth, chevron, icon, &node.name, selected, dim, renaming,
+        ui,
+        depth,
+        chevron,
+        icon,
+        &node.name,
+        selected,
+        (dim, mark.as_ref().map(|(color, _)| *color)),
+        renaming,
     );
+    let response = match mark {
+        Some((_, text)) => response.on_hover_text(text),
+        None => response,
+    };
     if done.is_some() {
         cx.rename_done = done;
     }
@@ -2603,10 +2708,15 @@ fn tree_row(
     icon: Icon,
     name: &str,
     selected: bool,
-    dim: bool,
+    (dim, mark): (bool, Option<egui::Color32>),
     renaming: Option<&mut Rename>,
 ) -> (Response, Option<bool>) {
-    let text = if dim { TEXT_WEAK } else { TEXT };
+    // A build mark colors the name; see docs/features/gui.md#build-marks.
+    let text = match mark {
+        Some(color) => color,
+        None if dim => TEXT_WEAK,
+        None => TEXT,
+    };
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
     if selected {
         ui.painter()

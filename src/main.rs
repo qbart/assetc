@@ -130,8 +130,15 @@ fn load_target(
 
 /// Prints an outcome as `assetc build` does; false when it failed.
 fn report(outcome: &build::Outcome) -> bool {
+    let mut warned = std::collections::HashSet::new();
     for built in &outcome.built {
         println!("{} -> {} ({})", built.source, built.output, built.detail);
+        // A source's warnings after its first line; see docs/features/build.md#cli.
+        if warned.insert(&built.source) {
+            for w in outcome.warnings.iter().filter(|w| w.source == built.source) {
+                eprintln!("warning: {w}");
+            }
+        }
     }
     for removed in &outcome.removed {
         println!("removed {removed}");

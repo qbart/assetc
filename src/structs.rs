@@ -434,20 +434,22 @@ pub fn check(scopes: &[Scope], schemas: &Schemas, assets: Option<&[String]>) -> 
 
 /// The struct chunks of `scopes` (none without attachments), or the first error; see
 /// docs/features/structs.md#build. `dir` is the folder of the file holding the attachments.
+/// Warnings are added to `warnings`.
 pub fn compile(
     dir: &Path,
     input: &Path,
     scopes: &[Scope],
+    warnings: &mut Vec<String>,
 ) -> Result<Vec<(&'static str, Vec<u8>)>, String> {
     if scopes.iter().all(|s| s.attachments.is_empty()) {
         return Ok(Vec::new());
     }
     let schemas = load(dir, Some(input), scopes);
     let assets = adata::asset_files(input);
-    let errors: Vec<Problem> = check(scopes, &schemas, Some(&assets))
+    let (found, errors): (Vec<Problem>, Vec<Problem>) = check(scopes, &schemas, Some(&assets))
         .into_iter()
-        .filter(|p| !p.warning)
-        .collect();
+        .partition(|p| p.warning);
+    warnings.extend(found.iter().map(Problem::text));
     if let Some(first) = errors.first() {
         let mut message = first.text();
         if errors.len() > 1 {
@@ -555,7 +557,7 @@ mod tests {
                 "w node a: values for Other, which is not attached",
             ]
         );
-        let err = compile(dir.path(), dir.path(), &scopes).unwrap_err();
+        let err = compile(dir.path(), dir.path(), &scopes, &mut Vec::new()).unwrap_err();
         assert_eq!(err, "Mode is not a struct of game.aschema (and 1 more)");
 
         // Only Step: one record per owner, resolved.
@@ -577,7 +579,15 @@ mod tests {
                 },
             ],
         }];
-        let chunks = compile(dir.path(), dir.path(), &scopes).unwrap();
+        let mut warnings = Vec::new();
+        let chunks = compile(dir.path(), dir.path(), &scopes, &mut warnings).unwrap();
+        assert_eq!(
+            warnings,
+            [
+                "node a: Step/cost: 12 is above the maximum 10",
+                "node a: values for Other, which is not attached"
+            ]
+        );
         let names: Vec<_> = chunks.iter().map(|(n, _)| *n).collect();
         assert_eq!(names, ["STRUCTS", "SVALUES", "SREFS", "SSTRINGS"]);
         let records = &chunks[0].1;

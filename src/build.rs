@@ -53,6 +53,8 @@ pub struct Outcome {
     pub removed: Vec<String>,
     /// Non-empty means the build failed and no manifest was written.
     pub failures: Vec<Failure>,
+    /// Problems that do not fail the build; see docs/features/build.md#cli.
+    pub warnings: Vec<Failure>,
 }
 
 impl Outcome {
@@ -101,8 +103,13 @@ impl Outcome {
                 0 => String::new(),
                 k => format!(", {k} removed"),
             };
+            let warnings = match self.warnings.len() {
+                0 => String::new(),
+                1 => ", 1 warning".to_owned(),
+                w => format!(", {w} warnings"),
+            };
             format!(
-                "Built {counts} ({} skipped{up_to_date}{removed})",
+                "Built {counts} ({} skipped{up_to_date}{removed}{warnings})",
                 self.skipped
             )
         }
@@ -203,6 +210,8 @@ pub fn run_cached(
             outcome.up_to_date += 1;
             continue;
         }
+        let mut warnings = Vec::new();
+        let warnings = &mut warnings;
         let result = match &asset.job {
             Job::Texture {
                 source,
@@ -224,20 +233,20 @@ pub fn run_cached(
                 source,
                 options,
                 sidecar,
-            } => compile_model(input, source, output, options, sidecar),
+            } => compile_model(input, source, output, options, sidecar, warnings),
             // Written with its model, font or atlas; counted once that is built.
             Job::ModelPart { source } | Job::FontPart { source } | Job::AtlasPart { source } => {
                 parts.push((source, asset.kind));
                 continue;
             }
             Job::Font { source } => compile_font(input, source, output),
-            Job::Data { source, kind } => compile_data(input, source, &dest, *kind),
+            Job::Data { source, kind } => compile_data(input, source, &dest, *kind, warnings),
             Job::Cubemap { source } => compile_cubemap(&input.join(source), &dest),
             Job::Atlas {
                 source,
                 color,
                 mipmaps,
-            } => compile_atlas(input, source, output, *color, *mipmaps),
+            } => compile_atlas(input, source, output, (*color, *mipmaps), warnings),
             Job::Lut { source, volume } => {
                 compile_lut(&input.join(source), &dest, *volume).map(|size| {
                     let layout = if *volume { "volume" } else { "strip" };
@@ -249,10 +258,18 @@ pub fn run_cached(
                 material,
                 structs,
                 values,
-            } => compile_material(input, source, material, structs, values)
+            } => compile_material(input, source, material, (structs, values), warnings)
                 .and_then(|bytes| write(&dest, &bytes))
                 .map(|()| material_detail(material)),
         };
+        if result.is_ok() {
+            outcome
+                .warnings
+                .extend(warnings.drain(..).map(|message| Failure {
+                    source: asset.source(),
+                    message,
+                }));
+        }
         match result {
             Ok(detail) => {
                 if let Some(stamp) = stamp {
@@ -600,6 +617,7 @@ fn compile_model(
     output: &Path,
     options: &crate::amesh::MeshOptions,
     sidecar: &crate::amod::Amod,
+    warnings: &mut Vec<String>,
 ) -> Result<String, String> {
     let p = strip_extension(source);
     let model = crate::model::compile(&input.join(source), p, options, sidecar)?;
@@ -613,7 +631,7 @@ fn compile_model(
             values: &sidecar.values,
         }],
     }];
-    let structs = crate::structs::compile(dir_of(&input.join(source)), input, &scopes)?;
+    let structs = crate::structs::compile(dir_of(&input.join(source)), input, &scopes, warnings)?;
     let mesh = crate::chunks::with_chunks(model.mesh, crate::amesh::FORMAT, structs)?;
     write(&output.join(format!("{p}.amesh.bin")), &mesh)?;
     if let Some(animation) = &model.animation {
@@ -650,8 +668,8 @@ fn compile_atlas(
     input: &Path,
     source: &str,
     output: &Path,
-    color: ColorSpace,
-    mipmaps: bool,
+    (color, mipmaps): (ColorSpace, bool),
+    warnings: &mut Vec<String>,
 ) -> Result<String, String> {
     let p = strip_extension(source);
     let (config, packed) = crate::atlas::build(&input.join(source))?;
@@ -669,7 +687,7 @@ fn compile_atlas(
             values: &config.values,
         }],
     }];
-    let structs = crate::structs::compile(&input.join(source), input, &scopes)?;
+    let structs = crate::structs::compile(&input.join(source), input, &scopes, warnings)?;
     let meta = crate::chunks::with_chunks(meta, crate::atlas::FORMAT, structs)?;
     write(&output.join(format!("{p}.aatlas.bin")), &meta)?;
     write_texture(
@@ -705,8 +723,8 @@ fn compile_material(
     input: &Path,
     source: &str,
     m: &material::Material,
-    structs: &[crate::structs::Attachment],
-    values: &crate::structs::Values,
+    (structs, values): (&[crate::structs::Attachment], &crate::structs::Values),
+    warnings: &mut Vec<String>,
 ) -> Result<Vec<u8>, String> {
     let mut bytes = material::encode(m);
     let scopes = [crate::structs::Scope {
@@ -718,7 +736,7 @@ fn compile_material(
             values,
         }],
     }];
-    let chunks = crate::structs::compile(dir_of(&input.join(source)), input, &scopes)?;
+    let chunks = crate::structs::compile(dir_of(&input.join(source)), input, &scopes, warnings)?;
     if !chunks.is_empty() {
         let mut writer = crate::chunks::Writer::new(material::ASTRUCT, 1);
         crate::compiled::put_structs(&mut writer, chunks);
@@ -734,7 +752,13 @@ fn dir_of(file: &Path) -> &Path {
 
 /// Compiles a schema, data file (resolved), graph or tree to its binary; see
 /// docs/features/build.md#inputs.
-fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<String, String> {
+fn compile_data(
+    input: &Path,
+    source: &str,
+    dest: &Path,
+    kind: Kind,
+    warnings: &mut Vec<String>,
+) -> Result<String, String> {
     use crate::compiled;
     let rel = &source.replace('\\', "/");
     let source = &input.join(source);
@@ -761,12 +785,12 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
             // Ids and refs reach the project's other files; see
             // docs/features/instances.md#references.
             let others = crate::adata::others(input, source, &data);
-            let errors: Vec<String> = data
+            let (found, errors): (Vec<_>, Vec<_>) = data
                 .check_with(&schema, Some(&assets), &others)
                 .into_iter()
-                .filter(|p| !p.warning)
-                .map(|p| p.message)
-                .collect();
+                .partition(|p| p.warning);
+            warnings.extend(found.into_iter().map(|p| p.message));
+            let errors: Vec<String> = errors.into_iter().map(|p| p.message).collect();
             first_problem(&errors)?;
             let n = data.instances.len();
             (
@@ -777,7 +801,7 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
         Kind::Gradient => {
             let file = crate::gradient::Gradients::parse(&text)?;
             let texture = crate::hash::fnv1a64(strip_extension(rel).as_bytes());
-            let structs = crate::structs::compile(dir_of(source), input, &file.scopes())?;
+            let structs = crate::structs::compile(dir_of(source), input, &file.scopes(), warnings)?;
             let n = file.gradients.len();
             (
                 compiled::encode_gradients(&file, texture, structs),
@@ -787,7 +811,7 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
         Kind::Palette => {
             let file = crate::palette::Palette::parse(&text)?;
             let texture = crate::hash::fnv1a64(strip_extension(rel).as_bytes());
-            let structs = crate::structs::compile(dir_of(source), input, &file.scopes())?;
+            let structs = crate::structs::compile(dir_of(source), input, &file.scopes(), warnings)?;
             let n = file.colors.len();
             (
                 compiled::encode_palette(&file, texture, structs),
@@ -798,7 +822,8 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
             let graph = crate::agraph::Graph::parse(&text)?;
             first_problem(&graph.check())?;
             let detail = format!("{} nodes, {} edges", graph.nodes.len(), graph.edges.len());
-            let structs = crate::structs::compile(dir_of(source), input, &graph.scopes(None))?;
+            let structs =
+                crate::structs::compile(dir_of(source), input, &graph.scopes(None), warnings)?;
             (compiled::encode_graph(&graph, structs), detail)
         }
         _ => {
@@ -814,7 +839,7 @@ fn compile_data(input: &Path, source: &str, dest: &Path, kind: Kind) -> Result<S
                 places[node] = place as u32;
             }
             let scopes = tree.scopes(Some(&places));
-            let structs = crate::structs::compile(dir_of(source), input, &scopes)?;
+            let structs = crate::structs::compile(dir_of(source), input, &scopes, warnings)?;
             (compiled::encode_tree(&tree, structs), detail)
         }
     };
@@ -1164,6 +1189,60 @@ mod tests {
         assert!(outcome.summary().starts_with("Build failed: broken.png:"));
         assert!(output.join("ok.ktx2").is_file());
         assert!(!output.join(manifest::FILE_NAME).exists());
+    }
+
+    #[test]
+    fn schema_changes_fail_or_warn_what_attaches_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        let schema = |fields: &str| {
+            let text = format!(
+                r#"{{ "$dialect": "a/1", "types": {{ "Step": {{ "kind": "struct", "fields": [{fields}] }} }} }}"#
+            );
+            fs::write(input.join("game.aschema"), text).unwrap();
+        };
+        schema(r#"{ "name": "cost", "type": "i32", "max": 10 }"#);
+        let graph = |ty: &str| {
+            let text = format!(
+                r#"{{ "$dialect": "agraph/1",
+                     "node_structs": [{{ "schema": "game.aschema", "type": "{ty}" }}],
+                     "nodes": [{{ "id": "a", "x": 0, "y": 0, "values": {{ "Step": {{ "cost": 12 }} }} }}],
+                     "edges": [] }}"#
+            );
+            fs::write(input.join("quest.agraph"), text).unwrap();
+        };
+        graph("Step");
+
+        // Out of range: built, with a warning.
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(outcome.warnings.len(), 1);
+        assert_eq!(outcome.warnings[0].source, "quest.agraph");
+        assert_eq!(
+            outcome.warnings[0].message,
+            "node a: Step/cost: 12 is above the maximum 10"
+        );
+        assert!(
+            outcome.summary().ends_with("skipped, 1 warning)"),
+            "{}",
+            outcome.summary()
+        );
+
+        // The field's type changes: the value no longer encodes, the graph fails.
+        schema(r#"{ "name": "cost", "type": "string" }"#);
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(outcome.failures[0].source, "quest.agraph");
+        assert!(outcome.warnings.is_empty());
+
+        // The struct is gone.
+        graph("Gone");
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert_eq!(
+            outcome.failures[0].message,
+            "Gone is not a struct of game.aschema"
+        );
     }
 
     #[test]
