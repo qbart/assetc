@@ -38,7 +38,7 @@ attached to the scope, even when it sets no values.
 |      8 |    8 | `type_hash` | u64, FNV-1a-64 of the struct's name |
 |     16 |    8 | `type`      | text: the struct's name |
 |     24 |    8 | `schema`    | u64, [asset ID](../features/build.md#asset-ids) of the struct's schema's `.aschema.bin` |
-|     32 |    4 | `value`     | u32, index into `SVALUES` of the struct value (`kind` 6), its fields in the struct's field order, every field resolved |
+|     32 |    4 | `value`     | u32, index into `SVALUES` of the struct value (`kind` 6), its fields in the struct's field order, every field resolved; no two records share a value |
 |     36 |    4 | `reserved`  | u32, `0` |
 
 Records are sorted by `scope`, then `item`, then the scope's attachment
@@ -54,7 +54,9 @@ order, so an owner's records are next to one another.
 
 Where a format is not a chunked file (a material's fixed record), the
 chunks travel in a chunked file of their own: format `ASTRUCT`, version
-`1`, the four chunks above in that order and nothing else.
+`1`, the four chunks above in that order and nothing else. Its chunk
+offsets count from the start of the `ASTRUCT` file, not of the file it
+follows.
 
 ## Reading
 

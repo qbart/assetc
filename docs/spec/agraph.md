@@ -76,8 +76,8 @@ Keys are written sorted.
 
 UTF-8, 2-space indent, one property or array item per line, `\n` line
 endings and a trailing newline; keys in the order of the tables above, then
-any other keys the object had; an attachment as one line,
-`{ "schema": "…", "type": "…" }`. Positions are written as numbers, integers
+any other keys the object had; an attachment's keys are `schema`, `type`,
+then any others. Positions are written as numbers, integers
 without a decimal point (`2`, `1.25`).
 
 ```json

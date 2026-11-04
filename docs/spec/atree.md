@@ -40,7 +40,7 @@ the tree's, `node_structs` and each node's `values` the nodes'.
 
 UTF-8, 2-space indent, one property or array item per line, `\n` line
 endings and a trailing newline; keys in the order of the tables above, then
-any other keys the object had; an attachment as one line, as in
+any other keys the object had; attachments as in
 [`.agraph`](agraph.md#written-form). Positions are written as numbers, integers
 without a decimal point (`2`, `1.25`).
 
