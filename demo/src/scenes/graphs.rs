@@ -145,7 +145,18 @@ pub fn spawn(s: &mut Spawn) {
             let (start, end) = (a + dir * inset(sizes[from]), b - dir * inset(sizes[to]));
             drawing.arrows.push((start, end));
         }
-        s.commands.spawn((InScene, drawing, TreeLines(!arrows)));
+        let extent = drawing
+            .boxes
+            .iter()
+            .map(|(center, size, _)| Rect::from_center_size(*center, *size))
+            .reduce(|a, b| a.union(b))
+            .unwrap_or_default();
+        s.commands.spawn((
+            InScene,
+            drawing,
+            TreeLines(!arrows),
+            crate::scroll::Extent(extent),
+        ));
     }
 }
 

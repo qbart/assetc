@@ -1,4 +1,7 @@
 .PHONY: run build install demo
+
+ASSETS ?= tmp/build/assetc.pak
+
 run:
 	cargo run
 
@@ -11,4 +14,4 @@ install: build
 
 demo:
 	cargo run --release -- pack
-	cargo run --release -p assetc-demo
+	cargo run --release -p assetc-demo -- $(ASSETS)

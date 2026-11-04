@@ -3,6 +3,7 @@
 
 mod convert;
 mod scenes;
+mod scroll;
 
 use std::collections::HashMap;
 
@@ -59,9 +60,9 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (keys, switch_scene, (orbit, scroll_2d, scenes::place_labels)).chain(),
+            (keys, switch_scene, (orbit, scenes::place_labels)).chain(),
         )
-        .add_plugins(scenes::ScenesPlugin)
+        .add_plugins((scenes::ScenesPlugin, scroll::ScrollPlugin))
         .run();
 }
 
@@ -251,7 +252,16 @@ fn setup(mut commands: Commands, mut demo: ResMut<Demo>, mut images: ResMut<Asse
             }
         });
     let status = match (&demo.assets, &demo.error) {
-        (Some(assets), _) => format!("{} assets from {}", assets.entries().len(), demo.path),
+        (Some(assets), _) => format!(
+            "{} assets from {} ({})",
+            assets.entries().len(),
+            demo.path,
+            if assets.pack().is_some() {
+                "pack"
+            } else {
+                "directory"
+            }
+        ),
         (None, Some(e)) => format!("{}: {e}. Run: cargo run -- pack", demo.path),
         (None, None) => String::new(),
     };
@@ -394,15 +404,4 @@ fn orbit(
         orbit.distance = (orbit.distance * 0.9f32.powf(scroll.delta.y)).clamp(0.5, 200.0);
     }
     **transform = orbit.transform();
-}
-
-fn scroll_2d(
-    current: Res<Current>,
-    scroll: Res<AccumulatedMouseScroll>,
-    mut camera: Single<&mut Transform, With<Camera2dMarker>>,
-) {
-    if current.shown.is_some_and(Scene::is_3d) || scroll.delta.y == 0.0 {
-        return;
-    }
-    camera.translation.y = (camera.translation.y + scroll.delta.y * 40.0).min(0.0);
 }
