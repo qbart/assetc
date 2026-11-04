@@ -370,11 +370,12 @@ fn values(
     }
     let (scope, item, label) = host.owner(view);
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!("Values of {label}"))
-                .size(14.0)
-                .color(TEXT),
-        );
+        // Gradient files and palettes name the owner in their dropdown.
+        let header = match host.items() {
+            Some(_) => "Values of".to_owned(),
+            None => format!("Values of {label}"),
+        };
+        ui.label(RichText::new(header).size(14.0).color(TEXT));
         if let Some(n) = host.items() {
             let labels: Vec<String> = std::iter::once("File".to_owned())
                 .chain((0..n).map(|i| host.item_label(i)))
@@ -400,7 +401,10 @@ fn values(
     let attachments = host.attachments(scope).clone();
     if attachments.is_empty() {
         let noun = host.scope_names()[scope].1;
-        ui.weak(format!("No structs attached to {noun}s"));
+        ui.weak(match scope {
+            0 => format!("No structs attached to the {noun}"),
+            _ => format!("No structs attached to {noun}s"),
+        });
         return;
     }
     let Some(values) = host.owners(scope).into_iter().nth(item) else {
