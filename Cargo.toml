@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "sdk", "demo"]
+
 [package]
 name = "assetc"
 version = "0.1.0"
@@ -54,5 +57,6 @@ features = [
 ]
 
 [dev-dependencies]
+assetc-sdk = { path = "sdk" }
 ktx2 = "0.5.0"
 tempfile = "3.27.0"

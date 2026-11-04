@@ -1,0 +1,98 @@
+//! Reads what `assetc build` and `assetc pack` write; see docs/features/sdk.md.
+//!
+//! Start with [`Assets::open`] on a `.pak` file or an output directory, then
+//! [`Assets::load`] any asset by ID into one of the format types.
+
+pub mod anim;
+pub mod assets;
+pub mod atlas;
+pub mod chunks;
+pub mod data;
+mod error;
+pub mod font;
+pub mod graph;
+pub mod hash;
+pub mod manifest;
+pub mod material;
+pub mod mesh;
+pub mod pack;
+mod read;
+pub mod schema;
+pub mod texture;
+pub mod tree;
+
+pub use anim::Animation;
+pub use assets::{Assets, Decode, Entry};
+pub use atlas::Atlas;
+pub use data::Data;
+pub use error::{Error, Result};
+pub use font::Font;
+pub use graph::Graph;
+pub use manifest::Manifest;
+pub use material::Material;
+pub use mesh::Mesh;
+pub use pack::Pack;
+pub use schema::Schema;
+pub use texture::Texture;
+pub use tree::Tree;
+
+/// What an asset is, with the values of the manifest and `.pak` contents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Kind {
+    Texture,
+    Material,
+    Mesh,
+    Animation,
+    Font,
+    Schema,
+    Data,
+    Graph,
+    Tree,
+    Atlas,
+    /// `assetc.aman.bin` (packs only).
+    Manifest,
+    Other,
+}
+
+impl Kind {
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Texture,
+            1 => Self::Material,
+            2 => Self::Mesh,
+            3 => Self::Animation,
+            4 => Self::Font,
+            5 => Self::Schema,
+            6 => Self::Data,
+            7 => Self::Graph,
+            8 => Self::Tree,
+            9 => Self::Atlas,
+            10 => Self::Manifest,
+            _ => Self::Other,
+        }
+    }
+
+    /// The kind of an output file, by its name.
+    pub fn of_path(path: &str) -> Self {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        if name == manifest::FILE_NAME {
+            return Self::Manifest;
+        }
+        let lower = name.to_ascii_lowercase();
+        [
+            (".ktx2", Self::Texture),
+            (".amat.bin", Self::Material),
+            (".amesh.bin", Self::Mesh),
+            (".aanim.bin", Self::Animation),
+            (".afont.bin", Self::Font),
+            (".aschema.bin", Self::Schema),
+            (".adata.bin", Self::Data),
+            (".agraph.bin", Self::Graph),
+            (".atree.bin", Self::Tree),
+            (".aatlas.bin", Self::Atlas),
+        ]
+        .into_iter()
+        .find(|(ext, _)| lower.ends_with(ext))
+        .map_or(Self::Other, |(_, kind)| kind)
+    }
+}

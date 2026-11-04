@@ -1,0 +1,10 @@
+[package]
+name = "assetc-sdk"
+version = "0.1.0"
+edition = "2024"
+description = "Reads the files assetc builds and packs: textures, materials, meshes, animations, fonts, atlases and data"
+
+[lib]
+name = "assetc_sdk"
+
+[dependencies]
