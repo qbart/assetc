@@ -156,7 +156,7 @@ From the top, 16 px from the canvas edges:
    data (the entries' bytes) and padding, each as wide as its share of the
    file, in their colors (data in `#50A05A`).
 3. A caption: `header 32 B   contents 1.1 KiB   data 6.1 MiB   padding 2.3 KiB
-   (0.1% overhead)`, overhead being header, contents and padding over the
+   (0.01% overhead)`, 2 decimals, overhead being header, contents and padding over the
    file size.
 4. One row per kind with entries, in the [CLI](#cli) order: the kind's name
    (plural, in its color) in a 110 px column, a bar as long as the kind's share
@@ -185,8 +185,8 @@ A memory map of the whole file, offset 0 at the top left, read like text:
 The data only (no header, contents or padding), in the canvas minus 16 px
 on each side:
 
-- One column per kind with entries, in the [CLI](#cli) order, as wide as its
-  share of the data; the kind's name in `TEXT` at the top left of the column
+- One column per kind with entries, in the [CLI](#cli) order: 8 px plus its
+  share of the rest of the width by bytes, so a kind with few bytes still shows; the kind's name in `TEXT` at the top left of the column
   when the column is at least 40 px wide.
 - In each column, one tile per entry, largest first from the top, as tall as
   its share of the kind's bytes; tiles alternate between the kind's color and
