@@ -86,7 +86,7 @@ pub(crate) mod tests {
         out[8..12].copy_from_slice(&version.to_le_bytes());
         out[12..16].copy_from_slice(&(chunks.len() as u32).to_le_bytes());
         for (i, (name, payload)) in chunks.iter().enumerate() {
-            while out.len() % 16 != 0 {
+            while !out.len().is_multiple_of(16) {
                 out.push(0);
             }
             let at = 32 + 32 * i;

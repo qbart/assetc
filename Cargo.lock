@@ -350,6 +350,7 @@ name = "assetc-demo"
 version = "0.1.0"
 dependencies = [
  "assetc-sdk",
+ "bevy",
 ]
 
 [[package]]

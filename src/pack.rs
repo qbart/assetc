@@ -491,3 +491,62 @@ mod tests {
         assert!(read(&file).unwrap_err().contains("past the end"));
     }
 }
+
+/// The SDK reads everything the build and pack write; see docs/features/sdk.md#conformance.
+#[cfg(test)]
+mod sdk_conformance {
+    use assetc_sdk::{self as sdk, Kind};
+
+    fn decode(assets: &sdk::Assets, entry: &sdk::Entry) -> Result<(), sdk::Error> {
+        match entry.kind {
+            Kind::Texture => assets.load::<sdk::Texture>(entry.id).map(drop),
+            Kind::Material => assets.load::<sdk::Material>(entry.id).map(drop),
+            Kind::Mesh => assets.load::<sdk::Mesh>(entry.id).map(drop),
+            Kind::Animation => assets.load::<sdk::Animation>(entry.id).map(drop),
+            Kind::Font => assets.load::<sdk::Font>(entry.id).map(drop),
+            Kind::Schema => assets.load::<sdk::Schema>(entry.id).map(drop),
+            Kind::Data => assets.load::<sdk::Data>(entry.id).map(drop),
+            Kind::Graph => assets.load::<sdk::Graph>(entry.id).map(drop),
+            Kind::Tree => assets.load::<sdk::Tree>(entry.id).map(drop),
+            Kind::Atlas => assets.load::<sdk::Atlas>(entry.id).map(drop),
+            Kind::Manifest => assets.load::<sdk::Manifest>(entry.id).map(drop),
+            Kind::Other => Ok(()),
+        }
+    }
+
+    #[test]
+    fn sdk_reads_every_sample() {
+        let samples = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("samples");
+        let dir = tempfile::tempdir().unwrap();
+        let output = dir.path().join("build");
+        let config = crate::config::Config::default();
+        let outcome = crate::build::run(&samples, &output, &config).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        let settings = super::Settings::new(&config.pack).unwrap();
+        let (pak, contents) = super::write(&output, &settings).unwrap();
+
+        let packed = sdk::Assets::open(&pak).unwrap();
+        assert_eq!(packed.entries().len(), contents.entries.len());
+        let loose = sdk::Assets::open(&output).unwrap();
+        for assets in [&packed, &loose] {
+            for entry in assets.entries() {
+                decode(assets, entry).unwrap_or_else(|e| panic!("{}: {e}", entry.path));
+            }
+        }
+        // Every kind the samples have is read, not skipped.
+        for kind in [
+            Kind::Texture,
+            Kind::Material,
+            Kind::Mesh,
+            Kind::Animation,
+            Kind::Font,
+            Kind::Schema,
+            Kind::Data,
+            Kind::Graph,
+            Kind::Tree,
+            Kind::Atlas,
+        ] {
+            assert!(packed.of_kind(kind).next().is_some(), "{kind:?}");
+        }
+    }
+}

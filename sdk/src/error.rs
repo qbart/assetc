@@ -8,7 +8,10 @@ pub enum Error {
     Io(std::io::Error),
     /// Bytes that are not what the spec says. `file` names the format (`amesh.bin`) or,
     /// from [`crate::Assets::load`], the asset's path.
-    Format { file: String, message: String },
+    Format {
+        file: String,
+        message: String,
+    },
     /// An ID or path the assets do not hold.
     NotFound(String),
 }

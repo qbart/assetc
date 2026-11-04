@@ -22,7 +22,12 @@ impl<'a> Bytes<'a> {
     pub fn slice(&self, at: usize, len: usize) -> Result<&'a [u8]> {
         at.checked_add(len)
             .and_then(|end| self.bytes.get(at..end))
-            .ok_or_else(|| self.err(format!("{len} bytes at {at} run past the end ({} bytes)", self.bytes.len())))
+            .ok_or_else(|| {
+                self.err(format!(
+                    "{len} bytes at {at} run past the end ({} bytes)",
+                    self.bytes.len()
+                ))
+            })
     }
 
     pub fn array<const N: usize>(&self, at: usize) -> Result<[u8; N]> {
@@ -73,7 +78,7 @@ impl<'a> Bytes<'a> {
     /// The `stride`-byte records of the whole payload; its size must be a multiple of
     /// `stride`.
     pub fn records(&self, stride: usize) -> Result<impl Iterator<Item = Bytes<'a>> + 'a> {
-        if self.bytes.len() % stride != 0 {
+        if !self.bytes.len().is_multiple_of(stride) {
             return Err(self.err(format!(
                 "{} bytes are not a whole number of {stride}-byte records",
                 self.bytes.len()

@@ -1,7 +1,7 @@
 //! `.ktx2` textures as assetc writes them; see docs/spec/ktx2.md.
 
-use crate::read::Bytes;
 use crate::Result;
+use crate::read::Bytes;
 
 const IDENTIFIER: [u8; 12] = [
     0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A,
@@ -82,8 +82,8 @@ impl Texture {
             let length = b.u64(at + 8)? as usize;
             let level = |size: u32| (size >> i).max(1);
             let (w, h, d) = (level(width), level(height), level(depth));
-            let expected = w as usize * h as usize * d as usize * faces as usize
-                * format.bytes_per_texel();
+            let expected =
+                w as usize * h as usize * d as usize * faces as usize * format.bytes_per_texel();
             if length != expected {
                 return Err(b.err(format!(
                     "level {i} has {length} bytes, {w} × {h} × {d} needs {expected}"
@@ -154,7 +154,10 @@ mod tests {
     #[test]
     fn reads_levels_and_checks_sizes() {
         let t = Texture::decode(&ktx2(43, 2, 1, 1, &[1, 2, 3, 4, 5, 6, 7, 8])).unwrap();
-        assert_eq!((t.format, t.width, t.height, t.depth), (Format::Rgba8Srgb, 2, 1, 1));
+        assert_eq!(
+            (t.format, t.width, t.height, t.depth),
+            (Format::Rgba8Srgb, 2, 1, 1)
+        );
         assert_eq!(t.levels[0].data, [1, 2, 3, 4, 5, 6, 7, 8]);
         assert!(Texture::decode(&ktx2(43, 2, 2, 1, &[0; 8])).is_err());
         assert!(Texture::decode(&ktx2(99, 1, 1, 1, &[0; 4])).is_err());

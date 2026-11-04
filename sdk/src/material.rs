@@ -1,7 +1,7 @@
 //! `.amat.bin` PBR materials; see docs/spec/amat.bin.md.
 
-use crate::read::Bytes;
 use crate::Result;
+use crate::read::Bytes;
 
 const SIZE: usize = 112;
 
