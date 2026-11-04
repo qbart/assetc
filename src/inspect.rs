@@ -62,6 +62,8 @@ pub struct Inspection {
     pub compiled_animation: Option<(crate::aanim::Decoded, Option<String>)>,
     /// The file's data as a table, for files without a preview (manifest, `.amat.bin`).
     pub data: Option<DataTable>,
+    /// A pack's header and contents, for its views; see docs/features/pack.md#views.
+    pub pack: Option<crate::pack::Contents>,
     /// A model's animations: name and duration in seconds.
     pub animations: Vec<(String, f32)>,
     /// A model's first skin's named joints, for its locators.
@@ -1233,6 +1235,7 @@ fn pack_rows(project: &Project, file: &Path, out: &mut Inspection) -> Result<(),
         ));
     }
     let output = project.output_dir();
+    out.pack = Some(contents.clone());
     out.data = Some(DataTable {
         header: format!(
             "APAK v{}   {n} entries   {}",

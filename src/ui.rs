@@ -52,6 +52,7 @@ mod curve;
 mod data;
 mod graph;
 mod material_edit;
+mod pack_view;
 mod schema;
 mod tree_nav;
 use crate::agraph::Graph;
@@ -62,6 +63,7 @@ use config_dialog::{ConfigDialog, DialogEnd, config_dialog};
 use data::{DataEdit, PreparedData, canvas_data, instances_tab};
 use graph::{GraphEdit, GraphView, canvas_graph, graph_tab};
 use material_edit::{MaterialEdit, PreparedMaterial, canvas_material, material_tab};
+use pack_view::{PackView, pack_view};
 use schema::{SchemaEdit, canvas_schema, types_tab};
 
 pub struct UiPlugin;
@@ -149,6 +151,8 @@ struct UiState {
     tree_scroll: bool,
     /// The HDR map (input-relative) lighting material previews; `None` is the studio light.
     material_light: Option<String>,
+    /// What the canvas shows of a pack; see docs/features/pack.md#views.
+    pack_view: PackView,
 }
 
 /// The areas keys belong to; see KEYS.md.
@@ -528,6 +532,7 @@ impl Default for UiState {
             keys: KeyArea::default(),
             tree_scroll: false,
             material_light: None,
+            pack_view: PackView::default(),
         }
     }
 }
@@ -862,6 +867,7 @@ fn shell(
         Shown::Lut => state.lut.view == LutView::Cube,
         Shown::Specimen
         | Shown::CompiledFont
+        | Shown::Pack
         | Shown::Data
         | Shown::Schema
         | Shown::Graph
@@ -884,12 +890,15 @@ fn shell(
             let modes = ViewMode::ALL.map(ViewMode::name);
             let mode = ViewMode::ALL.iter().position(|m| *m == state.mode);
             let lut_views = LutView::ALL.map(LutView::name);
+            let pack_views = PackView::ALL.map(PackView::name);
+            let pack_view_at = PackView::ALL.iter().position(|v| *v == state.pack_view);
             let lut_view = LutView::ALL.iter().position(|v| *v == state.lut.view);
             // Only images have a 2D/3D choice; an environment map only exists in 3D, a
             // specimen in 2D.
             let (options, active, enabled): (&[&str], _, _) = match shown {
                 Shown::Image => (&modes, mode, true),
                 Shown::Lut => (&lut_views, lut_view, true),
+                Shown::Pack => (&pack_views, pack_view_at, true),
                 Shown::CompiledMesh => (
                     &["3D", "Chunks"],
                     Some(usize::from(!state.mesh_in_3d)),
@@ -919,6 +928,7 @@ fn shell(
             if let Some(i) = view_bar(ui, bar, options, active, enabled) {
                 match shown {
                     Shown::Lut => state.lut.view = LutView::ALL[i],
+                    Shown::Pack => state.pack_view = PackView::ALL[i],
                     Shown::CompiledMesh => state.mesh_in_3d = i == 0,
                     Shown::CompiledFont => state.font_atlas = i == 0,
                     Shown::CompiledAnimation => state.anim_chunks = i == 1,
@@ -937,6 +947,17 @@ fn shell(
                 return;
             }
             match (shown, state.mode) {
+                (Shown::Pack, _) if state.pack_view != PackView::Entries => {
+                    let clicked = state.inspected.as_ref().and_then(|i| {
+                        let contents = i.inspection.pack.as_ref()?;
+                        pack_view(ui, rect, contents, &i.inspection.name, state.pack_view)
+                    });
+                    if let Some(entry) = clicked
+                        && let Some(output) = project.output_dir()
+                    {
+                        reveal(state, &output, &output.join(entry));
+                    }
+                }
                 (Shown::Material, _) => {
                     if let Some(inspected) = state.inspected.as_mut()
                         && let Some(light) = canvas_material(
@@ -1129,7 +1150,7 @@ fn shell(
                         }
                     }
                 }
-                (Shown::Data, _) => {
+                (Shown::Data | Shown::Pack, _) => {
                     if let Some(table) = state
                         .inspected
                         .as_ref()
@@ -2130,6 +2151,22 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
             }
         }
     }
+}
+
+/// Selects `file` (under `root`) in the Output tree: switches to it, opens the folders above
+/// it and scrolls to it; nothing when the file does not exist.
+fn reveal(state: &mut UiState, root: &Path, file: &Path) {
+    if !file.is_file() {
+        return;
+    }
+    let mut dir = file.parent();
+    while let Some(d) = dir.filter(|d| d.starts_with(root) && *d != root) {
+        state.open.insert(d.to_path_buf());
+        dir = d.parent();
+    }
+    state.browser_tab = BrowserTab::Output;
+    select(state, Location::Output, file.to_path_buf());
+    state.tree_scroll = true;
 }
 
 /// Moves the selection or folds a folder by key; see docs/features/gui.md#file-browser. Every
@@ -5084,6 +5121,8 @@ enum Shown {
     Instances,
     /// An `.amat` on a shape in 3D.
     Material,
+    /// A `.pak`: its entries or how its bytes are used.
+    Pack,
     Other,
 }
 
@@ -5091,6 +5130,7 @@ impl Shown {
     fn of(inspected: Option<&Inspected>) -> Self {
         match inspected {
             Some(i) if i.material.is_some() => Self::Material,
+            Some(i) if i.inspection.pack.is_some() => Self::Pack,
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.model.is_some() => Self::Model,
             Some(i) if i.inspection.compiled_animation.is_some() => Self::CompiledAnimation,
