@@ -19,7 +19,8 @@ are the same.
 
 Every key is optional; an empty file is a valid material that uses the
 defaults. Unknown keys are rejected; `[[structs]]` and `[values]` hold
-[attached structs](#structs).
+[attached structs](#structs). With `shader` the file is a
+[custom material](#custom-materials) and has other keys.
 
 | Key                  | Type               | Range / values                  | Default (see materials.md) |
 |----------------------|--------------------|---------------------------------|----------------------------|
@@ -79,6 +80,41 @@ type = "Pickup"
 mass = 2.5
 tags = ["loot", "rare"]
 stats = { hp = 40, armor = 2 }
+```
+
+## Custom materials
+
+> **Status: design**, see [`custom-materials.md`](../features/custom-materials.md).
+
+A `.amat` with `shader` is a custom material. Its keys:
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `shader` | string | Path of a [`.ashader`](ashader.md), relative to this file's folder, inside `input` |
+| `blend`, `alpha_cutoff`, `cull`, `depth_write`, `depth_test` | as in [`[state]`](ashader.md#state) | Override the shader's state |
+| `[params]` | table | The params struct's values, sparse and normalised, in [TOML form](../features/structs.md#values-in-toml) (struct values inline) |
+| `[textures]` | table | One key per binding or input name of the shader: a path (relative to this file's folder, inside `input`) or `{ path = "…", normal_y = "gl" \| "dx" }` (`normal_y` only for `normal` bindings) |
+| `[[structs]]`, `[values.<Type>]` | | [Attached structs](#structs), as for PBR materials |
+
+The PBR keys (`base_color` … `double_sided`) are errors in a custom
+material, and a key in `[textures]` that is not one of the shader's names is
+an error. The Material tab writes `shader`, the state keys in the order of
+the table above, `[params]`, `[textures]` (keys in the shader's binding and
+input order), then the structs, under the rules of
+[Written by assetc](#written-by-assetc).
+
+```toml
+shader = "../shaders/water.ashader"
+blend = "blend"
+
+[params]
+depth_color = "#0b3d4f"
+wave_speed = 1.5
+foam = { amount = 0.4, scale = 8.0 }
+
+[textures]
+color = "lake.png"
+ripples = { path = "../shared/ripples.n.png", normal_y = "dx" }
 ```
 
 ## Written by assetc

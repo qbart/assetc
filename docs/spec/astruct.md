@@ -49,6 +49,7 @@ order, so an owner's records are next to one another.
 | 0 | the asset itself | — |
 | 1 | each node (`.agraph.bin`, `.atree.bin`), gradient (`.agradient.bin`) or color (`.apalette.bin`) | `NODES` (a tree's breadth-first order), `GRADIENT`, `COLORS` |
 | 2 | each edge (`.agraph.bin`) | `EDGES` |
+| 3 | a [custom material](acmat.bin.md)'s params (design, not built yet) | — |
 
 ## `ASTRUCT` files
 

@@ -6,6 +6,9 @@ built from texture files that follow a naming convention, an optional
 material compiles to one `.amat.bin` file (see [`docs/spec/amat.bin.md`](../spec/amat.bin.md))
 that references its textures by asset ID.
 
+Materials for other shaders, with any values and textures, are
+[custom materials](custom-materials.md) (designed, not built yet).
+
 ## Slots
 
 | Slot         | Suffix | Color space | Compiled to                         |
