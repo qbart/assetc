@@ -220,7 +220,9 @@ The icon follows the entry's type, by extension (any case):
 | tree: `atree`, `atree.bin`                    | `list-tree`               |
 | atlas folder (`*.atlas`), atlas: `aatlas.bin` | `map`                     |
 | palette: `apalette`, `apalette.bin`           | `palette`                 |
-| material: `amat`, `amat.bin`                  | `gem`                     |
+| material: `amat`, `amat.bin`, `acmat`, `acmat.bin` | `gem`               |
+| shader: `ashader`, `ashader.bin`              | `sparkles`                |
+| SPIR-V: `spv`                                 | `binary`                  |
 | mesh: `gltf`, `glb`, `obj`, `amesh.bin`       | `torus`                   |
 | animation: `aanim.bin`                        | `film`                    |
 | per-file settings: `amod`                     | `settings-2` (dimmed)     |

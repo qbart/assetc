@@ -11,7 +11,9 @@ and in the `ASTRUCT` file after a material's record (see
 
 The chunks have their own names and string table, so they never change the
 offsets of the format's other chunks. All four are present when the asset
-has at least one attached struct, and none when it has none.
+has at least one attached struct, and none when it has none; a
+[`.acmat.bin`](acmat.bin.md) always has them, empty when there is nothing
+to hold.
 
 ## Chunks
 

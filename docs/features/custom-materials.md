@@ -1,7 +1,7 @@
 # Custom materials
 
-> **Status: in progress.** The build is done; the GUI, the
-> [preview](#preview) and the [SDK](#sdk) are not yet. Formats: [`.ashader`](../spec/ashader.md),
+> **Status: in progress.** The build, the editors and the SDK are done; the
+> SPIR-V [preview](#preview) is not yet. Formats: [`.ashader`](../spec/ashader.md),
 > [`.ashader.bin`](../spec/ashader.bin.md),
 > [`.acmat`](../spec/acmat.md), [`.acmat.bin`](../spec/acmat.bin.md).
 
@@ -333,7 +333,7 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
 
 ### Shader files
 
-- **New Shader** in the Input tree's context menu creates `shader.ashader`
+- **New Material ▸ Shader** in the Input tree's context menu creates `shader.ashader`
   (`[[textures]]` `color`, usage `color`, `bare`; no params) and starts
   renaming it. `*.ashader` rows use the icon `sparkles`; `*.spv` rows
   `binary` (both new Lucide icons).
@@ -364,7 +364,7 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
 
 - **New Material ▸ Custom Material** in the Input tree's context menu
   creates `material.acmat` with `shader = ""`, selects it and starts renaming
-  it. `*.acmat` rows use the icon `gem`, as `*.amat`.
+  it; it fails to build with `no shader chosen` until one is chosen. `*.acmat` rows use the icon `gem`, as `*.amat`.
 - The **Material** tab of a `.acmat` starts with a **Shader** row: a
   drop-down of every `*.ashader` in `input`. Choosing another shader drops the
   params and textures it has no use for; when any are set, a confirmation

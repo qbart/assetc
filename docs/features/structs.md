@@ -20,7 +20,7 @@ scope.
 | Graph (`*.agraph`) | the file | **Graph** `structs`, **Node** `node_structs`, **Edge** `edge_structs` |
 | Tree (`*.atree`) | the file | **Tree** `structs`, **Node** `node_structs` |
 | 3D model (`*.gltf`, `*.glb`) | its [`.amod`](../spec/amod.md#structs) sidecar | **Model** `structs` |
-| Material (`*.amat`) | the file | **Material** `structs` |
+| Material (`*.amat`, `*.acmat`) | the file | **Material** `structs` |
 | Atlas (`*.atlas` folder) | its [`atlas.toml`](../spec/atlas.toml.md#structs) | **Atlas** `structs` |
 | Gradient file (`*.agradient`) | the file | **File** `structs`, **Gradient** `gradient_structs` |
 | Palette (`*.apalette`) | the file | **File** `structs`, **Color** `color_structs` |
