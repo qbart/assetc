@@ -643,10 +643,14 @@ mod tests {
     fn sample_stage_becomes_valid_wgsl_at_the_material_bindings() {
         let root = env!("CARGO_MANIFEST_DIR");
         let bytes = std::fs::read(format!("{root}/samples/shaders/water.frag.spv")).unwrap();
-        let text = std::fs::read_to_string(format!("{root}/samples/shaders/water.ashader")).unwrap();
+        let text =
+            std::fs::read_to_string(format!("{root}/samples/shaders/water.ashader")).unwrap();
         let shader = crate::shader::Shader::parse(&text).unwrap();
         let (wgsl, frame, _) = to_wgsl(&bytes, &shader).unwrap();
-        assert!(wgsl.contains("@group(3) @binding(0) \nvar<uniform> params"), "{wgsl}");
+        assert!(
+            wgsl.contains("@group(3) @binding(0) \nvar<uniform> params"),
+            "{wgsl}"
+        );
         assert!(wgsl.contains("@align(16) @size(16) foam: Foam,"), "{wgsl}");
         assert_eq!(frame["time"], 48);
         // Bevy parses it again: it must still be valid, uniform layout rules included.

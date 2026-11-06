@@ -105,6 +105,8 @@ struct UiState {
     open: HashSet<PathBuf>,
     rename: Option<Rename>,
     confirm_delete: Option<PathBuf>,
+    /// An Input row being dragged to a folder.
+    tree_drag: Option<TreeDrag>,
     /// A failed file operation, shown in the status bar until the next operation or build.
     notice: Option<String>,
     /// Canvas toolbar state of each image, by path.
@@ -603,6 +605,7 @@ impl Default for UiState {
             open: HashSet::new(),
             rename: None,
             confirm_delete: None,
+            tree_drag: None,
             notice: None,
             canvas_options: HashMap::new(),
             animations: HashMap::new(),
@@ -2303,6 +2306,15 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
             let scroll_to = std::mem::take(&mut state.tree_scroll)
                 .then(|| state.selection.as_ref().map(|s| s.path.clone()))
                 .flatten();
+            let input = project.input_dir().filter(|_| editable);
+            // What a drag or a drop from outside would land in; see
+            // docs/features/file-operations.md#move.
+            let dragging = state.tree_drag.as_ref().map(|d| d.path.clone());
+            let files_hover = ui.input(|i| !i.raw.hovered_files.is_empty());
+            let fallback = project
+                .input_dir()
+                .map(|input| drop_fallback(state.selection.as_ref(), &input));
+            let mut target = None;
             let mut cx = TreeCx {
                 location,
                 selection: state.selection.as_ref(),
@@ -2313,6 +2325,8 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                 action: None,
                 scroll_to,
                 marks: (location == Location::Input).then_some(&state.build_marks),
+                rows: Vec::new(),
+                drag_start: None,
             };
             egui::ScrollArea::vertical()
                 .auto_shrink(false)
@@ -2325,12 +2339,91 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                     tree(ui, nodes, 0, &mut cx);
                     // The empty area below the rows stands for the input directory itself.
                     let rest = vec2(ui.available_width(), ui.available_height().max(24.0));
-                    let (_, response) = ui.allocate_exact_size(rest, Sense::click());
-                    if editable && let Some(input) = project.input_dir() {
-                        response.context_menu(|ui| create_items(ui, &input, &mut cx.action));
+                    let (rest, response) = ui.allocate_exact_size(rest, Sense::click());
+                    let Some(input) = &input else {
+                        return;
+                    };
+                    response.context_menu(|ui| create_items(ui, input, &mut cx.action));
+                    if dragging.is_none() && !files_hover {
+                        return;
+                    }
+                    let view = ui.clip_rect();
+                    let pointer = ui
+                        .input(|i| i.pointer.hover_pos())
+                        .filter(|p| view.contains(*p));
+                    let under = pointer.and_then(|p| row_target(&cx.rows, rest, p, input));
+                    target = match &dragging {
+                        Some(path) => under.filter(|t| fileops::can_move(path, t)),
+                        None => under.or(fallback.clone()),
+                    };
+                    if let Some(t) = &target {
+                        let outline = match cx.rows.iter().find(|(_, p, _)| p == t) {
+                            Some((rect, ..)) => Some(*rect),
+                            None => (t == input).then_some(view),
+                        };
+                        if let Some(rect) = outline {
+                            ui.painter().rect_stroke(
+                                rect.shrink(1.0),
+                                0.0,
+                                Stroke::new(1.0, ACCENT),
+                                egui::StrokeKind::Inside,
+                            );
+                        }
+                    }
+                    // Scroll near the edges while dragging.
+                    if let (Some(_), Some(p)) = (&dragging, pointer) {
+                        let step = if p.y < view.top() + 24.0 {
+                            6.0
+                        } else if p.y > view.bottom() - 24.0 {
+                            -6.0
+                        } else {
+                            0.0
+                        };
+                        if step != 0.0 {
+                            ui.scroll_with_delta(vec2(0.0, step));
+                        }
                     }
                 });
+            let hovered_folder = state.tree_drag.as_ref().and_then(|_| {
+                let p = ui.input(|i| i.pointer.hover_pos())?;
+                cx.rows
+                    .iter()
+                    .find(|(r, _, dir)| *dir && r.contains(p))
+                    .map(|(_, path, _)| path.clone())
+            });
+            if let (Some(path), Some(input)) = (cx.drag_start.take(), &input) {
+                let more = fileops::moving_with(input, &path);
+                state.tree_drag = Some(TreeDrag {
+                    path,
+                    more,
+                    hover: None,
+                });
+            }
             let (action, rename_done) = (cx.action, cx.rename_done);
+            if let Some(drag) = &mut state.tree_drag {
+                drag_feedback(ui, drag, hovered_folder, &mut state.open);
+                let (cancel, released) =
+                    ui.input(|i| (i.key_pressed(egui::Key::Escape), i.pointer.any_released()));
+                if cancel || released {
+                    let path = drag.path.clone();
+                    state.tree_drag = None;
+                    if let (false, Some(dest)) = (cancel, target.clone()) {
+                        apply_file_op(state, project, FileOp::Move(path, dest));
+                    }
+                }
+            }
+            let dropped: Vec<PathBuf> = ui.input(|i| {
+                i.raw
+                    .dropped_files
+                    .iter()
+                    .map(|f| f.path().to_path_buf())
+                    .collect()
+            });
+            if !dropped.is_empty()
+                && let Some(dest) = target.or(fallback)
+            {
+                drop_files(state, project, dropped, dest);
+            }
             match rename_done {
                 Some(true) => commit_rename(state, project),
                 Some(false) => state.rename = None,
@@ -2555,6 +2648,19 @@ enum FileOp {
     NewShader(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
+    /// An entry and the folder to move it into.
+    Move(PathBuf, PathBuf),
+    /// Files from outside the input directory and the folder to copy them into.
+    Copy(Vec<PathBuf>, PathBuf),
+}
+
+/// An Input row being dragged, see docs/features/file-operations.md#move.
+struct TreeDrag {
+    path: PathBuf,
+    /// The companions going with it.
+    more: usize,
+    /// The closed folder under the pointer, and since when.
+    hover: Option<(PathBuf, f64)>,
 }
 
 enum TreeAction {
@@ -2585,6 +2691,10 @@ struct TreeCx<'a> {
     scroll_to: Option<PathBuf>,
     /// The last build's marks, in the Input tree only.
     marks: Option<&'a BuildMarks>,
+    /// Each drawn row: its rect, path and whether it is a folder.
+    rows: Vec<(Rect, PathBuf, bool)>,
+    /// The row a drag started on this frame.
+    drag_start: Option<PathBuf>,
 }
 
 /// Menu items creating something in `dir`.
@@ -2765,6 +2875,10 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     if cx.scroll_to.as_ref() == Some(&node.path) {
         response.scroll_to_me(None);
     }
+    cx.rows.push((response.rect, node.path.clone(), is_dir));
+    if cx.editable && response.drag_started() {
+        cx.drag_start = Some(node.path.clone());
+    }
     if response.clicked() {
         if is_dir && !cx.open.remove(&node.path) {
             cx.open.insert(node.path.clone());
@@ -2814,7 +2928,8 @@ fn tree_row(
         None if dim => TEXT_WEAK,
         None => TEXT,
     };
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
     if selected {
         ui.painter()
             .rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.25));
@@ -2869,6 +2984,137 @@ fn tree_row(
         !ui.input(|i| i.key_pressed(egui::Key::Escape))
     });
     (response, done)
+}
+
+/// Where a drop lands when the pointer is not over the Input tree: the selected Input folder,
+/// the folder of the selected Input file, else the input directory.
+fn drop_fallback(selection: Option<&Selection>, input: &Path) -> PathBuf {
+    match selection.filter(|s| s.location == Location::Input) {
+        Some(s) if s.path.is_dir() => s.path.clone(),
+        Some(s) => s.path.parent().unwrap_or(input).to_path_buf(),
+        None => input.to_path_buf(),
+    }
+}
+
+/// The folder a drop at `pos` lands in: a folder row's folder, a file row's folder, or the input
+/// directory for the empty area below the rows.
+fn row_target(
+    rows: &[(Rect, PathBuf, bool)],
+    rest: Rect,
+    pos: egui::Pos2,
+    input: &Path,
+) -> Option<PathBuf> {
+    match rows.iter().find(|(r, ..)| r.contains(pos)) {
+        Some((_, path, true)) => Some(path.clone()),
+        Some((_, path, false)) => path.parent().map(Path::to_path_buf),
+        None => rest.contains(pos).then(|| input.to_path_buf()),
+    }
+}
+
+/// The label following the pointer while dragging a row, and opening a closed folder held
+/// under it for 0.6 s.
+fn drag_feedback(
+    ui: &Ui,
+    drag: &mut TreeDrag,
+    folder: Option<PathBuf>,
+    open: &mut HashSet<PathBuf>,
+) {
+    let now = ui.input(|i| i.time);
+    match (folder, &drag.hover) {
+        (Some(f), Some((h, since))) if f == *h => {
+            if now - since >= 0.6 {
+                open.insert(f);
+            }
+        }
+        (Some(f), _) if !open.contains(&f) => drag.hover = Some((f, now)),
+        (_, _) => drag.hover = None,
+    }
+    ui.ctx().request_repaint();
+    let Some(pos) = ui.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    let name = drag
+        .path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let icon = tree_icon(&drag.path, drag.path.is_dir(), false);
+    egui::Area::new(egui::Id::new("tree_drag"))
+        .order(egui::Order::Tooltip)
+        .fixed_pos(pos + vec2(14.0, 10.0))
+        .interactable(false)
+        .show(ui.ctx(), |ui| {
+            Frame::new()
+                .fill(BG_PANEL)
+                .stroke(Stroke::new(1.0, STROKE))
+                .corner_radius(4)
+                .inner_margin(Margin::symmetric(8, 4))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.add(icon.image(16.0, TEXT_WEAK));
+                        ui.label(RichText::new(name).size(13.0).color(TEXT));
+                        if drag.more > 0 {
+                            ui.label(
+                                RichText::new(format!("+ {}", drag.more))
+                                    .size(13.0)
+                                    .color(TEXT_WEAK),
+                            );
+                        }
+                    });
+                });
+        });
+}
+
+/// Files dropped from outside: those inside the input directory move, the others are copied
+/// into `dest`; see docs/features/file-operations.md#dropping-files.
+fn drop_files(state: &mut UiState, project: &Project, paths: Vec<PathBuf>, dest: PathBuf) {
+    let Some(input) = project.input_dir() else {
+        return;
+    };
+    let root = std::fs::canonicalize(&input).ok();
+    let (inside, outside): (Vec<PathBuf>, Vec<PathBuf>) = paths.into_iter().partition(|p| {
+        root.as_ref()
+            .is_some_and(|r| std::fs::canonicalize(p).is_ok_and(|p| p.starts_with(r)))
+    });
+    state.browser_tab = BrowserTab::Input;
+    for path in inside {
+        // Moved as the tree names it, under `input`.
+        let rel = std::fs::canonicalize(&path)
+            .ok()
+            .zip(root.as_ref())
+            .and_then(|(p, r)| p.strip_prefix(r).ok().map(|rel| input.join(rel)));
+        if let Some(path) = rel.filter(|p| fileops::can_move(p, &dest)) {
+            apply_file_op(state, project, FileOp::Move(path, dest.clone()));
+        }
+    }
+    if !outside.is_empty() {
+        apply_file_op(state, project, FileOp::Copy(outside, dest));
+    }
+}
+
+/// `Moved <name> to <folder>`-style status for a move or copy.
+fn moved_notice(verb: &str, input: &Path, dest: &Path, report: &fileops::Report) -> String {
+    let name = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let folder = if dest == input {
+        "input".into()
+    } else {
+        name(dest)
+    };
+    let mut text = format!("{verb} {} to {folder}", name(&report.path));
+    if report.more > 0 {
+        text += &format!(" with {} more", report.more);
+    }
+    match report.fixed {
+        0 => {}
+        1 => text += "; fixed paths in 1 file",
+        n => text += &format!("; fixed paths in {n} files"),
+    }
+    text
 }
 
 /// Runs a file operation from the Input tree; failures go to the status bar.
@@ -2927,6 +3173,16 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             state.confirm_delete = Some(path);
             return;
         }
+        FileOp::Move(path, dest) => {
+            let moved = fileops::move_into(&input, project.root.as_deref(), &path, &dest);
+            moved_or_copied(state, &input, &dest, moved, ("Moved", "Move failed"));
+            return;
+        }
+        FileOp::Copy(paths, dest) => {
+            let copied = fileops::copy_into(&input, &paths, &dest);
+            moved_or_copied(state, &input, &dest, copied, ("Copied", "Copy failed"));
+            return;
+        }
     };
     match created {
         Ok((dir, path)) => {
@@ -2939,11 +3195,36 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
     }
 }
 
+/// Shows the moved or copied entry: rescans, opens `dest` and selects it.
+fn moved_or_copied(
+    state: &mut UiState,
+    input: &Path,
+    dest: &Path,
+    result: Result<fileops::Report, String>,
+    (done, failed): (&str, &str),
+) {
+    match result {
+        Ok(report) => {
+            state.notice = Some(moved_notice(done, input, dest, &report));
+            state.open.insert(dest.to_path_buf());
+            state.rescan = true;
+            select(state, Location::Input, report.path);
+            state.tree_scroll = true;
+        }
+        Err(e) => state.notice = Some(format!("{failed}: {e}")),
+    }
+}
+
 fn commit_rename(state: &mut UiState, project: &Project) {
     let (Some(rename), Some(input)) = (state.rename.take(), project.input_dir()) else {
         return;
     };
-    match fileops::rename(&input, &rename.path, rename.text.trim()) {
+    match fileops::rename(
+        &input,
+        project.root.as_deref(),
+        &rename.path,
+        rename.text.trim(),
+    ) {
         Ok(new) if new != rename.path => {
             if state.open.remove(&rename.path) {
                 state.open.insert(new.clone());

@@ -39,6 +39,7 @@ mod plan;
 mod presets;
 mod preview3d;
 mod preview_custom;
+mod relocate;
 mod shader;
 mod structs;
 mod texture;
