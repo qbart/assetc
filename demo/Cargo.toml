@@ -2,11 +2,11 @@
 name = "assetc-demo"
 version = "0.1.0"
 edition = "2024"
-description = "Shows every sample through assetc-sdk, the way a game loads them"
+description = "Shows every sample through the assetc SDK, the way a game loads them"
 publish = false
 
 [dependencies]
-assetc-sdk = { path = "../sdk" }
+assetc = { path = "../sdk" }
 
 [dependencies.bevy]
 version = "0.20.1"

@@ -1,6 +1,6 @@
 //! Every atlas: its frames with their names; numbered frames also play as a flipbook.
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::prelude::*;
 
 use super::text_2d;

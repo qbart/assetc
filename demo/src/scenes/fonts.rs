@@ -1,6 +1,6 @@
 //! Every font drawn with its SDF atlas, laid out by the SDK.
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};

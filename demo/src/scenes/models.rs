@@ -1,7 +1,7 @@
 //! Every mesh with its materials; skinned meshes play their animation clips and show their
 //! locators.
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};

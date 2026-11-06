@@ -321,9 +321,13 @@ dependencies = [
 [[package]]
 name = "assetc"
 version = "0.1.0"
+
+[[package]]
+name = "assetc-core"
+version = "0.1.0"
 dependencies = [
  "ab_glyph",
- "assetc-sdk",
+ "assetc",
  "base64 0.23.1",
  "bevy",
  "bevy_egui",
@@ -350,13 +354,9 @@ dependencies = [
 name = "assetc-demo"
 version = "0.1.0"
 dependencies = [
- "assetc-sdk",
+ "assetc",
  "bevy",
 ]
-
-[[package]]
-name = "assetc-sdk"
-version = "0.1.0"
 
 [[package]]
 name = "async-broadcast"

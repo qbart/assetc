@@ -495,7 +495,7 @@ mod tests {
 /// The SDK reads everything the build and pack write; see docs/features/sdk.md#conformance.
 #[cfg(test)]
 mod sdk_conformance {
-    use assetc_sdk::{self as sdk, Kind};
+    use assetc::{self as sdk, Kind};
 
     fn decode(assets: &sdk::Assets, entry: &sdk::Entry) -> Result<(), sdk::Error> {
         match entry.kind {

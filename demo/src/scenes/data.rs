@@ -2,7 +2,7 @@
 
 use std::fmt::Write;
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::prelude::*;
 
 use crate::{BAR, InScene, Spawn, TEXT, TEXT_WEAK};

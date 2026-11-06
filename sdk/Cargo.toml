@@ -1,10 +1,11 @@
 [package]
-name = "assetc-sdk"
+name = "assetc"
 version = "0.1.0"
 edition = "2024"
 description = "Reads the files assetc builds and packs: textures, materials, meshes, animations, fonts, atlases and data"
-
-[lib]
-name = "assetc_sdk"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["gamedev", "assets", "ktx2", "mesh", "loader"]
+categories = ["game-development", "parser-implementations"]
 
 [dependencies]

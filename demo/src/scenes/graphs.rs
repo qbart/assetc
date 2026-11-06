@@ -1,6 +1,6 @@
 //! Every directed graph and tree: nodes at their positions, edges as arrows.
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::prelude::*;
 
 use super::text_2d;

@@ -1,6 +1,6 @@
 //! Every 2D texture as a tile with its path.
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::prelude::*;
 
 use super::text_2d;

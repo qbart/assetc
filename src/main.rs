@@ -61,7 +61,7 @@ use bevy_egui::{EguiGlobalSettings, EguiPlugin, PrimaryEguiContext};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(version, about)]
+#[command(name = "assetc", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,

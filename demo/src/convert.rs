@@ -1,6 +1,6 @@
 //! SDK values to Bevy resources.
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;

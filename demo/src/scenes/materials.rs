@@ -1,6 +1,6 @@
 //! Every material on a sphere, lit by the sky.
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::prelude::*;
 
 use super::label_3d;

@@ -1,11 +1,17 @@
 [workspace]
 members = [".", "sdk", "demo"]
 
+# The compiler (CLI and GUI); only the SDK in sdk/ is published, as `assetc`.
 [package]
-name = "assetc"
+name = "assetc-core"
 version = "0.1.0"
 edition = "2024"
 description = "Compiles source assets into runtime-friendly binary formats for video games"
+publish = false
+
+[[bin]]
+name = "assetc"
+path = "src/main.rs"
 
 [dependencies]
 ab_glyph = "0.2.32"
@@ -59,6 +65,6 @@ features = [
 ]
 
 [dev-dependencies]
-assetc-sdk = { path = "sdk" }
+assetc = { path = "sdk" }
 ktx2 = "0.5.0"
 tempfile = "3.27.0"

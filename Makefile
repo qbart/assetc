@@ -1,4 +1,4 @@
-.PHONY: run build release install demo
+.PHONY: run build release install demo publish publish-check
 
 ASSETS ?= tmp/build/assetc.pak
 
@@ -18,3 +18,10 @@ install: release
 demo:
 	cargo run --release -- pack
 	cargo run --release -p assetc-demo -- $(ASSETS)
+
+# The SDK is the only published crate; see docs/features/sdk.md.
+publish-check:
+	cargo publish -p assetc --dry-run
+
+publish:
+	cargo publish -p assetc

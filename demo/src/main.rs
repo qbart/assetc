@@ -1,4 +1,4 @@
-//! Shows every sample the way a game would load it: through `assetc-sdk` only. See
+//! Shows every sample the way a game would load it: through the `assetc` SDK only. See
 //! docs/features/demo.md.
 
 mod convert;
@@ -7,7 +7,7 @@ mod scroll;
 
 use std::collections::HashMap;
 
-use assetc_sdk as sdk;
+use assetc as sdk;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
