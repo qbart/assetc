@@ -1,6 +1,6 @@
 // The source of water.frag.spv, kept for reference: assetc reads only the SPIR-V.
-// Compiled with naga (`naga water.frag.wgsl water.frag.spv`); the names are what matter,
-// the groups and bindings are free. See docs/features/custom-materials.md.
+// Compiled with naga-cli (`naga -g water.frag.wgsl water.frag.spv`; -g keeps the debug names).
+// The names are what matter, the groups and bindings are free. See docs/features/custom-materials.md.
 
 struct Foam {
     amount: f32,

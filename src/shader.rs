@@ -1104,7 +1104,7 @@ pub fn reflect(
             let names = names(module, var);
             if names.is_empty() {
                 problems.push(format!(
-                    "{file}: has no names; compile without stripping debug info"
+                    "{file}: has no names; compile with debug names (naga: -g)"
                 ));
                 continue;
             }
