@@ -2857,6 +2857,7 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     let mark = cx.marks.and_then(|m| m.of(&node.path));
     let (response, done) = tree_row(
         ui,
+        egui::Id::new(("tree_row", &node.path)),
         depth,
         chevron,
         icon,
@@ -2909,11 +2910,12 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     }
 }
 
-/// A tree row; while `renaming`, its name is a text field. Returns the row response and,
-/// when the rename ends this frame, whether to commit it.
+/// A tree row with its `id`; while `renaming`, its name is a text field. Returns the row
+/// response and, when the rename ends this frame, whether to commit it.
 #[allow(clippy::too_many_arguments)]
 fn tree_row(
     ui: &mut Ui,
+    id: egui::Id,
     depth: usize,
     chevron: Option<Icon>,
     icon: Icon,
@@ -2928,8 +2930,9 @@ fn tree_row(
         None if dim => TEXT_WEAK,
         None => TEXT,
     };
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click_and_drag());
+    // Keyed by path, so a folder opening mid-drag does not hand the drag to another row.
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+    let response = ui.interact(rect, id, Sense::click_and_drag());
     if selected {
         ui.painter()
             .rect_filled(rect, 0.0, ACCENT.gamma_multiply(0.25));
