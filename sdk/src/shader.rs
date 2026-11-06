@@ -504,8 +504,10 @@ fn spirv(chunk: Option<&[u8]>, name: &str) -> Result<Option<Vec<u32>>> {
         return Err(b.err(format!("{name} is {} bytes, not whole words", bytes.len())));
     }
     let words: Vec<u32> = bytes
-        .chunks_exact(4)
-        .map(|w| u32::from_le_bytes(w.try_into().expect("4 bytes")))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|w| u32::from_le_bytes(*w))
         .collect();
     if words.first() != Some(&SPIRV_MAGIC) {
         return Err(b.err(format!("{name} is not SPIR-V")));
