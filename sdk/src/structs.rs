@@ -20,6 +20,8 @@ pub enum Scope {
     Item,
     /// Each edge of a graph (`2`).
     Edge,
+    /// A custom material's params (`3`); its item is `0`.
+    Params,
     /// A scope this SDK does not know; kept so its records are not lost.
     Other(u32),
 }
@@ -30,6 +32,7 @@ impl Scope {
             0 => Self::Asset,
             1 => Self::Item,
             2 => Self::Edge,
+            3 => Self::Params,
             other => Self::Other(other),
         }
     }
@@ -40,6 +43,7 @@ impl Scope {
             Self::Asset => 0,
             Self::Item => 1,
             Self::Edge => 2,
+            Self::Params => 3,
             Self::Other(value) => value,
         }
     }
