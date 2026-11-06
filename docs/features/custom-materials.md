@@ -187,7 +187,15 @@ point `entry` (`"main"` by default, per stage: `fragment_entry`,
 `vertex_entry`).
 
 - assetc does not compile shader sources; build the `.spv` with your own
-  tools (`glslc`, `glslangValidator`, `naga`, `slangc`, `dxc -spirv`).
+  tools, keeping debug names (see below):
+
+  | Source | Command |
+  |--------|---------|
+  | GLSL | `glslc -fshader-stage=frag water.frag -o water.frag.spv` |
+  | GLSL | `glslangValidator -V water.frag -o water.frag.spv` |
+  | WGSL | `naga -g water.frag.wgsl water.frag.spv` (naga-cli) |
+  | Slang | `slangc water.slang -target spirv -entry main -o water.frag.spv` |
+  | HLSL | `dxc -spirv -T ps_6_0 -E main water.hlsl -Fo water.frag.spv` |
 - The build parses each stage, checks it against the shader's interface
   (see [The interface in SPIR-V](#the-interface-in-spir-v)) and puts it in the
   `.ashader.bin`, so the game can create the pipeline from it.
@@ -200,10 +208,11 @@ assetc finds a stage's resources **by name**, at whatever descriptor set and
 binding the stage declares them. It asks for no particular numbers, so a
 shader keeps the layout its game's renderer uses; the `.ashader.bin` records
 the numbers it found (see [`ashader.bin.md`](../spec/ashader.bin.md#bindings)).
-Names come from the SPIR-V's debug names (`OpName`), which every compiler
-writes by default; a stage stripped of them (`spirv-opt --strip-debug`)
-fails the shader with `<file>: has no names; compile without stripping debug
-info`.
+Names come from the SPIR-V's debug names (`OpName`). glslc,
+glslangValidator, slangc and dxc write them by default; the naga CLI writes
+them only with `-g`. A stage without them (naga without `-g`,
+`spirv-opt --strip-debug`) fails the shader with `<file>: has no names;
+compile with debug names (naga: -g)`.
 
 | Name (variable or block type) | Resource | Notes |
 |-------------------------------|----------|-------|
