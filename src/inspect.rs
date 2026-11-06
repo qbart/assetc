@@ -117,6 +117,9 @@ enum Kind {
     Data,
     Hdr,
     MaterialSource,
+    Shader,
+    CustomMaterialSource,
+    Spirv,
     ColorLut,
     Font,
     Model,
@@ -132,6 +135,8 @@ enum Kind {
     CompiledAtlas,
     CompiledGradient,
     CompiledPalette,
+    CompiledShader,
+    CompiledCustomMaterial,
     Manifest,
     Pack,
     Ignored,
@@ -151,6 +156,9 @@ impl Kind {
             Self::Data => "Data",
             Self::Hdr => "HDR environment map",
             Self::MaterialSource => "Material source",
+            Self::Shader => "Shader",
+            Self::CustomMaterialSource => "Custom material",
+            Self::Spirv => "SPIR-V",
             Self::ColorLut => "Color LUT",
             Self::Font => "Font",
             Self::Model => "Model",
@@ -166,6 +174,8 @@ impl Kind {
             Self::CompiledAtlas => "Compiled atlas",
             Self::CompiledGradient => "Compiled gradients",
             Self::CompiledPalette => "Compiled palette",
+            Self::CompiledShader => "Compiled shader",
+            Self::CompiledCustomMaterial => "Compiled custom material",
             Self::Manifest => "Manifest",
             Self::Pack => "Pack",
             Self::Ignored => "Ignored",
@@ -224,6 +234,9 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         .filter(|name| !name.is_empty());
     let kind = match location {
         Location::Input if material_name.is_some() => Kind::MaterialSource,
+        Location::Input if crate::shader::is_shader(file) => Kind::Shader,
+        Location::Input if crate::acmat::is_custom_material(file) => Kind::CustomMaterialSource,
+        Location::Input if crate::shader::is_spirv(file) => Kind::Spirv,
         Location::Input if has_ext("cube") => Kind::ColorLut,
         Location::Input if is_noise(file) => Kind::Noise,
         Location::Input if is_gradient(file) => Kind::Gradient,
@@ -251,6 +264,10 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Output if has_ext(manifest::Kind::Atlas.extension()) => Kind::CompiledAtlas,
         Location::Output if has_ext(manifest::Kind::Gradient.extension()) => Kind::CompiledGradient,
         Location::Output if has_ext(manifest::Kind::Palette.extension()) => Kind::CompiledPalette,
+        Location::Output if has_ext(manifest::Kind::Shader.extension()) => Kind::CompiledShader,
+        Location::Output if has_ext(manifest::Kind::CustomMaterial.extension()) => {
+            Kind::CompiledCustomMaterial
+        }
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output if crate::pack::is_pack(file) => Kind::Pack,
         Location::Output => Kind::File,
@@ -273,6 +290,11 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Kind::Data => data_rows(project, file, &rel, &mut out),
         Kind::Hdr => hdr_rows(project, file, &rel, &mut out),
         Kind::MaterialSource => material_source(project, file, &rel, &mut out),
+        Kind::Shader => shader_rows(project, &rel, &mut out),
+        Kind::CustomMaterialSource => custom_material_rows(project, file, &rel, &mut out),
+        Kind::Spirv => fs::read(file)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| spirv_rows(&bytes, &mut out)),
         Kind::ColorLut => color_lut(project, file, &rel, &mut out),
         Kind::Font => font_rows(project, file, &rel, &mut out),
         Kind::Model => model_rows(project, file, &rel, &mut out),
@@ -336,7 +358,9 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         | Kind::CompiledTree
         | Kind::CompiledAtlas
         | Kind::CompiledGradient
-        | Kind::CompiledPalette => fs::read(file)
+        | Kind::CompiledPalette
+        | Kind::CompiledShader
+        | Kind::CompiledCustomMaterial => fs::read(file)
             .map_err(|e| e.to_string())
             .and_then(|bytes| Ok((crate::compiled::rows(&bytes)?, bytes)))
             .map(|(rows, bytes)| {
@@ -1112,6 +1136,125 @@ fn material_source(
     );
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
     material::Source::parse(&text)?;
+    Ok(())
+}
+
+/// See docs/features/custom-materials.md#shader-files.
+fn shader_rows(project: &Project, rel: &str, out: &mut Inspection) -> Result<(), String> {
+    let asset_path = format!(
+        "{}.{}",
+        crate::build::strip_extension(rel),
+        manifest::Kind::Shader.extension()
+    );
+    let input = project.input_dir().ok_or("no input directory")?;
+    let loaded = crate::shader::load(&input, rel);
+    if let Ok(l) = &loaded {
+        let params = match &l.shader.params {
+            Some(p) => format!("{} ({})", p.ty, p.schema),
+            None => "none".into(),
+        };
+        out.rows.push(("Params", params));
+        out.rows.push((
+            "GPU block",
+            match l.block.size {
+                0 => "none".into(),
+                n => format!("{n} bytes"),
+            },
+        ));
+        out.rows.push(("Textures", l.shader.textures.len().to_string()));
+        let stages: Vec<&str> = [(l.vertex.is_some(), "vertex"), (l.fragment.is_some(), "fragment")]
+            .into_iter()
+            .filter_map(|(on, s)| on.then_some(s))
+            .collect();
+        out.rows.push((
+            "Stages",
+            if stages.is_empty() {
+                "none".into()
+            } else {
+                stages.join(", ")
+            },
+        ));
+    }
+    asset_rows(&asset_path, out);
+    output_row(project, &asset_path, "", out);
+    loaded.map(drop)
+}
+
+/// See docs/features/custom-materials.md#custom-materials.
+fn custom_material_rows(
+    project: &Project,
+    file: &Path,
+    rel: &str,
+    out: &mut Inspection,
+) -> Result<(), String> {
+    let (dir, name) = split_dir(rel);
+    let name = name.strip_suffix(crate::acmat::SUFFIX).unwrap_or(name);
+    let source = fs::read_to_string(file)
+        .map_err(|e| e.to_string())
+        .and_then(|t| crate::acmat::Source::parse(&t));
+    if let Ok(source) = &source {
+        let shader = match source.shader.as_str() {
+            "" => "none chosen".to_owned(),
+            s => s.to_owned(),
+        };
+        out.rows.push(("Shader", shader));
+    }
+    let asset_path = join(
+        dir,
+        &format!("{name}.{}", manifest::Kind::CustomMaterial.extension()),
+    );
+    asset_rows(&asset_path, out);
+    output_row(project, &asset_path, "", out);
+    source.map(drop)
+}
+
+/// A SPIR-V file's header, entry points and resources; see
+/// docs/features/custom-materials.md#shader-files.
+fn spirv_rows(bytes: &[u8], out: &mut Inspection) -> Result<(), String> {
+    let word = |i: usize| {
+        bytes
+            .get(i * 4..i * 4 + 4)
+            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
+    };
+    if word(0) != Some(0x0723_0203) {
+        return Err("not SPIR-V".into());
+    }
+    let version = word(1).unwrap_or(0);
+    out.rows.push((
+        "SPIR-V version",
+        format!("{}.{}", version >> 16 & 0xff, version >> 8 & 0xff),
+    ));
+    let generator = word(2).unwrap_or(0);
+    out.rows.push(("Generator", format!("{} (version {})", generator >> 16, generator & 0xffff)));
+    let options = naga::front::spv::Options {
+        adjust_coordinate_space: false,
+        ..Default::default()
+    };
+    let module = naga::front::spv::parse_u8_slice(bytes, &options).map_err(|e| e.to_string())?;
+    for e in &module.entry_points {
+        out.rows
+            .push(("Entry point", format!("{} ({:?})", e.name, e.stage).to_lowercase()));
+    }
+    for (_, var) in module.global_variables.iter() {
+        let Some(at) = &var.binding else {
+            continue;
+        };
+        let name = var
+            .name
+            .clone()
+            .or_else(|| module.types[var.ty].name.clone())
+            .unwrap_or_else(|| "(no name)".into());
+        let kind = match &module.types[var.ty].inner {
+            naga::TypeInner::Image { dim, .. } => format!("texture {dim:?}"),
+            naga::TypeInner::Sampler { .. } => "sampler".into(),
+            naga::TypeInner::Struct { span, .. } => format!("block, {span} bytes"),
+            _ => "resource".into(),
+        };
+        out.rows.push((
+            "Binding",
+            format!("set {} binding {}: {name} ({kind})", at.group, at.binding),
+        ));
+    }
     Ok(())
 }
 

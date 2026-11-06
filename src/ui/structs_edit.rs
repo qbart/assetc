@@ -41,6 +41,7 @@ enum Host<'a> {
     Graph(&'a mut graph::GraphEdit),
     Model(&'a mut MeshEdit),
     Material(&'a mut MaterialEdit),
+    Custom(&'a mut super::custom::CustomEdit),
     Atlas(&'a mut (crate::atlas::AtlasConfig, crate::atlas::AtlasConfig)),
     Gradient(&'a mut GradientEdit),
     Palette(&'a mut PaletteEdit),
@@ -83,7 +84,7 @@ impl Host<'_> {
                 ),
             ],
             Self::Model(_) => &[("Model structs", "model", "One value for the model.")],
-            Self::Material(_) => &[(
+            Self::Material(_) | Self::Custom(_) => &[(
                 "Material structs",
                 "material",
                 "One value for the material.",
@@ -115,6 +116,7 @@ impl Host<'_> {
             (Self::Graph(g), _) => &mut g.edit.edge_structs,
             (Self::Model(m), _) => &mut m.edit.structs,
             (Self::Material(m), _) => &mut m.source_mut().structs,
+            (Self::Custom(c), _) => &mut c.edit.structs,
             (Self::Atlas(a), _) => &mut a.0.structs,
             (Self::Gradient(g), 0) => &mut g.edit.structs,
             (Self::Gradient(g), _) => &mut g.edit.gradient_structs,
@@ -131,6 +133,7 @@ impl Host<'_> {
             (Self::Graph(g), _) => g.edit.edges.iter_mut().map(|e| &mut e.values).collect(),
             (Self::Model(m), _) => vec![&mut m.edit.values],
             (Self::Material(m), _) => vec![&mut m.source_mut().values],
+            (Self::Custom(c), _) => vec![&mut c.edit.values],
             (Self::Atlas(a), _) => vec![&mut a.0.values],
             (Self::Gradient(g), 0) => vec![&mut g.edit.values],
             (Self::Gradient(g), _) => g.edit.gradients.iter_mut().map(|g| &mut g.values).collect(),
@@ -169,6 +172,7 @@ impl Host<'_> {
                 let s = m.source_mut();
                 one("material", &s.structs, &s.values)
             }
+            Self::Custom(c) => one("material", &c.edit.structs, &c.edit.values),
             Self::Atlas(a) => one("atlas", &a.0.structs, &a.0.values),
             Self::Gradient(g) => g.edit.scopes(),
             Self::Palette(p) => p.edit.scopes(),
@@ -189,7 +193,7 @@ impl Host<'_> {
                 }
             },
             Self::Model(_) => (0, 0, "model".into()),
-            Self::Material(_) => (0, 0, "material".into()),
+            Self::Material(_) | Self::Custom(_) => (0, 0, "material".into()),
             Self::Atlas(_) => (0, 0, "atlas".into()),
             Self::Gradient(_) | Self::Palette(_) => match view.owner {
                 0 => (0, 0, "file".into()),
@@ -224,6 +228,14 @@ impl Host<'_> {
             Self::Model(m) => mesh_commit(ui, m).map(|a| StructsSave::Sidecar(Box::new(a))),
             Self::Material(m) => {
                 material_edit::material_commit(ui, m).map(|s| StructsSave::File(s.to_toml()))
+            }
+            Self::Custom(c) => {
+                let busy =
+                    ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+                (!busy && c.edit != c.saved).then(|| {
+                    c.saved = c.edit.clone();
+                    StructsSave::File(c.edit.to_toml(&c.order()))
+                })
             }
             Self::Atlas(pair) => {
                 let busy =
@@ -262,6 +274,8 @@ pub(super) fn structs_tab(
         Host::Model(m)
     } else if let Some(Ok(m)) = &mut inspected.material {
         Host::Material(m)
+    } else if let Some(Ok(c)) = &mut inspected.custom {
+        Host::Custom(c)
     } else if let Some(Ok(a)) = &mut inspected.atlas {
         Host::Atlas(a)
     } else if let Some(Ok(g)) = &mut inspected.gradient {

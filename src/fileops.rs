@@ -85,6 +85,30 @@ pub fn create_material(input: &Path, dir: &Path) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// Creates `material.acmat` (or `material 2.acmat`, …) in `dir`, with no shader chosen yet;
+/// see docs/features/custom-materials.md#custom-materials.
+pub fn create_custom_material(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "material", crate::acmat::SUFFIX);
+    fs::write(&path, "shader = \"\"\n").map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// Creates `shader.ashader` (or `shader 2.ashader`, …) in `dir`; see
+/// docs/features/custom-materials.md#shader-files.
+pub fn create_shader(input: &Path, dir: &Path) -> Result<PathBuf, String> {
+    check_inside(input, dir, true)?;
+    let path = unique(dir, "shader", ".ashader");
+    let mut texture = crate::shader::Texture::new("color", crate::shader::Usage::Color);
+    texture.bare = true;
+    let shader = crate::shader::Shader {
+        textures: vec![texture],
+        ..Default::default()
+    };
+    fs::write(&path, shader.to_toml()).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
 /// Creates `palette.apalette` (or `palette 2.apalette`, …) in `dir`; see
 /// docs/features/palettes.md#creating.
 pub fn create_palette(input: &Path, dir: &Path) -> Result<PathBuf, String> {

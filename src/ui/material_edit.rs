@@ -421,7 +421,7 @@ pub(super) fn material_commit(ui: &Ui, edit: &mut MaterialEdit) -> Option<Source
     })
 }
 
-fn section(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
+pub(super) fn section(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
     prop_section(
         ui,
         ("amat", title),
@@ -504,7 +504,7 @@ fn emission(ui: &mut Ui, edit: &mut MaterialEdit, defaults: &Material) {
 
 /// A row editing one key: the label `ACCENT` when the file sets it (the key on hover), Reset
 /// while set, and a help line below. Returns whether Reset was clicked.
-fn key_row(
+pub(super) fn key_row(
     ui: &mut Ui,
     [label, key]: [&str; 2],
     help: &str,
@@ -520,12 +520,14 @@ fn key_row(
             reset = icon_button(ui, Icon::RotateCcw, "Reset to default", true).clicked();
         }
     });
-    help_line(ui, help);
+    if !help.is_empty() {
+        help_line(ui, help);
+    }
     reset
 }
 
 /// `add` in a box exactly `width` wide, so a control cannot grow past it.
-fn fixed(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
+pub(super) fn fixed(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
     ui.allocate_ui_with_layout(
         vec2(width, 22.0),
         egui::Layout::left_to_right(egui::Align::Center),
@@ -536,7 +538,7 @@ fn fixed(ui: &mut Ui, width: f32, add: impl FnOnce(&mut Ui)) {
     );
 }
 
-fn help_line(ui: &mut Ui, help: &str) {
+pub(super) fn help_line(ui: &mut Ui, help: &str) {
     let text = RichText::new(help).size(12.0).color(TEXT_WEAK);
     ui.add(egui::Label::new(text).wrap());
     ui.add_space(2.0);
@@ -584,7 +586,7 @@ fn number_row(
 }
 
 /// One of `options`, shown by name.
-fn choice_row<T: Copy + PartialEq + Default>(
+pub(super) fn choice_row<T: Copy + PartialEq + Default>(
     ui: &mut Ui,
     names: [&str; 2],
     help: &str,

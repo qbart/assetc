@@ -693,6 +693,8 @@ pub fn format_of(bytes: &[u8]) -> Option<&'static str> {
         crate::atlas::FORMAT,
         AGRAD,
         APALETTE,
+        crate::shader::FORMAT,
+        crate::acmat::FORMAT,
     ]
     .into_iter()
     .find(|f| chunks::Reader::parse(bytes, f).is_ok())
@@ -729,6 +731,41 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
             ]);
         }
         APALETTE => return Ok(vec![("Colors", field(0)), ("Size", size(8))]),
+        // See docs/features/custom-materials.md#gui.
+        crate::shader::FORMAT => {
+            let u = |at| chunks::u32_at(desc, 0, 64, at).unwrap_or(0);
+            let count = |name, stride| reader.chunk(name).map_or(0, |c| c.len() / stride);
+            let stages: Vec<&str> = [("SPIRVV", "vertex"), ("SPIRVF", "fragment")]
+                .into_iter()
+                .filter(|(c, _)| reader.chunk(c).is_some())
+                .map(|(_, s)| s)
+                .collect();
+            return Ok(vec![
+                ("GPU block", block_size(u(24))),
+                ("GPU fields", count("FIELDS", 32).to_string()),
+                ("Textures", count("TEXTURES", 48).to_string()),
+                ("Bindings", count("BINDINGS", 32).to_string()),
+                (
+                    "Stages",
+                    if stages.is_empty() {
+                        "none".into()
+                    } else {
+                        stages.join(", ")
+                    },
+                ),
+            ]);
+        }
+        crate::acmat::FORMAT => {
+            let u = |at| chunks::u32_at(desc, 0, 32, at).unwrap_or(0);
+            let shader = desc
+                .get(..8)
+                .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()));
+            return Ok(vec![
+                ("Shader", format!("{shader:#018x}")),
+                ("GPU block", block_size(u(16))),
+                ("Textures", u(20).to_string()),
+            ]);
+        }
         _ => {}
     }
     let names: &[&'static str] = match format {
@@ -744,6 +781,13 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
         .collect())
 }
 
+fn block_size(n: u32) -> String {
+    match n {
+        0 => "none".into(),
+        n => format!("{n} bytes"),
+    }
+}
+
 /// What a record column holds; see docs/features/inspector.md#compiled-data.
 #[derive(Clone, Copy)]
 enum Col {
@@ -756,6 +800,7 @@ enum Col {
     Color(usize),
     TypeKind(usize),
     Flags(usize),
+    Hex32(usize),
     ValueKind,
     ValuePayload,
     Byte(usize),
@@ -1047,6 +1092,78 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
                 ("V1", F32(28)),
             ],
         ),
+        (crate::shader::FORMAT, "DESC") => (
+            64,
+            vec![
+                ("params_schema", Hex(0)),
+                ("params_type_hash", Hex(8)),
+                ("params_type", Text(16)),
+                ("block_size", U32(24)),
+                ("state", U32(28)),
+                ("alpha_cutoff", F32(32)),
+                ("vertex_entry", Text(36)),
+                ("fragment_entry", Text(44)),
+                ("doc", Text(52)),
+            ],
+        ),
+        (crate::shader::FORMAT, "FIELDS") => (
+            32,
+            vec![
+                ("Path", Text(8)),
+                ("Hash", Hex(0)),
+                ("Offset", U32(16)),
+                ("Type", U32(20)),
+                ("Source", U32(24)),
+            ],
+        ),
+        (crate::shader::FORMAT, "TEXTURES") => (
+            48,
+            vec![
+                ("Name", Text(8)),
+                ("Hash", Hex(0)),
+                ("Usage", Byte(20)),
+                ("Dimension", Byte(21)),
+                ("Default", Byte(22)),
+                ("Flags", Byte(23)),
+                ("First input", U32(28)),
+                ("Inputs", U32(32)),
+                ("Fill", Color(36)),
+            ],
+        ),
+        (crate::shader::FORMAT, "INPUTS") => (16, vec![("Name", Text(0)), ("Channel", U32(8))]),
+        (crate::shader::FORMAT, "BINDINGS") => (
+            32,
+            vec![
+                ("Name", Text(24)),
+                ("Kind", U32(0)),
+                ("Texture", U32(4)),
+                ("Set", U32(8)),
+                ("Binding", U32(12)),
+                ("Stages", U32(16)),
+                ("Size", U32(20)),
+            ],
+        ),
+        (crate::shader::FORMAT, "SPIRVV" | "SPIRVF") => (4, vec![("Word", Hex32(0))]),
+        (crate::acmat::FORMAT, "DESC") => (
+            32,
+            vec![
+                ("shader", Hex(0)),
+                ("state", U32(8)),
+                ("alpha_cutoff", F32(12)),
+                ("block_size", U32(16)),
+                ("texture_count", U32(20)),
+            ],
+        ),
+        (crate::acmat::FORMAT, "PARAMS") => (
+            16,
+            vec![
+                ("+0", F32(0)),
+                ("+4", F32(4)),
+                ("+8", F32(8)),
+                ("+12", F32(12)),
+            ],
+        ),
+        (crate::acmat::FORMAT, "TEXTURES") => (8, vec![("Asset ID", Hex(0))]),
         (AGRAD | APALETTE, "RGBA8") => (4, vec![("Color", Color(0))]),
         (AGRAD | APALETTE, "RGBAF") => (
             16,
@@ -1086,6 +1203,12 @@ pub fn describe(name: &str) -> &'static str {
         "COLORS" => "Colors",
         "RGBA8" => "Colors, sRGB bytes",
         "RGBAF" => "Colors, linear floats",
+        "TEXTURES" => "Textures",
+        "INPUTS" => "Pack inputs",
+        "BINDINGS" => "Bindings in the stages",
+        "SPIRVV" => "Vertex SPIR-V",
+        "SPIRVF" => "Fragment SPIR-V",
+        "PARAMS" => "GPU block",
         _ => "Unknown chunk",
     }
 }
@@ -1191,6 +1314,7 @@ pub fn cell_in(bytes: &[u8], format: &str, name: &str, row: usize, column: usize
         Col::F32(at) => format!("{}", f32::from_bits(u32_at(at))),
         Col::F64(at) => format!("{}", f64::from_bits(u64_at(at))),
         Col::Hex(at) => format!("{:#018x}", u64_at(at)),
+        Col::Hex32(at) => format!("{:#010x}", u32_at(at)),
         Col::Text(at) => text_at(u32_at(at) as usize, u32_at(at + 4) as usize),
         Col::Color(at) => match bytes_at(at, 4) {
             Some([0, 0, 0, 0]) | None => "—".into(),

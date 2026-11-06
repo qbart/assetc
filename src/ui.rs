@@ -49,6 +49,7 @@ use crate::vertex_colors;
 mod anim;
 mod config_dialog;
 mod curve;
+mod custom;
 mod data;
 mod graph;
 mod material_edit;
@@ -342,6 +343,10 @@ struct Inspected {
     /// textures.
     material: Option<Result<MaterialEdit, String>>,
     uploaded_material: bool,
+    /// An `.ashader` being edited, or why it can't be read.
+    shader: Option<Result<custom::ShaderEdit, String>>,
+    /// An `.acmat` being edited, or why it can't be read.
+    custom: Option<Result<custom::CustomEdit, String>>,
     /// An image's `.amod` (its modifiers) being edited, or why it can't be read.
     sidecar: Option<Result<SidecarEdit, String>>,
     lut_compare: Option<CompareCache>,
@@ -671,6 +676,7 @@ enum InspectorTab {
     Atlas,
     Instances,
     Material,
+    Shader,
     Structs,
     Animations,
     Mipmaps,
@@ -679,7 +685,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 22] = [
+    const ALL: [Self; 23] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -697,6 +703,7 @@ impl InspectorTab {
         Self::Atlas,
         Self::Instances,
         Self::Material,
+        Self::Shader,
         Self::Structs,
         Self::Animations,
         Self::Mipmaps,
@@ -722,6 +729,7 @@ impl InspectorTab {
             Self::Atlas => Icon::Map,
             Self::Instances => Icon::Package,
             Self::Material => Icon::Gem,
+            Self::Shader => Icon::Sparkles,
             Self::Structs => Icon::Boxes,
             Self::Animations => Icon::Film,
             Self::Mipmaps => Icon::Images,
@@ -749,6 +757,7 @@ impl InspectorTab {
             Self::Atlas => "Atlas",
             Self::Instances => "Instances",
             Self::Material => "Material",
+            Self::Shader => "Shader",
             Self::Structs => "Structs",
             Self::Animations => "Animations",
             Self::Mipmaps => "Mipmaps",
@@ -822,7 +831,13 @@ impl InspectorTab {
             }),
             Self::Material => selection.is_some_and(|s| {
                 s.location == Location::Input
-                    && crate::material::is_source(&s.path)
+                    && (crate::material::is_source(&s.path)
+                        || crate::acmat::is_custom_material(&s.path))
+                    && s.path.is_file()
+            }),
+            Self::Shader => selection.is_some_and(|s| {
+                s.location == Location::Input
+                    && crate::shader::is_shader(&s.path)
                     && s.path.is_file()
             }),
             // See docs/features/structs.md#scopes.
@@ -834,6 +849,7 @@ impl InspectorTab {
                             || crate::atree::is_tree(p)
                             || model::is_model(p)
                             || crate::material::is_source(p)
+                            || crate::acmat::is_custom_material(p)
                             || gradient::is_gradient(p)
                             || palette::is_palette(p)))
                         || (p.is_dir() && crate::atlas::is_atlas(p)))
@@ -978,6 +994,8 @@ fn shell(
         | Shown::CompiledFont
         | Shown::Pack
         | Shown::Data
+        | Shown::ShaderLayout
+        | Shown::CustomMaterial
         | Shown::Schema
         | Shown::Graph
         | Shown::Instances
@@ -1026,6 +1044,8 @@ fn shell(
                 | Shown::Schema
                 | Shown::Graph
                 | Shown::Instances
+                | Shown::ShaderLayout
+                | Shown::CustomMaterial
                 | Shown::CompiledData => (&[], None, false),
                 Shown::CompiledAnimation => (
                     &["Play", "Chunks"],
@@ -1210,6 +1230,25 @@ fn shell(
                     &mut preview3d,
                     &mut state.vision,
                 ),
+                (Shown::ShaderLayout | Shown::CustomMaterial, _) => {
+                    let mut ui = ui.new_child(
+                        egui::UiBuilder::new()
+                            .id_salt("custom_canvas")
+                            .max_rect(rect)
+                            .layout(Layout::top_down(Align::Min)),
+                    );
+                    match state.inspected.as_mut().map(|i| (&mut i.shader, &i.custom)) {
+                        Some((Some(Ok(edit)), _)) => custom::canvas_layout(&mut ui, edit),
+                        Some((_, Some(Ok(edit)))) => custom::canvas_custom(&mut ui, edit),
+                        Some((Some(Err(e)), _)) => {
+                            placeholder(&mut ui, &format!("Can't read the file: {e}"))
+                        }
+                        Some((_, Some(Err(e)))) => {
+                            placeholder(&mut ui, &format!("Can't read the file: {e}"))
+                        }
+                        _ => {}
+                    }
+                }
                 (Shown::Schema, _) => {
                     if let Some(inspected) = state.inspected.as_mut()
                         && let Some(schema) =
@@ -1373,6 +1412,8 @@ struct Prepared {
     compiled_materials: Vec<Option<inspect::MaterialPreview>>,
     compiled_bytes: Option<Vec<u8>>,
     material: Option<Result<PreparedMaterial, String>>,
+    shader: Option<Result<custom::ShaderEdit, String>>,
+    custom: Option<Result<custom::CustomEdit, String>>,
 }
 
 fn request_inspection(ctx: &egui::Context, state: &mut UiState, project: &Project) {
@@ -1447,6 +1488,16 @@ fn prepare(
             let (material, faces) = material_edit::prepare(&input, &selection.path, light);
             (Some(material), faces)
         }
+        _ => (None, None),
+    };
+    // See docs/features/custom-materials.md#gui.
+    let (shader, custom) = match project.input_dir() {
+        Some(input) if selection.location == Location::Input => (
+            crate::shader::is_shader(&selection.path)
+                .then(|| custom::prepare_shader(&input, &selection.path)),
+            crate::acmat::is_custom_material(&selection.path)
+                .then(|| custom::prepare_custom(&input, &selection.path)),
+        ),
         _ => (None, None),
     };
     let noise =
@@ -1577,6 +1628,8 @@ fn prepare(
             .map(|image| inspect::fit_within(image, max_side)),
         cubemap: inspection.cubemap.take().or(light_faces),
         material,
+        shader,
+        custom,
         mips: std::mem::take(&mut inspection.mips)
             .into_iter()
             .map(|image| inspect::fit_within(image, max_side))
@@ -1663,6 +1716,16 @@ fn inspected(
     let material = prepared
         .material
         .map(|parsed| parsed.map(|p| MaterialEdit::new(p, kept_material)));
+    let kept_shader = previous
+        .as_mut()
+        .and_then(|p| p.shader.take())
+        .and_then(Result::ok);
+    let kept_custom = previous
+        .as_mut()
+        .and_then(|p| p.custom.take())
+        .and_then(Result::ok);
+    let shader = prepared.shader.map(|r| r.map(|e| e.keep(kept_shader)));
+    let custom = prepared.custom.map(|r| r.map(|e| e.keep(kept_custom)));
     let data = prepared.data.map(|parsed| {
         parsed.map(|p| {
             let mut edit = DataEdit::new(p, kept_data);
@@ -1809,6 +1872,8 @@ fn inspected(
         sidecar,
         material,
         uploaded_material: false,
+        shader,
+        custom,
         compiled_mesh: prepared.compiled_mesh,
         compiled_materials: prepared.compiled_materials,
         uploaded_lod: None,
@@ -2468,6 +2533,8 @@ enum FileOp {
     NewData(PathBuf),
     NewTree(PathBuf),
     NewMaterial(PathBuf),
+    NewCustomMaterial(PathBuf),
+    NewShader(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
 }
@@ -2538,9 +2605,14 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
             *action = Some(TreeAction::Op(FileOp::NewMaterial(dir.to_path_buf())));
             ui.close();
         }
-        // Designed in docs/features/custom-materials.md, not built yet.
-        menu_row(ui, "Custom Material", None, false)
-            .on_hover_text("Custom materials are designed but not built yet");
+        if menu_item(ui, "Custom Material", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewCustomMaterial(dir.to_path_buf())));
+            ui.close();
+        }
+        if menu_item(ui, "Shader", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewShader(dir.to_path_buf())));
+            ui.close();
+        }
     });
     ui.menu_button(RichText::new("New Data").size(14.0).color(TEXT), |ui| {
         if menu_item(ui, "Schema", None).clicked() {
@@ -2605,7 +2677,9 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "adata" | "pak" => Icon::Package,
         "atree" => Icon::ListTree,
         "aatlas" => Icon::Map,
-        "amat" => Icon::Gem,
+        "amat" | "acmat" => Icon::Gem,
+        "ashader" => Icon::Sparkles,
+        "spv" => Icon::Binary,
         "amod" => Icon::Settings2,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
@@ -2809,6 +2883,12 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             .map(|path| (dir, path)),
         FileOp::NewMaterial(dir) => fileops::create_material(&input, &dir)
             .map_err(|e| ("New Material", e))
+            .map(|path| (dir, path)),
+        FileOp::NewCustomMaterial(dir) => fileops::create_custom_material(&input, &dir)
+            .map_err(|e| ("New Custom Material", e))
+            .map(|path| (dir, path)),
+        FileOp::NewShader(dir) => fileops::create_shader(&input, &dir)
+            .map_err(|e| ("New Shader", e))
             .map(|path| (dir, path)),
         FileOp::NewData(dir) => fileops::create_data(&input, &dir)
             .map_err(|e| ("New Instance", e))
@@ -3198,6 +3278,30 @@ fn right_sidebar(
                         None => {}
                     }
                 }
+                (InspectorTab::Material, Some(inspected), Some(_))
+                    if matches!(inspected.custom, Some(Ok(_))) =>
+                {
+                    if let Some(Ok(edit)) = &mut inspected.custom
+                        && let Some(text) = custom::custom_tab(ui, edit)
+                    {
+                        match std::fs::write(&inspected.path, text) {
+                            Ok(()) => state.reinspect = true,
+                            Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                        }
+                    }
+                }
+                (InspectorTab::Shader, Some(inspected), Some(_)) => match &mut inspected.shader {
+                    Some(Ok(edit)) => {
+                        if let Some(text) = custom::shader_tab(ui, edit) {
+                            match std::fs::write(&inspected.path, text) {
+                                Ok(()) => state.reinspect = true,
+                                Err(e) => state.notice = Some(format!("Saving failed: {e}")),
+                            }
+                        }
+                    }
+                    Some(Err(e)) => placeholder(ui, &format!("Can't read the file: {e}")),
+                    None => {}
+                },
                 (InspectorTab::Material, Some(inspected), Some(_)) => {
                     if let Some(source) = material_tab(ui, inspected) {
                         match std::fs::write(&inspected.path, source.to_toml()) {
@@ -5361,6 +5465,10 @@ enum Shown {
     Instances,
     /// An `.amat` on a shape in 3D.
     Material,
+    /// An `.ashader`'s GPU block and resources.
+    ShaderLayout,
+    /// An `.acmat`'s GPU block and textures.
+    CustomMaterial,
     /// A `.pak`: its entries or how its bytes are used.
     Pack,
     Other,
@@ -5370,6 +5478,8 @@ impl Shown {
     fn of(inspected: Option<&Inspected>) -> Self {
         match inspected {
             Some(i) if i.material.is_some() => Self::Material,
+            Some(i) if i.shader.is_some() => Self::ShaderLayout,
+            Some(i) if i.custom.is_some() => Self::CustomMaterial,
             Some(i) if i.inspection.pack.is_some() => Self::Pack,
             Some(i) if i.cubemap.is_some() => Self::Environment,
             Some(i) if i.model.is_some() => Self::Model,
