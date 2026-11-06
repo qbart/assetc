@@ -7,7 +7,7 @@ material compiles to one `.amat.bin` file (see [`docs/spec/amat.bin.md`](../spec
 that references its textures by asset ID.
 
 Materials for other shaders, with any values and textures, are
-[custom materials](custom-materials.md) (designed, not built yet).
+[custom materials](custom-materials.md).
 
 ## Slots
 

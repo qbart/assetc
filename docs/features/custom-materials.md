@@ -1,7 +1,6 @@
 # Custom materials
 
-> **Status: in progress.** The build, the editors and the SDK are done; the
-> SPIR-V [preview](#preview) is not yet. Formats: [`.ashader`](../spec/ashader.md),
+> Formats: [`.ashader`](../spec/ashader.md),
 > [`.ashader.bin`](../spec/ashader.bin.md),
 > [`.acmat`](../spec/acmat.md), [`.acmat.bin`](../spec/acmat.bin.md).
 
@@ -337,28 +336,39 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
   (`[[textures]]` `color`, usage `color`, `bare`; no params) and starts
   renaming it. `*.ashader` rows use the icon `sparkles`; `*.spv` rows
   `binary` (both new Lucide icons).
-- **Info** tab: Params (`WaterParams (game.aschema)` or `none`), GPU block
-  (`64 bytes` or `none`), Textures (count), Stages (`fragment`, `vertex`,
-  `none`), Asset path, Output, Error.
+- **Info** tab: Params (`WaterParams (../data/game.aschema)` or `none`), GPU
+  block (`64 bytes` or `none`), Textures (count), Stages (`fragment`,
+  `vertex`, `none`), Asset path, Asset ID, Output; an Error row when the
+  shader or what it names cannot be read or checked.
 - **Shader** tab (icon `sparkles`), in the property editor style:
-  - *Params*: the schema and struct, picked as in the
-    [Structs tab](structs.md#structs-tab)'s Attach menu; a Clear button.
-  - *Textures*: one card per texture, in order, with its keys as rows; add,
-    remove and drag to reorder (the order of the material's texture IDs). Pack channels are four drop-downs of the input names
-    plus *New input…*.
+  - *Shader*: Doc, and Params: a drop-down with a submenu per schema of the
+    input listing its structs, as the [Structs tab](structs.md#structs-tab)'s
+    Attach menu does; Reset removes the params.
   - *State*: the [State](#state) keys.
-  - *Stages*: two drop-downs of the `*.spv` files in `input`, plus `None`.
-  - Saved like the other editors, whole file, keys in spec order.
+  - *Stages*: Fragment and Vertex, drop-downs of `None` and the `*.spv`
+    files in `input`. Entry points are kept but not edited here.
+  - *Textures*: one card per texture, in order (the order of the material's
+    texture IDs), its name in monospace with **Move down** (`chevron-down`)
+    and **Remove** (`x`), then its keys as rows: Name and Usage (always set,
+    no Reset), Dimension, Color space (images only), Default, Required,
+    Bare, Mipmaps, Packed. A packed texture has Red, Green, Blue and Alpha
+    rows (an input name, `.g`, `.b` or `.a` for another channel of its
+    image) and Fill. **Add texture** (`plus`) appends `texture<n>`, usage
+    `data`.
+  - Saved like the other editors, whole file, keys in spec order, but only
+    while the file is valid: otherwise `Not saved: <problem>` shows at the
+    top in `CHANNEL_R` until it is.
 - **Canvas — Layout view**: the GPU block as a table (offset, size, type,
   field path; CPU-only fields listed after it in `TEXT_WEAK` with
   `CPU only`), the resources table (name, kind, dimension, usage, and the
   set / binding each stage declares it at, or `unused`), and **GLSL** /
   **WGSL** tabs with the interface declarations (at sets and bindings of
-  assetc's choosing, to be changed freely), each with a **Copy** button. Problems (a stage that does not match) show
-  under the tables in `CHANNEL_R`, one line each.
+  assetc's choosing, to be changed freely), with **Copy** (`files`). When
+  the stages do not match the shader, or what it names cannot be read, the
+  view shows that problem in `CHANNEL_R` instead.
 - **`*.spv`** files: the Info tab shows SPIR-V version, generator, size,
   entry points with their stages, and every resource binding (set, binding,
-  type, name); the canvas shows the same as a table.
+  type, name).
 
 ### Custom materials
 
@@ -367,8 +377,9 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
   it; it fails to build with `no shader chosen` until one is chosen. `*.acmat` rows use the icon `gem`, as `*.amat`.
 - The **Material** tab of a `.acmat` starts with a **Shader** row: a
   drop-down of every `*.ashader` in `input`. Choosing another shader drops the
-  params and textures it has no use for; when any are set, a confirmation
-  lists them first. Without a shader the tab shows only this row.
+  params and textures it has no use for; when any are set, a line in
+  `ACCENT` lists them (`<shader> drops: texture mask, params`) with
+  **Switch** and **Cancel**. Without a shader the tab shows only this row.
 - With a shader, the sections are:
   - *Params*: the params struct's fields with the instance editors
     (groups, conditions, defaults shown `TEXT_WEAK`, reset per field), as in
@@ -378,23 +389,36 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
     files the texture's usage can take; `normal` rows have the `normal_y`
     toggle.
   - *State*: the shader's state with its values shown as defaults.
-- The Info tab adds Shader and Problems rows.
+- The Info tab shows Shader, Asset path, Asset ID and Output.
+- The [Structs tab](structs.md#structs-tab) attaches structs to it as to a
+  PBR material.
 
 ## Preview
 
 - **With a `fragment` stage**: the canvas shows the material on the
-  [preview shape](materials.md#3d-preview) (same toolbar, lighting choice,
-  rotation and controls), drawn with the shader's SPIR-V, the edited params
-  (before saving) and the textures as the build would make them (scaled to at
-  most 2048 px). The frame's light is the preview's key light; an HDR
-  environment shows as the background but is not given to the shader (bind
-  one in a `cube` texture to use it). `time` runs while the canvas is shown.
+  [preview shape](materials.md#3d-preview) (the shape and color vision
+  toolbar, rotation and 3D controls), drawn with the shader's fragment
+  SPIR-V, the edited params (before saving) and the saved textures.
+  - The stage is turned into WGSL with naga, its resources found by name and
+    moved to the preview material's own bindings; its numbers do not matter.
+  - The vertex stage is assetc's, giving the fragment inputs of
+    [the interface](#the-interface-in-spir-v); a `vertex` SPIR-V stage is
+    checked and built but not used by the preview.
+  - `Frame` holds the preview camera, its key light (white, intensity 1),
+    the time since the material was shown and the view size; `Object` the
+    shape's transform. `time` runs while the canvas is shown.
+  - Textures: images as the build would make them (packs packed, DirectX
+    normal maps flipped), scaled to at most 2048 px; noise, gradients,
+    palettes, atlases and 2D LUTs from their built `.ktx2` in `output` (their
+    default until built); `cube` and `3d` textures always show their
+    default. At most 10 2D, 3 cube and 3 3D textures are shown.
+  - The state applies (blend, cull, depth), but not shadows.
 - **Without**: no 3D view. The canvas shows the **Material view**: the GPU
-  block as a table (offset, field, value) and the bound textures as
-  thumbnails with their names, empty textures showing their default.
-- A stage that fails to load or to create a pipeline shows its error in
-  `CHANNEL_R` in the canvas' bottom-left corner instead of the shape;
-  editing values keeps working. Saving a new `.spv` reloads the preview.
+  block as a table (offset, field, value) and each texture with the file
+  that fills it, empty textures showing their default.
+- A stage the preview cannot use shows why in `CHANNEL_R` in the canvas'
+  bottom-left corner instead of the shape; editing values keeps working.
+  Saving the material or the shader reads the stage again.
 
 ## SDK
 
