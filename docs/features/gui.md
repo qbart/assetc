@@ -134,7 +134,9 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   row opens / closes it **and** selects it; clicking a file row selects it
   (see [`inspector.md`](inspector.md#selection)).
   Right-clicking an Input row opens the [file operations](file-operations.md)
-  menu.
+  menu; dragging an Input row onto a folder [moves](file-operations.md#move)
+  it, and files dropped from outside are
+  [copied in](file-operations.md#dropping-files).
 - **Sidecars**: a file's [`.amod`](../spec/amod.md) (`Fox.glb.amod` for
   `Fox.glb`) is listed right below that file, one level deeper, instead of in
   name order. It does not fold: the sidecar row is always shown, and the file

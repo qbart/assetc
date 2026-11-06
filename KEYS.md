@@ -46,7 +46,9 @@ trees, the others in the Input tree only.
 | Right click     | File operations menu                       |
 | `F2`            | Rename the selected entry (after a press in the sidebar) |
 | `Delete`        | Delete the selected entry, asks first (after a press in the sidebar) |
-| `Escape`        | While renaming: cancel                     |
+| `Escape`        | While renaming: cancel; while dragging a row: cancel the move |
+| Drag a row onto a folder | Move it there with its companions, fixing paths |
+| Drop files from outside | Copy them into the folder under the pointer (or the selected one) |
 
 ## Canvas (2D)
 
