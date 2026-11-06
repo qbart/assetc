@@ -462,7 +462,7 @@ pub fn asset_kind(path: &str) -> Option<&'static str> {
         "cube" => "lut",
         "exr" => "hdr",
         "atlas" => "atlas",
-        "amat" => "material",
+        "amat" | "acmat" => "material",
         "agraph" => "graph",
         "atree" => "tree",
         "adata" => "data",

@@ -31,10 +31,12 @@ pub enum Kind {
     Atlas = 9,
     Gradient = 11,
     Palette = 12,
+    Shader = 13,
+    CustomMaterial = 14,
 }
 
 impl Kind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Texture,
         Self::Material,
         Self::Mesh,
@@ -47,6 +49,8 @@ impl Kind {
         Self::Atlas,
         Self::Gradient,
         Self::Palette,
+        Self::Shader,
+        Self::CustomMaterial,
     ];
 
     /// Extension of the files assets of this kind are written to, without the leading `.`;
@@ -65,6 +69,8 @@ impl Kind {
             Self::Atlas => "aatlas.bin",
             Self::Gradient => "agradient.bin",
             Self::Palette => "apalette.bin",
+            Self::Shader => "ashader.bin",
+            Self::CustomMaterial => "acmat.bin",
         }
     }
 
@@ -90,6 +96,8 @@ impl Kind {
             Self::Atlas => "Atlas",
             Self::Gradient => "Gradient",
             Self::Palette => "Palette",
+            Self::Shader => "Shader",
+            Self::CustomMaterial => "Custom material",
         }
     }
 

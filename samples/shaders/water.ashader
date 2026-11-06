@@ -1,0 +1,28 @@
+doc = "Lake and river water"
+params = { schema = "../data/game.aschema", type = "WaterParams" }
+
+[state]
+blend = "blend"
+cull = "none"
+
+[stages]
+fragment = "water.frag.spv"
+
+[[textures]]
+name = "color"
+usage = "color"
+bare = true
+
+[[textures]]
+name = "ripples"
+usage = "normal"
+
+[[textures]]
+name = "mask"
+usage = "data"
+pack = { r = "foam", g = "depth" }
+fill = [0, 128, 0, 255]
+
+[[textures]]
+name = "sky"
+usage = "environment"

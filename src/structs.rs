@@ -445,8 +445,19 @@ pub fn compile(
         return Ok(Vec::new());
     }
     let schemas = load(dir, Some(input), scopes);
+    finish(input, scopes, &schemas, warnings)
+}
+
+/// [`compile`] with the schemas loaded: problems checked (warnings added to `warnings`), then
+/// the chunks.
+pub fn finish(
+    input: &Path,
+    scopes: &[Scope],
+    schemas: &Schemas,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<(&'static str, Vec<u8>)>, String> {
     let assets = adata::asset_files(input);
-    let (found, errors): (Vec<Problem>, Vec<Problem>) = check(scopes, &schemas, Some(&assets))
+    let (found, errors): (Vec<Problem>, Vec<Problem>) = check(scopes, schemas, Some(&assets))
         .into_iter()
         .partition(|p| p.warning);
     warnings.extend(found.iter().map(Problem::text));
@@ -457,7 +468,7 @@ pub fn compile(
         }
         return Err(message);
     }
-    Ok(crate::compiled::encode_structs(scopes, &schemas))
+    Ok(crate::compiled::encode_structs(scopes, schemas))
 }
 
 /// The schema's `.aschema.bin` asset ID, from its input-relative path.

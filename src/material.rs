@@ -374,7 +374,7 @@ impl Source {
 }
 
 /// `v` rounded to 4 decimals, always with a decimal point (`1.0`, `0.25`).
-fn float(v: f32) -> String {
+pub fn float(v: f32) -> String {
     let rounded = (f64::from(v) * 1e4).round() / 1e4;
     let text = format!("{rounded}");
     if text.contains(['.', 'e', 'N', 'i']) {

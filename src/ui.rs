@@ -5228,6 +5228,8 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path, texture: Opt
                             Kind::Atlas => Icon::Map,
                             Kind::Gradient => Icon::SwatchBook,
                             Kind::Palette => Icon::Palette,
+                            Kind::Shader => Icon::Sparkles,
+                            Kind::CustomMaterial => Icon::Gem,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {

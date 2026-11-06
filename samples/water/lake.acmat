@@ -1,0 +1,9 @@
+shader = "../shaders/water.ashader"
+
+[params]
+wave_speed = 0.6
+foam = { amount = 0.5 }
+style = "choppy"
+
+[textures]
+sky = "../sky.exr"

@@ -1,4 +1,5 @@
 mod aanim;
+mod acmat;
 mod adata;
 mod agraph;
 mod amesh;
@@ -37,6 +38,7 @@ mod path;
 mod plan;
 mod presets;
 mod preview3d;
+mod shader;
 mod structs;
 mod texture;
 mod theme;

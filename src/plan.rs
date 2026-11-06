@@ -96,6 +96,23 @@ pub enum Job {
         structs: Vec<crate::structs::Attachment>,
         values: crate::structs::Values,
     },
+    /// A shader interface (relative to `input`); see docs/features/custom-materials.md#build.
+    Shader { source: String },
+    /// A custom material's packed texture: each channel's input image (relative to `input`)
+    /// and the input's channel, and the channels no input fills.
+    Pack {
+        sources: [Option<(String, u8)>; 4],
+        fill: [u8; 4],
+        mipmaps: bool,
+    },
+    /// A custom material: its `.acmat`, its shader (both relative to `input`) and the asset ID
+    /// of each of the shader's textures (`0`: empty).
+    CustomMaterial {
+        source: String,
+        shader: String,
+        textures: Vec<u64>,
+        material: Box<crate::acmat::Source>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,7 +133,20 @@ impl Asset {
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", "),
+            Job::Pack { sources, .. } => sources
+                .iter()
+                .flatten()
+                .map(|(s, _)| s.as_str())
+                .fold(Vec::<&str>::new(), |mut list, s| {
+                    if !list.contains(&s) {
+                        list.push(s);
+                    }
+                    list
+                })
+                .join(", "),
             Job::Material { source, .. }
+            | Job::Shader { source }
+            | Job::CustomMaterial { source, .. }
             | Job::Lut { source, .. }
             | Job::Model { source, .. }
             | Job::ModelPart { source }
@@ -223,6 +253,8 @@ fn data_kind(file: &Path) -> Option<Kind> {
 struct Claim {
     color: ColorSpace,
     flip_green: bool,
+    /// `false` only for a custom material's texture with `mipmaps = false`.
+    mipmaps: bool,
 }
 
 pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
@@ -237,6 +269,9 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
     let mut plan = Plan::default();
     let mut sources = Vec::new();
     let mut groups: BTreeMap<(String, String), Group> = BTreeMap::new();
+    // `.acmat` files, and every file and atlas folder for their textures by name.
+    let mut customs = Vec::new();
+    let mut listing: HashSet<String> = HashSet::new();
     for dir in atlases {
         let rel = match relative(input, dir) {
             Ok(rel) => rel,
@@ -248,6 +283,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 continue;
             }
         };
+        listing.insert(rel.clone());
         // `P.aatlas.bin` writes `P.ktx2` too; see docs/features/atlases.md#build.
         let p = strip_extension(&rel).to_owned();
         for (kind, asset_path, job) in [
@@ -288,8 +324,20 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 continue;
             }
         };
+        listing.insert(rel.clone());
         let (dir, name) = split_dir(&rel);
-        if let Some(material) = name.strip_suffix(material::OLD_SUFFIX)
+        if crate::shader::is_shader(file) {
+            let asset_path = format!("{}.{}", strip_extension(&rel), Kind::Shader.extension());
+            plan.assets.push(Asset {
+                id: fnv1a64(asset_path.as_bytes()),
+                kind: Kind::Shader,
+                output: Kind::Shader.output_path(&asset_path),
+                asset_path,
+                job: Job::Shader { source: rel },
+            });
+        } else if crate::acmat::is_custom_material(file) {
+            customs.push(rel);
+        } else if let Some(material) = name.strip_suffix(material::OLD_SUFFIX)
             && !material.is_empty()
         {
             // See docs/features/materials.md#old-mattoml-files.
@@ -415,6 +463,222 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
     let mut maps: HashMap<String, crate::ktx2::Usage> = HashMap::new();
     let mut orm_inputs = HashSet::new();
     let mut materials = Vec::new();
+    // Custom materials' packed textures and materials, written after the textures.
+    let mut custom_assets = Vec::new();
+    let mut shaders: HashMap<String, Result<crate::shader::Shader, String>> = HashMap::new();
+    for rel in customs {
+        let fail = |plan: &mut Plan, message: String| {
+            plan.failures.push(Failure {
+                source: rel.clone(),
+                message,
+            })
+        };
+        let (dir, file) = split_dir(&rel);
+        let name = file.strip_suffix(crate::acmat::SUFFIX).unwrap_or(file);
+        // Its `<name>.*` files are its own; see docs/features/custom-materials.md#materials.
+        if let Some(group) = groups.remove(&(dir.to_owned(), name.to_owned()))
+            && let Some(amat) = group.source
+        {
+            fail(
+                &mut plan,
+                format!("{amat} and {rel} are both material {name}"),
+            );
+            continue;
+        }
+        let source = match fs::read_to_string(input.join(&rel))
+            .map_err(|e| e.to_string())
+            .and_then(|text| crate::acmat::Source::parse(&text))
+        {
+            Ok(source) => source,
+            Err(message) => {
+                fail(&mut plan, message);
+                continue;
+            }
+        };
+        if source.shader.is_empty() {
+            fail(&mut plan, "no shader chosen".into());
+            continue;
+        }
+        let Some(shader_rel) = resolve(dir, &source.shader)
+            .filter(|r| listing.contains(r) && crate::shader::is_shader(Path::new(r)))
+        else {
+            let message = format!("shader {:?} is not a .ashader in input", source.shader);
+            fail(&mut plan, message);
+            continue;
+        };
+        let shader = shaders
+            .entry(shader_rel.clone())
+            .or_insert_with(|| {
+                fs::read_to_string(input.join(&shader_rel))
+                    .map_err(|e| e.to_string())
+                    .and_then(|text| crate::shader::Shader::parse(&text))
+            })
+            .clone();
+        let shader = match shader {
+            Ok(shader) => shader,
+            Err(e) => {
+                fail(&mut plan, format!("{shader_rel}: {e}"));
+                continue;
+            }
+        };
+        let fillable = shader.fillable();
+        let mut ok = true;
+        for (key, _) in &source.textures {
+            if !fillable.iter().any(|(n, _)| n == key) {
+                let message = format!("[textures] {key} is not a texture or input of {shader_rel}");
+                fail(&mut plan, message);
+                ok = false;
+            }
+        }
+        // What fills each texture and input: its `[textures]` key, else a file by name.
+        let mut filled: HashMap<String, String> = HashMap::new();
+        for (fill, usage) in &fillable {
+            let bare = shader.textures.iter().any(|t| t.bare && t.name == *fill);
+            let found = match source.texture(fill) {
+                Some(t) => match resolve(dir, &t.path).filter(|r| listing.contains(r)) {
+                    Some(r) if usage.accepts(Path::new(&r)) => Some(r),
+                    Some(r) => {
+                        let message = format!(
+                            "[textures] {fill} = {:?}: a {} texture cannot take {r}",
+                            t.path,
+                            usage.key()
+                        );
+                        fail(&mut plan, message);
+                        ok = false;
+                        None
+                    }
+                    None => {
+                        fail(
+                            &mut plan,
+                            format!("[textures] {fill} = {:?} is not in input", t.path),
+                        );
+                        ok = false;
+                        None
+                    }
+                },
+                None => {
+                    let mut by_name: Vec<&String> = listing
+                        .iter()
+                        .filter(|r| {
+                            let (d, f) = split_dir(r);
+                            let stem = strip_extension(f);
+                            d == dir
+                                && usage.accepts(Path::new(r))
+                                && (stem == format!("{name}.{fill}") || (bare && stem == name))
+                        })
+                        .collect();
+                    by_name.sort();
+                    by_name.first().map(|r| (*r).clone())
+                }
+            };
+            if let Some(r) = found {
+                filled.insert(fill.clone(), r);
+            }
+        }
+        let mut textures = Vec::new();
+        let mut packs = Vec::new();
+        for t in &shader.textures {
+            let Some(pack) = &t.pack else {
+                let Some(r) = filled.get(&t.name) else {
+                    if t.required {
+                        fail(&mut plan, format!("texture {} is required", t.name));
+                        ok = false;
+                    }
+                    textures.push(0);
+                    continue;
+                };
+                if t.usage.takes_images() {
+                    let flip_green = t.usage == crate::shader::Usage::Normal
+                        && source.texture(&t.name).and_then(|x| x.normal_y) == Some(NormalY::Dx);
+                    let claim = Claim {
+                        color: if t.srgb() {
+                            ColorSpace::Srgb
+                        } else {
+                            ColorSpace::Linear
+                        },
+                        flip_green,
+                        mipmaps: t.mipmaps(),
+                    };
+                    match claims.get(r) {
+                        Some(existing) if *existing != claim => {
+                            let message = format!(
+                                "{r} is used as {} here but differently by another material",
+                                t.name
+                            );
+                            fail(&mut plan, message);
+                            ok = false;
+                        }
+                        _ => {
+                            claims.insert(r.clone(), claim);
+                            if matches!(
+                                t.usage,
+                                crate::shader::Usage::Normal | crate::shader::Usage::Height
+                            ) {
+                                maps.insert(r.clone(), t.usage.ktx());
+                            }
+                        }
+                    }
+                } else if t.usage == crate::shader::Usage::Lut
+                    && settings.volume_lut(r) != (t.dimension() == crate::shader::Dimension::D3)
+                {
+                    let message = format!(
+                        "texture {} is {} but {r} compiles to the other kind of LUT (see volume_luts)",
+                        t.name,
+                        t.dimension().key()
+                    );
+                    fail(&mut plan, message);
+                    ok = false;
+                }
+                textures.push(fnv1a64(strip_extension(r).as_bytes()));
+                continue;
+            };
+            let sources = pack.channels().map(|c| {
+                let (input_name, channel) = crate::shader::pack_input(c?).ok()?;
+                Some((filled.get(input_name)?.clone(), channel))
+            });
+            if sources.iter().all(Option::is_none) {
+                if t.required {
+                    fail(&mut plan, format!("texture {} is required", t.name));
+                    ok = false;
+                }
+                textures.push(0);
+                continue;
+            }
+            for (r, _) in sources.iter().flatten() {
+                orm_inputs.insert(r.clone());
+            }
+            let pack_path = join(dir, &format!("{name}.{}", t.name));
+            textures.push(fnv1a64(pack_path.as_bytes()));
+            packs.push(Asset {
+                id: fnv1a64(pack_path.as_bytes()),
+                kind: Kind::Texture,
+                output: Kind::Texture.output_path(&pack_path),
+                asset_path: pack_path.clone(),
+                job: Job::Pack {
+                    sources,
+                    fill: t.fill(),
+                    mipmaps: t.mipmaps() && settings.mipmaps(&pack_path),
+                },
+            });
+        }
+        if !ok {
+            continue;
+        }
+        let asset_path = join(dir, &format!("{name}.{}", Kind::CustomMaterial.extension()));
+        custom_assets.extend(packs);
+        custom_assets.push(Asset {
+            id: fnv1a64(asset_path.as_bytes()),
+            kind: Kind::CustomMaterial,
+            output: Kind::CustomMaterial.output_path(&asset_path),
+            asset_path,
+            job: Job::CustomMaterial {
+                source: rel.clone(),
+                shader: shader_rel,
+                textures,
+                material: Box::new(source),
+            },
+        });
+    }
     for ((dir, name), group) in &groups {
         if group.source.is_none() && group.slots.is_empty() {
             continue;
@@ -487,6 +751,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             let claim = Claim {
                 color: slot.color_space(),
                 flip_green: slot == Slot::Normal && source.normal_y == Some(NormalY::Dx),
+                mipmaps: true,
             };
             match claims.get(rel) {
                 Some(existing) if *existing != claim => {
@@ -537,12 +802,12 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 },
             });
         }
-        let (color, flip_green) = match claims.get(rel) {
-            Some(claim) => (claim.color, claim.flip_green),
+        let (color, flip_green, claimed_mipmaps) = match claims.get(rel) {
+            Some(claim) => (claim.color, claim.flip_green, claim.mipmaps),
             None if orm_inputs.contains(rel) => continue,
             // Noise is data: linear unless a material slot says otherwise.
-            None if is_noise(Path::new(rel)) => (ColorSpace::Linear, false),
-            None => (settings.color_space(rel), false),
+            None if is_noise(Path::new(rel)) => (ColorSpace::Linear, false, true),
+            None => (settings.color_space(rel), false, true),
         };
         // See docs/spec/ktx2.md#keyvalue-data.
         let usage = match kind {
@@ -566,6 +831,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 usage,
                 // Smaller levels would blend neighbouring gradient or palette cells.
                 mipmaps: settings.mipmaps(rel)
+                    && claimed_mipmaps
                     && !is_gradient(Path::new(rel))
                     && !crate::palette::is_palette(Path::new(rel)),
                 flip_green,
@@ -617,6 +883,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
         });
     }
 
+    plan.assets.extend(custom_assets);
     reject_bad_ids(&mut plan);
     Ok(plan)
 }
@@ -683,7 +950,7 @@ pub fn join(dir: &str, name: &str) -> String {
 
 /// Resolves a `/`-separated `path` relative to `dir` (both input-relative);
 /// `None` if it is absolute or leaves the input directory.
-fn resolve(dir: &str, path: &str) -> Option<String> {
+pub fn resolve(dir: &str, path: &str) -> Option<String> {
     if path.starts_with('/') {
         return None;
     }

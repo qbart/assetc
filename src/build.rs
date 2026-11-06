@@ -86,6 +86,8 @@ impl Outcome {
                         Kind::Atlas => ("atlas", "atlases"),
                         Kind::Gradient => ("gradient", "gradients"),
                         Kind::Palette => ("palette", "palettes"),
+                        Kind::Shader => ("shader", "shaders"),
+                        Kind::CustomMaterial => ("custom material", "custom materials"),
                     };
                     (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
                 })
@@ -261,6 +263,31 @@ pub fn run_cached(
             } => compile_material(input, source, material, (structs, values), warnings)
                 .and_then(|bytes| write(&dest, &bytes))
                 .map(|()| material_detail(material)),
+            Job::Shader { source } => crate::shader::load(input, source).and_then(|loaded| {
+                write(&dest, &loaded.encode())?;
+                Ok(loaded.detail())
+            }),
+            Job::Pack {
+                sources,
+                fill,
+                mipmaps,
+            } => compile_pack(input, sources, *fill, &dest, *mipmaps)
+                .map(|levels| levels_detail(ColorSpace::Linear, levels)),
+            Job::CustomMaterial {
+                source,
+                shader,
+                textures,
+                material,
+            } => compile_custom_material(input, source, shader, textures, material, warnings)
+                .and_then(|bytes| write(&dest, &bytes))
+                .map(|()| {
+                    let name = crate::plan::split_dir(strip_extension(shader)).1;
+                    let n = textures.iter().filter(|id| **id != 0).count();
+                    format!(
+                        "custom material: {name}, {n} texture{}",
+                        if n == 1 { "" } else { "s" }
+                    )
+                }),
         };
         if result.is_ok() {
             outcome
@@ -370,6 +397,8 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
         Job::Material { structs, .. } => !structs.is_empty(),
         Job::Atlas { source, .. } => mentions(input.join(source).join(crate::atlas::CONFIG)),
         Job::Data { source, kind } => *kind != Kind::Schema && mentions(input.join(source)),
+        // Params are a struct of a schema; see docs/features/custom-materials.md#build.
+        Job::Shader { .. } | Job::CustomMaterial { .. } => true,
         _ => false,
     };
     let mut reads: Vec<PathBuf> = match job {
@@ -384,6 +413,17 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
         Job::Model { source, .. } => vec![input.join(source)],
         Job::Atlas { source, .. } => files_under(&input.join(source)),
         Job::Data { source, .. } => vec![input.join(source)],
+        Job::Pack { sources, .. } => sources
+            .iter()
+            .flatten()
+            .map(|(s, _)| input.join(s))
+            .collect(),
+        Job::Shader { source } => shader_reads(input, source),
+        Job::CustomMaterial { source, shader, .. } => {
+            let mut reads = shader_reads(input, shader);
+            reads.push(input.join(source));
+            reads
+        }
         Job::Material { source, .. } if source.ends_with(material::SOURCE_SUFFIX) => {
             vec![input.join(source)]
         }
@@ -953,6 +993,141 @@ fn compile_orm(input: &Path, sources: &[Option<String>; 3], dest: &Path) -> Resu
     write_texture(packed, dest, (ColorSpace::Linear, Usage::Orm), true)
 }
 
+/// A custom material's packed texture: channel `c` from its input's channel, else `fill`; see
+/// docs/features/custom-materials.md#packing.
+fn compile_pack(
+    input: &Path,
+    sources: &[Option<(String, u8)>; 4],
+    fill: [u8; 4],
+    dest: &Path,
+    mipmaps: bool,
+) -> Result<usize, String> {
+    let mut size: Option<(&str, (u32, u32))> = None;
+    let mut images: HashMap<&str, image::RgbaImage> = HashMap::new();
+    for (source, _) in sources.iter().flatten() {
+        if images.contains_key(source.as_str()) {
+            continue;
+        }
+        let image = decode(&input.join(source)).map_err(|e| format!("{source}: {e}"))?;
+        match size {
+            None => size = Some((source, image.dimensions())),
+            Some((first, dims)) if dims != image.dimensions() => {
+                let (w, h) = image.dimensions();
+                return Err(format!(
+                    "pack inputs differ in size: {first} is {} × {}, {source} is {w} × {h}",
+                    dims.0, dims.1
+                ));
+            }
+            Some(_) => {}
+        }
+        images.insert(source, image);
+    }
+    let Some((_, (width, height))) = size else {
+        return Err("no pack inputs".into());
+    };
+    let mut packed = image::RgbaImage::from_pixel(width, height, image::Rgba(fill));
+    for (channel, source) in sources.iter().enumerate() {
+        let Some((source, from)) = source else {
+            continue;
+        };
+        for (out, src) in packed.pixels_mut().zip(images[source.as_str()].pixels()) {
+            out[channel] = src[*from as usize];
+        }
+    }
+    write_texture(packed, dest, (ColorSpace::Linear, Usage::Data), mipmaps)
+}
+
+/// The files a shader's build reads: the `.ashader` and its stages.
+fn shader_reads(input: &Path, rel: &str) -> Vec<PathBuf> {
+    let mut reads = vec![input.join(rel)];
+    if let Ok(shader) = fs::read_to_string(input.join(rel))
+        .map_err(|e| e.to_string())
+        .and_then(|t| crate::shader::Shader::parse(&t))
+    {
+        let dir = crate::plan::split_dir(rel).0;
+        for path in [&shader.stages.vertex, &shader.stages.fragment]
+            .into_iter()
+            .flatten()
+        {
+            if let Some(file) = crate::plan::resolve(dir, path) {
+                reads.push(input.join(file));
+            }
+        }
+    }
+    reads
+}
+
+/// `.acmat.bin` of a custom material; see docs/features/custom-materials.md#build.
+fn compile_custom_material(
+    input: &Path,
+    source: &str,
+    shader_rel: &str,
+    textures: &[u64],
+    material: &crate::acmat::Source,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<u8>, String> {
+    use crate::structs::{Attachment, Owner, Scope, Values};
+    let loaded =
+        crate::shader::load(input, shader_rel).map_err(|e| format!("shader {shader_rel}: {e}"))?;
+    let dir = crate::plan::split_dir(source).0;
+    // The params are checked and compiled like an attached struct of scope 3.
+    let params: Vec<Attachment> = loaded
+        .params
+        .iter()
+        .map(|(schema_rel, ty, ..)| {
+            let rel = crate::adata::relative(Path::new(dir), Path::new(schema_rel));
+            Attachment::new(rel, ty.clone())
+        })
+        .collect();
+    let mut params_values = Values::new();
+    if let Some(a) = params.first() {
+        params_values.insert(a.ty.clone(), material.params.clone().into());
+    } else if !material.params.is_empty() {
+        warnings.push(format!("[params] is set but {shader_rel} has no params"));
+    }
+    let scopes = [
+        Scope {
+            scope: crate::structs::ASSET,
+            attachments: &material.structs,
+            owners: vec![Owner {
+                item: 0,
+                label: "material".into(),
+                values: &material.values,
+            }],
+        },
+        Scope {
+            scope: crate::acmat::PARAMS_SCOPE,
+            attachments: &params,
+            owners: vec![Owner {
+                item: 0,
+                label: "params".into(),
+                values: &params_values,
+            }],
+        },
+    ];
+    let schemas = crate::structs::load(&input.join(dir), Some(input), &scopes);
+    let chunks = crate::structs::finish(input, &scopes, &schemas, warnings)?;
+    let block = match &loaded.params {
+        Some((_, _, schema, si)) => {
+            let values = crate::adata::resolve(schema, *si, &material.params, None);
+            crate::shader::pack(&loaded.block, &values)
+        }
+        None => Vec::new(),
+    };
+    let shader_id = crate::hash::fnv1a64(
+        format!(
+            "{}.{}",
+            strip_extension(shader_rel),
+            Kind::Shader.extension()
+        )
+        .as_bytes(),
+    );
+    let state = loaded.shader.state.with(material.state);
+    Ok(crate::acmat::encode(
+        shader_id, &state, &block, textures, chunks,
+    ))
+}
+
 fn write_texture(
     image: image::RgbaImage,
     dest: &Path,
@@ -1242,6 +1417,95 @@ mod tests {
         assert_eq!(
             outcome.failures[0].message,
             "Gone is not a struct of game.aschema"
+        );
+    }
+
+    #[test]
+    fn custom_materials_fill_pack_and_check_their_textures() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(input.join("water")).unwrap();
+        fs::write(
+            input.join("game.aschema"),
+            r#"{ "$dialect": "a/1", "types": { "P": { "kind": "struct", "fields": [
+                 { "name": "speed", "type": "f32", "default": 2, "max": 5 },
+                 { "name": "sound", "type": "string" } ] } } }"#,
+        )
+        .unwrap();
+        fs::write(
+            input.join("water.ashader"),
+            "params = { schema = \"game.aschema\", type = \"P\" }\n\n\
+             [[textures]]\nname = \"color\"\nusage = \"color\"\nbare = true\n\n\
+             [[textures]]\nname = \"mask\"\nusage = \"data\"\npack = { r = \"foam\", b = \"depth.g\" }\n\n\
+             [[textures]]\nname = \"detail\"\nusage = \"data\"\nrequired = true\n",
+        )
+        .unwrap();
+        let png = |name: &str, rgba: [u8; 4]| {
+            image::RgbaImage::from_pixel(4, 4, image::Rgba(rgba))
+                .save(input.join("water").join(name))
+                .unwrap();
+        };
+        png("lake.png", [10, 20, 30, 255]);
+        png("lake.foam.png", [200, 0, 0, 255]);
+        png("lake.depth.png", [0, 77, 0, 255]);
+        png("other.png", [1, 2, 3, 255]);
+        let material = |text: &str| fs::write(input.join("water/lake.acmat"), text).unwrap();
+
+        // `detail` is required and nothing fills it.
+        material("shader = \"../water.ashader\"\n");
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert_eq!(outcome.failures.len(), 1, "{:?}", outcome.failures);
+        assert_eq!(outcome.failures[0].message, "texture detail is required");
+
+        material(
+            "shader = \"../water.ashader\"\n\n[params]\nspeed = 9\n\n[textures]\ndetail = \"other.png\"\n",
+        );
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(
+            outcome.warnings[0].message,
+            "params: P/speed: 9 is above the maximum 5"
+        );
+        let mask =
+            crate::ktx2::read(&fs::read(output.join("water/lake.mask.ktx2")).unwrap()).unwrap();
+        let texel = &mask.level0.unwrap().pixels[..4];
+        assert_eq!(
+            texel,
+            [200, 255, 77, 255],
+            "foam's R, fill, depth's G, fill"
+        );
+        assert!(
+            !output.join("water/lake.foam.ktx2").exists(),
+            "inputs make no textures"
+        );
+        let bytes = fs::read(output.join("water/lake.acmat.bin")).unwrap();
+        let reader = crate::chunks::Reader::parse(&bytes, crate::acmat::FORMAT).unwrap();
+        assert_eq!(reader.require("PARAMS").unwrap()[..4], 9f32.to_le_bytes());
+        let ids: Vec<u64> = reader
+            .require("TEXTURES")
+            .unwrap()
+            .chunks(8)
+            .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+            .collect();
+        let id = |p: &str| crate::hash::fnv1a64(p.as_bytes());
+        assert_eq!(
+            ids,
+            [id("water/lake"), id("water/lake.mask"), id("water/other")]
+        );
+
+        // Keys that are not the shader's, and a PBR material of the same name.
+        material("shader = \"../water.ashader\"\n\n[textures]\nnormal = \"lake.png\"\n");
+        fs::write(input.join("water/lake.amat"), "").unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert_eq!(
+            outcome.failures[0].message,
+            "water/lake.amat and water/lake.acmat are both material lake"
+        );
+        fs::remove_file(input.join("water/lake.amat")).unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        assert_eq!(
+            outcome.failures[0].message,
+            "[textures] normal is not a texture or input of water.ashader"
         );
     }
 

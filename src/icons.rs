@@ -78,10 +78,12 @@ pub enum Icon {
     Unlink2,
     Wrench,
     X,
+    Sparkles,
+    Binary,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 73] = [
+const SVGS: [(&str, &str); 75] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -203,6 +205,8 @@ const SVGS: [(&str, &str); 73] = [
     ("unlink-2", include_str!("../assets/icons/unlink-2.svg")),
     ("wrench", include_str!("../assets/icons/wrench.svg")),
     ("x", include_str!("../assets/icons/x.svg")),
+    ("sparkles", include_str!("../assets/icons/sparkles.svg")),
+    ("binary", include_str!("../assets/icons/binary.svg")),
 ];
 
 // Rendered white so `Image::tint` can color them.

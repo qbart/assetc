@@ -48,7 +48,12 @@ pub const PROJECTS: [Project; 25] = [
         "MIT or Apache-2.0",
         "bevy.org",
     ),
-    project("wgpu", "graphics", "MIT or Apache-2.0", "wgpu.rs"),
+    project(
+        "wgpu",
+        "graphics; naga reads SPIR-V",
+        "MIT or Apache-2.0",
+        "wgpu.rs",
+    ),
     project(
         "winit",
         "windowing",
@@ -172,6 +177,7 @@ mod tests {
         fn part_of(name: &str) -> &str {
             match name {
                 "egui_extras" => "egui",
+                "naga" => "wgpu",
                 "serde" | "serde_json" | "toml" | "toml_edit" => "serde and toml",
                 other => other,
             }

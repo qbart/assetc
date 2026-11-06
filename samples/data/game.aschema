@@ -524,6 +524,89 @@
           "default": false
         }
       ]
+    },
+    "WaterStyle": {
+      "kind": "enum",
+      "doc": "How rough the water is.",
+      "values": [
+        "calm",
+        "choppy",
+        "storm"
+      ]
+    },
+    "Foam": {
+      "kind": "struct",
+      "doc": "White water where the mask's red channel says.",
+      "fields": [
+        {
+          "name": "amount",
+          "type": "f32",
+          "default": 0.4,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "scale",
+          "type": "f32",
+          "default": 8,
+          "min": 1,
+          "max": 32
+        }
+      ]
+    },
+    "WaterParams": {
+      "kind": "struct",
+      "doc": "Params of shaders/water.ashader.",
+      "fields": [
+        {
+          "name": "deep_color",
+          "type": "rgb",
+          "default": "#0b3d4f"
+        },
+        {
+          "name": "wave_speed",
+          "type": "f32",
+          "default": 1,
+          "min": 0,
+          "max": 10,
+          "step": 0.1
+        },
+        {
+          "name": "shallow_color",
+          "type": "rgb",
+          "default": "#2a8c8c"
+        },
+        {
+          "name": "wave_scale",
+          "type": "f32",
+          "default": 4,
+          "min": 0.1,
+          "max": 32
+        },
+        {
+          "name": "foam",
+          "type": "Foam"
+        },
+        {
+          "name": "style",
+          "type": "WaterStyle"
+        },
+        {
+          "name": "opacity",
+          "type": "f32",
+          "default": 0.85,
+          "min": 0,
+          "max": 1,
+          "step": 0.01
+        },
+        {
+          "name": "splash_sound",
+          "type": "string",
+          "default": "water_small",
+          "doc": "CPU only: strings are not in the GPU block."
+        }
+      ]
     }
   }
 }
