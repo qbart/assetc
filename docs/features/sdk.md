@@ -1,6 +1,6 @@
 # SDK
 
-`assetc-sdk` is the runtime side of assetc: a Rust library a game (or any
+The `assetc` crate is the runtime side of assetc: a Rust library a game (or any
 tool) uses to read what `assetc build` and `assetc pack` write. It knows
 every [output format](../spec/), so a game never parses the binary layouts
 itself. The idea follows the SDK of
@@ -8,20 +8,39 @@ itself. The idea follows the SDK of
 
 ## Crate
 
-- Lives in `sdk/` of this repository, a member of the Cargo workspace; the
-  package is `assetc-sdk`, the library `assetc_sdk`.
-- Depends on **nothing but `std`**: no Bevy, no assetc, no image or
-  compression crates. Pulling it in builds only the SDK.
+- The only crate of this repository published to
+  [crates.io](https://crates.io/crates/assetc): the package and the library
+  are both `assetc` (`use assetc::Assets;`). It lives in `sdk/`, a member of
+  the Cargo workspace.
+- Lightweight: it depends on **nothing but `std`**. No Bevy, no glTF,
+  meshoptimizer, image, shader or compression crates, and none of the
+  compiler's code: it holds only what is needed to read the `.a*` formats at
+  runtime. Pulling it in builds only the SDK.
 - Engine-neutral: it returns plain Rust values (pixels as bytes, vertices as
   arrays). Turning them into engine resources (a Bevy `Image`, `Mesh`, …) is
   the game's part; the [demo](demo.md) shows how for Bevy.
+- Licensed `MIT OR Apache-2.0` (`sdk/LICENSE-MIT`, `sdk/LICENSE-APACHE`);
+  `sdk/README.md` is its crates.io page.
 
 ```toml
 [dependencies]
-assetc-sdk = { git = "<this repository's URL>", package = "assetc-sdk" }
+assetc = "0.1"
 # or, next to a checkout:
-assetc-sdk = { path = "../assetc/sdk" }
+assetc = { path = "../assetc/sdk" }
 ```
+
+The compiler (CLI and GUI) is the unpublished package `assetc-core` at the
+repository root; its binary is still `assetc`. It reads the formats with its
+own code and uses the SDK only in tests, to check that what it writes reads
+back.
+
+### Publishing
+
+`make publish` runs `cargo publish -p assetc`: it checks that the crate
+builds alone from its packaged files, then uploads it. It needs a crates.io
+token (`cargo login`) and a version in `sdk/Cargo.toml` not published yet.
+`make publish-check` (`cargo publish -p assetc --dry-run`) does everything
+but the upload.
 
 ## Opening assets
 
@@ -127,7 +146,7 @@ material does not repeat them.
 
 ## Errors
 
-Every reader returns `Result<T, assetc_sdk::Error>`:
+Every reader returns `Result<T, assetc::Error>`:
 
 - `Error::Io` for a file that cannot be read;
 - `Error::Format { file, message }` for bytes that are not what the spec

@@ -24,7 +24,7 @@ $ cargo run --release -p assetc-demo -- [path]
   pack`), then runs the demo on that pack. `make demo ASSETS=tmp/build`
   runs it on the output directory instead.
 - Lives in `demo/`, a member of the Cargo workspace. Its only dependencies
-  are `assetc-sdk` and `bevy`.
+  are `assetc` (the [SDK](sdk.md#crate)) and `bevy`.
 
 ## Layout
 
