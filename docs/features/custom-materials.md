@@ -398,10 +398,13 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
 
 ## SDK
 
-`Kind::Shader` and `Kind::CustomMaterial`; `Shader` gives the block layout
-(fields by name: offset, type), resources and SPIR-V words;
-`CustomMaterial` gives the shader ID, state, the block bytes, texture IDs
-and the params as `Structs` (scope 3). See [`sdk.md`](sdk.md).
+`Kind::Shader` and `Kind::CustomMaterial`; `Shader` gives the params type,
+the block layout (fields by path: offset, type), the textures (usage,
+dimension, default, packing), the state, the bindings the stages declare
+(set, binding, stages, by name or by kind) and the SPIR-V words with their
+entry points; `CustomMaterial` gives the shader ID, state, the block bytes,
+texture IDs and the params as `Structs` (`Scope::Params`, scope 3) next to
+its attached structs. See [`sdk.md`](sdk.md#custom-materials).
 
 ## Later
 
