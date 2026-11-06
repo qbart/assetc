@@ -3,8 +3,7 @@
 > **Status: design.** Nothing on this page is built yet; it is the spec the
 > implementation follows. Formats: [`.ashader`](../spec/ashader.md),
 > [`.ashader.bin`](../spec/ashader.bin.md),
-> [custom `.amat`](../spec/amat.md#custom-materials),
-> [custom `.amat.bin`](../spec/acmat.bin.md).
+> [`.acmat`](../spec/acmat.md), [`.acmat.bin`](../spec/acmat.bin.md).
 
 [Materials](materials.md) are glTF metallic-roughness PBR: fixed values and
 fixed texture slots. A **custom material** is made for a shader assetc does not
@@ -18,7 +17,7 @@ material only when the shader comes with SPIR-V code (see
 shaders/water.ashader      what a water material has: params, textures, state, code
 shaders/water.frag.spv     optional SPIR-V, for the preview and the game
 data/game.aschema          struct WaterParams: the params' fields
-water/lake.amat            shader = "../shaders/water.ashader", its params and textures
+water/lake.acmat           shader = "../shaders/water.ashader", its params and textures
 water/lake.foam.png        fills the shader's `foam` input by name
 ```
 
@@ -32,8 +31,8 @@ shader's interface:
   defaults, ranges, enums, groups and conditions all come from the schema, so
   params are edited and checked like [instances](instances.md). A shader
   without params is valid.
-- **Textures**: the shader's texture bindings, in binding order, each with a
-  name, a usage, a dimension, a color space and a fallback. A binding is
+- **Textures**: the shader's textures, in order, each with a
+  name, a usage, a dimension, a color space and a fallback. A texture is
   filled by one input file, or **packed** from channels of several inputs
   (ORM generalised, see [Packing](#packing)).
 - **State**: blending, culling and depth, which every material of the shader
@@ -112,17 +111,17 @@ give it as GLSL and WGSL declarations to paste into the shader.
 
 ### Textures
 
-Each `[[textures]]` entry is one binding the shader samples:
+Each `[[textures]]` entry is one texture the shader samples:
 
 | Key | Meaning |
 |-----|---------|
-| `name` | Identifier (`[a-z][a-z0-9_]*`), unique in the shader. The `.amat`'s key for it and, unpacked, its by-name suffix. |
+| `name` | Identifier (`[a-z][a-z0-9_]*`), unique in the shader. The `.acmat`'s key for it and, unpacked, its by-name suffix. |
 | `usage` | What it holds; sets the default color space and which files can fill it (below). Written to the KTX2 [usage key](../spec/ktx2.md). |
 | `dimension` | `2d` (default), `3d`, `cube`. A file that compiles to another dimension fails the material. |
 | `color_space` | `srgb` or `linear`; the default comes from `usage`. Only for image files: other assets keep their own. |
 | `default` | What the game binds when a material leaves it empty: `white` (default), `black`, `gray`, `normal` (`0.5, 0.5, 1`), `transparent`. |
 | `required` | `true`: a material without it fails. Default `false`. |
-| `bare` | `true`: the material's unsuffixed file (`lake.png`) fills it by name, as PBR's base color. At most one binding, unpacked. |
+| `bare` | `true`: the material's unsuffixed file (`lake.png`) fills it by name, as PBR's base color. At most one texture, unpacked. |
 | `mipmaps` | `false`: compiled without mipmaps, whatever `no_mipmaps` says. Default `true` (then `no_mipmaps` applies). |
 | `channels` | `rgba` (default), `rg` or `r`: the compiled format (`R8G8B8A8`, `R8G8`, `R8`), for data that needs fewer channels. sRGB needs `rgba`. |
 | `pack` | Builds the texture from other inputs' channels instead, see [Packing](#packing). |
@@ -140,14 +139,14 @@ Each `[[textures]]` entry is one binding the shader samples:
 | `environment` | an [HDR environment](hdr.md) (`*.exr`), `dimension = "cube"` | its own |
 | `atlas` | an [atlas](atlases.md) (`*.atlas` folder) | its own |
 
-An image is compiled with the binding's settings, like a PBR slot texture
+An image is compiled with the texture's settings, like a PBR slot texture
 (the same file used with conflicting color spaces, `normal_y` or channels by
 any materials fails the build). The other assets compile as they always do,
 and the material refers to their texture.
 
 ### Packing
 
-`pack` maps the channels of the binding to **inputs**, each an input name and
+`pack` maps the channels of the texture to **inputs**, each an input name and
 optionally the input's channel (`foam`, `foam.r`, `depth.a`; `.r` by
 default):
 
@@ -159,17 +158,16 @@ pack = { r = "foam", g = "depth", b = "caustics.g" }
 fill = [0, 255, 0, 255]
 ```
 
-- An input is filled like an unpacked binding: by the material's key of its
-  name, or by name (`lake.foam.png`). It is not a binding and makes no
-  texture of its own.
-- Inputs are images. All inputs of one material's packed binding must have the
+- An input is filled like an unpacked texture: by the material's key of its
+  name, or by name (`lake.foam.png`). It makes no texture of its own.
+- Inputs are images. All inputs of one material's packed texture must have the
   same size; a channel whose input the material leaves empty gets `fill`.
 - The packed texture is linear. Its asset path is
-  `<dir>/<material>.<binding>` (`water/lake.mask`), as `.orm` is for PBR.
-- A material with none of a pack's inputs gets no texture for the binding
+  `<dir>/<material>.<texture>` (`water/lake.mask`), as `.orm` is for PBR.
+- A material with none of a pack's inputs gets no texture there
   (`0`, the game binds `default`).
-- Input names share the binding names' namespace: an input may not be named
-  like a binding.
+- Input names share the texture names' namespace: an input may not be named
+  like a texture.
 
 ### State
 
@@ -200,59 +198,75 @@ point `entry` (`"main"` by default, per stage: `fragment_entry`,
 
 ### The interface in SPIR-V
 
-The resources a stage may use, as Vulkan GLSL; a stage may leave any of them
-out, but what it declares must match:
+assetc finds a stage's resources **by name**, at whatever descriptor set and
+binding the stage declares them. It asks for no particular numbers, so a
+shader keeps the layout its game's renderer uses; the `.ashader.bin` records
+the numbers it found (see [`ashader.bin.md`](../spec/ashader.bin.md#resources)).
+Names come from the SPIR-V's debug names (`OpName`), which every compiler
+writes by default; a stage stripped of them (`spirv-opt --strip-debug`)
+fails the shader with `<file>: has no names; compile without stripping debug
+info`.
+
+| Name (variable or block type) | Resource | Notes |
+|-------------------------------|----------|-------|
+| `Params` / `params` | uniform block | The GPU block; each member it declares must have the block's offset and type for that field, by name (nested structs by their members' names). It may declare fewer members. |
+| a texture's `name` | texture | `texture2D`, `texture3D` or `textureCube` by the texture's `dimension` |
+| `<name>_sampler` | sampler | The texture's sampler; optional |
+| `Frame` / `frame` | uniform block | Optional, filled by the preview, see below |
+| `Object` / `object` | uniform block | Optional, filled by the preview: `mat4 model`, `mat4 normal` (inverse transpose of `model`) |
 
 ```glsl
-// set 0: the frame, filled by the preview (or the game)
+// The numbers are yours; only the names matter.
+layout(set = 1, binding = 0, std140) uniform Params {
+    vec3 depth_color;
+    float wave_speed;
+} params;
+layout(set = 1, binding = 1) uniform texture2D color;
+layout(set = 1, binding = 2) uniform sampler color_sampler;
 layout(set = 0, binding = 0, std140) uniform Frame {
     mat4 view_proj;
-    mat4 view;
-    vec4 camera_position;   // xyz world, w unused
-    vec4 light_direction;   // xyz world, towards the light
-    vec4 light_color;       // rgb linear, w intensity
-    vec4 time;              // x seconds since start, y delta, zw unused
-    vec4 viewport;          // width, height, 1/width, 1/height
+    vec4 time;
 } frame;
-
-// set 1: the material
-layout(set = 1, binding = 0, std140) uniform Params { /* the GPU block */ } params;
-layout(set = 1, binding = 1) uniform texture2D color;   // binding 1 + 2i: texture i
-layout(set = 1, binding = 2) uniform sampler color_sampler;  // 2 + 2i: its sampler
-// …
-
-// set 2: the object
-layout(set = 2, binding = 0, std140) uniform Object {
-    mat4 model;
-    mat4 normal;            // inverse transpose of model
-} object;
 ```
+
+`Frame`'s members, any of them, in any order:
+
+| Member | Type | Value in the preview |
+|--------|------|----------------------|
+| `view_proj` | `mat4` | view-projection |
+| `view` | `mat4` | view |
+| `camera_position` | `vec4` | xyz world, w `1` |
+| `light_direction` | `vec4` | xyz world, towards the key light; w `0` |
+| `light_color` | `vec4` | rgb linear, w intensity |
+| `time` | `vec4` | x seconds since the preview started, y frame delta |
+| `viewport` | `vec4` | width, height, 1 / width, 1 / height |
 
 - Textures and samplers are separate (`texture2D` + `sampler`, used as
   `sampler2D(color, color_sampler)`); combined image samplers are rejected.
-  `textureCube` / `texture3D` follow the binding's `dimension`.
-- **Fragment input** without a `vertex` stage, from assetc's own vertex stage:
-  location 0 `vec3` world position, 1 `vec3` world normal, 2 `vec2` UV 0,
-  3 `vec4` world tangent (w = handedness), 4 `vec4` vertex color.
+- **Fragment input** without a `vertex` stage, from assetc's own vertex
+  stage: location 0 `vec3` world position, 1 `vec3` world normal, 2 `vec2`
+  UV 0, 3 `vec4` world tangent (w = handedness), 4 `vec4` vertex color.
 - **Vertex input**, for a `vertex` stage: location 0 `vec3` position,
   1 `vec3` normal, 2 `vec2` UV 0, 3 `vec4` tangent, 4 `vec4` color
   (`1, 1, 1, 1` when the mesh has none). Its output must give the fragment
   stage what it reads.
 - **Fragment output**: location 0 `vec4`, linear color (the preview
   tone-maps it); alpha is used by the shader's `blend`.
-- The build fails the shader when a stage's `Params` block has another size
-  or different member offsets than the GPU block, a texture binding has
-  another dimension, a stage declares a binding the interface has not, or the
-  entry point is missing or of the wrong stage. Unused bindings are fine.
+- The build fails the shader when a stage's `Params` member has another
+  offset or type than the block's field of that name, or a name the block
+  has not; a texture has another dimension; a resource name is used at two
+  different set / binding pairs across the stages; two resources share a set
+  and binding; or the entry point is missing or of the wrong stage. Uniform
+  blocks, textures and samplers with other names are reported as
+  `<file>: <name> is not part of the interface` and fail it too.
 
 ## Materials
 
-A material is custom when its `.amat` has `shader` (path to a `.ashader`,
-relative to the `.amat`'s folder). The PBR keys then do not apply and are
-errors; instead (see [`amat.md`](../spec/amat.md#custom-materials)):
+A custom material is a `<name>.acmat` file (TOML, see
+[`acmat.md`](../spec/acmat.md)) naming its shader, relative to its folder:
 
 ```toml
-# water/lake.amat
+# water/lake.acmat
 shader = "../shaders/water.ashader"
 blend = "blend"                    # overrides the shader's state
 
@@ -263,7 +277,7 @@ foam = { amount = 0.4, scale = 8.0 }
 
 [textures]
 color = "lake.png"
-sky = "../forest.exr"
+sky = "../sky.exr"
 ripples = { path = "../shared/ripples.n.png", normal_y = "dx" }
 ```
 
@@ -272,17 +286,17 @@ ripples = { path = "../shared/ripples.n.png", normal_y = "dx" }
   Checked like instances: a type mismatch or unknown enum value fails the
   material; out-of-range numbers, unknown keys and refs or assets that do not
   resolve are warnings ([build marks](gui.md#build-marks) turn it orange).
-- **`[textures]`**: one key per binding or input name, a path (relative to
-  the `.amat`'s folder) or `{ path, normal_y }`.
-- **By name**: as for PBR, files next to the material named
-  `<material>.<name>.<ext>` fill the binding or input `<name>`, and
-  `<material>.<ext>` fills the `bare` binding. A key in `[textures]` wins.
-  A file only joins a custom material when its suffix is one of its shader's
-  names; the PBR suffixes (`.n`, `.r`, …) mean nothing here.
-- **Structs** can be attached as to any material (`[[structs]]`,
-  `[values.<Type>]`).
-- A material is either PBR or custom; a material named by convention files
-  only (no `.amat`) is always PBR.
+- **`[textures]`**: one key per texture or input name, a path (relative to
+  the `.acmat`'s folder) or `{ path, normal_y }`.
+- **By name**: files next to the material named `<material>.<name>.<ext>`
+  fill the texture or input `<name>`, and `<material>.<ext>` fills the `bare`
+  texture. A key in `[textures]` wins. Only the shader's names count; the PBR
+  suffixes (`.n`, `.r`, …) mean nothing here.
+- Where `<name>.acmat` exists, the folder's `<name>.*` files belong to it and
+  no PBR material `<name>` is formed from them; a `<name>.amat` next to it is
+  an error.
+- **Structs** can be attached as to PBR materials (`[[structs]]`,
+  `[values.<Type>]`); `asset<material>` fields take `*.amat` and `*.acmat`.
 
 Models' glTF materials stay PBR; mapping them to custom materials is
 [not designed yet](#later).
@@ -290,31 +304,30 @@ Models' glTF materials stay PBR; mapping them to custom materials is
 ## Build
 
 - **Shader** `<dir>/<name>.ashader` → `<dir>/<name>.ashader.bin`
-  ([spec](../spec/ashader.bin.md)), manifest kind `shader`: the interface,
-  the GPU block layout and the SPIR-V stages. Built when any material uses it
-  or not.
-- **Custom material** → `<dir>/<name>.amat.bin`, the same asset path as a PBR
-  material, but in the chunked format `ACMAT`
-  ([spec](../spec/acmat.bin.md)) and manifest kind `custom material`: the
+  ([spec](../spec/ashader.bin.md)), manifest kind `13` (`shader`): the
+  interface, the GPU block layout, the resources found in the stages and the
+  SPIR-V. Built whether a material uses it or not.
+- **Custom material** `<dir>/<name>.acmat` → `<dir>/<name>.acmat.bin`
+  ([spec](../spec/acmat.bin.md)), manifest kind `14` (`custom material`): the
   shader's asset ID, the state, the GPU block bytes ready to upload, the
-  texture asset IDs in binding order (`0` = empty, bind the default), and the
-  params and attached structs as struct chunks.
-- A material is rebuilt when its `.amat`, shader, params schema, `.spv`
+  texture asset IDs in the shader's texture order (`0` = empty, bind the
+  default), and the params and attached structs as struct chunks.
+- A material is rebuilt when its `.acmat`, shader, params schema, `.spv`
   files or any texture input changes.
 
 The build fails the shader, and every material using it, when the
-`.ashader` does not parse, its params struct cannot be found, a binding is
+`.ashader` does not parse, its params struct cannot be found, a texture is
 invalid, the block is over 16 KiB, or a stage does not parse or does not
 match the interface. A material fails on its own when its shader fails,
-`[textures]` points at a missing file or one its binding cannot take, a
-`required` binding is empty, pack inputs differ in size, or a params value
+`[textures]` points at a missing file or one its texture cannot take, a
+`required` texture is empty, pack inputs differ in size, or a params value
 has an error.
 
 ```
 shaders/water.ashader -> shaders/water.ashader.bin (shader: 64-byte params, 4 textures, fragment)
 water/lake.png -> water/lake.ktx2 (srgb, 11 levels)
 water/lake.foam.png, water/lake.depth.png -> water/lake.mask.ktx2 (linear, 11 levels)
-water/lake.amat -> water/lake.amat.bin (custom material: water, 3 textures)
+water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
 ```
 
 ## GUI
@@ -331,18 +344,18 @@ water/lake.amat -> water/lake.amat.bin (custom material: water, 3 textures)
 - **Shader** tab (icon `sparkles`), in the property editor style:
   - *Params*: the schema and struct, picked as in the
     [Structs tab](structs.md#structs-tab)'s Attach menu; a Clear button.
-  - *Textures*: one card per binding, in order, with its keys as rows; add,
-    remove and drag to reorder (reordering changes binding numbers, which the
-    Layout view shows). Pack channels are four drop-downs of the input names
+  - *Textures*: one card per texture, in order, with its keys as rows; add,
+    remove and drag to reorder (the order of the material's texture IDs). Pack channels are four drop-downs of the input names
     plus *New input…*.
   - *State*: the [State](#state) keys.
   - *Stages*: two drop-downs of the `*.spv` files in `input`, plus `None`.
   - Saved like the other editors, whole file, keys in spec order.
 - **Canvas — Layout view**: the GPU block as a table (offset, size, type,
   field path; CPU-only fields listed after it in `TEXT_WEAK` with
-  `CPU only`), the bindings table (set, binding, name, kind, dimension,
-  usage), and **GLSL** / **WGSL** tabs with the interface declarations,
-  each with a **Copy** button. Problems (a stage that does not match) show
+  `CPU only`), the resources table (name, kind, dimension, usage, and the
+  set / binding each stage declares it at, or `unused`), and **GLSL** /
+  **WGSL** tabs with the interface declarations (at sets and bindings of
+  assetc's choosing, to be changed freely), each with a **Copy** button. Problems (a stage that does not match) show
   under the tables in `CHANNEL_R`, one line each.
 - **`*.spv`** files: the Info tab shows SPIR-V version, generator, size,
   entry points with their stages, and every resource binding (set, binding,
@@ -351,20 +364,19 @@ water/lake.amat -> water/lake.amat.bin (custom material: water, 3 textures)
 ### Custom materials
 
 - **New Material ▸ Custom Material** in the Input tree's context menu
-  creates `material.amat` with `shader = ""` and the Material tab open on its
-  Shader row. Until custom materials are built the item is disabled (see
-  [`file-operations.md`](file-operations.md#context-menu)).
-- The **Material** tab starts with a **Shader** row: a drop-down of
-  **Standard (PBR)** and every `*.ashader` in `input`. Switching between PBR
-  and a shader, or between shaders, drops the keys the new choice has no use
-  for; when any are set, a confirmation lists them first.
+  creates `material.acmat` with `shader = ""`, selects it and starts renaming
+  it. `*.acmat` rows use the icon `gem`, as `*.amat`.
+- The **Material** tab of a `.acmat` starts with a **Shader** row: a
+  drop-down of every `*.ashader` in `input`. Choosing another shader drops the
+  params and textures it has no use for; when any are set, a confirmation
+  lists them first. Without a shader the tab shows only this row.
 - With a shader, the sections are:
   - *Params*: the params struct's fields with the instance editors
     (groups, conditions, defaults shown `TEXT_WEAK`, reset per field), as in
     the [Structs tab](structs.md#structs-tab).
-  - *Textures*: one row per binding (packed bindings: one row per input,
-    under the binding's name), drop-downs as for PBR slots, listing only the
-    files the binding's usage can take; `normal` rows have the `normal_y`
+  - *Textures*: one row per texture (packed textures: one row per input,
+    under the texture's name), drop-downs as for PBR slots, listing only the
+    files the texture's usage can take; `normal` rows have the `normal_y`
     toggle.
   - *State*: the shader's state with its values shown as defaults.
 - The Info tab adds Shader and Problems rows.
@@ -377,10 +389,10 @@ water/lake.amat -> water/lake.amat.bin (custom material: water, 3 textures)
   (before saving) and the textures as the build would make them (scaled to at
   most 2048 px). The frame's light is the preview's key light; an HDR
   environment shows as the background but is not given to the shader (bind
-  one in a `cube` binding to use it). `time` runs while the canvas is shown.
+  one in a `cube` texture to use it). `time` runs while the canvas is shown.
 - **Without**: no 3D view. The canvas shows the **Material view**: the GPU
   block as a table (offset, field, value) and the bound textures as
-  thumbnails with their binding names, empty bindings showing their default.
+  thumbnails with their names, empty textures showing their default.
 - A stage that fails to load or to create a pipeline shows its error in
   `CHANNEL_R` in the canvas' bottom-left corner instead of the shape;
   editing values keeps working. Saving a new `.spv` reloads the preview.
@@ -388,7 +400,7 @@ water/lake.amat -> water/lake.amat.bin (custom material: water, 3 textures)
 ## SDK
 
 `Kind::Shader` and `Kind::CustomMaterial`; `Shader` gives the block layout
-(fields by name: offset, type), bindings and SPIR-V words;
+(fields by name: offset, type), resources and SPIR-V words;
 `CustomMaterial` gives the shader ID, state, the block bytes, texture IDs
 and the params as `Structs` (scope 3). See [`sdk.md`](sdk.md).
 

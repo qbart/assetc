@@ -3,7 +3,7 @@
 > **Status: design**, see [`custom-materials.md`](../features/custom-materials.md).
 
 The interface of a shader that [custom materials](../features/custom-materials.md)
-are made for: params, texture bindings, render state and optional SPIR-V
+are made for: params, textures, render state and optional SPIR-V
 stages. assetc reads it, and its Shader tab writes it (see
 [Written by assetc](#written-by-assetc)).
 
@@ -22,7 +22,7 @@ Unknown keys are errors, at every level.
 | `params` | table `{ schema, type }` | none | The params struct: `schema` is the `.aschema`'s path relative to this file's folder (forward slashes), `type` the name of a struct in it |
 | `[state]` | table | see below | Render state |
 | `[stages]` | table | none | SPIR-V stages |
-| `[[textures]]` | array of tables | none | Texture bindings, in binding order |
+| `[[textures]]` | array of tables | none | Textures, in order |
 
 ### `[state]`
 
@@ -49,21 +49,21 @@ Unknown keys are errors, at every level.
 
 | Key | Type | Default | Values |
 |-----|------|---------|--------|
-| `name` | string | required | `[a-z][a-z0-9_]*`, at most 32 bytes, unique among bindings and inputs |
+| `name` | string | required | `[a-z][a-z0-9_]*`, at most 32 bytes, unique among textures and inputs |
 | `usage` | string | required | `"color"`, `"data"`, `"normal"`, `"height"`, `"noise"`, `"gradient"`, `"palette"`, `"lut"`, `"environment"`, `"atlas"` |
 | `dimension` | string | `"2d"` (`"cube"` for `environment`) | `"2d"`, `"3d"`, `"cube"` |
 | `color_space` | string | `"srgb"` for `color`, else `"linear"` | `"srgb"`, `"linear"`; only with `color`, `data`, `normal`, `height` |
 | `default` | string | `"white"` (`"normal"` for `normal`) | `"white"`, `"black"`, `"gray"`, `"normal"`, `"transparent"` |
 | `required` | bool | `false` | |
-| `bare` | bool | `false` | at most one binding; not with `pack` |
+| `bare` | bool | `false` | at most one texture; not with `pack` |
 | `mipmaps` | bool | `true` | |
 | `channels` | string | `"rgba"` | `"rgba"`, `"rg"`, `"r"`; `"srgb"` needs `"rgba"` |
 | `pack` | table | none | keys `r`, `g`, `b`, `a` (at least one), each `"<input>"` or `"<input>.<r\|g\|b\|a>"`; only with usage `data`, `color_space` `linear`, `dimension` `2d` |
 | `fill` | array of 4 integers | `[255, 255, 255, 255]` | each `0..=255`; only with `pack` |
 
-- Input names follow the binding name rules and share their namespace. The
-  same input may fill several channels and several packed bindings.
-- At most **16** bindings.
+- Input names follow the texture name rules and share their namespace. The
+  same input may fill several channels and several packed textures.
+- At most **16** textures.
 - Usages `noise`, `gradient`, `palette`, `atlas` need `dimension = "2d"`;
   `environment` needs `"cube"`; `lut` takes `"2d"` (strip) or `"3d"`
   (volume).
@@ -72,7 +72,7 @@ Unknown keys are errors, at every level.
 
 The Shader tab rewrites the whole file: `doc`, `params` (inline), `[state]`,
 `[stages]` (each only when it has a key set), then one `[[textures]]` per
-binding, keys in the order of the tables above, `pack` inline with its
+texture, keys in the order of the tables above, `pack` inline with its
 channels in `r`, `g`, `b`, `a` order. Only keys that are set are written;
 blank line between tables; comments are not kept; floats as in
 [`.amat`](amat.md#written-by-assetc).
