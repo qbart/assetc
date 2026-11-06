@@ -40,7 +40,12 @@ pub struct Preview3dPlugin;
 impl Plugin for Preview3dPlugin {
     fn build(&self, app: &mut App) {
         bevy::asset::embedded_asset!(app, "vision.wgsl");
+        bevy::asset::embedded_asset!(app, "preview_custom.wgsl");
         app.add_plugins(FullscreenMaterialPlugin::<VisionFilter>::default())
+            .add_plugins(bevy::pbr::MaterialPlugin::<
+                crate::preview_custom::CustomPreviewMaterial,
+            >::default())
+            .init_resource::<crate::preview_custom::CustomPreview>()
             .init_resource::<Preview3d>()
             .insert_resource(GlobalAmbientLight {
                 brightness: AMBIENT_BRIGHTNESS,
@@ -55,6 +60,7 @@ impl Plugin for Preview3dPlugin {
                         sync_compiled,
                         sync,
                         sync_material,
+                        crate::preview_custom::sync_custom,
                         sync_model,
                         sync_playback,
                         sync_vision,
@@ -217,6 +223,11 @@ pub struct Preview3d {
     pub material: Option<crate::material::Material>,
     /// Its textures, sent once per inspection.
     pub material_textures: Option<MaterialTextures>,
+    /// A custom material to show on the shape instead, set every frame it is wanted; see
+    /// docs/features/custom-materials.md#preview.
+    pub custom: Option<crate::preview_custom::Want>,
+    /// Why the custom material can't be shown, written back.
+    pub custom_error: Option<String>,
     /// The shape materials are shown on; `None` is a sphere.
     pub material_shape: Option<Shape>,
     /// Where the shown model's locators hang, once it is fitted; written by [`report_frames`].
@@ -536,10 +547,10 @@ pub struct CubemapUpload {
 }
 
 #[derive(Component)]
-struct PreviewCamera;
+pub(crate) struct PreviewCamera;
 
 #[derive(Component)]
-struct PreviewShape;
+pub(crate) struct PreviewShape;
 
 #[derive(Resource)]
 struct Scene {

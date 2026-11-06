@@ -1161,11 +1161,15 @@ fn shader_rows(project: &Project, rel: &str, out: &mut Inspection) -> Result<(),
                 n => format!("{n} bytes"),
             },
         ));
-        out.rows.push(("Textures", l.shader.textures.len().to_string()));
-        let stages: Vec<&str> = [(l.vertex.is_some(), "vertex"), (l.fragment.is_some(), "fragment")]
-            .into_iter()
-            .filter_map(|(on, s)| on.then_some(s))
-            .collect();
+        out.rows
+            .push(("Textures", l.shader.textures.len().to_string()));
+        let stages: Vec<&str> = [
+            (l.vertex.is_some(), "vertex"),
+            (l.fragment.is_some(), "fragment"),
+        ]
+        .into_iter()
+        .filter_map(|(on, s)| on.then_some(s))
+        .collect();
         out.rows.push((
             "Stages",
             if stages.is_empty() {
@@ -1225,15 +1229,20 @@ fn spirv_rows(bytes: &[u8], out: &mut Inspection) -> Result<(), String> {
         format!("{}.{}", version >> 16 & 0xff, version >> 8 & 0xff),
     ));
     let generator = word(2).unwrap_or(0);
-    out.rows.push(("Generator", format!("{} (version {})", generator >> 16, generator & 0xffff)));
+    out.rows.push((
+        "Generator",
+        format!("{} (version {})", generator >> 16, generator & 0xffff),
+    ));
     let options = naga::front::spv::Options {
         adjust_coordinate_space: false,
         ..Default::default()
     };
     let module = naga::front::spv::parse_u8_slice(bytes, &options).map_err(|e| e.to_string())?;
     for e in &module.entry_points {
-        out.rows
-            .push(("Entry point", format!("{} ({:?})", e.name, e.stage).to_lowercase()));
+        out.rows.push((
+            "Entry point",
+            format!("{} ({:?})", e.name, e.stage).to_lowercase(),
+        ));
     }
     for (_, var) in module.global_variables.iter() {
         let Some(at) = &var.binding else {

@@ -981,6 +981,9 @@ fn shell(
     let show_3d = match shown {
         Shown::Image => state.mode == ViewMode::ThreeD,
         Shown::Environment | Shown::Model | Shown::Material => true,
+        Shown::CustomMaterial => {
+            custom::has_preview(state.inspected.as_ref().and_then(|i| i.custom.as_ref()))
+        }
         Shown::CompiledMesh => state.mesh_in_3d,
         Shown::CompiledAnimation => {
             !state.anim_chunks
@@ -995,7 +998,6 @@ fn shell(
         | Shown::Pack
         | Shown::Data
         | Shown::ShaderLayout
-        | Shown::CustomMaterial
         | Shown::Schema
         | Shown::Graph
         | Shown::Instances
@@ -1230,6 +1232,21 @@ fn shell(
                     &mut preview3d,
                     &mut state.vision,
                 ),
+                (Shown::CustomMaterial, _)
+                    if custom::has_preview(
+                        state.inspected.as_ref().and_then(|i| i.custom.as_ref()),
+                    ) =>
+                {
+                    if let Some(inspected) = state.inspected.as_mut() {
+                        custom::canvas_custom_3d(
+                            ui,
+                            rect,
+                            inspected,
+                            &mut preview3d,
+                            &mut state.vision,
+                        );
+                    }
+                }
                 (Shown::ShaderLayout | Shown::CustomMaterial, _) => {
                     let mut ui = ui.new_child(
                         egui::UiBuilder::new()
@@ -1495,8 +1512,9 @@ fn prepare(
         Some(input) if selection.location == Location::Input => (
             crate::shader::is_shader(&selection.path)
                 .then(|| custom::prepare_shader(&input, &selection.path)),
-            crate::acmat::is_custom_material(&selection.path)
-                .then(|| custom::prepare_custom(&input, &selection.path)),
+            crate::acmat::is_custom_material(&selection.path).then(|| {
+                custom::prepare_custom(&input, project.output_dir().as_deref(), &selection.path)
+            }),
         ),
         _ => (None, None),
     };

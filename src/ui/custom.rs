@@ -26,7 +26,6 @@ use crate::theme::{ACCENT, CHANNEL_R, TEXT, TEXT_WEAK};
 pub struct Checked {
     pub block: Block,
     pub resources: Vec<Resource>,
-    pub stages: (bool, bool),
 }
 
 /// An `.ashader` being edited.
@@ -114,13 +113,11 @@ impl ShaderEdit {
             return;
         }
         self.checked_for = Some(self.edit.clone());
-        self.checked = shader::load_parsed(&self.input, &self.rel, self.edit.clone()).map(|l| {
-            Checked {
-                stages: (l.vertex.is_some(), l.fragment.is_some()),
+        self.checked =
+            shader::load_parsed(&self.input, &self.rel, self.edit.clone()).map(|l| Checked {
                 block: l.block,
                 resources: l.resources,
-            }
-        });
+            });
     }
 }
 
@@ -129,12 +126,10 @@ pub fn shader_tab(ui: &mut Ui, edit: &mut ShaderEdit) -> Option<String> {
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
-            Frame::new()
-                .inner_margin(Margin::same(8))
-                .show(ui, |ui| {
-                    property_style(ui);
-                    shader_sections(ui, edit);
-                });
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                shader_sections(ui, edit);
+            });
         });
     shader_commit(ui, edit)
 }
@@ -242,30 +237,24 @@ fn params_row(ui: &mut Ui, params: &mut Option<ParamsRef>, schemas: &[(String, V
 
 fn stage_row(ui: &mut Ui, label: &str, key: &str, value: &mut Option<String>, files: &[String]) {
     let current = value.clone().unwrap_or_else(|| "None".into());
-    let reset = key_row(
-        ui,
-        [label, key],
-        "",
-        value.is_some(),
-        |ui, width| {
-            fixed(ui, width, |ui| {
-                egui::ComboBox::from_id_salt(("ashader_stage", key))
-                    .width(width)
-                    .truncate()
-                    .selected_text(current)
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_label(value.is_none(), "None").clicked() {
-                            *value = None;
+    let reset = key_row(ui, [label, key], "", value.is_some(), |ui, width| {
+        fixed(ui, width, |ui| {
+            egui::ComboBox::from_id_salt(("ashader_stage", key))
+                .width(width)
+                .truncate()
+                .selected_text(current)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(value.is_none(), "None").clicked() {
+                        *value = None;
+                    }
+                    for f in files {
+                        if ui.selectable_label(value.as_ref() == Some(f), f).clicked() {
+                            *value = Some(f.clone());
                         }
-                        for f in files {
-                            if ui.selectable_label(value.as_ref() == Some(f), f).clicked() {
-                                *value = Some(f.clone());
-                            }
-                        }
-                    });
-            });
-        },
-    );
+                    }
+                });
+        });
+    });
     if reset {
         *value = None;
     }
@@ -311,13 +300,7 @@ fn option_row<T: Copy + PartialEq>(
 }
 
 /// A bool key with a checkbox; `default` shown while unset.
-fn bool_row(
-    ui: &mut Ui,
-    names: [&str; 2],
-    help: &str,
-    value: &mut Option<bool>,
-    default: bool,
-) {
+fn bool_row(ui: &mut Ui, names: [&str; 2], help: &str, value: &mut Option<bool>, default: bool) {
     let reset = key_row(ui, names, help, value.is_some(), |ui, _| {
         let mut v = value.unwrap_or(default);
         if ui.checkbox(&mut v, "").changed() {
@@ -384,8 +367,7 @@ fn state_section(ui: &mut Ui, state: &mut State, base: Option<&State>, salt: &st
             &mut state.depth_write,
             depth_default,
         );
-        let tests: Vec<(DepthTest, &str)> =
-            DepthTest::ALL.iter().map(|d| (*d, d.key())).collect();
+        let tests: Vec<(DepthTest, &str)> = DepthTest::ALL.iter().map(|d| (*d, d.key())).collect();
         option_row(
             ui,
             ["Depth test", "depth_test"],
@@ -458,7 +440,12 @@ fn textures_section(ui: &mut Ui, textures: &mut Vec<Texture>) {
 }
 
 /// A row of a key every texture has: no Reset.
-fn required_row(ui: &mut Ui, [label, key]: [&str; 2], help: &str, control: impl FnOnce(&mut Ui, f32)) {
+fn required_row(
+    ui: &mut Ui,
+    [label, key]: [&str; 2],
+    help: &str,
+    control: impl FnOnce(&mut Ui, f32),
+) {
     super::prop_row_colored(ui, label, ACCENT, Some(key), |ui, width| {
         control(ui, (width - 32.0).max(24.0));
     });
@@ -491,7 +478,11 @@ fn texture_rows(ui: &mut Ui, t: &mut Texture) {
             });
         },
     );
-    let dims = [(Dimension::D2, "2d"), (Dimension::D3, "3d"), (Dimension::Cube, "cube")];
+    let dims = [
+        (Dimension::D2, "2d"),
+        (Dimension::D3, "3d"),
+        (Dimension::Cube, "cube"),
+    ];
     let default_dim = Texture::new("", t.usage).dimension();
     option_row(
         ui,
@@ -593,16 +584,10 @@ fn texture_rows(ui: &mut Ui, t: &mut Texture) {
             ("Alpha", &mut pack.a),
         ] {
             let mut text = channel.clone().unwrap_or_default();
-            key_row(
-                ui,
-                [label, "pack"],
-                "",
-                channel.is_some(),
-                |ui, width| {
-                    let edit = egui::TextEdit::singleline(&mut text).hint_text("input or input.g");
-                    ui.add_sized(vec2(width, 22.0), edit);
-                },
-            )
+            key_row(ui, [label, "pack"], "", channel.is_some(), |ui, width| {
+                let edit = egui::TextEdit::singleline(&mut text).hint_text("input or input.g");
+                ui.add_sized(vec2(width, 22.0), edit);
+            })
             .then(|| text.clear());
             *channel = (!text.is_empty()).then_some(text);
         }
@@ -715,7 +700,9 @@ pub fn canvas_layout(ui: &mut Ui, edit: &mut ShaderEdit) {
                         .desired_width(f32::INFINITY)
                         .interactive(true),
                 );
-                ui.weak("Sets and bindings here are only a suggestion: assetc finds resources by name.");
+                ui.weak(
+                    "Sets and bindings here are only a suggestion: assetc finds resources by name.",
+                );
             });
         });
 }
@@ -748,8 +735,11 @@ fn resources_grid(ui: &mut Ui, shader: &Shader, found: &[Resource]) {
             }
             ui.end_row();
             use shader::ResourceKind as K;
-            for (name, kind) in [("Params", K::Params), ("Frame", K::Frame), ("Object", K::Object)]
-            {
+            for (name, kind) in [
+                ("Params", K::Params),
+                ("Frame", K::Frame),
+                ("Object", K::Object),
+            ] {
                 ui.monospace(name);
                 ui.monospace("block");
                 ui.monospace("");
@@ -783,10 +773,10 @@ pub struct MaterialShader {
     pub shader: Shader,
     pub params: Option<(Schema, usize, String)>,
     pub block: Block,
-    /// The stages, when there is a fragment one: for the preview.
+    /// The fragment stage, for the preview.
     pub fragment: Option<Vec<u8>>,
-    pub vertex: Option<Vec<u8>>,
-    pub resources: Vec<Resource>,
+    fragment_shared: Option<std::sync::Arc<Vec<u8>>>,
+    shared: std::sync::Arc<Shader>,
 }
 
 /// An `.acmat` being edited.
@@ -803,6 +793,10 @@ pub struct CustomEdit {
     assets: Vec<String>,
     refs: Vec<Target>,
     pub shader: Option<Result<MaterialShader, String>>,
+    /// Tells this reading apart from others, for the preview.
+    generation: u64,
+    /// Each of the shader's textures as the preview shows it; `None` binds its default.
+    preview_images: std::sync::Arc<Vec<Option<crate::texture::Image>>>,
     fields: FieldsState,
     /// A shader chosen whose switch drops values, waiting for confirmation.
     switching: Option<(String, Vec<String>)>,
@@ -831,22 +825,23 @@ fn read_shader(input: &Path, dir: &Path, path: &str) -> Result<MaterialShader, S
         .as_ref()
         .and_then(|(s, si, _)| shader::layout(s, *si).ok())
         .unwrap_or_default();
-    let (fragment, vertex, resources) = match loaded {
-        Ok(l) => (l.fragment, l.vertex, l.resources),
-        Err(_) => (None, None, Vec::new()),
-    };
+    let fragment = loaded.ok().and_then(|l| l.fragment);
     Ok(MaterialShader {
         path: path.to_owned(),
+        fragment_shared: fragment.clone().map(std::sync::Arc::new),
+        shared: std::sync::Arc::new(parsed.clone()),
         shader: parsed,
         params,
         block,
         fragment,
-        vertex,
-        resources,
     })
 }
 
-pub fn prepare_custom(input: &Path, file: &Path) -> Result<CustomEdit, String> {
+pub fn prepare_custom(
+    input: &Path,
+    output: Option<&Path>,
+    file: &Path,
+) -> Result<CustomEdit, String> {
     let text = std::fs::read_to_string(file).map_err(|e| e.to_string())?;
     let source = acmat::Source::parse(&text)?;
     let dir = file.parent().unwrap_or(input);
@@ -874,7 +869,8 @@ pub fn prepare_custom(input: &Path, file: &Path) -> Result<CustomEdit, String> {
         })) => adata::project(input, &input.join(schema_rel)),
         _ => Vec::new(),
     };
-    Ok(CustomEdit {
+    static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let mut edit = CustomEdit {
         edit: source.clone(),
         saved: source,
         file: file.to_path_buf(),
@@ -884,9 +880,177 @@ pub fn prepare_custom(input: &Path, file: &Path) -> Result<CustomEdit, String> {
         assets: adata::asset_files(input),
         refs,
         shader,
+        generation: GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        preview_images: Default::default(),
         fields: FieldsState::default(),
         switching: None,
-    })
+    };
+    if let Some(Ok(s)) = &edit.shader
+        && s.fragment.is_some()
+    {
+        edit.preview_images = std::sync::Arc::new(preview_images(&edit, &s.shader, output));
+    }
+    Ok(edit)
+}
+
+/// Longest side of a preview texture.
+const MAX_SIDE: u32 = 2048;
+
+/// Each texture of `shader` as the build would make it, for the preview: images decoded (packs
+/// packed), generated assets from their built `.ktx2`; see docs/features/custom-materials.md#preview.
+fn preview_images(
+    edit: &CustomEdit,
+    shader: &Shader,
+    output: Option<&Path>,
+) -> Vec<Option<crate::texture::Image>> {
+    let dir = edit.dir().to_path_buf();
+    let decode = |path: &str, flip: bool| -> Option<image::RgbaImage> {
+        let mut image = image::open(dir.join(path)).ok()?.to_rgba8();
+        if flip {
+            for p in image.pixels_mut() {
+                p[1] = 255 - p[1];
+            }
+        }
+        Some(image)
+    };
+    let fit = |image: image::RgbaImage| {
+        crate::inspect::fit_within(
+            crate::texture::Image {
+                width: image.width(),
+                height: image.height(),
+                pixels: image.into_raw(),
+            },
+            MAX_SIDE,
+        )
+    };
+    shader
+        .textures
+        .iter()
+        .map(|t| match &t.pack {
+            None => {
+                let (path, _) = edit.filled(&t.name, t.usage, t.bare)?;
+                if t.usage.takes_images() {
+                    let flip = edit
+                        .edit
+                        .texture(&t.name)
+                        .is_some_and(|x| x.normal_y == Some(NormalY::Dx));
+                    return decode(&path, flip).map(fit);
+                }
+                // Generated assets: their built texture, when there is one.
+                let output = output?;
+                let rel = crate::build::relative(&edit.input, &dir.join(&path)).ok()?;
+                let rel = crate::plan::resolve("", &rel)?;
+                let built = output.join(format!("{}.ktx2", crate::build::strip_extension(&rel)));
+                let info = crate::ktx2::read(&std::fs::read(built).ok()?).ok()?;
+                info.level0
+            }
+            Some(pack) => {
+                let mut size = None;
+                let mut sources = Vec::new();
+                for channel in pack.channels() {
+                    let source = channel.and_then(|c| shader::pack_input(c).ok()).and_then(
+                        |(name, from)| {
+                            let (path, _) = edit.filled(name, Usage::Data, false)?;
+                            Some((decode(&path, false)?, from))
+                        },
+                    );
+                    if let Some((image, _)) = &source {
+                        match size {
+                            None => size = Some(image.dimensions()),
+                            Some(s) if s != image.dimensions() => return None,
+                            Some(_) => {}
+                        }
+                    }
+                    sources.push(source);
+                }
+                let (w, h) = size?;
+                let mut packed = image::RgbaImage::from_pixel(w, h, image::Rgba(t.fill()));
+                for (channel, source) in sources.iter().enumerate() {
+                    if let Some((image, from)) = source {
+                        for (out, src) in packed.pixels_mut().zip(image.pixels()) {
+                            out[channel] = src[*from as usize];
+                        }
+                    }
+                }
+                Some(fit(packed))
+            }
+        })
+        .collect()
+}
+
+/// Whether the canvas previews `edit` in 3D: its shader has a fragment stage.
+pub fn has_preview(edit: Option<&Result<CustomEdit, String>>) -> bool {
+    matches!(edit, Some(Ok(CustomEdit { shader: Some(Ok(s)), .. })) if s.fragment.is_some())
+}
+
+/// The material on the preview shape, drawn with its shader's SPIR-V; see
+/// docs/features/custom-materials.md#preview.
+pub fn canvas_custom_3d(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    inspected: &mut super::Inspected,
+    preview: &mut crate::preview3d::Preview3d,
+    vision: &mut Option<crate::vision::Vision>,
+) {
+    use crate::material::{Source, TextureIds};
+    use crate::preview3d::{MaterialTextures, Shape};
+    let Some(Ok(edit)) = &inspected.custom else {
+        return;
+    };
+    let Some(Ok(s)) = &edit.shader else {
+        return;
+    };
+    let Some(fragment) = &s.fragment else {
+        return;
+    };
+    // The PBR preview sets up the shape and the camera; the custom material replaces the
+    // shape's material.
+    preview.material = Some(Source::default().material(&[], TextureIds::default()));
+    if !inspected.uploaded_material {
+        preview.material_textures = Some(MaterialTextures::default());
+        inspected.uploaded_material = true;
+    }
+    let values = match &s.params {
+        Some((schema, si, _)) => adata::resolve(schema, *si, &edit.edit.params, None),
+        None => Map::new(),
+    };
+    let key = edit.generation ^ crate::hash::fnv1a64(edit.edit.shader.as_bytes());
+    preview.custom = Some(crate::preview_custom::Want {
+        key,
+        fragment: s
+            .fragment_shared
+            .clone()
+            .unwrap_or_else(|| std::sync::Arc::new(fragment.clone())),
+        entry: s
+            .shader
+            .stages
+            .fragment_entry
+            .clone()
+            .unwrap_or_else(|| "main".into()),
+        shader: s.shared.clone(),
+        params: shader::pack(&s.block, &values),
+        state: s.shader.state.with(edit.edit.state),
+        images: edit.preview_images.clone(),
+    });
+    super::view_3d(ui, rect, preview, true);
+    let shapes = super::shape_tools(preview.material_shape());
+    let seen = super::vision_tools(*vision);
+    match super::toolbar(ui, rect, &[&shapes, &seen]) {
+        Some((0, button)) => preview.material_shape = Some(Shape::ALL[button]),
+        Some((_, button)) => super::toggle_vision(vision, button),
+        None => {}
+    }
+    if let Some(e) = &preview.custom_error {
+        ui.painter_at(rect).text(
+            rect.left_bottom() + vec2(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            e,
+            egui::FontId::proportional(13.0),
+            CHANNEL_R,
+        );
+    }
+    // `time` runs while the canvas is shown.
+    ui.ctx().request_repaint();
 }
 
 impl CustomEdit {
@@ -977,12 +1141,10 @@ pub fn custom_tab(ui: &mut Ui, edit: &mut CustomEdit) -> Option<String> {
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
-            Frame::new()
-                .inner_margin(Margin::same(8))
-                .show(ui, |ui| {
-                    property_style(ui);
-                    custom_sections(ui, edit);
-                });
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                custom_sections(ui, edit);
+            });
         });
     commit(ui, edit)
 }
@@ -1156,7 +1318,9 @@ fn textures_choice(ui: &mut Ui, edit: &mut CustomEdit, shader: &Shader) {
                         .show_ui(ui, |ui| {
                             let by = by_name
                                 .as_ref()
-                                .map_or("By name: none".to_owned(), |(p, _)| format!("By name: {p}"));
+                                .map_or("By name: none".to_owned(), |(p, _)| {
+                                    format!("By name: {p}")
+                                });
                             if ui.selectable_label(!set, by).clicked() {
                                 choice = Some(None);
                             }
@@ -1178,25 +1342,26 @@ fn textures_choice(ui: &mut Ui, edit: &mut CustomEdit, shader: &Shader) {
                 let mut dx = t.1.normal_y == Some(NormalY::Dx);
                 ui.horizontal(|ui| {
                     ui.add_space(ui.available_width() * 0.4);
-                    if ui.checkbox(&mut dx, "DirectX normal map (+Y down)").changed() {
+                    if ui
+                        .checkbox(&mut dx, "DirectX normal map (+Y down)")
+                        .changed()
+                    {
                         t.1.normal_y = dx.then_some(NormalY::Dx);
                     }
                 });
             }
             match choice {
                 Some(None) => edit.edit.textures.retain(|(n, _)| *n != name),
-                Some(Some(path)) => {
-                    match edit.edit.textures.iter_mut().find(|(n, _)| *n == name) {
-                        Some(t) => t.1.path = path,
-                        None => edit.edit.textures.push((
-                            name.clone(),
-                            TextureRef {
-                                path,
-                                normal_y: None,
-                            },
-                        )),
-                    }
-                }
+                Some(Some(path)) => match edit.edit.textures.iter_mut().find(|(n, _)| *n == name) {
+                    Some(t) => t.1.path = path,
+                    None => edit.edit.textures.push((
+                        name.clone(),
+                        TextureRef {
+                            path,
+                            normal_y: None,
+                        },
+                    )),
+                },
                 None => {}
             }
         }
@@ -1218,10 +1383,7 @@ pub fn canvas_custom(ui: &mut Ui, edit: &CustomEdit) {
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
                 if s.fragment.is_none() {
-                    ui.weak(format!(
-                        "No preview: {} has no fragment stage.",
-                        s.path
-                    ));
+                    ui.weak(format!("No preview: {} has no fragment stage.", s.path));
                     ui.add_space(8.0);
                 }
                 heading(ui, "GPU block");
@@ -1253,9 +1415,7 @@ pub fn canvas_custom(ui: &mut Ui, edit: &CustomEdit) {
                         for t in &s.shader.textures {
                             ui.monospace(&t.name);
                             let what = match &t.pack {
-                                None => edit
-                                    .filled(&t.name, t.usage, t.bare)
-                                    .map(|(p, _)| p),
+                                None => edit.filled(&t.name, t.usage, t.bare).map(|(p, _)| p),
                                 Some(pack) => {
                                     let parts: Vec<String> = pack
                                         .channels()

@@ -60,6 +60,7 @@ pub struct State {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)]
 pub enum Blend {
     Opaque,
     Mask,
@@ -554,19 +555,6 @@ impl Shader {
             .flat_map(|p| p.channels().into_iter().flatten())
     }
 
-    /// Input names, each once, in order of first use.
-    pub fn input_names(&self) -> Vec<String> {
-        let mut out: Vec<String> = Vec::new();
-        for text in self.inputs() {
-            if let Ok((name, _)) = pack_input(text)
-                && !out.iter().any(|n| n == name)
-            {
-                out.push(name.to_owned());
-            }
-        }
-        out
-    }
-
     /// The names a material's `[textures]` and by-name files fill: unpacked textures and
     /// inputs, in order. With the usage that decides which files they take.
     pub fn fillable(&self) -> Vec<(String, Usage)> {
@@ -951,18 +939,6 @@ pub enum ResourceKind {
     Object,
     Texture,
     Sampler,
-}
-
-impl ResourceKind {
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Params => "params",
-            Self::Frame => "frame",
-            Self::Object => "object",
-            Self::Texture => "texture",
-            Self::Sampler => "sampler",
-        }
-    }
 }
 
 /// A resource of the interface that a stage declares.
@@ -1768,7 +1744,8 @@ fill = [0, 255, 0, 255]
 "#;
         let shader = Shader::parse(text).unwrap();
         assert_eq!(shader.to_toml(), text);
-        assert_eq!(shader.input_names(), ["foam", "depth"]);
+        let names: Vec<String> = shader.fillable().into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, ["color", "foam", "depth"]);
         assert!(!shader.state.depth_write());
         let bad = |t: &str| Shader::parse(t).unwrap_err();
         assert!(bad("[[textures]]\nname = \"Color\"\nusage = \"color\"\n").contains("name"));

@@ -38,6 +38,7 @@ mod path;
 mod plan;
 mod presets;
 mod preview3d;
+mod preview_custom;
 mod shader;
 mod structs;
 mod texture;
