@@ -17,7 +17,8 @@ Right-clicking an Input row, or the empty area below the last row (the
 | New Pattern ▸ (the `pattern/…` generators) | as New Folder, see [`noise.md`](noise.md#creating) | always |
 | New Color ▸ Gradient | as New Folder, see [`gradients.md`](gradients.md#creating) | always |
 | New Color ▸ Palette  | as New Folder, see [`palettes.md`](palettes.md#creating) | always |
-| New Material         | as New Folder, see [`materials.md`](materials.md#creating) | always |
+| New Material ▸ PBR Material | as New Folder, see [`materials.md`](materials.md#creating) | always |
+| New Material ▸ Custom Material | disabled until [custom materials](custom-materials.md) are built; hover: `Custom materials are designed but not built yet` | always |
 | New Data ▸ Schema    | as New Folder, see [`schemas.md`](schemas.md#creating) | always |
 | New Data ▸ Directed Graph | as New Folder, see [`graphs.md`](graphs.md#creating) | always |
 | New Data ▸ Instance  | as New Folder, see [`instances.md`](instances.md#creating) | always |

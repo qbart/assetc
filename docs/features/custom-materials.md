@@ -350,6 +350,10 @@ water/lake.amat -> water/lake.amat.bin (custom material: water, 3 textures)
 
 ### Custom materials
 
+- **New Material ▸ Custom Material** in the Input tree's context menu
+  creates `material.amat` with `shader = ""` and the Material tab open on its
+  Shader row. Until custom materials are built the item is disabled (see
+  [`file-operations.md`](file-operations.md#context-menu)).
 - The **Material** tab starts with a **Shader** row: a drop-down of
   **Standard (PBR)** and every `*.ashader` in `input`. Switching between PBR
   and a shader, or between shaders, drops the keys the new choice has no use

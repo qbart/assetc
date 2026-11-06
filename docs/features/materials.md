@@ -175,7 +175,7 @@ otherwise `<dir>/<name>.*`.
 
 ## Creating
 
-**New Material** in the Input tree's context menu (see
+**New Material ▸ PBR Material** in the Input tree's context menu (see
 [`file-operations.md`](file-operations.md#context-menu)) creates
 `material.amat` (or `material 2.amat`, …) in the target folder, selects it
 and starts renaming it, like the other New items. The file holds:

@@ -67,6 +67,19 @@ table above in the Input tree, in the
 **Attached**: one section per scope of the asset, in the table's order:
 
 - A header (`Graph structs`, `Node structs`, …; 14 px, `TEXT_WEAK`).
+- A hint under it (12 px, `TEXT_WEAK`, wrapped) saying whose values the
+  scope holds and where they are filled:
+
+  | Scope | Hint |
+  |-------|------|
+  | Graph | One value for the whole graph. Fill it with no node or edge selected. |
+  | Tree | One value for the whole tree. Fill it with no node selected. |
+  | Node (graph, tree) | Every node gets its own value of these. Select a node to fill it. |
+  | Edge | Every edge gets its own value of these. Select an edge to fill it. |
+  | Model, Material, Atlas | One value for the model (material, atlas). |
+  | File (gradients, palettes) | One value for the whole file. Choose File under Values of. |
+  | Gradient | Every gradient gets its own value of these. Choose one under Values of. |
+  | Color | Every color gets its own value of these. Choose one under Values of. |
 - One row per attachment, 26 px: the struct's name (monospace, `TEXT`), the
   schema path (`TEXT_WEAK`, right-aligned), the [problem
   icon](instances.md#problems) of the attachment's own problems and
