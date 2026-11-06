@@ -2533,10 +2533,15 @@ fn create_items(ui: &mut Ui, dir: &Path, action: &mut Option<TreeAction>) {
             ui.close();
         }
     });
-    if menu_item(ui, "New Material", None).clicked() {
-        *action = Some(TreeAction::Op(FileOp::NewMaterial(dir.to_path_buf())));
-        ui.close();
-    }
+    ui.menu_button(RichText::new("New Material").size(14.0).color(TEXT), |ui| {
+        if menu_item(ui, "PBR Material", None).clicked() {
+            *action = Some(TreeAction::Op(FileOp::NewMaterial(dir.to_path_buf())));
+            ui.close();
+        }
+        // Designed in docs/features/custom-materials.md, not built yet.
+        menu_row(ui, "Custom Material", None, false)
+            .on_hover_text("Custom materials are designed but not built yet");
+    });
     ui.menu_button(RichText::new("New Data").size(14.0).color(TEXT), |ui| {
         if menu_item(ui, "Schema", None).clicked() {
             *action = Some(TreeAction::Op(FileOp::NewSchema(dir.to_path_buf())));

@@ -47,20 +47,64 @@ enum Host<'a> {
 }
 
 impl Host<'_> {
-    /// Each scope's title and what its owners are called.
-    fn scope_names(&self) -> &'static [(&'static str, &'static str)] {
+    /// Each scope's title, what its owners are called and its hint; see
+    /// docs/features/structs.md#structs-tab.
+    fn scope_names(&self) -> &'static [(&'static str, &'static str, &'static str)] {
+        const NODE: (&str, &str, &str) = (
+            "Node structs",
+            "node",
+            "Every node gets its own value of these. Select a node to fill it.",
+        );
+        const FILE: (&str, &str, &str) = (
+            "File structs",
+            "file",
+            "One value for the whole file. Choose File under Values of.",
+        );
         match self {
-            Self::Graph(g) if g.tree => &[("Tree structs", "tree"), ("Node structs", "node")],
-            Self::Graph(_) => &[
-                ("Graph structs", "graph"),
-                ("Node structs", "node"),
-                ("Edge structs", "edge"),
+            Self::Graph(g) if g.tree => &[
+                (
+                    "Tree structs",
+                    "tree",
+                    "One value for the whole tree. Fill it with no node selected.",
+                ),
+                NODE,
             ],
-            Self::Model(_) => &[("Model structs", "model")],
-            Self::Material(_) => &[("Material structs", "material")],
-            Self::Atlas(_) => &[("Atlas structs", "atlas")],
-            Self::Gradient(_) => &[("File structs", "file"), ("Gradient structs", "gradient")],
-            Self::Palette(_) => &[("File structs", "file"), ("Color structs", "color")],
+            Self::Graph(_) => &[
+                (
+                    "Graph structs",
+                    "graph",
+                    "One value for the whole graph. Fill it with no node or edge selected.",
+                ),
+                NODE,
+                (
+                    "Edge structs",
+                    "edge",
+                    "Every edge gets its own value of these. Select an edge to fill it.",
+                ),
+            ],
+            Self::Model(_) => &[("Model structs", "model", "One value for the model.")],
+            Self::Material(_) => &[(
+                "Material structs",
+                "material",
+                "One value for the material.",
+            )],
+            Self::Atlas(_) => &[("Atlas structs", "atlas", "One value for the atlas.")],
+            Self::Gradient(_) => &[
+                FILE,
+                (
+                    "Gradient structs",
+                    "gradient",
+                    "Every gradient gets its own value of these. Choose one under Values of.",
+                ),
+            ],
+            Self::Palette(_) => &[
+                FILE,
+                (
+                    "Color structs",
+                    "color",
+                    "Every color gets its own value of these. Choose one under Values of.",
+                ),
+            ],
         }
     }
 
@@ -290,9 +334,10 @@ pub(super) fn structs_tab(
 fn attached(ui: &mut Ui, host: &mut Host, cache: &StructsCache, problems: &[Problem]) {
     let names = host.scope_names();
     let mut detach = None;
-    for (scope, (title, _)) in names.iter().enumerate() {
+    for (scope, (title, _, hint)) in names.iter().enumerate() {
         ui.add_space(if scope == 0 { 0.0 } else { 10.0 });
         ui.label(RichText::new(*title).size(14.0).color(TEXT_WEAK));
+        ui.add(egui::Label::new(RichText::new(*hint).size(12.0).color(TEXT_WEAK)).wrap());
         let attachments = host.attachments(scope);
         if attachments.is_empty() {
             ui.weak("None");
