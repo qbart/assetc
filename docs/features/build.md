@@ -40,6 +40,8 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.exr` (any case) | texture, cubemap | `<asset path>.ktx2`, see [`hdr.md`](hdr.md#build) |
 | `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
 | `*.amat`, plus suffixed texture groups | material | `<dir>/<name>.amat.bin`, see [`materials.md`](materials.md) |
+| `*.ashader` | shader | `<asset path>.ashader.bin`, see [`custom-materials.md`](custom-materials.md#build) |
+| `*.acmat`, plus its textures by name | custom material | `<dir>/<name>.acmat.bin`, see [`custom-materials.md`](custom-materials.md#build) |
 | `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh.bin` and more, see [`models.md`](models.md#build) |
 | `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont.bin` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
 | `*.aschema` (any case) | schema | `<asset path>.aschema.bin`, see [`schemas.md`](schemas.md#build) |
@@ -64,6 +66,7 @@ grayscale or color-mapped, with either origin). Color space and mipmaps follow t
   assetc.aman.bin            see docs/spec/aman.bin.md
   <asset path>.ktx2          one per texture (incl. <name>.orm.ktx2), same directory structure as input
   <dir>/<name>.amat.bin      one per material
+  <dir>/<name>.acmat.bin     one per custom material, <path>.ashader.bin one per shader
   <model>.amesh.bin          one per glTF model, with <model>/… for its materials and textures
   <model>.aanim.bin          one per skinned, animated glTF model
   <font>.afont.bin           one per font, beside its atlas <font>.ktx2
@@ -106,6 +109,8 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | atlas      | `*.aatlas.bin` |
   | gradient   | `*.agradient.bin` |
   | palette    | `*.apalette.bin` |
+  | shader     | `*.ashader.bin` |
+  | custom material | `*.acmat.bin` |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assetc.aman.bin` is rewritten, never removed; a leftover
@@ -176,7 +181,8 @@ warnings` (`1 warning`) when there were warnings:
   meshes (`.amesh.bin`), animations (`.aanim.bin`), fonts (`.afont.bin`), schemas
   (`.aschema.bin`), data files (`.adata.bin`), graphs (`.agraph.bin`), trees (`.atree.bin`),
   atlases (`.aatlas.bin`), gradients (`.agradient.bin`), palettes
-  (`.apalette.bin`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
+  (`.apalette.bin`), shaders (`.ashader.bin`), custom materials
+  (`.acmat.bin`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
   `nothing` when nothing was built.
 - Outputs written along with a model or font count too (a model's `.aanim.bin`,
   `.amat.bin`s and textures, a font's atlas), though the CLI prints one line for

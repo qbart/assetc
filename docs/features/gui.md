@@ -97,7 +97,7 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | Hack                 | monospace typeface     | MIT                         | sourcefoundry.org/hack |
 | Noto Emoji           | emoji                  | SIL Open Font License 1.1   | fonts.google.com/noto |
 | Bevy                 | application framework  | MIT or Apache-2.0           | bevy.org |
-| wgpu                 | graphics               | MIT or Apache-2.0           | wgpu.rs |
+| wgpu                 | graphics; naga reads SPIR-V | MIT or Apache-2.0      | wgpu.rs |
 | winit                | windowing              | Apache-2.0                  | github.com/rust-windowing/winit |
 | egui                 | user interface         | MIT or Apache-2.0           | github.com/emilk/egui |
 | bevy_egui            | egui integration       | MIT                         | github.com/vladbat00/bevy_egui |

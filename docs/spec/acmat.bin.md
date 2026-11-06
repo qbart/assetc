@@ -1,7 +1,5 @@
 # `.acmat.bin` custom materials
 
-> **Status: design**, see [`custom-materials.md`](../features/custom-materials.md).
-
 A compiled [custom material](../features/custom-materials.md)
 ([`.acmat`](acmat.md)), written to `<output>/<dir>/<name>.acmat.bin`, asset
 path `<dir>/<name>.acmat.bin`, manifest kind `14` (`custom material`).

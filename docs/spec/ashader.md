@@ -1,7 +1,5 @@
 # `<name>.ashader`
 
-> **Status: design**, see [`custom-materials.md`](../features/custom-materials.md).
-
 The interface of a shader that [custom materials](../features/custom-materials.md)
 are made for: params, textures, render state and optional SPIR-V
 stages. assetc reads it, and its Shader tab writes it (see
@@ -57,7 +55,6 @@ Unknown keys are errors, at every level.
 | `required` | bool | `false` | |
 | `bare` | bool | `false` | at most one texture; not with `pack` |
 | `mipmaps` | bool | `true` | |
-| `channels` | string | `"rgba"` | `"rgba"`, `"rg"`, `"r"`; `"srgb"` needs `"rgba"` |
 | `pack` | table | none | keys `r`, `g`, `b`, `a` (at least one), each `"<input>"` or `"<input>.<r\|g\|b\|a>"`; only with usage `data`, `color_space` `linear`, `dimension` `2d` |
 | `fill` | array of 4 integers | `[255, 255, 255, 255]` | each `0..=255`; only with `pack` |
 

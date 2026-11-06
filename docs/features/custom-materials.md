@@ -1,7 +1,7 @@
 # Custom materials
 
-> **Status: design.** Nothing on this page is built yet; it is the spec the
-> implementation follows. Formats: [`.ashader`](../spec/ashader.md),
+> **Status: in progress.** The build is done; the GUI, the
+> [preview](#preview) and the [SDK](#sdk) are not yet. Formats: [`.ashader`](../spec/ashader.md),
 > [`.ashader.bin`](../spec/ashader.bin.md),
 > [`.acmat`](../spec/acmat.md), [`.acmat.bin`](../spec/acmat.bin.md).
 
@@ -123,7 +123,6 @@ Each `[[textures]]` entry is one texture the shader samples:
 | `required` | `true`: a material without it fails. Default `false`. |
 | `bare` | `true`: the material's unsuffixed file (`lake.png`) fills it by name, as PBR's base color. At most one texture, unpacked. |
 | `mipmaps` | `false`: compiled without mipmaps, whatever `no_mipmaps` says. Default `true` (then `no_mipmaps` applies). |
-| `channels` | `rgba` (default), `rg` or `r`: the compiled format (`R8G8B8A8`, `R8G8`, `R8`), for data that needs fewer channels. sRGB needs `rgba`. |
 | `pack` | Builds the texture from other inputs' channels instead, see [Packing](#packing). |
 | `fill` | With `pack`: the value (0–255) of each channel no input fills, `[255, 255, 255, 255]` by default. |
 
@@ -140,7 +139,7 @@ Each `[[textures]]` entry is one texture the shader samples:
 | `atlas` | an [atlas](atlases.md) (`*.atlas` folder) | its own |
 
 An image is compiled with the texture's settings, like a PBR slot texture
-(the same file used with conflicting color spaces, `normal_y` or channels by
+(the same file used with conflicting color spaces, `normal_y` or mipmaps by
 any materials fails the build). The other assets compile as they always do,
 and the material refers to their texture.
 
@@ -201,7 +200,7 @@ point `entry` (`"main"` by default, per stage: `fragment_entry`,
 assetc finds a stage's resources **by name**, at whatever descriptor set and
 binding the stage declares them. It asks for no particular numbers, so a
 shader keeps the layout its game's renderer uses; the `.ashader.bin` records
-the numbers it found (see [`ashader.bin.md`](../spec/ashader.bin.md#resources)).
+the numbers it found (see [`ashader.bin.md`](../spec/ashader.bin.md#bindings)).
 Names come from the SPIR-V's debug names (`OpName`), which every compiler
 writes by default; a stage stripped of them (`spirv-opt --strip-debug`)
 fails the shader with `<file>: has no names; compile without stripping debug
@@ -411,3 +410,4 @@ and the params as `Structs` (scope 3). See [`sdk.md`](sdk.md).
 - Shader sources (GLSL, WGSL, Slang) compiled by assetc.
 - Several passes, specialization constants and keyword variants.
 - Environment lighting (irradiance, specular) given to custom shaders.
+- Textures with fewer channels (`R8`, `R8G8`) for data that needs fewer than four.

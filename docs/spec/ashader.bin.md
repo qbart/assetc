@@ -1,7 +1,5 @@
 # `.ashader.bin` shaders
 
-> **Status: design**, see [`custom-materials.md`](../features/custom-materials.md).
-
 A compiled [shader interface](ashader.md): its GPU params block layout,
 textures, render state, the resources its SPIR-V stages declare and the
 stages themselves. Written to
@@ -19,7 +17,7 @@ A [chunked file](chunks.md), format `ASHADER`, version `1`. Text is
 | `FIELDS` | yes | [`Field`](#field-32-bytes)`[]`: the GPU block, in offset order (empty without a block) |
 | `TEXTURES` | yes | [`Texture`](#texture-48-bytes)`[]`, in the shader's order |
 | `INPUTS` | yes | [`Input`](#input-16-bytes)`[]`: the packed textures' channels |
-| `RESOURCES` | yes | [`Resource`](#resources)`[]`: what the stages declare, where (empty without stages) |
+| `BINDINGS` | yes | [`Binding`](#bindings)`[]`: the resources the stages declare, and where (empty without stages) |
 | `SPIRVV` | no | the vertex stage's SPIR-V words (u32, little-endian), as in the `.spv` |
 | `SPIRVF` | no | the fragment stage's SPIR-V words |
 | `STRINGS` | yes | UTF-8 text back to back |
@@ -76,8 +74,7 @@ joined with `.`: `foam.amount`).
 | 21 | 1 | `dimension` | u8: `0` 2d, `1` 3d, `2` cube |
 | 22 | 1 | `default` | u8: `0` white, `1` black, `2` gray, `3` normal, `4` transparent |
 | 23 | 1 | `flags` | u8: bit 0 sRGB, bit 1 required, bit 2 bare, bit 3 mipmaps, bit 4 packed |
-| 24 | 1 | `channels` | u8: `4` rgba, `2` rg, `1` r |
-| 25 | 3 | `reserved` | `0` |
+| 24 | 4 | `reserved` | `0` |
 | 28 | 4 | `inputs` | u32, index of the texture's first `INPUTS` record (`0` when not packed) |
 | 32 | 4 | `input_count` | u32, `4` when packed, else `0` |
 | 36 | 4 | `fill` | u8 × 4, R G B A fill values; `0` when not packed |
@@ -93,7 +90,7 @@ Four per packed texture, for its R, G, B and A channels.
 | 8 | 4 | `channel` | u32, the input's channel: `0` r, `1` g, `2` b, `3` a |
 | 12 | 4 | `reserved` | `0` |
 
-## Resources
+## Bindings
 
 One 32-byte record per resource of the [interface](../features/custom-materials.md#the-interface-in-spir-v)
 that at least one stage declares, in this order: `Params`, `Frame`,

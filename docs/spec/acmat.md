@@ -1,7 +1,5 @@
 # `<name>.acmat`
 
-> **Status: design**, see [`custom-materials.md`](../features/custom-materials.md).
-
 A [custom material](../features/custom-materials.md): the values and
 textures of one material for a [shader](ashader.md). assetc reads it, and
 its Material tab writes it.
