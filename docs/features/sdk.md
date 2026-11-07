@@ -20,8 +20,8 @@ itself. The idea follows the SDK of
   arrays). Turning them into engine resources (a Bevy `Image`, `Mesh`, …) is
   the game's part; the [demo](demo.md) shows how for Bevy.
 - Author Bartłomiej Wójtowicz; licensed `MIT OR Apache-2.0`
-  (`sdk/LICENSE-MIT`, `sdk/LICENSE-APACHE`). Needs Rust 1.85 or newer
-  (edition 2024).
+  (`sdk/LICENSE-MIT`, `sdk/LICENSE-APACHE`). Needs Rust 1.88 or newer
+  (`rust-version`, checked with that toolchain).
 - `sdk/README.md` is both its crates.io page and the front page of its API
   docs; its example is compiled as a doctest.
 
