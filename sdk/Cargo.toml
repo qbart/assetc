@@ -1,11 +1,13 @@
 [package]
 name = "assetc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.88"
 authors = ["Bartłomiej Wójtowicz"]
 description = "Reads the files assetc builds and packs: textures, materials, meshes, animations, fonts, atlases and data"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/qbart/assetc"
+homepage = "https://github.com/qbart/assetc"
 readme = "README.md"
 keywords = ["gamedev", "assets", "ktx2", "mesh", "loader"]
 categories = ["game-development", "parser-implementations"]
