@@ -170,6 +170,10 @@ let texture: Texture = assets.load_path("ui/fire.ktx2")?;
 
 The compiler itself is the unpublished `assetc-core` package at the repository root (its binary is `assetc`). See [docs/features/sdk.md](docs/features/sdk.md) and [sdk/README.md](sdk/README.md).
 
+## Sample assets
+
+[`samples/`](samples/) is a project with an input of every kind, used by the tests, the screenshots and the demo. Most of it was made for assetc; the third-party assets (the Khronos Fox model, the monogram font, …) and their licenses are listed in [NOTICE.md](NOTICE.md).
+
 ## Demo
 
 `make demo` packs the samples and opens [`demo/`](demo/), a small Bevy app that shows every sample through the SDK only, the way a game would load them. See [docs/features/demo.md](docs/features/demo.md).
