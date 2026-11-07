@@ -4,7 +4,7 @@ members = [".", "sdk", "demo"]
 # The compiler (CLI and GUI); only the SDK in sdk/ is published, as `assetc`.
 [package]
 name = "assetc-core"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Compiles source assets into runtime-friendly binary formats for video games"
 publish = false
