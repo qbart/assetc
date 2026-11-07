@@ -30,7 +30,7 @@ itself. The idea follows the SDK of
 
 ```toml
 [dependencies]
-assetc = "0.1"
+assetc = "0.2"
 # or, next to a checkout:
 assetc = { path = "../assetc/sdk" }
 ```

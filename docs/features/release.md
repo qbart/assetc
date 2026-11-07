@@ -10,15 +10,15 @@ hand, with `make publish` (see [Publishing](sdk.md#publishing)).
 
 ## Trigger
 
-- A pushed tag `v<version>` (`v0.1.0`, `v0.2.0-beta.1`), where `<version>` is
+- A pushed tag `v<version>` (`v0.2.0`, `v0.3.0-beta.1`), where `<version>` is
   the `version` of `assetc-core` in the root `Cargo.toml`.
 - A tag that does not match that version fails the release before anything
-  is built: `tag v0.2.0 does not match assetc-core 0.1.0 in Cargo.toml`.
+  is built: `tag v0.3.0 does not match assetc-core 0.2.0 in Cargo.toml`.
   Bump the version, commit, then tag that commit:
 
   ```
-  $ git tag v0.1.0
-  $ git push origin v0.1.0
+  $ git tag v0.2.0
+  $ git push origin v0.2.0
   ```
 
 - Other pushes and tags not starting with `v` run nothing.
@@ -55,7 +55,7 @@ Builds are cached per platform (Cargo registry and `target/`), keyed by
 ## Release
 
 After all three builds succeed, one more job creates the GitHub release
-named after the tag (`v0.1.0`), with release notes generated from the
+named after the tag (`v0.2.0`), with release notes generated from the
 commits since the previous tag, and uploads the three archives and their
 `.sha256` files. A version with a pre-release part (`-beta.1`) is marked as
 a pre-release. If any build fails, no release is created.

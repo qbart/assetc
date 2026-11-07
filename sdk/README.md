@@ -23,7 +23,7 @@ The format specs it follows are in [`docs/spec/`](../docs/spec/), and its API in
 
 ```toml
 [dependencies]
-assetc = "0.1"
+assetc = "0.2"
 ```
 
 ```rust,no_run

@@ -133,7 +133,7 @@ instead.
 | Format     | `R8G8B8A8_SRGB`, `R8G8B8A8_UNORM`, `R16G16B16A16_SFLOAT`, or `vkFormat <n>` for any other |
 | Color space | the data format descriptor's transfer function: `sRGB` or `linear` |
 | Mip levels | `levelCount`                                                        |
-| Writer     | the `KTXwriter` value (`assetc 0.1.0`), when there is one            |
+| Writer     | the `KTXwriter` value (`assetc 0.2.0`), when there is one            |
 | Asset path | output-relative path without extension                              |
 | Asset ID   | as above                                                            |
 

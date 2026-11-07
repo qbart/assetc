@@ -158,7 +158,7 @@ Keybindings: [KEYS.md](KEYS.md). Layout and look: [docs/features/gui.md](docs/fe
 
 ```toml
 [dependencies]
-assetc = "0.1"
+assetc = "0.2"
 ```
 
 ```rust
