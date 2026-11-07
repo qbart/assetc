@@ -19,6 +19,9 @@ itself. The idea follows the SDK of
 - Engine-neutral: it returns plain Rust values (pixels as bytes, vertices as
   arrays). Turning them into engine resources (a Bevy `Image`, `Mesh`, …) is
   the game's part; the [demo](demo.md) shows how for Bevy.
+- Home (repository and documentation):
+  [github.com/qbart/assetc](https://github.com/qbart/assetc), the crate's
+  `repository` and `homepage`; API docs on [docs.rs](https://docs.rs/assetc).
 - Author Bartłomiej Wójtowicz; licensed `MIT OR Apache-2.0`
   (`sdk/LICENSE-MIT`, `sdk/LICENSE-APACHE`). Needs Rust 1.88 or newer
   (`rust-version`, checked with that toolchain).

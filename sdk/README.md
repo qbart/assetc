@@ -1,6 +1,6 @@
 # assetc
 
-The runtime SDK of **assetc**, the asset compiler. Learn more about the project, its GUI and every source and output format in the [main README](../README.md).
+The runtime SDK of **[assetc](https://github.com/qbart/assetc)**, the asset compiler. Learn more about the project, its GUI and every source and output format in the [main README](../README.md).
 
 ## The project
 
