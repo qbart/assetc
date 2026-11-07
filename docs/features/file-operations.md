@@ -105,10 +105,10 @@ texture.
 After a move or rename, every path in the project that pointed at a moved
 file or folder points at its new place, and the moved files' own relative
 paths still point where they did. Only those path strings change: the rest
-of each file is kept byte for byte (comments, order, layout), so hand-written
-files stay as they were. Paths relative to a file's folder are rewritten
-relative to its folder, `/`-separated; input-relative ones stay
-input-relative.
+of each file is kept byte for byte (comments, order, layout, CRLF or LF
+line endings), so hand-written files stay as they were. Paths relative to
+a file's folder are rewritten relative to its folder, `/`-separated;
+input-relative ones stay input-relative.
 
 | File | Relative to its folder | Input-relative |
 |------|------------------------|----------------|

@@ -563,7 +563,11 @@ mod tests {
             problems,
             [
                 "Mode is not a struct of game.aschema",
-                "X: schema nope.aschema: No such file or directory (os error 2)",
+                format!(
+                    "X: schema nope.aschema: {}",
+                    std::io::Error::from_raw_os_error(2)
+                )
+                .as_str(),
                 "w node a: Step/cost: 12 is above the maximum 10",
                 "w node a: values for Other, which is not attached",
             ]

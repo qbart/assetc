@@ -1853,6 +1853,9 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         png(&input.join("a.png"), 1, 1);
         png(&input.join("a.PNG"), 1, 1);
+        if fs::read_dir(&input).unwrap().count() < 2 {
+            return; // case-insensitive file system (Windows, macOS)
+        }
 
         let outcome = run(&input, &output, &config::Config::default()).unwrap();
         assert_eq!(outcome.failures.len(), 2);

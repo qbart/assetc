@@ -347,7 +347,18 @@ pub fn toml(text: &str, fix: &mut Fix) -> Option<String> {
     let mut doc: DocumentMut = text.parse().ok()?;
     let mut changed = false;
     walk(doc.as_item_mut(), &mut Vec::new(), fix, &mut changed);
-    changed.then(|| doc.to_string())
+    changed.then(|| print(&doc, text))
+}
+
+/// Prints `doc` with the line endings of `text`, which it was parsed from:
+/// toml_edit writes `\n` only, which would turn every CRLF line into LF.
+fn print(doc: &DocumentMut, text: &str) -> String {
+    let out = doc.to_string();
+    if text.contains("\r\n") {
+        out.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        out
+    }
 }
 
 #[cfg(test)]
@@ -401,6 +412,13 @@ mod tests {
     }
 
     #[test]
+    fn toml_keeps_crlf_line_endings() {
+        let text = "# shader\r\nshader = \"a.ashader\"\r\nroughness = 0.5\r\n";
+        let out = toml(text, &mut |_, v| Some(format!("sub/{v}"))).unwrap();
+        assert_eq!(out, text.replace("\"a.", "\"sub/a."));
+    }
+
+    #[test]
     fn sample_toml_files_round_trip_unchanged() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut files = crate::build::files_under(&root.join("samples"));
@@ -412,7 +430,7 @@ mod tests {
             };
             let text = std::fs::read_to_string(&file).unwrap();
             let doc: DocumentMut = text.parse().unwrap();
-            assert_eq!(doc.to_string(), text, "{}", file.display());
+            assert_eq!(print(&doc, &text), text, "{}", file.display());
             checked += 1;
         }
         assert!(checked > 10);
