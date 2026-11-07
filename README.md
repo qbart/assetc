@@ -45,6 +45,10 @@ Like git with `.git`, assetc finds its project by looking for `assetc.toml` in t
 | `make demo` | Packs the samples, then shows them in the [demo](#demo) |
 | `make publish-check` / `make publish` | Dry run / publish of the [`assetc` crate](#sdk-the-assetc-crate) to crates.io |
 
+### Releases
+
+Pushing a tag `v<version>` (matching the version in `Cargo.toml`) builds `assetc` for Linux x64, macOS Apple silicon and Windows x64 on GitHub Actions and attaches the archives to a GitHub release; see [docs/features/release.md](docs/features/release.md). The SDK crate is published by hand (`make publish`).
+
 ## Configuration (`assetc.toml`)
 
 Every key is optional; an empty file builds `assets/` into `build/`. Full reference: [docs/spec/assetc.toml.md](docs/spec/assetc.toml.md).
