@@ -1,4 +1,4 @@
-//! Reads what `assetc build` and `assetc pack` write; see docs/features/sdk.md.
+#![doc = include_str!("../README.md")]
 //!
 //! Start with [`Assets::open`] on a `.pak` file or an output directory, then
 //! [`Assets::load`] any asset by ID into one of the format types.
