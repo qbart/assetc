@@ -146,6 +146,20 @@ a place); any other is an authored set.
 
 Keys a fill does not use are ignored when read.
 
+## `[[paints]]`
+
+For glTF models; see
+[`docs/features/texture-paint.md`](../features/texture-paint.md). One table
+per paint; its texels are in the [`.apaint`](apaint.md) file
+`<model file name>.<name>.apaint`.
+
+| Key        | Type    | Default    | Meaning |
+|------------|---------|------------|---------|
+| `name`     | string  | (required) | non-empty, ASCII letters, digits, `_` and `-` only, unique among the file's paints |
+| `mode`     | string  | `"color"`  | `"color"` or `"channels"` |
+| `size`     | integer | `1024`     | width and height in texels: `256`, `512`, `1024`, `2048` or `4096` |
+| `channels` | string  | `"rgba"`   | channels mode: `"r"`, `"rg"`, `"rgb"` or `"rgba"`; ignored in color mode |
+
 ## `[[events]]`
 
 For glTF models; see
@@ -288,6 +302,12 @@ stops = [
     { at = 1.0, color = "#fde68a" },
 ]
 blend = { with = "tint", mode = "multiply", amount = 1.0 }
+
+[[paints]]
+name = "wear"
+mode = "channels"
+size = 1024
+channels = "rg"
 
 [[events]]
 animation = "Walk"

@@ -84,7 +84,7 @@ On a model (see [`docs/features/locators.md`](docs/features/locators.md#3d-view)
 | `W`                                    | Gizmo: Move (again: off); with the Paths tab, on the chosen path point; with the Vertex colors tab, on the chosen gradient end |
 | `E`                                    | Gizmo: Rotate (again: off); nothing with the Paths or Vertex colors tab |
 | `S`                                    | Arm Place on surface                         |
-| `Escape`                               | Gizmo off, disarm Place on surface, stop painting or erasing, stop drawing path points |
+| `Escape`                               | Gizmo off, disarm Place on surface, stop painting or erasing (regions and texture paints), stop drawing path points |
 | Left click on a path point             | Choose that path and point (unfolds its card) |
 | Left click on a gradient end           | Choose that end (From or To) of the chosen color set |
 
@@ -184,6 +184,14 @@ On a compiled animation's timeline (see [`docs/features/models.md`](docs/feature
 | `,` / `.`                              | Pause and step back / forward to the previous / next 0.01 s |
 | `Shift` + `,` / `.`                    | The same by 0.001 s                          |
 | Left press / drag on the ruler         | Move the playhead there (pauses)             |
+
+While a texture paint paints (see [`docs/features/texture-paint.md`](docs/features/texture-paint.md#painting)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left drag / click on the model         | Paint (Paint on) or erase (Erase on) texels under the brush |
+| `Shift` + left drag / click            | The other one: erase while painting, paint while erasing |
+| Right drag                             | Orbit the camera                             |
 
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
 

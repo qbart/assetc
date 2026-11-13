@@ -69,7 +69,8 @@ a shape.
   [Show](#show) group, then Color vision.
 - The model's [locators](locators.md), [shapes](shapes.md) and
   [regions](regions.md) are drawn over it and edited there, see
-  [`locators.md`](locators.md#3d-view).
+  [`locators.md`](locators.md#3d-view); its
+  [texture paints](texture-paint.md#3d-view) are painted on it.
 - Loaded with Bevy's glTF loader from an asset source registered at startup
   for the project's `input` directory, so the model's own meshes, materials
   and textures (embedded or next to the file) are used, as Bevy renders them.
@@ -413,6 +414,7 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 | `P/<image>.ktx2`            | texture    | `P/<image>`       | per image used as base color, normal or emissive texture |
 | `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
 | `P/<set>.colors.ktx2`       | texture    | `P/<set>.colors`  | per color set exported as Texture + UV buffer or Both, see [`vertex-colors.md`](vertex-colors.md#export) |
+| `P/<paint>.paint.ktx2`      | texture    | `P/<paint>.paint` | per texture paint, see [`texture-paint.md`](texture-paint.md#build) |
 | `P.aanim.bin`                   | animation  | `P.aanim.bin`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.bin.md)) |
 
 The `.amesh.bin` also carries the model's [properties](properties.md),

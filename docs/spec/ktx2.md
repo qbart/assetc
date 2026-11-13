@@ -8,7 +8,7 @@ reader can load them.
 
 | Property                  | Value                                         |
 |---------------------------|-----------------------------------------------|
-| `vkFormat`                | `VK_FORMAT_R8G8B8A8_SRGB` (`43`) for sRGB textures, `VK_FORMAT_R8G8B8A8_UNORM` (`37`) for linear ones |
+| `vkFormat`                | `VK_FORMAT_R8G8B8A8_SRGB` (`43`) for sRGB textures, `VK_FORMAT_R8G8B8A8_UNORM` (`37`) for linear ones; see [One and two channels](#one-and-two-channels) for `R8_UNORM` and `R8G8_UNORM` |
 | `typeSize`                | `1`                                           |
 | `pixelWidth`/`pixelHeight`| source image size                             |
 | `pixelDepth`              | `0` (2D); `N` for color LUT volumes, see [Color LUTs](#color-luts) |
@@ -77,6 +77,28 @@ descriptors.
 
 Sample layout: `bitOffset` u16, `bitLength` u8, `channelType` u8,
 `samplePosition` 4×u8, `sampleLower` u32, `sampleUpper` u32.
+
+## One and two channels
+
+[Texture paints](../features/texture-paint.md#build) in Channels mode with R
+or RG are written with fewer channels; everything else above stays the same:
+
+| Property | R | RG |
+|----------|---|----|
+| `vkFormat` | `VK_FORMAT_R8_UNORM` (`9`) | `VK_FORMAT_R8G8_UNORM` (`16`) |
+| Level image | `w_n · h_n` bytes, one per texel | `w_n · h_n · 2` bytes, `R G` per texel |
+| `dfdTotalSize` | `60` | `76` |
+| descriptorBlockSize | `56` | `72` |
+| transferFunction | `1` (linear) | `1` (linear) |
+| bytesPlane[0] | `1` | `2` |
+| Samples | R only | R, G |
+
+The samples are R's and G's rows of the table above (`bitOffset` 0 and 8).
+A level's `byteLength` need not be a multiple of 4 here (a 1 × 1 R level is
+1 byte). KTX2 aligns each level image to the least common multiple of the
+texel size and 4, which is 4 for both formats: zero bytes pad each level
+image to the next multiple of 4, `byteOffset` points at the image and
+`byteLength` does not count the padding.
 
 ## Key/value data
 

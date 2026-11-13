@@ -47,7 +47,9 @@ renaming it.
   name does nothing.
 - On success the tree is rescanned and the renamed entry stays selected.
 - A file's [`.amod`](../spec/amod.md) sidecar is renamed with it
-  (`Fox.glb.amod` → `Hero.glb.amod`).
+  (`Fox.glb.amod` → `Hero.glb.amod`), and a model's
+  [`.apaint`](../spec/apaint.md) files too (`Fox.glb.dirt.apaint` →
+  `Hero.glb.dirt.apaint`).
 - The paths that point to or from what was renamed are fixed, as for a
   [move](#paths) (renaming a folder changes the path of everything in it).
 
@@ -92,6 +94,7 @@ folder (and below, for a `.gltf`):
 | Moved file | Goes with it |
 |------------|--------------|
 | any file | its [`.amod`](../spec/amod.md) sidecar (`Fox.glb.amod`, `brick.jpg.amod`) |
+| `*.gltf`, `*.glb` | its [texture paints'](texture-paint.md) [`.apaint`](../spec/apaint.md) files: `<file name>.<paint>.apaint` |
 | `<name>.amat` | the [material's files by name](materials.md): `<name>.<ext>` (base color) and `<name>.<suffix>.<ext>` for the slot suffixes, `<ext>` a texture source (`png`, `jpg`, `jpeg`, `tga`, `anoise`, `agradient`, `apalette`) |
 | `<name>.acmat` | the files and atlas folders its shader takes [by name](custom-materials.md): `<name>.<texture>.<ext>` for each texture and input the shader fills, and `<name>.<ext>` for its `bare` texture, each of a kind the texture's usage accepts. None when the shader cannot be read. |
 | `*.gltf` | the buffer and image files its `uri`s name (not data URIs) in its folder or below, keeping their place relative to it (`textures/a.png` → `<target>/textures/a.png`), unless another `.gltf` in the input uses them too |
@@ -158,7 +161,8 @@ copied whether or not other models use them).
   confirming button), in the [dialog look](gui.md#dialogs). Escape or
   clicking outside cancels.
 - Deleting is permanent (not moved to a trash). A file's
-  [`.amod`](../spec/amod.md) sidecar is deleted with it.
+  [`.amod`](../spec/amod.md) sidecar is deleted with it, and a model's
+  [`.apaint`](../spec/apaint.md) files too.
 - On success the tree is rescanned and the selection is cleared.
 
 ## Safety
