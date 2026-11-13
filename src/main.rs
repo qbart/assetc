@@ -43,6 +43,7 @@ mod relocate;
 mod shader;
 mod structs;
 mod texture;
+mod texture_paint;
 mod theme;
 mod tree;
 mod ui;

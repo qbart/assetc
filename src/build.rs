@@ -410,7 +410,15 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
         Job::Model { source, .. } if source.to_ascii_lowercase().ends_with(".gltf") => {
             files_under(input.join(source).parent().unwrap_or(input))
         }
-        Job::Model { source, .. } => vec![input.join(source)],
+        // With its texture paints' files; see docs/features/texture-paint.md#build.
+        Job::Model { source, sidecar, .. } => std::iter::once(input.join(source))
+            .chain(
+                sidecar
+                    .paints
+                    .iter()
+                    .map(|p| crate::texture_paint::file_for(&input.join(source), &p.name)),
+            )
+            .collect(),
         Job::Atlas { source, .. } => files_under(&input.join(source)),
         Job::Data { source, .. } => vec![input.join(source)],
         Job::Pack { sources, .. } => sources
@@ -699,6 +707,19 @@ fn compile_model(
     for (name, image) in model.color_textures {
         let dest = output.join(format!("{p}/{name}.colors.ktx2"));
         write_texture(image, &dest, (ColorSpace::Srgb, Usage::Color), false)?;
+    }
+    // Texture paints; see docs/features/texture-paint.md#build.
+    for (name, levels, export) in model.paint_textures {
+        let dest = output.join(format!("{p}/{name}.paint.ktx2"));
+        let bytes = match export {
+            crate::texture_paint::Export::Rgba(color) => {
+                crate::ktx2::encode_rgba8(color, Usage::of(color), &levels)
+            }
+            crate::texture_paint::Export::Unorm(channels) => {
+                crate::ktx2::encode_unorm(channels, Usage::Data, &levels)
+            }
+        };
+        write(&dest, &bytes)?;
     }
     Ok(model.detail)
 }

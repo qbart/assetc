@@ -513,6 +513,13 @@ pub struct Compiled {
     /// Color sets exported as Texture + UV buffer, by name: `<P>/<name>.colors.ktx2`, sRGB,
     /// without mipmaps.
     pub color_textures: Vec<(String, image::RgbaImage)>,
+    /// Texture paints, by name: `<P>/<name>.paint.ktx2`, their mip chains and how to write
+    /// them.
+    pub paint_textures: Vec<(
+        String,
+        Vec<crate::texture::Image>,
+        crate::texture_paint::Export,
+    )>,
     /// For build output.
     pub detail: String,
 }
@@ -641,6 +648,9 @@ pub struct ModelGeometry {
     pub parts: Vec<GeometryPart>,
     /// `n` of every `COLOR_n` set any primitive has, ascending.
     pub color_sets: Vec<u32>,
+    /// Some triangle primitive has `TEXCOORD_0`, which texture paints paint through; see
+    /// docs/features/texture-paint.md.
+    pub uvs: bool,
 }
 
 /// A triangle primitive's vertices as compiled; see docs/features/vertex-colors.md#3d-view.
@@ -740,10 +750,18 @@ impl ModelGeometry {
             .collect();
         color_sets.sort_unstable();
         color_sets.dedup();
+        let uvs = parts.iter().any(|p| {
+            document
+                .meshes()
+                .nth(p.mesh as usize)
+                .and_then(|m| m.primitives().nth(p.index as usize))
+                .is_some_and(|p| p.get(&gltf::Semantic::TexCoords(0)).is_some())
+        });
         let bounded = min.cmple(max).all();
         Self {
             parts: geometry_parts,
             color_sets,
+            uvs,
             bounds: if bounded { [min, max] } else { [Vec3::ZERO; 2] },
             points,
             joints,
@@ -887,6 +905,16 @@ pub fn compile(
         }
     }
     vertex_colors::check(&sets).map_err(sidecar_error)?;
+    // Texture paints; see docs/features/texture-paint.md#build.
+    let mut paint_textures = Vec::new();
+    for paint in &sidecar.paints {
+        let fail = |e: String| sidecar_error(format!("paint {:?}: {e}", paint.name));
+        if !geometry.uvs {
+            return Err(fail("the model has no TEXCOORD_0".into()));
+        }
+        let (levels, export) = crate::texture_paint::compile(file, paint).map_err(fail)?;
+        paint_textures.push((paint.name.clone(), levels, export));
+    }
     // Written sets: as colors, or as a texture and UV set; see
     // docs/features/vertex-colors.md#export.
     let kept: Vec<usize> = vertex_colors::bases(&sets)
@@ -1092,7 +1120,7 @@ pub fn compile(
     }
     detail.push(plural(materials.len(), "material", "materials"));
     detail.push(plural(
-        images.len() + orm.len() + color_textures.len(),
+        images.len() + orm.len() + color_textures.len() + paint_textures.len(),
         "texture",
         "textures",
     ));
@@ -1103,6 +1131,7 @@ pub fn compile(
         images,
         orm,
         color_textures,
+        paint_textures,
         detail: detail.join(", "),
     })
 }
@@ -1529,6 +1558,13 @@ mod tests {
         );
         let info = amesh::rows(mesh).unwrap();
         assert!(info.contains(&("Color sets", "COLOR_0".into())));
+        // No TEXCOORD_0 to paint through; see docs/features/texture-paint.md#build.
+        let paint = crate::amod::Amod::parse("[[paints]]\nname = \"p\"\n").unwrap();
+        let err = compile(&file, "colors", &options, &paint).err().unwrap();
+        assert_eq!(
+            err,
+            "colors.gltf.amod: paint \"p\": the model has no TEXCOORD_0"
+        );
         // The preview's first level carries COLOR_0, linear.
         let preview = amesh::preview(mesh).unwrap();
         assert_eq!(preview.color_sets, [("COLOR_0".to_owned(), 0)]);
@@ -1730,6 +1766,33 @@ mod tests {
         assert_eq!(
             err.as_deref(),
             Some(r#"tri.gltf.amod: locator "hand": no skeleton for joint "x""#)
+        );
+    }
+
+    #[test]
+    fn paints_on_the_fox() {
+        let amod = crate::amod::Amod::parse(
+            "[[paints]]\nname = \"wear\"\nmode = \"channels\"\nsize = 256\nchannels = \"rg\"\n",
+        )
+        .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Fox.glb");
+        std::fs::write(&file, FOX).unwrap();
+        assert!(geometry(&file).unwrap().uvs);
+        let options = amesh::MeshOptions::default();
+        // Without a file: unpainted.
+        let compiled = compile(&file, "Fox", &options, &amod).unwrap();
+        let (name, levels, export) = &compiled.paint_textures[0];
+        assert_eq!(name, "wear");
+        assert_eq!(*export, crate::texture_paint::Export::Unorm(2));
+        assert_eq!((levels[0].width, levels.len()), (256, 9));
+        // A file of another size fails.
+        let paint = crate::texture_paint::file_for(&file, "wear");
+        crate::texture_paint::write_file(&paint, 512, &crate::texture_paint::blank(512)).unwrap();
+        let err = compile(&file, "Fox", &options, &amod).err().unwrap();
+        assert_eq!(
+            err,
+            "Fox.glb.amod: paint \"wear\": Fox.glb.wear.apaint is 512 × 512, not 256 × 256"
         );
     }
 

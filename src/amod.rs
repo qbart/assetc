@@ -26,6 +26,8 @@ pub struct Amod {
     pub paths: Vec<enrich::Path>,
     /// `[[colors]]`: a glTF model's color sets, see docs/features/vertex-colors.md.
     pub colors: Vec<enrich::ColorSet>,
+    /// `[[paints]]`: a glTF model's texture paints, see docs/features/texture-paint.md.
+    pub paints: Vec<crate::texture_paint::Paint>,
     /// `[[events]]`: a glTF model's animation events, see docs/features/animation-events.md.
     pub events: Vec<enrich::Event>,
     /// `[[modifiers]]`: an image's modifier stack, as in `.anoise` files.
@@ -136,6 +138,7 @@ impl Amod {
             && self.regions.is_empty()
             && self.paths.is_empty()
             && self.colors.is_empty()
+            && self.paints.is_empty()
             && self.events.is_empty()
             && self.modifiers.is_empty()
             && self.structs.is_empty()
@@ -173,6 +176,11 @@ impl Amod {
         let colors = table
             .remove("colors")
             .map(enrich::parse_colors)
+            .transpose()?
+            .unwrap_or_default();
+        let paints = table
+            .remove("paints")
+            .map(crate::texture_paint::parse)
             .transpose()?
             .unwrap_or_default();
         let events = table
@@ -229,6 +237,7 @@ impl Amod {
             regions,
             paths,
             colors,
+            paints,
             events,
             modifiers,
             structs,
@@ -279,6 +288,7 @@ impl Amod {
         enrich::write_regions(&self.regions, &mut out);
         enrich::write_paths(&self.paths, &mut out);
         enrich::write_colors(&self.colors, &mut out);
+        crate::texture_paint::write(&self.paints, &mut out);
         enrich::write_events(&self.events, &mut out);
         noise::write_modifiers(&self.modifiers, &mut out);
         crate::structs::write_toml_attachments(&mut out, "structs", &self.structs);

@@ -190,6 +190,7 @@ fn model_assets(
 ) {
     let p = strip_extension(source);
     let colors = sidecar.colors.clone();
+    let paints = sidecar.paints.clone();
     let mut push = |kind: Kind, asset_path: String, job: Job| {
         plan.assets.push(Asset {
             id: fnv1a64(asset_path.as_bytes()),
@@ -222,6 +223,10 @@ fn model_assets(
     }
     for name in &outputs.orm {
         push(Kind::Texture, format!("{p}/{name}.orm"), part());
+    }
+    // Texture paints; see docs/features/texture-paint.md#build.
+    for paint in &paints {
+        push(Kind::Texture, format!("{p}/{}.paint", paint.name), part());
     }
     // Color sets exported as Texture + UV buffer; see docs/features/vertex-colors.md#export.
     // Bases (sets others blend with) are not written.
