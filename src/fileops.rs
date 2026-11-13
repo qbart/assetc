@@ -135,11 +135,12 @@ pub fn rename(
     }
     let target = path.with_file_name(name);
     let mut moves = vec![(path.to_path_buf(), target.clone())];
-    // The sidecar follows its file.
+    // The sidecar follows its file, and a model's texture paints.
     let sidecar = crate::amod::path_for(path);
     if sidecar.is_file() {
         moves.push((sidecar, crate::amod::path_for(&target)));
     }
+    moves.extend(renamed_paints(path, name));
     relocate_all(input, root, &moves)?;
     Ok(target)
 }
@@ -152,10 +153,15 @@ pub fn delete(input: &Path, path: &Path) -> Result<(), String> {
         fs::remove_dir_all(path).map_err(|e| e.to_string())
     } else {
         fs::remove_file(path).map_err(|e| e.to_string())?;
-        // The sidecar goes with its file.
+        // The sidecar goes with its file, and a model's texture paints.
         let sidecar = crate::amod::path_for(path);
         if sidecar.is_file() {
             fs::remove_file(sidecar).map_err(|e| e.to_string())?;
+        }
+        if crate::model::is_model(path) {
+            for paint in crate::texture_paint::files_of(path) {
+                fs::remove_file(paint).map_err(|e| e.to_string())?;
+            }
         }
         Ok(())
     }
@@ -280,6 +286,24 @@ fn copy_entry(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
+/// A model's `.apaint` files and their names when the model is renamed to `name`; see
+/// docs/features/file-operations.md#rename.
+fn renamed_paints(path: &Path, name: &str) -> Vec<(PathBuf, PathBuf)> {
+    if !crate::model::is_model(path) {
+        return Vec::new();
+    }
+    let old = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    crate::texture_paint::files_of(path)
+        .into_iter()
+        .filter_map(|p| {
+            let file = p.file_name()?.to_string_lossy().into_owned();
+            let rest = file.strip_prefix(&old)?;
+            let to = p.with_file_name(format!("{name}{rest}"));
+            Some((p, to))
+        })
+        .collect()
+}
+
 /// The file whose sidecar `path` is, when that file exists.
 fn sidecar_file(path: &Path) -> Option<PathBuf> {
     let main = path.with_extension("");
@@ -328,6 +352,10 @@ pub fn companions(input: Option<&Path>, path: &Path) -> Vec<PathBuf> {
             out.extend(custom_textures(path, dir, material));
         } else if is_gltf(path) {
             out.extend(gltf_files(input, path));
+        }
+        // A model's texture paints; see docs/features/texture-paint.md#files.
+        if crate::model::is_model(path) {
+            out.extend(crate::texture_paint::files_of(path));
         }
         let sidecars: Vec<PathBuf> = out
             .iter()
@@ -578,11 +606,23 @@ mod tests {
         let model = input.join("Fox.glb");
         fs::write(&model, "x").unwrap();
         fs::write(input.join("Fox.glb.amod"), "").unwrap();
+        fs::write(input.join("Fox.glb.wear.apaint"), "").unwrap();
+        assert_eq!(
+            companions(Some(&input), &model),
+            [
+                model.clone(),
+                input.join("Fox.glb.wear.apaint"),
+                input.join("Fox.glb.amod")
+            ]
+        );
         let hero = rename(&input, None, &model, "Hero.glb").unwrap();
         assert!(input.join("Hero.glb.amod").is_file());
         assert!(!input.join("Fox.glb.amod").exists());
+        assert!(input.join("Hero.glb.wear.apaint").is_file());
+        assert!(!input.join("Fox.glb.wear.apaint").exists());
         delete(&input, &hero).unwrap();
         assert!(!input.join("Hero.glb.amod").exists());
+        assert!(!input.join("Hero.glb.wear.apaint").exists());
     }
 
     #[test]

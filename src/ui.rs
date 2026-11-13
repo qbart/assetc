@@ -2849,7 +2849,10 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     let open = cx.open.contains(&node.path);
     let icon = tree_icon(&node.path, is_dir, open);
     // Sidecars are dimmed.
-    let dim = !is_dir && (amod::is_sidecar(&node.path) || is_atlas_config(&node.path));
+    let dim = !is_dir
+        && (amod::is_sidecar(&node.path)
+            || crate::texture_paint::is_apaint(&node.path)
+            || is_atlas_config(&node.path));
     let selected = cx
         .selection
         .is_some_and(|s| s.location == cx.location && s.path == node.path);
