@@ -67,10 +67,22 @@ impl Plugin for Preview3dPlugin {
                     )
                         .chain()
                         .before(TransformSystems::Propagate),
-                    (sync_attachments, sync_region_view, sync_grid)
+                    (
+                        sync_attachments,
+                        sync_region_view,
+                        sync_paint_view,
+                        sync_grid,
+                    )
+                        .chain()
                         .after(sync_model)
                         .before(TransformSystems::Propagate),
-                    (fit_model, report_frames, cast_surface, report_regions)
+                    (
+                        fit_model,
+                        report_frames,
+                        cast_surface,
+                        paint_surface,
+                        report_regions,
+                    )
                         .chain()
                         .after(TransformSystems::Propagate),
                 ),
@@ -254,6 +266,35 @@ pub struct Preview3d {
     /// The outlined region's triangles as posed this frame: region and corners; written by
     /// [`report_regions`].
     pub region_triangles: Vec<(usize, [Vec3; 3])>,
+    /// The texture paint drawn on the model instead of its materials (or regions, or a color
+    /// set), and painted by `paint_ray`; see docs/features/texture-paint.md#3d-view.
+    pub paint: Option<PaintView>,
+    /// A ray to paint along this frame, taken by [`paint_surface`].
+    pub paint_ray: Option<PaintRay>,
+}
+
+/// A texture paint on the shown model; see docs/features/texture-paint.md#3d-view.
+pub struct PaintView {
+    /// The model's path and the paint's name, for the UI to tell paints apart.
+    pub key: (PathBuf, String),
+    pub canvas: crate::texture_paint::Canvas,
+    pub display: crate::texture_paint::Display,
+}
+
+/// A dab of paint where a ray hits the shown model; see
+/// docs/features/texture-paint.md#painting.
+#[derive(Clone, Copy, Debug)]
+pub struct PaintRay {
+    pub origin: Vec3,
+    /// Unit length.
+    pub dir: Vec3,
+    /// The camera's view direction, unit length, to measure depth along.
+    pub forward: Vec3,
+    /// The brush's radius in world units at depth 1.
+    pub radius: f32,
+    pub hardness: f32,
+    pub strength: f32,
+    pub target: crate::texture_paint::Target,
 }
 
 /// A ray to cast against the shown model.
@@ -2029,6 +2070,8 @@ struct PosedMesh<'a> {
     indices: Vec<usize>,
     /// The skin, with each vertex's joints and weights.
     skin: Option<PosedSkin<'a>>,
+    /// `TEXCOORD_0` per vertex, when the mesh has it.
+    uvs: Option<&'a [[f32; 2]]>,
 }
 
 /// A copy of one of the shown model's meshes drawn in its regions' colors (or a color set's),
@@ -2112,18 +2155,24 @@ fn sync_region_view(
     loaded: Res<LoadedModel>,
     children: Query<&Children>,
     roots: Query<Entity, With<AttachmentRoot>>,
-    sources: Query<(&Mesh3d, &Transform, &ChildOf, Option<&SkinnedMesh>), Without<RegionOverlay>>,
-    mut overlays: Query<(Entity, &mut RegionOverlay, &Mesh3d, &mut Transform)>,
+    sources: OverlaySources,
+    mut overlays: Query<
+        (Entity, &mut RegionOverlay, &Mesh3d, &mut Transform),
+        Without<PaintOverlay>,
+    >,
     mut visibilities: Query<&mut Visibility>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut material: Local<Option<Handle<StandardMaterial>>>,
 ) {
     let view = preview.color_view.as_deref();
-    let model = loaded
-        .0
-        .as_ref()
-        .filter(|m| m.ready && m.fitted.is_some() && (preview.region_view || view.is_some()));
+    // A texture paint takes the place of both; see docs/features/texture-paint.md#3d-view.
+    let model = loaded.0.as_ref().filter(|m| {
+        m.ready
+            && m.fitted.is_some()
+            && preview.paint.is_none()
+            && (preview.region_view || view.is_some())
+    });
     // Overlays no longer wanted, whose mesh is gone, or shaded the other way.
     for (entity, overlay, _, _) in &overlays {
         let smooth = matches!(overlay.shows, Shows::Colors(_));
@@ -2249,6 +2298,19 @@ fn primitive_id(mesh: &Handle<Mesh>) -> Option<(u32, u32)> {
     Some((m.parse().ok()?, p.parse().ok()?))
 }
 
+/// The shown model's meshes that overlays stand in for.
+type OverlaySources<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Mesh3d,
+        &'static Transform,
+        &'static ChildOf,
+        Option<&'static SkinnedMesh>,
+    ),
+    (Without<RegionOverlay>, Without<PaintOverlay>),
+>;
+
 type MeshQuery<'w, 's> = Query<
     'w,
     's,
@@ -2257,6 +2319,7 @@ type MeshQuery<'w, 's> = Query<
         &'static GlobalTransform,
         Option<&'static SkinnedMesh>,
         Has<RegionOverlay>,
+        Has<PaintOverlay>,
     ),
 >;
 
@@ -2282,7 +2345,7 @@ fn posed_meshes<'a>(
         if attached.contains(&entity) {
             continue;
         }
-        let Ok((mesh3d, global, skin, false)) = mesh_entities.get(entity) else {
+        let Ok((mesh3d, global, skin, false, false)) = mesh_entities.get(entity) else {
             continue;
         };
         let id = primitive_id(&mesh3d.0);
@@ -2342,10 +2405,15 @@ fn posed_meshes<'a>(
             Some(indices) => indices.iter().collect(),
             None => (0..world.len()).collect(),
         };
+        let uvs = match mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
+            Some(bevy::mesh::VertexAttributeValues::Float32x2(v)) => Some(v.as_slice()),
+            _ => None,
+        };
         visit(PosedMesh {
             id,
             world,
             indices,
+            uvs,
             skin: skin
                 .filter(|_| matrices.is_some())
                 .map(|(skin, (ji, jw))| (skin, ji, jw)),
@@ -2509,6 +2577,285 @@ fn report_regions(
         );
     }
     preview.region_triangles = out;
+}
+
+/// A copy of one of the shown model's meshes drawn with the texture paint, beside the mesh it
+/// stands in for; see docs/features/texture-paint.md#3d-view.
+#[derive(Component)]
+struct PaintOverlay {
+    source: Entity,
+    /// The mesh has `TEXCOORD_0`; without, it is drawn plain.
+    uvs: bool,
+}
+
+/// The texture shown by [`PaintOverlay`]s and their materials.
+#[derive(Default)]
+struct PaintAssets {
+    image: Option<Handle<Image>>,
+    /// The size and display the image was made for.
+    shown: Option<(u32, crate::texture_paint::Display)>,
+    /// Lit (Color) and unlit (Channels), each textured and plain.
+    lit: Option<[Handle<StandardMaterial>; 2]>,
+    unlit: Option<[Handle<StandardMaterial>; 2]>,
+}
+
+/// Shows [`PaintOverlay`]s in place of the shown model's meshes while [`Preview3d::paint`]
+/// is set, keeping their texture up to date with the canvas; the meshes again when it is not.
+#[allow(clippy::too_many_arguments)]
+fn sync_paint_view(
+    mut commands: Commands,
+    mut preview: ResMut<Preview3d>,
+    loaded: Res<LoadedModel>,
+    children: Query<&Children>,
+    roots: Query<Entity, With<AttachmentRoot>>,
+    sources: OverlaySources,
+    mut overlays: Query<
+        (
+            Entity,
+            &PaintOverlay,
+            &mut Transform,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        Without<RegionOverlay>,
+    >,
+    mut visibilities: Query<&mut Visibility>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut images: ResMut<Assets<Image>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut assets: Local<PaintAssets>,
+) {
+    use crate::texture_paint::Display;
+    let model = loaded
+        .0
+        .as_ref()
+        .filter(|m| m.ready && m.fitted.is_some() && preview.paint.is_some());
+    for (entity, overlay, _, _) in &overlays {
+        if model.is_none() || !sources.contains(overlay.source) {
+            commands.entity(entity).despawn();
+            if let Ok(mut visibility) = visibilities.get_mut(overlay.source) {
+                *visibility = Visibility::Inherited;
+            }
+        }
+    }
+    let (Some(model), Some(paint)) = (model, preview.paint.as_mut()) else {
+        return;
+    };
+    // The texture: remade for a new size or display, else updated where the canvas changed.
+    let size = paint.canvas.size;
+    let fresh = assets.shown == Some((size, paint.display));
+    let image = match &assets.image {
+        Some(handle) if fresh => handle.clone(),
+        _ => {
+            let mut pixels = vec![0; size as usize * size as usize * 4];
+            paint
+                .canvas
+                .display_into(paint.display, [0, 0, size - 1, size - 1], &mut pixels);
+            paint.canvas.take_dirty();
+            let mut image = bevy_image(
+                &crate::texture::Image {
+                    width: size,
+                    height: size,
+                    pixels,
+                },
+                true,
+            );
+            image.asset_usage = RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD;
+            let handle = match &assets.image {
+                Some(handle) => {
+                    images.insert(handle, image).ok();
+                    handle.clone()
+                }
+                None => images.add(image),
+            };
+            assets.image = Some(handle.clone());
+            assets.shown = Some((size, paint.display));
+            handle
+        }
+    };
+    if let Some(rect) = paint.canvas.take_dirty()
+        && let Some(mut shown) = images.get_mut(&image)
+        && let Some(data) = shown.data.as_mut()
+    {
+        paint.canvas.display_into(paint.display, rect, data);
+    }
+    let mut material = |unlit: bool, textured: bool| {
+        let slot = if unlit {
+            &mut assets.unlit
+        } else {
+            &mut assets.lit
+        };
+        let pair = slot.get_or_insert_with(|| {
+            [true, false].map(|textured| {
+                materials.add(StandardMaterial {
+                    base_color: if textured {
+                        Color::WHITE
+                    } else if unlit {
+                        Color::BLACK
+                    } else {
+                        Color::srgb_u8(0x80, 0x80, 0x80)
+                    },
+                    base_color_texture: textured.then(|| image.clone()),
+                    perceptual_roughness: 0.9,
+                    unlit,
+                    ..default()
+                })
+            })
+        });
+        pair[usize::from(!textured)].clone()
+    };
+    let unlit = matches!(paint.display, Display::Channel(_));
+    let attached: std::collections::HashSet<Entity> = roots
+        .iter()
+        .flat_map(|root| std::iter::once(root).chain(children.iter_descendants(root)))
+        .collect();
+    for entity in children.iter_descendants(model.fit) {
+        if attached.contains(&entity) {
+            continue;
+        }
+        let Ok((mesh3d, transform, parent, skin)) = sources.get(entity) else {
+            continue;
+        };
+        if primitive_id(&mesh3d.0).is_none() {
+            continue;
+        }
+        match overlays
+            .iter_mut()
+            .find(|(_, overlay, _, _)| overlay.source == entity)
+        {
+            Some((_, overlay, mut overlay_transform, mut overlay_material)) => {
+                if *overlay_transform != *transform {
+                    *overlay_transform = *transform;
+                }
+                let wanted = material(unlit, overlay.uvs);
+                if overlay_material.0 != wanted {
+                    overlay_material.0 = wanted;
+                }
+            }
+            None => {
+                let Some(source) = meshes.get(&mesh3d.0) else {
+                    continue;
+                };
+                if source.has_morph_targets()
+                    || source.primitive_topology() != PrimitiveTopology::TriangleList
+                {
+                    continue;
+                }
+                let mut mesh = source.clone();
+                mesh.remove_attribute(Mesh::ATTRIBUTE_COLOR);
+                mesh.remove_attribute(Mesh::ATTRIBUTE_TANGENT);
+                if !mesh.contains_attribute(Mesh::ATTRIBUTE_NORMAL) {
+                    mesh.duplicate_vertices();
+                    mesh.remove_indices();
+                    mesh.compute_flat_normals();
+                }
+                let uvs = mesh.contains_attribute(Mesh::ATTRIBUTE_UV_0);
+                let mut overlay = commands.spawn((
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(material(unlit, uvs)),
+                    *transform,
+                    ChildOf(parent.parent()),
+                    PaintOverlay {
+                        source: entity,
+                        uvs,
+                    },
+                ));
+                if let Some(skin) = skin {
+                    overlay.insert((skin.clone(), bevy::camera::visibility::NoFrustumCulling));
+                }
+            }
+        }
+        // Kept hidden every frame: the regions' overlays may have shown it again.
+        if let Ok(mut visibility) = visibilities.get_mut(entity)
+            && *visibility != Visibility::Hidden
+            && meshes
+                .get(&mesh3d.0)
+                .is_some_and(|m| !m.has_morph_targets())
+        {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+/// Paints [`Preview3d::paint`] along [`Preview3d::paint_ray`] where it hits the shown model
+/// (not its attachments), skinned meshes as posed; see docs/features/texture-paint.md#painting.
+#[allow(clippy::too_many_arguments)]
+fn paint_surface(
+    loaded: Res<LoadedModel>,
+    mut preview: ResMut<Preview3d>,
+    children: Query<&Children>,
+    mesh_entities: MeshQuery,
+    nodes: Query<(&GlobalTransform, Option<&Name>)>,
+    roots: Query<Entity, With<AttachmentRoot>>,
+    meshes: Res<Assets<Mesh>>,
+    bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
+) {
+    let Some(ray) = preview.paint_ray.take() else {
+        return;
+    };
+    let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some()) else {
+        return;
+    };
+    let Some(paint) = preview.paint.as_mut() else {
+        return;
+    };
+    let mut posed = Vec::new();
+    posed_meshes(
+        model.fit,
+        &children,
+        &mesh_entities,
+        &nodes,
+        &roots,
+        &meshes,
+        &bindposes,
+        |_| true,
+        |mesh| posed.push(mesh),
+    );
+    let corners = |mesh: &PosedMesh, t: &[usize; 3]| {
+        t.map(|i| mesh.world.get(i).copied().unwrap_or(Vec3::NAN))
+    };
+    // The nearest hit, as for a surface ray.
+    let mut nearest: Option<f32> = None;
+    for mesh in &posed {
+        for t in mesh.indices.as_chunks::<3>().0 {
+            let [a, b, c] = corners(mesh, t);
+            if let Some(d) = ray_triangle(ray.origin, ray.dir, a, b, c)
+                && nearest.is_none_or(|n| d < n)
+            {
+                nearest = Some(d);
+            }
+        }
+    }
+    let Some(distance) = nearest else {
+        // Off the model: the stroke goes on from the next hit without joining up.
+        paint.canvas.lift();
+        return;
+    };
+    let center = ray.origin + ray.dir * distance;
+    let depth = (center - ray.origin).dot(ray.forward).max(1e-4);
+    let radius = ray.radius * depth;
+    for center in paint.canvas.dab_centers(center, radius) {
+        let brush = crate::texture_paint::Brush {
+            center,
+            radius,
+            hardness: ray.hardness,
+            strength: ray.strength,
+            target: ray.target,
+        };
+        for mesh in &posed {
+            let Some(uvs) = mesh.uvs else {
+                continue;
+            };
+            for t in mesh.indices.as_chunks::<3>().0 {
+                let [a, b, c] = corners(mesh, t);
+                // Facing the camera.
+                if (b - a).cross(c - a).dot(ray.dir) >= 0.0 {
+                    continue;
+                }
+                let uv = t.map(|i| uvs.get(i).copied().unwrap_or_default());
+                paint.canvas.paint_triangle([a, b, c], uv, &brush);
+            }
+        }
+    }
 }
 
 /// Distance along the ray to triangle `a b c` (either side), Möller–Trumbore.

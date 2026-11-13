@@ -39,6 +39,7 @@ use crate::preview3d::{
     Preview3d, Shape, Upload,
 };
 use crate::texture::Image;
+use crate::texture_paint;
 use crate::theme::{
     self, ACCENT, BG_BAR, BG_CENTER, BG_HEADER, BG_PANEL, CHANNEL_B, CHANNEL_G, CHANNEL_R,
     CHECKER_DARK, CHECKER_LIGHT, STROKE, TEXT, TEXT_WEAK,
@@ -231,6 +232,54 @@ struct LocatorTools {
     /// docs/features/vertex-colors.md#3d-view.
     color_view: Option<(PathBuf, ColorKey, std::sync::Arc<preview3d::ColorView>)>,
     color_generation: u64,
+    /// The texture paint brush; see docs/features/texture-paint.md#texture-paint-tab.
+    texture: TextureBrush,
+}
+
+/// The texture paint tools, for the session; see
+/// docs/features/texture-paint.md#texture-paint-tab.
+struct TextureBrush {
+    /// Paint or Erase is on (`rubber`: Erase).
+    on: bool,
+    rubber: bool,
+    /// Radius on screen, in points.
+    size: f32,
+    strength: f32,
+    hardness: f32,
+    /// Color mode: sRGB with alpha.
+    color: [u8; 4],
+    picker: Picker,
+    /// Channels mode: the channel painted and shown (0 R … 3 A), and what it is painted to.
+    channel: usize,
+    value: f32,
+    /// A stroke is being painted.
+    stroking: bool,
+    /// Bumped to read the chosen paint's file again.
+    reload: u64,
+    /// The chosen paint's texels are all unpainted.
+    blank: bool,
+    /// A failed file operation, for the status bar.
+    notice: Option<String>,
+}
+
+impl Default for TextureBrush {
+    fn default() -> Self {
+        Self {
+            on: false,
+            rubber: false,
+            size: 24.0,
+            strength: 1.0,
+            hardness: 0.5,
+            color: [255; 4],
+            picker: Picker::default(),
+            channel: 0,
+            value: 1.0,
+            stroking: false,
+            reload: 0,
+            blank: true,
+            notice: None,
+        }
+    }
 }
 
 /// What a color view shows: the model's whole list of sets and the shown one.
@@ -259,6 +308,7 @@ impl Default for LocatorTools {
             brush: 12.0,
             color_view: None,
             color_generation: 0,
+            texture: TextureBrush::default(),
         }
     }
 }
@@ -669,6 +719,7 @@ enum InspectorTab {
     Regions,
     Paths,
     VertexColors,
+    TexturePaint,
     Properties,
     Modifiers,
     Gradients,
@@ -688,7 +739,7 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 23] = [
+    const ALL: [Self; 24] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
@@ -696,6 +747,7 @@ impl InspectorTab {
         Self::Regions,
         Self::Paths,
         Self::VertexColors,
+        Self::TexturePaint,
         Self::Properties,
         Self::Modifiers,
         Self::Gradients,
@@ -723,6 +775,7 @@ impl InspectorTab {
             Self::Regions => Icon::PaintBucket,
             Self::Paths => Icon::Spline,
             Self::VertexColors => Icon::SwatchBook,
+            Self::TexturePaint => Icon::Paintbrush,
             Self::Properties => Icon::Database,
             Self::Modifiers => Icon::Wrench,
             Self::Gradients | Self::Colors => Icon::Palette,
@@ -750,6 +803,7 @@ impl InspectorTab {
             Self::Regions => "Regions",
             Self::Paths => "Paths",
             Self::VertexColors => "Vertex colors",
+            Self::TexturePaint => "Texture paint",
             Self::Properties => "Properties",
             Self::Modifiers => "Modifiers",
             Self::Gradients => "Gradients",
@@ -799,6 +853,7 @@ impl InspectorTab {
             | Self::Regions
             | Self::Paths
             | Self::VertexColors
+            | Self::TexturePaint
             | Self::Properties => selection.is_some_and(|s| {
                 s.location == Location::Input && model::is_model(&s.path) && s.path.is_file()
             }),
@@ -1214,6 +1269,12 @@ fn shell(
                     );
                     if let Some(tab) = out.show_tab {
                         state.inspector_tab = tab;
+                    }
+                    if out.rescan {
+                        state.rescan = true;
+                    }
+                    if let Some(notice) = state.locators.texture.notice.take() {
+                        state.notice = Some(notice);
                     }
                     if let (Some(amod), Some(inspected)) = (out.save, &state.inspected) {
                         match amod::write(&inspected.path, &amod) {
@@ -1836,6 +1897,7 @@ fn inspected(
                 color: None,
                 color_end: 0,
                 color_cards: Vec::new(),
+                paint: None,
                 inherited,
                 held,
             },
@@ -3431,6 +3493,7 @@ fn right_sidebar(
                     | InspectorTab::Regions
                     | InspectorTab::Paths
                     | InspectorTab::VertexColors
+                    | InspectorTab::TexturePaint
                     | InspectorTab::Properties),
                     Some(inspected),
                     Some(_),
@@ -3447,9 +3510,13 @@ fn right_sidebar(
                         InspectorTab::Regions => regions_tab(ui, inspected, tools),
                         InspectorTab::Paths => paths_tab(ui, inspected, tools, animating),
                         InspectorTab::VertexColors => vertex_colors_tab(ui, inspected, tools),
+                        InspectorTab::TexturePaint => texture_paint_tab(ui, inspected, tools),
                         InspectorTab::Properties => properties_tab(ui, inspected),
                         _ => locators_tab(ui, inspected, frames, tools, animating),
                     };
+                    if let Some(notice) = state.locators.texture.notice.take() {
+                        state.notice = Some(notice);
+                    }
                     if let Some(amod) = save {
                         match amod::write(&inspected.path, &amod) {
                             Ok(()) => {
@@ -3980,6 +4047,8 @@ struct MeshEdit {
     color: Option<usize>,
     color_end: usize,
     color_cards: Vec<GradientCard>,
+    /// The chosen texture paint, by index; see docs/features/texture-paint.md#texture-paint-tab.
+    paint: Option<usize>,
     /// The locators the model has without its sidecar; `edit` and `saved` hold every locator,
     /// and only what differs from these is written.
     inherited: Vec<Inherited>,
@@ -6813,6 +6882,8 @@ fn chunk_table(
 struct ModelCanvas {
     /// The sidecar to write.
     save: Option<Amod>,
+    /// A file was made: the trees need a rescan.
+    rescan: bool,
     /// Switch the Inspector to this tab.
     show_tab: Option<InspectorTab>,
 }
@@ -6831,6 +6902,7 @@ fn canvas_model(
     let shapes_active = tab == InspectorTab::Shapes;
     let paths_active = tab == InspectorTab::Paths;
     let colors_active = tab == InspectorTab::VertexColors;
+    let paints_active = tab == InspectorTab::TexturePaint;
     use bevy::math::{Affine3A, Quat, Vec3};
     let mut out = ModelCanvas::default();
     let Some(inspected) = inspected else {
@@ -6893,7 +6965,20 @@ fn canvas_model(
     if tab != InspectorTab::Regions {
         tools.paint = false;
     }
-    let painting = tools.paint && edit.as_ref().is_some_and(|e| e.region.is_some());
+    if !paints_active {
+        tools.texture.on = false;
+    }
+    // The chosen texture paint and its file; see docs/features/texture-paint.md#3d-view.
+    let chosen_paint = edit.as_ref().filter(|_| paints_active).and_then(|e| {
+        let i = e.paint?;
+        Some((
+            e.edit.paints.get(i)?.clone(),
+            paint_file(&inspected.path, e, i)?,
+        ))
+    });
+    let brushing = tools.texture.on && chosen_paint.is_some();
+    let region_painting = tools.paint && edit.as_ref().is_some_and(|e| e.region.is_some());
+    let painting = region_painting || brushing;
     let drawing = tools.draw && edit.as_ref().is_some_and(|e| e.path.is_some());
     let camera = gizmo::ViewCamera::new(rect, &preview.orbit);
     let frames = preview.frames.clone();
@@ -7143,7 +7228,7 @@ fn canvas_model(
 
     // Painting: a ray each frame while the left button is down; see
     // docs/features/regions.md#painting.
-    if painting
+    if region_painting
         && !tools.paint_awaiting
         && let Some(p) = pointer.filter(|p| rect.contains(*p))
         && ui.input(|i| i.pointer.primary_down())
@@ -7158,6 +7243,86 @@ fn canvas_model(
         tools.paint_awaiting = true;
         tools.erase = tools.rubber != ui.input(|i| i.modifiers.shift);
         ui.ctx().request_repaint();
+    }
+
+    // The chosen texture paint on the model, read from its file when it changes; see
+    // docs/features/texture-paint.md#3d-view.
+    preview.paint_ray = None;
+    match &chosen_paint {
+        Some((paint, file)) => {
+            let key = (
+                inspected.path.clone(),
+                format!("{}:{}:{}", file.display(), paint.size, tools.texture.reload),
+            );
+            if preview.paint.as_ref().is_none_or(|v| v.key != key) {
+                let pixels = texture_paint::load(file, paint.size);
+                let canvas = texture_paint::Canvas::new(paint.size, pixels);
+                tools.texture.blank = canvas.is_blank();
+                tools.texture.stroking = false;
+                preview.paint = Some(preview3d::PaintView {
+                    key,
+                    canvas,
+                    display: texture_paint::Display::Color,
+                });
+            }
+            if let Some(view) = &mut preview.paint {
+                view.display = match paint.mode {
+                    texture_paint::Mode::Color => texture_paint::Display::Color,
+                    texture_paint::Mode::Channels => texture_paint::Display::Channel(
+                        tools.texture.channel.min(paint.channels.count() - 1),
+                    ),
+                };
+            }
+        }
+        None => preview.paint = None,
+    }
+    // Painting: a dab each frame while the left button is down, the file written when it is
+    // released; see docs/features/texture-paint.md#painting.
+    let texture_erase = tools.texture.rubber != ui.input(|i| i.modifiers.shift);
+    if let Some((paint, _)) = &chosen_paint
+        && brushing
+        && let Some(p) = pointer.filter(|p| rect.contains(*p))
+        && ui.input(|i| i.pointer.primary_down())
+        && response.is_pointer_button_down_on()
+    {
+        let (origin, dir) = camera.ray(p);
+        let forward = camera.ray(rect.center()).1;
+        let brush = &tools.texture;
+        let target = match paint.mode {
+            texture_paint::Mode::Color if texture_erase => texture_paint::Target::Color([0; 4]),
+            texture_paint::Mode::Color => texture_paint::Target::Color(brush.color),
+            texture_paint::Mode::Channels => texture_paint::Target::Channel(
+                brush.channel.min(paint.channels.count() - 1),
+                if texture_erase {
+                    0
+                } else {
+                    (brush.value * 255.0).round() as u8
+                },
+            ),
+        };
+        preview.paint_ray = Some(preview3d::PaintRay {
+            origin,
+            dir,
+            forward,
+            radius: brush.size * camera.world_per_point(camera.position() + forward),
+            hardness: brush.hardness,
+            strength: brush.strength,
+            target,
+        });
+        tools.texture.stroking = true;
+        ui.ctx().request_repaint();
+    }
+    if tools.texture.stroking && !ui.input(|i| i.pointer.primary_down()) {
+        tools.texture.stroking = false;
+        if let (Some((paint, file)), Some(view)) = (&chosen_paint, &mut preview.paint)
+            && view.canvas.end_stroke()
+        {
+            out.rescan = !file.is_file();
+            if let Err(e) = texture_paint::write_file(file, paint.size, &view.canvas.pixels) {
+                tools.texture.notice = Some(format!("Saving failed: {e}"));
+            }
+            tools.texture.blank = view.canvas.is_blank();
+        }
     }
 
     // Drawing: a point where the press hits, then one every DRAW_STEP along the stroke; see
@@ -7280,6 +7445,7 @@ fn canvas_model(
                 tools.gizmo = None;
                 tools.armed = false;
                 tools.paint = false;
+                tools.texture.on = false;
                 tools.draw = false;
             } else if locked {
             } else if i.key_pressed(egui::Key::W) {
@@ -7372,6 +7538,13 @@ fn canvas_model(
             }
             preview.color_view = tools.color_view.as_ref().map(|(_, _, view)| view.clone());
         }
+    }
+    // A texture paint takes the place of both; see docs/features/texture-paint.md#3d-view.
+    if preview.paint.is_some() {
+        preview.region_view = false;
+        preview.region_outline = None;
+        preview.region_wants.clear();
+        preview.color_view = None;
     }
     let painter = ui.painter_at(rect);
     if let Some(edit) = &edit {
@@ -7506,7 +7679,7 @@ fn canvas_model(
     }
 
     // The brush at the pointer; see docs/features/regions.md#painting.
-    if painting
+    if region_painting
         && let Some(edit) = &edit
         && let Some(region) = edit.region.and_then(|r| edit.edit.regions.get(r))
         && let Some(p) = pointer.filter(|p| rect.contains(*p))
@@ -7517,6 +7690,39 @@ fn canvas_model(
             hex_color32(&region.color).unwrap_or(TEXT)
         };
         painter.circle_stroke(p, tools.brush, Stroke::new(1.0, color));
+    }
+    // The texture paint's brush; see docs/features/texture-paint.md#painting.
+    if let Some((paint, _)) = &chosen_paint
+        && brushing
+        && let Some(p) = pointer.filter(|p| rect.contains(*p))
+    {
+        let brush = &tools.texture;
+        let color = match paint.mode {
+            _ if texture_erase => TEXT,
+            texture_paint::Mode::Color => {
+                let [r, g, b, _] = brush.color;
+                egui::Color32::from_rgb(r, g, b)
+            }
+            texture_paint::Mode::Channels => {
+                PAINT_CHANNELS[brush.channel.min(paint.channels.count() - 1)].1
+            }
+        };
+        painter.circle_stroke(p, brush.size, Stroke::new(1.0, color));
+        if brush.hardness < 1.0 {
+            let inner = brush.size * brush.hardness;
+            let points: Vec<egui::Pos2> = (0..=48)
+                .map(|k| {
+                    let a = k as f32 / 48.0 * std::f32::consts::TAU;
+                    p + vec2(a.cos(), a.sin()) * inner
+                })
+                .collect();
+            painter.extend(egui::Shape::dashed_line(
+                &points,
+                Stroke::new(1.0, color),
+                4.0,
+                4.0,
+            ));
+        }
     }
 
     if let Some(edit) = &edit {
@@ -9821,6 +10027,295 @@ fn fit_gradient(
 }
 
 /// The Regions tab; see docs/features/regions.md#regions-tab.
+/// The channels' colors in the 3D view and on the brush (A in white); see
+/// docs/features/texture-paint.md#3d-view.
+const PAINT_CHANNELS: [(&str, egui::Color32); 4] = [
+    ("R", egui::Color32::from_rgb(255, 0, 0)),
+    ("G", egui::Color32::from_rgb(0, 255, 0)),
+    ("B", egui::Color32::from_rgb(0, 0, 255)),
+    ("A", egui::Color32::WHITE),
+];
+
+/// The `.apaint` file of paint `i` of `edit`'s model at `model`: by its saved name, which its
+/// file has until the sidecar is written.
+fn paint_file(model: &Path, edit: &MeshEdit, i: usize) -> Option<PathBuf> {
+    let name = edit
+        .saved
+        .paints
+        .get(i)
+        .filter(|_| edit.saved.paints.len() == edit.edit.paints.len())
+        .or_else(|| edit.edit.paints.get(i))?
+        .name
+        .clone();
+    Some(texture_paint::file_for(model, &name))
+}
+
+/// The Texture paint tab; see docs/features/texture-paint.md#texture-paint-tab.
+fn texture_paint_tab(
+    ui: &mut Ui,
+    inspected: &mut Inspected,
+    tools: &mut LocatorTools,
+) -> Option<Amod> {
+    let uvs = inspected.geometry.as_ref().is_some_and(|g| g.uvs);
+    let model = inspected.path.clone();
+    let brush = &mut tools.texture;
+    let Some(Ok(edit)) = &mut inspected.mesh else {
+        placeholder(ui, "No paints");
+        return None;
+    };
+    let mut notice = None;
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| {
+            Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
+                property_style(ui);
+                let add = egui::Button::image_and_text(Icon::Plus.image(14.0, TEXT), "Add paint");
+                let add = ui
+                    .add_enabled(uvs, add)
+                    .on_disabled_hover_text("The model has no TEXCOORD_0 to paint through");
+                if add.clicked() {
+                    let paints = &mut edit.edit.paints;
+                    let name = enrich::free_name("paint", |n| paints.iter().any(|p| p.name == n));
+                    paints.push(texture_paint::Paint::new(name));
+                    edit.paint = Some(paints.len() - 1);
+                    brush.on = false;
+                }
+                ui.add_space(8.0);
+                if edit.edit.paints.is_empty() {
+                    ui.weak("No paints");
+                }
+                let mut event = None;
+                for i in 0..edit.edit.paints.len() {
+                    let open = edit.paint == Some(i);
+                    let name = edit.edit.paints[i].name.clone();
+                    let label = edit.edit.paints[i].label();
+                    let file = paint_file(&model, edit, i);
+                    let mut delete = false;
+                    let (_, folded) = ui
+                        .push_id(("paint", i), |ui| {
+                            card(
+                                ui,
+                                Some(open),
+                                RichText::new(&name),
+                                |_| {},
+                                |ui, open| {
+                                    if open {
+                                        delete =
+                                            icon_button(ui, Icon::Trash2, "Delete", true).clicked();
+                                    } else {
+                                        ui.add_space(4.0);
+                                        ui.label(RichText::new(&label).size(11.0).color(TEXT_WEAK));
+                                    }
+                                },
+                                |ui| {
+                                    if let Some(e) =
+                                        paint_fields(ui, edit, i, file.as_deref(), brush)
+                                    {
+                                        notice = Some(e);
+                                    }
+                                },
+                            )
+                        })
+                        .inner;
+                    if folded {
+                        event = Some(CardEvent::Fold(i));
+                    }
+                    if delete {
+                        event = Some(CardEvent::Delete(i));
+                    }
+                }
+                match event {
+                    Some(CardEvent::Fold(i)) => {
+                        edit.paint = (edit.paint != Some(i)).then_some(i);
+                        brush.on = false;
+                    }
+                    Some(CardEvent::Delete(i)) => {
+                        if let Some(file) = paint_file(&model, edit, i)
+                            && let Err(e) = std::fs::remove_file(&file)
+                            && e.kind() != std::io::ErrorKind::NotFound
+                        {
+                            notice = Some(format!("Deleting failed: {e}"));
+                        }
+                        edit.edit.paints.remove(i);
+                        if edit.saved.paints.len() > i {
+                            // The file is gone: the saved list no longer names it.
+                            edit.saved.paints.remove(i);
+                        }
+                        edit.paint = None;
+                        brush.on = false;
+                    }
+                    _ => {}
+                }
+            });
+        });
+    if notice.is_some() {
+        brush.notice = notice;
+    }
+    mesh_commit(ui, edit)
+}
+
+/// The body of paint `i`'s card; a failed file operation's message.
+fn paint_fields(
+    ui: &mut Ui,
+    edit: &mut MeshEdit,
+    i: usize,
+    file: Option<&Path>,
+    brush: &mut TextureBrush,
+) -> Option<String> {
+    use texture_paint::{Channels, Mode, SIZES};
+    let saved = edit.saved.paints.get(i).map(|p| p.name.clone());
+    let others: Vec<String> = edit
+        .edit
+        .paints
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| *k != i)
+        .map(|(_, p)| p.name.clone())
+        .collect();
+    let others: Vec<&str> = others.iter().map(String::as_str).collect();
+    let paint = &mut edit.edit.paints[i];
+    let mut failed = None;
+    // Names make files: only letters, digits, _ and -.
+    let mut done = false;
+    prop_row(ui, "Name", |ui, width| {
+        done = ui
+            .add_sized(
+                vec2(width, 22.0),
+                egui::TextEdit::singleline(&mut paint.name),
+            )
+            .lost_focus();
+    });
+    if done && (!texture_paint::valid_name(&paint.name) || others.contains(&paint.name.as_str())) {
+        paint.name = saved
+            .filter(|old| !others.contains(&old.as_str()))
+            .unwrap_or_else(|| enrich::free_name("paint", |n| others.contains(&n)));
+    }
+    prop_row(ui, "Mode", |ui, width| {
+        egui::ComboBox::from_id_salt("paint_mode")
+            .width(width - 8.0)
+            .selected_text(paint.mode.name())
+            .show_ui(ui, |ui| {
+                for mode in Mode::ALL {
+                    ui.selectable_value(&mut paint.mode, mode, mode.name());
+                }
+            });
+    });
+    let size = paint.size;
+    prop_row(ui, "Size", |ui, width| {
+        egui::ComboBox::from_id_salt("paint_size")
+            .width(width - 8.0)
+            .selected_text(paint.size.to_string())
+            .show_ui(ui, |ui| {
+                for size in SIZES {
+                    ui.selectable_value(&mut paint.size, size, size.to_string());
+                }
+            });
+    });
+    // A new size resamples the file at once; see docs/features/texture-paint.md#paint.
+    if paint.size != size
+        && let Some(file) = file.filter(|f| f.is_file())
+    {
+        let pixels = texture_paint::load(file, paint.size);
+        if let Err(e) = texture_paint::write_file(file, paint.size, &pixels) {
+            failed = Some(format!("Saving failed: {e}"));
+        }
+        brush.reload += 1;
+    }
+    if paint.mode == Mode::Channels {
+        prop_row(ui, "Channels", |ui, width| {
+            egui::ComboBox::from_id_salt("paint_channels")
+                .width(width - 8.0)
+                .selected_text(paint.channels.name())
+                .show_ui(ui, |ui| {
+                    for channels in Channels::ALL {
+                        ui.selectable_value(&mut paint.channels, channels, channels.name());
+                    }
+                });
+        });
+        if brush.channel >= paint.channels.count() {
+            brush.channel = 0;
+        }
+    }
+    // Paint and Erase: at most one on, as the regions' are.
+    ui.horizontal(|ui| {
+        let buttons = [
+            (Icon::Paintbrush, "Paint", false),
+            (Icon::Eraser, "Erase", true),
+        ];
+        for (icon, text, erases) in buttons {
+            let on = brush.on && brush.rubber == erases;
+            let mut button = egui::Button::image_and_text(icon.image(14.0, TEXT), text);
+            if on {
+                button = button.fill(ACCENT.gamma_multiply(0.25));
+            }
+            if ui.add(button).clicked() {
+                (brush.on, brush.rubber) = (!on, erases);
+            }
+        }
+    });
+    prop_row(ui, "Size", |ui, _| {
+        ui.spacing_mut().slider_width = 100.0;
+        ui.add(
+            egui::Slider::new(&mut brush.size, 2.0..=256.0)
+                .fixed_decimals(0)
+                .text("px"),
+        )
+        .on_hover_text("The brush's radius on screen");
+    });
+    prop_row(ui, "Strength", |ui, _| {
+        ui.spacing_mut().slider_width = 100.0;
+        ui.add(egui::Slider::new(&mut brush.strength, 0.0..=1.0).fixed_decimals(2));
+    });
+    prop_row(ui, "Hardness", |ui, _| {
+        ui.spacing_mut().slider_width = 100.0;
+        ui.add(egui::Slider::new(&mut brush.hardness, 0.0..=1.0).fixed_decimals(2))
+            .on_hover_text("The part of the radius painted at full strength");
+    });
+    match paint.mode {
+        Mode::Color => {
+            prop_row(ui, "Color", |_, _| {});
+            brush.picker.show(ui, &mut brush.color);
+        }
+        Mode::Channels => {
+            prop_row(ui, "Channel", |ui, _| {
+                for (k, (label, color)) in PAINT_CHANNELS
+                    .into_iter()
+                    .take(paint.channels.count())
+                    .enumerate()
+                {
+                    let on = brush.channel == k;
+                    let text = RichText::new(label).color(if on { color } else { TEXT });
+                    let mut button = egui::Button::new(text);
+                    if on {
+                        button = button.fill(ACCENT.gamma_multiply(0.25));
+                    }
+                    if ui.add(button).clicked() {
+                        brush.channel = k;
+                    }
+                }
+            });
+            prop_row(ui, "Value", |ui, _| {
+                ui.spacing_mut().slider_width = 100.0;
+                ui.add(egui::Slider::new(&mut brush.value, 0.0..=1.0).fixed_decimals(2));
+            });
+        }
+    }
+    ui.add_space(4.0);
+    let clear = ui.add_enabled(!brush.blank, egui::Button::new("Clear"));
+    if clear.clicked()
+        && let Some(file) = file
+    {
+        let blank = texture_paint::blank(paint.size);
+        if let Err(e) = texture_paint::write_file(file, paint.size, &blank) {
+            failed = Some(format!("Saving failed: {e}"));
+        }
+        brush.reload += 1;
+        brush.blank = true;
+    }
+    ui.weak("Drag on the model to paint or erase. Shift + drag does the other. Right drag orbits.");
+    failed
+}
+
 fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools) -> Option<Amod> {
     let parts = inspected
         .geometry

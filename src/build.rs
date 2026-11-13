@@ -411,7 +411,9 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
             files_under(input.join(source).parent().unwrap_or(input))
         }
         // With its texture paints' files; see docs/features/texture-paint.md#build.
-        Job::Model { source, sidecar, .. } => std::iter::once(input.join(source))
+        Job::Model {
+            source, sidecar, ..
+        } => std::iter::once(input.join(source))
             .chain(
                 sidecar
                     .paints

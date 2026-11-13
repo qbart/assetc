@@ -67,7 +67,13 @@ pub fn encode_rgba8(color: ColorSpace, usage: Usage, levels: &[Image]) -> Vec<u8
         );
     }
     let data: Vec<&[u8]> = levels.iter().map(|l| l.pixels.as_slice()).collect();
-    encode(color, 4, usage, [levels[0].width, levels[0].height, 0], &data)
+    encode(
+        color,
+        4,
+        usage,
+        [levels[0].width, levels[0].height, 0],
+        &data,
+    )
 }
 
 /// Encodes the first `channels` (1 R or 2 RG) of RGBA8 mip levels as a linear KTX2 file; see
@@ -79,7 +85,9 @@ pub fn encode_unorm(channels: usize, usage: Usage, levels: &[Image]) -> Vec<u8> 
         .map(|level| {
             level
                 .pixels
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .flat_map(|texel| texel[..channels].iter().copied())
                 .collect()
         })
@@ -381,7 +389,12 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
                 match texel {
                     // R shows as gray, RG as red and green.
                     1 => pixels.extend(row.iter().flat_map(|&r| [r, r, r, 255])),
-                    2 => pixels.extend(row.chunks_exact(2).flat_map(|t| [t[0], t[1], 0, 255])),
+                    2 => pixels.extend(
+                        row.as_chunks::<2>()
+                            .0
+                            .iter()
+                            .flat_map(|&[r, g]| [r, g, 0, 255]),
+                    ),
                     _ => pixels.extend_from_slice(row),
                 }
             }
@@ -554,7 +567,9 @@ mod tests {
             for (read, level) in read.iter().zip(&levels) {
                 let packed: Vec<u8> = level
                     .pixels
-                    .chunks_exact(4)
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
                     .flat_map(|t| t[..channels].to_vec())
                     .collect();
                 assert_eq!(read.data, &packed[..]);
@@ -563,7 +578,10 @@ mod tests {
             assert_eq!(info.format_name(), name);
             let level0 = info.level0.unwrap();
             assert_eq!(level0.pixels.len(), 3 * 2 * 4);
-            assert_eq!(level0.pixels[..4], [0, if channels == 1 { 0 } else { 1 }, 0, 255]);
+            assert_eq!(
+                level0.pixels[..4],
+                [0, if channels == 1 { 0 } else { 1 }, 0, 255]
+            );
             assert_eq!(info.mips.len(), 1);
         }
     }

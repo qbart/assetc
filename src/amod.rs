@@ -329,6 +329,19 @@ pub fn read(file: &Path) -> Result<Option<Amod>, String> {
 
 /// Writes the sidecar of `file`, or deletes it when `amod` holds nothing.
 pub fn write(file: &Path, amod: &Amod) -> io::Result<()> {
+    // Renamed texture paints take their files along; see
+    // docs/features/texture-paint.md#texture-paint-tab.
+    if let Ok(Some(old)) = read(file)
+        && old.paints.len() == amod.paints.len()
+    {
+        for (before, after) in old.paints.iter().zip(&amod.paints) {
+            let from = crate::texture_paint::file_for(file, &before.name);
+            let to = crate::texture_paint::file_for(file, &after.name);
+            if before.name != after.name && from.is_file() && !to.exists() {
+                fs::rename(from, to)?;
+            }
+        }
+    }
     let path = path_for(file);
     if amod.is_empty() {
         match fs::remove_file(&path) {

@@ -15,6 +15,8 @@ pub fn image(t: &sdk::Texture) -> Image {
         sdk::texture::Format::Rgba8Srgb => TextureFormat::Rgba8UnormSrgb,
         sdk::texture::Format::Rgba8Unorm => TextureFormat::Rgba8Unorm,
         sdk::texture::Format::Rgba16Float => TextureFormat::Rgba16Float,
+        sdk::texture::Format::R8Unorm => TextureFormat::R8Unorm,
+        sdk::texture::Format::Rg8Unorm => TextureFormat::Rg8Unorm,
     };
     let (dimension, layers) = if t.is_volume() {
         (TextureDimension::D3, t.depth)

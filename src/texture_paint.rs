@@ -162,9 +162,7 @@ pub fn parse(value: toml::Value) -> Result<Vec<Paint>, String> {
             Some(k) => Channels::ALL
                 .into_iter()
                 .find(|c| c.key() == k)
-                .ok_or_else(|| {
-                    fail(format!("unknown channels {k:?} (use r, rg, rgb or rgba)"))
-                })?,
+                .ok_or_else(|| fail(format!("unknown channels {k:?} (use r, rg, rgb or rgba)")))?,
         };
         let size = match table.remove("size") {
             None => DEFAULT_SIZE,
@@ -217,7 +215,10 @@ pub fn files_of(model: &Path) -> Vec<PathBuf> {
     let Some(dir) = model.parent() else {
         return Vec::new();
     };
-    let Some(prefix) = model.file_name().map(|n| format!("{}.", n.to_string_lossy())) else {
+    let Some(prefix) = model
+        .file_name()
+        .map(|n| format!("{}.", n.to_string_lossy()))
+    else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(if dir.as_os_str().is_empty() {
@@ -330,7 +331,7 @@ pub fn compile(model: &Path, paint: &Paint) -> Result<(Vec<Image>, Export), Stri
         (Mode::Channels, Channels::R) => (ColorSpace::Linear, Export::Unorm(1)),
         (Mode::Channels, Channels::Rg) => (ColorSpace::Linear, Export::Unorm(2)),
         (Mode::Channels, Channels::Rgb) => {
-            for texel in pixels.chunks_exact_mut(4) {
+            for texel in pixels.as_chunks_mut::<4>().0 {
                 texel[3] = 255;
             }
             (ColorSpace::Linear, Export::Rgba(ColorSpace::Linear))
@@ -416,24 +417,15 @@ impl Canvas {
             .is_some_and(|s| s.weights.iter().any(|&w| w > 0.0))
     }
 
-    pub fn in_stroke(&self) -> bool {
-        self.stroke.is_some()
-    }
-
-    /// Every texel back to unpainted.
-    pub fn clear(&mut self) {
-        self.stroke = None;
-        self.pixels.fill(0);
-        self.touch_all();
+    /// The stroke goes on without joining its next dab to the last one.
+    pub fn lift(&mut self) {
+        if let Some(stroke) = &mut self.stroke {
+            stroke.last = None;
+        }
     }
 
     pub fn is_blank(&self) -> bool {
         self.pixels.iter().all(|&b| b == 0)
-    }
-
-    fn touch_all(&mut self) {
-        self.generation += 1;
-        self.dirty = Some([0, 0, self.size - 1, self.size - 1]);
     }
 
     /// The texels changed since the last call.
@@ -546,7 +538,10 @@ impl Canvas {
                     continue;
                 }
                 let w = brush.strength * falloff(d, brush.hardness);
-                let (xi, yi) = (x.rem_euclid(size as i64) as usize, y.rem_euclid(size as i64) as usize);
+                let (xi, yi) = (
+                    x.rem_euclid(size as i64) as usize,
+                    y.rem_euclid(size as i64) as usize,
+                );
                 let i = yi * size + xi;
                 if w <= stroke.weights[i] {
                     continue;
@@ -811,7 +806,7 @@ mod tests {
         write_file(&path, 256, &pixels).unwrap();
         std::fs::write(dir.path().join("Fox.glb.amod"), "").unwrap();
         std::fs::write(dir.path().join("Foxy.glb.x.apaint"), "").unwrap();
-        assert_eq!(files_of(&model), [path.clone()]);
+        assert_eq!(files_of(&model), std::slice::from_ref(&path));
         assert_eq!(load(&path, 256), pixels);
         assert_eq!(load(&path, 512).len(), 512 * 512 * 4);
 

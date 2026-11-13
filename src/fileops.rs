@@ -292,7 +292,11 @@ fn renamed_paints(path: &Path, name: &str) -> Vec<(PathBuf, PathBuf)> {
     if !crate::model::is_model(path) {
         return Vec::new();
     }
-    let old = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+    let old = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
     crate::texture_paint::files_of(path)
         .into_iter()
         .filter_map(|p| {
