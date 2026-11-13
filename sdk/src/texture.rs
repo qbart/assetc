@@ -16,6 +16,10 @@ pub enum Format {
     Rgba8Unorm,
     /// `VK_FORMAT_R16G16B16A16_SFLOAT` (97): HDR environment cubemaps, IEEE half floats.
     Rgba16Float,
+    /// `VK_FORMAT_R8_UNORM` (9): texture paints with one channel.
+    R8Unorm,
+    /// `VK_FORMAT_R8G8_UNORM` (16): texture paints with two channels.
+    Rg8Unorm,
 }
 
 impl Format {
@@ -23,6 +27,8 @@ impl Format {
         match self {
             Self::Rgba8Srgb | Self::Rgba8Unorm => 4,
             Self::Rgba16Float => 8,
+            Self::R8Unorm => 1,
+            Self::Rg8Unorm => 2,
         }
     }
 }
@@ -65,6 +71,8 @@ impl Texture {
             43 => Format::Rgba8Srgb,
             37 => Format::Rgba8Unorm,
             97 => Format::Rgba16Float,
+            9 => Format::R8Unorm,
+            16 => Format::Rg8Unorm,
             other => return Err(b.err(format!("unsupported vkFormat {other}"))),
         };
         let (width, height) = (b.u32(20)?, b.u32(24)?);
@@ -214,6 +222,11 @@ mod tests {
         assert_eq!(t.usage, None);
         assert!(Texture::decode(&ktx2(43, 2, 2, &[0; 8])).is_err());
         assert!(Texture::decode(&ktx2(99, 1, 1, &[0; 4])).is_err());
+        let r = Texture::decode(&ktx2(9, 3, 1, &[1, 2, 3])).unwrap();
+        assert_eq!((r.format, r.levels[0].data.len()), (Format::R8Unorm, 3));
+        let rg = Texture::decode(&ktx2(16, 1, 1, &[1, 2])).unwrap();
+        assert_eq!(rg.format, Format::Rg8Unorm);
+        assert!(Texture::decode(&ktx2(16, 1, 1, &[1, 2, 3, 4])).is_err());
     }
 
     #[test]

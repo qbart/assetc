@@ -5,6 +5,8 @@ use crate::texture::{ColorSpace, Image};
 const IDENTIFIER: [u8; 12] = [
     0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A,
 ];
+const VK_FORMAT_R8_UNORM: u32 = 9;
+const VK_FORMAT_R8G8_UNORM: u32 = 16;
 const VK_FORMAT_R8G8B8A8_UNORM: u32 = 37;
 const VK_FORMAT_R8G8B8A8_SRGB: u32 = 43;
 const VK_FORMAT_R16G16B16A16_SFLOAT: u32 = 97;
@@ -65,7 +67,26 @@ pub fn encode_rgba8(color: ColorSpace, usage: Usage, levels: &[Image]) -> Vec<u8
         );
     }
     let data: Vec<&[u8]> = levels.iter().map(|l| l.pixels.as_slice()).collect();
-    encode(color, usage, [levels[0].width, levels[0].height, 0], &data)
+    encode(color, 4, usage, [levels[0].width, levels[0].height, 0], &data)
+}
+
+/// Encodes the first `channels` (1 R or 2 RG) of RGBA8 mip levels as a linear KTX2 file; see
+/// docs/spec/ktx2.md#one-and-two-channels.
+pub fn encode_unorm(channels: usize, usage: Usage, levels: &[Image]) -> Vec<u8> {
+    assert!(matches!(channels, 1 | 2));
+    let data: Vec<Vec<u8>> = levels
+        .iter()
+        .map(|level| {
+            level
+                .pixels
+                .chunks_exact(4)
+                .flat_map(|texel| texel[..channels].iter().copied())
+                .collect()
+        })
+        .collect();
+    let data: Vec<&[u8]> = data.iter().map(Vec::as_slice).collect();
+    let size = [levels[0].width, levels[0].height, 0];
+    encode(ColorSpace::Linear, channels, usage, size, &data)
 }
 
 /// Encodes one RGBA8 3D texture level, `size` = width, height, depth; `pixels` are depth
@@ -80,26 +101,37 @@ pub fn encode_rgba8_volume(
         pixels.len(),
         size.iter().map(|&s| s as usize).product::<usize>() * 4
     );
-    encode(color, usage, size, &[pixels])
+    encode(color, 4, usage, size, &[pixels])
 }
 
-/// `size` is level 0's width, height and depth (0 for 2D).
-fn encode(color: ColorSpace, usage: Usage, size: [u32; 3], levels: &[&[u8]]) -> Vec<u8> {
-    let format = match color {
-        ColorSpace::Srgb => VK_FORMAT_R8G8B8A8_SRGB,
-        ColorSpace::Linear => VK_FORMAT_R8G8B8A8_UNORM,
+/// `size` is level 0's width, height and depth (0 for 2D); `channels` is 4 (RGBA, sRGB or
+/// linear), or 1 or 2 (R, RG, linear).
+fn encode(
+    color: ColorSpace,
+    channels: usize,
+    usage: Usage,
+    size: [u32; 3],
+    levels: &[&[u8]],
+) -> Vec<u8> {
+    let format = match (channels, color) {
+        (1, _) => VK_FORMAT_R8_UNORM,
+        (2, _) => VK_FORMAT_R8G8_UNORM,
+        (_, ColorSpace::Srgb) => VK_FORMAT_R8G8B8A8_SRGB,
+        (_, ColorSpace::Linear) => VK_FORMAT_R8G8B8A8_UNORM,
     };
+    let dfd_size = dfd_size(channels);
     let kvd = key_value_data(usage);
     let dfd_offset = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * levels.len();
-    let kvd_offset = dfd_offset + DFD_SIZE as usize;
+    let kvd_offset = dfd_offset + dfd_size as usize;
     let data_offset = (kvd_offset + kvd.len()).next_multiple_of(4);
 
-    // Images are stored smallest level first; the index lists level 0 first.
+    // Images are stored smallest level first, each at a multiple of 4; the index lists level 0
+    // first.
     let mut offsets = vec![0; levels.len()];
     let mut offset = data_offset;
     for (i, level) in levels.iter().enumerate().rev() {
         offsets[i] = offset;
-        offset += level.len();
+        offset = (offset + level.len()).next_multiple_of(4);
     }
 
     let mut out = Vec::with_capacity(offset);
@@ -110,7 +142,7 @@ fn encode(color: ColorSpace, usage: Usage, size: [u32; 3], levels: &[&[u8]]) -> 
         put_u32(&mut out, v);
     }
     put_u32(&mut out, dfd_offset as u32);
-    put_u32(&mut out, DFD_SIZE);
+    put_u32(&mut out, dfd_size);
     put_u32(&mut out, kvd_offset as u32);
     put_u32(&mut out, kvd.len() as u32);
     put_u64(&mut out, 0);
@@ -124,29 +156,40 @@ fn encode(color: ColorSpace, usage: Usage, size: [u32; 3], levels: &[&[u8]]) -> 
     }
     debug_assert_eq!(out.len(), dfd_offset);
 
-    write_dfd(&mut out, color);
+    write_dfd(&mut out, color, channels);
     out.extend_from_slice(&kvd);
     out.resize(data_offset, 0);
     for level in levels.iter().rev() {
         out.extend_from_slice(level);
+        out.resize(out.len().next_multiple_of(4), 0);
     }
     out
 }
 
-fn write_dfd(out: &mut Vec<u8>, color: ColorSpace) {
+/// The data format descriptor's size for `channels` 8-bit channels: 28 bytes and 16 a sample.
+fn dfd_size(channels: usize) -> u32 {
+    28 + 16 * channels as u32
+}
+
+fn write_dfd(out: &mut Vec<u8>, color: ColorSpace, channels: usize) {
     // Alpha is flagged linear only when the color channels are sRGB.
     let (transfer, alpha) = match color {
-        ColorSpace::Srgb => (2, 0x1F),
-        ColorSpace::Linear => (1, 0x0F),
+        ColorSpace::Srgb if channels == 4 => (2, 0x1F),
+        _ => (1, 0x0F),
     };
-    put_u32(out, DFD_SIZE);
+    let size = dfd_size(channels);
+    put_u32(out, size);
     put_u32(out, 0); // vendorId 0, descriptorType 0
     put_u16(out, 2); // versionNumber
-    put_u16(out, 88); // descriptorBlockSize
+    put_u16(out, size as u16 - 4); // descriptorBlockSize
     out.extend_from_slice(&[1, 1, transfer, 0]); // RGBSDA, BT.709, transfer, straight alpha
     out.extend_from_slice(&[0; 4]); // texelBlockDimension
-    out.extend_from_slice(&[4, 0, 0, 0, 0, 0, 0, 0]); // bytesPlane
-    for (channel, channel_type) in [0x00u8, 0x01, 0x02, alpha].into_iter().enumerate() {
+    out.extend_from_slice(&[channels as u8, 0, 0, 0, 0, 0, 0, 0]); // bytesPlane
+    for (channel, channel_type) in [0x00u8, 0x01, 0x02, alpha]
+        .into_iter()
+        .take(channels)
+        .enumerate()
+    {
         put_u16(out, channel as u16 * 8);
         out.push(7); // bitLength - 1
         out.push(channel_type);
@@ -276,6 +319,8 @@ impl Info {
         match self.vk_format {
             VK_FORMAT_R8G8B8A8_SRGB => "R8G8B8A8_SRGB".into(),
             VK_FORMAT_R8G8B8A8_UNORM => "R8G8B8A8_UNORM".into(),
+            VK_FORMAT_R8_UNORM => "R8_UNORM".into(),
+            VK_FORMAT_R8G8_UNORM => "R8G8_UNORM".into(),
             VK_FORMAT_R16G16B16A16_SFLOAT => "R16G16B16A16_SFLOAT".into(),
             n => format!("vkFormat {n}"),
         }
@@ -301,10 +346,14 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
     ] = std::array::from_fn(|i| u32_at(12 + i * 4));
 
     let plain = layers == 0 && faces == 1 && supercompression == 0;
-    let rgba8 = matches!(
-        vk_format,
-        VK_FORMAT_R8G8B8A8_SRGB | VK_FORMAT_R8G8B8A8_UNORM
-    );
+    // Bytes per texel of the 8-bit formats assetc writes.
+    let texel = match vk_format {
+        VK_FORMAT_R8G8B8A8_SRGB | VK_FORMAT_R8G8B8A8_UNORM => 4,
+        VK_FORMAT_R8_UNORM => 1,
+        VK_FORMAT_R8G8_UNORM => 2,
+        _ => 0,
+    };
+    let rgba8 = texel > 0;
     // Level `i` is `max(1, size >> i)` on each axis; its entry is in the level index.
     // A 3D level is laid out as its depth slices side by side.
     let level = |i: u32| {
@@ -319,16 +368,22 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
             (depth >> i).max(1),
         );
         let end = offset.checked_add(length)?;
-        if length != w as u64 * h as u64 * d as u64 * 4 || end > bytes.len() as u64 {
+        if length != w as u64 * h as u64 * d as u64 * texel as u64 || end > bytes.len() as u64 {
             return None;
         }
         let data = &bytes[offset as usize..end as usize];
-        let row = w as usize * 4;
-        let mut pixels = Vec::with_capacity(data.len());
+        let row = w as usize * texel;
+        let mut pixels = Vec::with_capacity(w as usize * h as usize * d as usize * 4);
         for y in 0..h as usize {
             for z in 0..d as usize {
                 let start = (z * h as usize + y) * row;
-                pixels.extend_from_slice(&data[start..start + row]);
+                let row = &data[start..start + row];
+                match texel {
+                    // R shows as gray, RG as red and green.
+                    1 => pixels.extend(row.iter().flat_map(|&r| [r, r, r, 255])),
+                    2 => pixels.extend(row.chunks_exact(2).flat_map(|t| [t[0], t[1], 0, 255])),
+                    _ => pixels.extend_from_slice(row),
+                }
             }
         }
         Some(Image {
@@ -477,6 +532,39 @@ mod tests {
                 [dfd::Block::Basic(basic)] => assert_eq!(basic, &expected),
                 other => panic!("unexpected dfd blocks: {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn one_and_two_channels_match_reference() {
+        let levels = mip_chain(sample(), ColorSpace::Linear);
+        for (channels, format, name) in [
+            (1, Format::R8_UNORM, "R8_UNORM"),
+            (2, Format::R8G8_UNORM, "R8G8_UNORM"),
+        ] {
+            let file = encode_unorm(channels, Usage::Data, &levels);
+            let reader = Reader::new(&file[..]).unwrap();
+            assert_eq!(reader.header().format, Some(format));
+            let (expected, _) = dfd::Basic::from_format(format).unwrap();
+            match reader.dfd_blocks() {
+                [dfd::Block::Basic(basic)] => assert_eq!(basic, &expected),
+                other => panic!("unexpected dfd blocks: {other:?}"),
+            }
+            let read: Vec<_> = reader.levels().collect();
+            for (read, level) in read.iter().zip(&levels) {
+                let packed: Vec<u8> = level
+                    .pixels
+                    .chunks_exact(4)
+                    .flat_map(|t| t[..channels].to_vec())
+                    .collect();
+                assert_eq!(read.data, &packed[..]);
+            }
+            let info = super::read(&file).unwrap();
+            assert_eq!(info.format_name(), name);
+            let level0 = info.level0.unwrap();
+            assert_eq!(level0.pixels.len(), 3 * 2 * 4);
+            assert_eq!(level0.pixels[..4], [0, if channels == 1 { 0 } else { 1 }, 0, 255]);
+            assert_eq!(info.mips.len(), 1);
         }
     }
 
