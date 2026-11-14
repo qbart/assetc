@@ -209,6 +209,18 @@ While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawin
 | Left drag on the model                 | Add a point every 24 px along the stroke     |
 | Right drag                             | Orbit the camera                             |
 
+## File pickers
+
+A dropdown that chooses a texture or another file (see
+[`docs/features/gui.md`](docs/features/gui.md#file-pickers)), while open:
+
+| Input              | Action                                             |
+|--------------------|----------------------------------------------------|
+| Typing             | Narrow the list to fuzzy matches, best first       |
+| `Down` / `Up`      | Mark the next / previous row                       |
+| `Enter`            | Choose the marked row                              |
+| `Escape`           | Close without choosing                             |
+
 ## Canvas (color LUT)
 
 See [`docs/features/lut.md`](docs/features/lut.md#views).

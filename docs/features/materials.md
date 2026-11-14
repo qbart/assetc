@@ -256,7 +256,7 @@ Roughness, Metallic, Occlusion, Emissive, Height) with the help line under
 the section title: *Files named `<name>.<suffix>.<ext>` next to the material
 fill their slot by name. Choose another texture to use it instead.*
 
-- The control is a drop-down showing the slot's texture:
+- The control is a [file picker](gui.md#file-pickers) showing the slot's texture:
   - the `[textures]` path, when the file sets one (label `ACCENT`, with
     Reset);
   - else the convention file, e.g. `brick.n.jpg (by name)` in `TEXT_WEAK`;
@@ -307,7 +307,7 @@ the canvas 3D view (orbit, zoom and reset as in
   (Box, Sphere, Cylinder, Torus; Sphere by default, remembered for all
   materials during the session, apart from the image 3D view's shape) and
   the color vision group.
-- **Lighting**: a drop-down on a `BG_BAR` card (6 px corners) in the canvas'
+- **Lighting**: a [file picker](gui.md#file-pickers) on a `BG_BAR` card (6 px corners) in the canvas'
   bottom-right corner, 8 px from the edges, labeled with the current choice: **Studio** (the default light of
   the 3D view) or any HDR environment map (`*.exr`) in `input`, by input
   path. Choosing a map loads it in the background, like an inspection. It is

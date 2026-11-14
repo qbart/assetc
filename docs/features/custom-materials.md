@@ -394,7 +394,7 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
     (groups, conditions, defaults shown `TEXT_WEAK`, reset per field), as in
     the [Structs tab](structs.md#structs-tab).
   - *Textures*: one row per texture (packed textures: one row per input,
-    under the texture's name), drop-downs as for PBR slots, listing only the
+    under the texture's name), file pickers as for PBR slots, listing only the
     files the texture's usage can take; `normal` rows have the `normal_y`
     toggle.
   - *State*: the shader's state with its values shown as defaults.

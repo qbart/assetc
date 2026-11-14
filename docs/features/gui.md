@@ -313,6 +313,42 @@ property sheet, inside 8 px margins:
   **Sliders** take the control column minus 64 px, followed by a 56 px value
   box (a number field) 8 px to their right.
 
+### File pickers
+
+Wherever a texture or another file of the input is chosen from a list (a
+[material](materials.md#material-tab)'s texture slots and its preview's
+Lighting, a [custom material](custom-materials.md)'s textures, a
+[mip level](mipmaps.md#mipmaps-tab)'s file, an
+[`asset<K>`](schemas.md) field), the control is a **file picker**: a
+dropdown whose list can be searched by typing.
+
+- Closed, it looks and reads like any dropdown: the current choice,
+  truncated to its width.
+- Opened, it shows a **search field** (hint `Search`, focused at once, empty
+  each time) above the **list**: the control's first entry (`By name: …`,
+  `None`, `—`, `Studio`), then its files in their usual order. The list
+  scrolls (at most 260 px tall); the field stays in place.
+- **Typing** narrows the list to the entries that match and orders them best
+  match first. The match is **fuzzy**:
+  - an entry matches when the typed characters appear in it in that order,
+    not necessarily next to each other, whatever their case (`brkn` and
+    `BRICK n` match `brick/brick.n.jpg`);
+  - words separated by spaces are matched one by one, in any order, and all
+    have to match (`jpg rough`);
+  - better matches come first: characters next to each other, at the start
+    of a word (after `/`, `.`, `_`, `-`, a space, or a capital after a
+    small letter) and in the file's name rather than its folders count for
+    more; characters skipped between two matches count against. Of equal
+    matches the shorter path comes first.
+  - The characters that matched are drawn in `ACCENT`.
+  - The first entry stays in the list only when it matches too. With
+    nothing matching, a weak `No match`.
+- One row is **marked** (an `ACCENT` outline): the first to start with and
+  after every keystroke. `Down` / `Up` move the mark (the list scrolls to
+  it); `Enter` chooses the marked row, as a click on any row does; `Escape`
+  or a click outside closes the picker with nothing chosen.
+- The current choice is drawn selected, as in any dropdown.
+
 ## Dialogs
 
 Modal dialogs (e.g. the delete confirmation) dim the window behind them and

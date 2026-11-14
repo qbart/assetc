@@ -198,7 +198,7 @@ in the type's data encoding:
   item's editor (200 px, so the Remove buttons line up; as above: a struct item's fields and a list item's items
   under its row) and **Remove** (`x`). Then **Add item** (`plus` and text),
   appending `T`'s implicit default.
-- `asset<K>`: a dropdown of `—` (`""`) and every file of kind `K` in the
+- `asset<K>`: a [file picker](gui.md#file-pickers) of `—` (`""`) and every file of kind `K` in the
   input directory, by input-relative path, sorted; a path that is none of
   them stays shown.
 - `ref<S>`: a dropdown of `—` (`""`) and the ids of every instance of `S`

@@ -143,7 +143,7 @@ writes and edits the `.amipmap`:
   Clicking a row shows that level in the canvas, as for a compiled texture;
   level 0 to start with.
 - With Custom mip chain on and a level other than 0 chosen, **Level `<n>`
-  file**: a dropdown of `By name: <file>` (or `By name: none`), which removes
+  file**: a [file picker](gui.md#file-pickers) of `By name: <file>` (or `By name: none`), which removes
   the level's `[files]` entry, and every texture source of the input except
   the texture itself, as paths relative to its folder (the ones in that
   folder first, then the rest, each by name); choosing one sets
