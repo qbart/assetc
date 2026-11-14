@@ -250,7 +250,8 @@ struct TextureBrush {
     /// Color mode: sRGB with alpha.
     color: [u8; 4],
     picker: Picker,
-    /// Channels mode: the channel painted and shown (0 R … 3 A), and what it is painted to.
+    /// Channels and Weights modes: the channel painted and shown (0 R … 3 A), and what it is
+    /// painted to (Weights: built up to).
     channel: usize,
     value: f32,
     /// A stroke is being painted.
@@ -7286,6 +7287,7 @@ fn canvas_model(
     // The chosen texture paint on the model, read from its file when it changes; see
     // docs/features/texture-paint.md#3d-view.
     preview.paint_ray = None;
+    preview.paint_probe = None;
     match &chosen_paint {
         Some((paint, file)) => {
             let key = (
@@ -7309,6 +7311,9 @@ fn canvas_model(
                     texture_paint::Mode::Channels => texture_paint::Display::Channel(
                         tools.texture.channel.min(paint.channels.count() - 1),
                     ),
+                    texture_paint::Mode::Weights => texture_paint::Display::Heat(
+                        tools.texture.channel.min(paint.channels.count() - 1),
+                    ),
                 };
             }
         }
@@ -7326,17 +7331,18 @@ fn canvas_model(
         let (origin, dir) = camera.ray(p);
         let forward = camera.ray(rect.center()).1;
         let brush = &tools.texture;
+        let channel = brush.channel.min(paint.channels.count() - 1);
+        let value = (brush.value * 255.0).round() as u8;
         let target = match paint.mode {
             texture_paint::Mode::Color if texture_erase => texture_paint::Target::Color([0; 4]),
             texture_paint::Mode::Color => texture_paint::Target::Color(brush.color),
-            texture_paint::Mode::Channels => texture_paint::Target::Channel(
-                brush.channel.min(paint.channels.count() - 1),
-                if texture_erase {
-                    0
-                } else {
-                    (brush.value * 255.0).round() as u8
-                },
-            ),
+            texture_paint::Mode::Channels => {
+                texture_paint::Target::Channel(channel, if texture_erase { 0 } else { value })
+            }
+            texture_paint::Mode::Weights if texture_erase => {
+                texture_paint::Target::Subtract(channel)
+            }
+            texture_paint::Mode::Weights => texture_paint::Target::Add(channel, value),
         };
         preview.paint_ray = Some(preview3d::PaintRay {
             origin,
@@ -7348,6 +7354,16 @@ fn canvas_model(
             target,
         });
         tools.texture.stroking = true;
+        ui.ctx().request_repaint();
+    }
+    // The weight under the pointer is read every frame; see
+    // docs/features/texture-paint.md#building-weight-up.
+    if let Some((paint, _)) = &chosen_paint
+        && paint.mode == texture_paint::Mode::Weights
+        && brushing
+        && let Some(p) = pointer.filter(|p| rect.contains(*p))
+    {
+        preview.paint_probe = Some(camera.ray(p));
         ui.ctx().request_repaint();
     }
     if tools.texture.stroking && !ui.input(|i| i.pointer.primary_down()) {
@@ -7744,8 +7760,22 @@ fn canvas_model(
             texture_paint::Mode::Channels => {
                 PAINT_CHANNELS[brush.channel.min(paint.channels.count() - 1)].1
             }
+            texture_paint::Mode::Weights => heat_color32(brush.value),
         };
         painter.circle_stroke(p, brush.size, Stroke::new(1.0, color));
+        // The weight under the pointer, beside the brush.
+        if paint.mode == texture_paint::Mode::Weights
+            && let Some(texel) = preview.paint_probed
+        {
+            let weight = f32::from(texel[brush.channel.min(paint.channels.count() - 1)]) / 255.0;
+            let at =
+                p + vec2(brush.size, brush.size) * std::f32::consts::FRAC_1_SQRT_2 + vec2(8.0, 8.0);
+            let text =
+                painter.layout_no_wrap(format!("{weight:.2}"), FontId::proportional(13.0), TEXT);
+            let plate = Rect::from_min_size(at, text.size()).expand2(vec2(5.0, 2.0));
+            painter.rect_filled(plate, 3.0, BG_PANEL);
+            painter.galley(at, text, TEXT);
+        }
         if brush.hardness < 1.0 {
             let inner = brush.size * brush.hardness;
             let points: Vec<egui::Pos2> = (0..=48)
@@ -10259,7 +10289,7 @@ fn paint_fields(
         }
         brush.reload += 1;
     }
-    if paint.mode == Mode::Channels {
+    if paint.mode != Mode::Color {
         prop_row(ui, "Channels", |ui, width| {
             egui::ComboBox::from_id_salt("paint_channels")
                 .width(width - 8.0)
@@ -10300,9 +10330,13 @@ fn paint_fields(
         )
         .on_hover_text("The brush's radius on screen");
     });
+    let weights = paint.mode == Mode::Weights;
     prop_row(ui, "Strength", |ui, _| {
         ui.spacing_mut().slider_width = 100.0;
-        ui.add(egui::Slider::new(&mut brush.strength, 0.0..=1.0).fixed_decimals(2));
+        let slider = ui.add(egui::Slider::new(&mut brush.strength, 0.0..=1.0).fixed_decimals(2));
+        if weights {
+            slider.on_hover_text("How fast weight builds up");
+        }
     });
     prop_row(ui, "Hardness", |ui, _| {
         ui.spacing_mut().slider_width = 100.0;
@@ -10314,7 +10348,7 @@ fn paint_fields(
             prop_row(ui, "Color", |_, _| {});
             brush.picker.show(ui, &mut brush.color);
         }
-        Mode::Channels => {
+        Mode::Channels | Mode::Weights => {
             prop_row(ui, "Channel", |ui, _| {
                 for (k, (label, color)) in PAINT_CHANNELS
                     .into_iter()
@@ -10334,8 +10368,15 @@ fn paint_fields(
             });
             prop_row(ui, "Value", |ui, _| {
                 ui.spacing_mut().slider_width = 100.0;
-                ui.add(egui::Slider::new(&mut brush.value, 0.0..=1.0).fixed_decimals(2));
+                let slider =
+                    ui.add(egui::Slider::new(&mut brush.value, 0.0..=1.0).fixed_decimals(2));
+                if weights {
+                    slider.on_hover_text("The most painting builds up to");
+                }
             });
+            if weights {
+                heat_scale(ui, brush.value);
+            }
         }
     }
     ui.add_space(4.0);
@@ -10350,8 +10391,55 @@ fn paint_fields(
         brush.reload += 1;
         brush.blank = true;
     }
-    ui.weak("Drag on the model to paint or erase. Shift + drag does the other. Right drag orbits.");
+    ui.weak(if weights {
+        "Hold or drag on the model to build weight up; go slower or over it again for more. \
+         Shift + drag takes it away. Right drag orbits."
+    } else {
+        "Drag on the model to paint or erase. Shift + drag does the other. Right drag orbits."
+    });
     failed
+}
+
+/// The heatmap color of weight `v` (0–1); see docs/features/texture-paint.md#heatmap.
+fn heat_color32(v: f32) -> egui::Color32 {
+    let [r, g, b] = texture_paint::heat((v.clamp(0.0, 1.0) * 255.0).round() as u8);
+    egui::Color32::from_rgb(r, g, b)
+}
+
+/// The heatmap's scale from 0 to 1 with a tick at `value`; see
+/// docs/features/texture-paint.md#texture-paint-tab.
+fn heat_scale(ui: &mut Ui, value: f32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
+    let bar = Rect::from_min_size(rect.min + vec2(2.0, 2.0), vec2(rect.width() - 4.0, 12.0));
+    let painter = ui.painter();
+    // One strip per weight a texel can hold.
+    for v in 0..=255u8 {
+        let x = |v: f32| bar.left() + bar.width() * v / 256.0;
+        let strip = Rect::from_min_max(
+            pos2(x(f32::from(v)), bar.top()),
+            pos2(x(f32::from(v) + 1.0), bar.bottom()),
+        );
+        let [r, g, b] = texture_paint::heat(v);
+        painter.rect_filled(strip, 0.0, egui::Color32::from_rgb(r, g, b));
+    }
+    let x = bar.left() + bar.width() * value.clamp(0.0, 1.0);
+    painter.line_segment(
+        [pos2(x, bar.top() - 2.0), pos2(x, bar.bottom() + 2.0)],
+        Stroke::new(2.0, TEXT),
+    );
+    for (at, label, align) in [
+        (0.0, "0", Align2::LEFT_TOP),
+        (0.5, "0.5", Align2::CENTER_TOP),
+        (1.0, "1", Align2::RIGHT_TOP),
+    ] {
+        painter.text(
+            pos2(bar.left() + bar.width() * at, bar.bottom() + 3.0),
+            align,
+            label,
+            FontId::proportional(11.0),
+            TEXT_WEAK,
+        );
+    }
 }
 
 fn regions_tab(ui: &mut Ui, inspected: &mut Inspected, tools: &mut LocatorTools) -> Option<Amod> {

@@ -271,6 +271,11 @@ pub struct Preview3d {
     pub paint: Option<PaintView>,
     /// A ray to paint along this frame, taken by [`paint_surface`].
     pub paint_ray: Option<PaintRay>,
+    /// A ray (origin and unit direction) to read the paint's texel along this frame, taken
+    /// by [`paint_surface`].
+    pub paint_probe: Option<(Vec3, Vec3)>,
+    /// The paint's texel where the last probe (or painting ray) hit the model.
+    pub paint_probed: Option<[u8; 4]>,
 }
 
 /// A texture paint on the shown model; see docs/features/texture-paint.md#3d-view.
@@ -2594,7 +2599,7 @@ struct PaintAssets {
     image: Option<Handle<Image>>,
     /// The size and display the image was made for.
     shown: Option<(u32, crate::texture_paint::Display)>,
-    /// Lit (Color) and unlit (Channels), each textured and plain.
+    /// Lit (Color, Weights) and unlit (Channels), each textured and plain.
     lit: Option<[Handle<StandardMaterial>; 2]>,
     unlit: Option<[Handle<StandardMaterial>; 2]>,
 }
@@ -2777,9 +2782,11 @@ fn sync_paint_view(
 }
 
 /// Paints [`Preview3d::paint`] along [`Preview3d::paint_ray`] where it hits the shown model
-/// (not its attachments), skinned meshes as posed; see docs/features/texture-paint.md#painting.
+/// (not its attachments), skinned meshes as posed, and reads the texel
+/// [`Preview3d::paint_probe`] hits; see docs/features/texture-paint.md#painting.
 #[allow(clippy::too_many_arguments)]
 fn paint_surface(
+    time: Res<Time>,
     loaded: Res<LoadedModel>,
     mut preview: ResMut<Preview3d>,
     children: Query<&Children>,
@@ -2789,12 +2796,16 @@ fn paint_surface(
     meshes: Res<Assets<Mesh>>,
     bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
 ) {
-    let Some(ray) = preview.paint_ray.take() else {
+    let ray = preview.paint_ray.take();
+    let probe = preview.paint_probe.take();
+    preview.paint_probed = None;
+    let Some((origin, dir)) = ray.map(|r| (r.origin, r.dir)).or(probe) else {
         return;
     };
     let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some()) else {
         return;
     };
+    let preview = &mut *preview;
     let Some(paint) = preview.paint.as_mut() else {
         return;
     };
@@ -2813,35 +2824,69 @@ fn paint_surface(
     let corners = |mesh: &PosedMesh, t: &[usize; 3]| {
         t.map(|i| mesh.world.get(i).copied().unwrap_or(Vec3::NAN))
     };
-    // The nearest hit, as for a surface ray.
-    let mut nearest: Option<f32> = None;
+    // The nearest hit, as for a surface ray, and the triangle hit.
+    let mut nearest: Option<(f32, &PosedMesh, &[usize; 3])> = None;
     for mesh in &posed {
         for t in mesh.indices.as_chunks::<3>().0 {
             let [a, b, c] = corners(mesh, t);
-            if let Some(d) = ray_triangle(ray.origin, ray.dir, a, b, c)
-                && nearest.is_none_or(|n| d < n)
+            if let Some(d) = ray_triangle(origin, dir, a, b, c)
+                && nearest.is_none_or(|(n, ..)| d < n)
             {
-                nearest = Some(d);
+                nearest = Some((d, mesh, t));
             }
         }
     }
-    let Some(distance) = nearest else {
+    let Some((distance, hit_mesh, hit)) = nearest else {
         // Off the model: the stroke goes on from the next hit without joining up.
-        paint.canvas.lift();
+        if ray.is_some() {
+            paint.canvas.lift();
+        }
         return;
     };
-    let center = ray.origin + ray.dir * distance;
+    let center = origin + dir * distance;
+    if let Some(ray) = ray {
+        paint_dabs(&mut paint.canvas, &posed, &ray, center, time.delta_secs());
+    }
+    // The texel hit, as it is now.
+    if let Some(uvs) = hit_mesh.uvs {
+        let [k0, k1, k2] = barycentric(center, corners(hit_mesh, hit));
+        let [a, b, c] = hit.map(|i| uvs.get(i).copied().unwrap_or_default());
+        let uv = [0, 1].map(|i| a[i] * k0 + b[i] * k1 + c[i] * k2);
+        preview.paint_probed = Some(paint.canvas.texel_at(uv));
+    }
+}
+
+/// The dabs of `ray` from the stroke's last one to `center`, its hit on the model, on the
+/// texels of `posed`'s triangles that face the camera; `dt` is the frame's time, which a
+/// brush that builds up spreads over the dabs.
+fn paint_dabs(
+    canvas: &mut crate::texture_paint::Canvas,
+    posed: &[PosedMesh],
+    ray: &PaintRay,
+    center: Vec3,
+    dt: f32,
+) {
+    use crate::texture_paint::{FLOW, LONGEST_FRAME};
+    let corners = |mesh: &PosedMesh, t: &[usize; 3]| {
+        t.map(|i| mesh.world.get(i).copied().unwrap_or(Vec3::NAN))
+    };
     let depth = (center - ray.origin).dot(ray.forward).max(1e-4);
     let radius = ray.radius * depth;
-    for center in paint.canvas.dab_centers(center, radius) {
+    let centers = canvas.dab_centers(center, radius);
+    let strength = if ray.target.builds_up() {
+        ray.strength * FLOW * dt.min(LONGEST_FRAME) / centers.len() as f32
+    } else {
+        ray.strength
+    };
+    for center in centers {
         let brush = crate::texture_paint::Brush {
             center,
             radius,
             hardness: ray.hardness,
-            strength: ray.strength,
+            strength,
             target: ray.target,
         };
-        for mesh in &posed {
+        for mesh in posed {
             let Some(uvs) = mesh.uvs else {
                 continue;
             };
@@ -2852,10 +2897,24 @@ fn paint_surface(
                     continue;
                 }
                 let uv = t.map(|i| uvs.get(i).copied().unwrap_or_default());
-                paint.canvas.paint_triangle([a, b, c], uv, &brush);
+                canvas.paint_triangle([a, b, c], uv, &brush);
             }
         }
     }
+}
+
+/// The barycentric coordinates of `p`, a point in the plane of triangle `a b c`.
+fn barycentric(p: Vec3, [a, b, c]: [Vec3; 3]) -> [f32; 3] {
+    let (e1, e2, v) = (b - a, c - a, p - a);
+    let (d11, d12, d22) = (e1.dot(e1), e1.dot(e2), e2.dot(e2));
+    let (d1, d2) = (v.dot(e1), v.dot(e2));
+    let det = d11 * d22 - d12 * d12;
+    if det.abs() < 1e-20 {
+        return [1.0, 0.0, 0.0];
+    }
+    let k1 = (d22 * d1 - d12 * d2) / det;
+    let k2 = (d11 * d2 - d12 * d1) / det;
+    [1.0 - k1 - k2, k1, k2]
 }
 
 /// Distance along the ray to triangle `a b c` (either side), Möller–Trumbore.
@@ -2885,6 +2944,14 @@ fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f3
 mod tests {
     use super::*;
     use crate::lut::Lut;
+
+    #[test]
+    fn barycentric_coordinates_weigh_the_corners() {
+        let t = [Vec3::ZERO, Vec3::X * 2.0, Vec3::Y * 2.0];
+        assert_eq!(barycentric(Vec3::ZERO, t), [1.0, 0.0, 0.0]);
+        assert_eq!(barycentric(Vec3::new(1.0, 1.0, 0.0), t), [0.0, 0.5, 0.5]);
+        assert_eq!(barycentric(Vec3::new(0.5, 0.0, 0.0), t), [0.75, 0.25, 0.0]);
+    }
 
     #[test]
     fn rays_hit_triangles_in_front() {

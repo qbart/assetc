@@ -21,15 +21,18 @@ pub enum Mode {
     Color,
     /// Independent linear masks, one per channel.
     Channels,
+    /// The same masks, built up by the brush and shown as a heatmap.
+    Weights,
 }
 
 impl Mode {
-    pub const ALL: [Self; 2] = [Self::Color, Self::Channels];
+    pub const ALL: [Self; 3] = [Self::Color, Self::Channels, Self::Weights];
 
     pub fn key(self) -> &'static str {
         match self {
             Self::Color => "color",
             Self::Channels => "channels",
+            Self::Weights => "weights",
         }
     }
 
@@ -37,6 +40,7 @@ impl Mode {
         match self {
             Self::Color => "Color",
             Self::Channels => "Channels",
+            Self::Weights => "Weights",
         }
     }
 }
@@ -90,7 +94,7 @@ pub struct Paint {
     pub mode: Mode,
     /// Texels per side, one of [`SIZES`].
     pub size: u32,
-    /// Channels mode only.
+    /// Channels and Weights modes only.
     pub channels: Channels,
 }
 
@@ -104,11 +108,12 @@ impl Paint {
         }
     }
 
-    /// A short label of the mode and size (`Color 1024`, `RG 512`).
+    /// A short label of the mode and size (`Color 1024`, `RG 512`, `Weights R 512`).
     pub fn label(&self) -> String {
         match self.mode {
             Mode::Color => format!("Color {}", self.size),
             Mode::Channels => format!("{} {}", self.channels.name(), self.size),
+            Mode::Weights => format!("Weights {} {}", self.channels.name(), self.size),
         }
     }
 }
@@ -155,7 +160,11 @@ pub fn parse(value: toml::Value) -> Result<Vec<Paint>, String> {
             Some(k) => Mode::ALL
                 .into_iter()
                 .find(|m| m.key() == k)
-                .ok_or_else(|| fail(format!("unknown mode {k:?} (use color or channels)")))?,
+                .ok_or_else(|| {
+                    fail(format!(
+                        "unknown mode {k:?} (use color, channels or weights)"
+                    ))
+                })?,
         };
         let channels = match key(&mut table, "channels")? {
             None => Channels::Rgba,
@@ -192,7 +201,7 @@ pub fn write(paints: &[Paint], out: &mut String) {
         *out += &format!("name = {}\n", toml::Value::from(paint.name.as_str()));
         *out += &format!("mode = \"{}\"\n", paint.mode.key());
         *out += &format!("size = {}\n", paint.size);
-        if paint.mode == Mode::Channels {
+        if paint.mode != Mode::Color {
             *out += &format!("channels = \"{}\"\n", paint.channels.key());
         }
     }
@@ -328,15 +337,15 @@ pub fn compile(model: &Path, paint: &Paint) -> Result<(Vec<Image>, Export), Stri
     };
     let (color, export) = match (paint.mode, paint.channels) {
         (Mode::Color, _) => (ColorSpace::Srgb, Export::Rgba(ColorSpace::Srgb)),
-        (Mode::Channels, Channels::R) => (ColorSpace::Linear, Export::Unorm(1)),
-        (Mode::Channels, Channels::Rg) => (ColorSpace::Linear, Export::Unorm(2)),
-        (Mode::Channels, Channels::Rgb) => {
+        (_, Channels::R) => (ColorSpace::Linear, Export::Unorm(1)),
+        (_, Channels::Rg) => (ColorSpace::Linear, Export::Unorm(2)),
+        (_, Channels::Rgb) => {
             for texel in pixels.as_chunks_mut::<4>().0 {
                 texel[3] = 255;
             }
             (ColorSpace::Linear, Export::Rgba(ColorSpace::Linear))
         }
-        (Mode::Channels, Channels::Rgba) => (ColorSpace::Linear, Export::Rgba(ColorSpace::Linear)),
+        (_, Channels::Rgba) => (ColorSpace::Linear, Export::Rgba(ColorSpace::Linear)),
     };
     let base = Image {
         width: paint.size,
@@ -353,6 +362,43 @@ pub enum Target {
     Color([u8; 4]),
     /// One channel (0 R … 3 A) to this value.
     Channel(usize, u8),
+    /// One channel raised by what each dab brings, no further than this value; see
+    /// docs/features/texture-paint.md#building-weight-up.
+    Add(usize, u8),
+    /// One channel lowered by what each dab brings.
+    Subtract(usize),
+}
+
+impl Target {
+    /// Whether dabs add up instead of moving texels toward a value.
+    pub fn builds_up(self) -> bool {
+        matches!(self, Self::Add(..) | Self::Subtract(_))
+    }
+}
+
+/// Weight a build-up brush at Strength 1 adds per second at its center.
+pub const FLOW: f32 = 4.0;
+
+/// The longest a frame counts for when weight builds up, in seconds.
+pub const LONGEST_FRAME: f32 = 0.1;
+
+/// The heatmap color (sRGB) of weight `v`; see docs/features/texture-paint.md#heatmap.
+pub fn heat(v: u8) -> [u8; 3] {
+    const STOPS: [[f32; 3]; 5] = [
+        [0.0, 0.0, 255.0],
+        [0.0, 255.0, 255.0],
+        [0.0, 255.0, 0.0],
+        [255.0, 255.0, 0.0],
+        [255.0, 0.0, 0.0],
+    ];
+    if v == 0 {
+        return [128; 3];
+    }
+    // Blue at 1/255, red at 1.
+    let t = f32::from(v - 1) / 254.0 * 4.0;
+    let i = (t as usize).min(3);
+    let f = t - i as f32;
+    std::array::from_fn(|c| (STOPS[i][c] + (STOPS[i + 1][c] - STOPS[i][c]) * f).round() as u8)
 }
 
 /// A dab of the brush: a sphere in the posed model's space.
@@ -362,7 +408,8 @@ pub struct Brush {
     pub radius: f32,
     /// 0–1: the part of the radius at full strength.
     pub hardness: f32,
-    /// 0–1.
+    /// 0–1; for a target that [builds up](Target::builds_up), what this dab adds or takes
+    /// away at its center.
     pub strength: f32,
     pub target: Target,
 }
@@ -374,6 +421,8 @@ pub enum Display {
     Color,
     /// One channel alone, in its color (A in white), black where 0.
     Channel(usize),
+    /// One channel alone, as a heatmap.
+    Heat(usize),
 }
 
 /// The texels of a paint being painted.
@@ -389,7 +438,8 @@ pub struct Canvas {
     stroke: Option<Stroke>,
 }
 
-/// A stroke in progress: the texels as it began and the largest weight each got.
+/// A stroke in progress: the texels as it began and the largest weight each got (a stroke
+/// that builds up: what it has added to each, negative when taken away).
 #[derive(Debug, Clone)]
 struct Stroke {
     base: Vec<u8>,
@@ -414,7 +464,7 @@ impl Canvas {
     pub fn end_stroke(&mut self) -> bool {
         self.stroke
             .take()
-            .is_some_and(|s| s.weights.iter().any(|&w| w > 0.0))
+            .is_some_and(|s| s.weights.iter().any(|&w| w != 0.0))
     }
 
     /// The stroke goes on without joining its next dab to the last one.
@@ -426,6 +476,15 @@ impl Canvas {
 
     pub fn is_blank(&self) -> bool {
         self.pixels.iter().all(|&b| b == 0)
+    }
+
+    /// The texel at `TEXCOORD_0` coordinates `uv` (the nearest one; coordinates repeat).
+    pub fn texel_at(&self, [u, v]: [f32; 2]) -> [u8; 4] {
+        let size = self.size as usize;
+        let wrap =
+            |c: f32| ((c * self.size as f32).floor() as i64).rem_euclid(size as i64) as usize;
+        let i = (wrap(v) * size + wrap(u)) * 4;
+        [0, 1, 2, 3].map(|k| self.pixels[i + k])
     }
 
     /// The texels changed since the last call.
@@ -543,22 +602,45 @@ impl Canvas {
                     y.rem_euclid(size as i64) as usize,
                 );
                 let i = yi * size + xi;
-                if w <= stroke.weights[i] {
-                    continue;
-                }
-                stroke.weights[i] = w;
                 let base = &stroke.base[i * 4..i * 4 + 4];
                 let texel = &mut self.pixels[i * 4..i * 4 + 4];
-                let lerp = |from: u8, to: u8| {
-                    (f32::from(from) + (f32::from(to) - f32::from(from)) * w).round() as u8
-                };
-                match brush.target {
-                    Target::Color(color) => {
-                        for k in 0..4 {
-                            texel[k] = lerp(base[k], color[k]);
+                if let Target::Add(k, _) | Target::Subtract(k) = brush.target {
+                    // What the stroke has added so far is kept exactly, so the smallest
+                    // dabs add up too.
+                    let from = f32::from(base[k]) / 255.0;
+                    let now = from + stroke.weights[i];
+                    let next = match brush.target {
+                        Target::Add(_, limit) => {
+                            let limit = f32::from(limit) / 255.0;
+                            if now >= limit {
+                                continue;
+                            }
+                            (now + w).min(limit)
                         }
+                        _ => (now - w).max(0.0),
+                    };
+                    if next == now {
+                        continue;
                     }
-                    Target::Channel(k, value) => texel[k] = lerp(base[k], value),
+                    stroke.weights[i] = next - from;
+                    texel[k] = (next * 255.0).round() as u8;
+                } else {
+                    if w <= stroke.weights[i] {
+                        continue;
+                    }
+                    stroke.weights[i] = w;
+                    let lerp = |from: u8, to: u8| {
+                        (f32::from(from) + (f32::from(to) - f32::from(from)) * w).round() as u8
+                    };
+                    match brush.target {
+                        Target::Color(color) => {
+                            for k in 0..4 {
+                                texel[k] = lerp(base[k], color[k]);
+                            }
+                        }
+                        Target::Channel(k, value) => texel[k] = lerp(base[k], value),
+                        Target::Add(..) | Target::Subtract(_) => {}
+                    }
                 }
                 let (xi, yi) = (xi as u32, yi as u32);
                 touched = Some(match touched {
@@ -599,6 +681,10 @@ impl Canvas {
                             2 => [0, 0, v, 255],
                             _ => [v, v, v, 255],
                         }
+                    }
+                    Display::Heat(k) => {
+                        let [r, g, b] = heat(t[k]);
+                        [r, g, b, 255]
                     }
                 };
                 out[i..i + 4].copy_from_slice(&shown);
@@ -725,6 +811,65 @@ mod tests {
     }
 
     #[test]
+    fn weights_build_up_to_the_limit_and_come_off_again() {
+        let mut canvas = quad_canvas(8);
+        let center = Vec3::new(0.5, 0.5, 0.0);
+        // Each dab brings a tenth; smaller than one step of a texel, a thousandth.
+        let mut b = brush(center, Target::Add(1, 128));
+        b.strength = 0.1;
+        canvas.dab_centers(center, 0.25);
+        for _ in 0..3 {
+            paint_square(&mut canvas, &b);
+        }
+        assert_eq!(texel(&canvas, 4, 4), [0, 77, 0, 0]);
+        b.strength = 0.001;
+        for _ in 0..100 {
+            paint_square(&mut canvas, &b);
+        }
+        assert_eq!(texel(&canvas, 4, 4), [0, 102, 0, 0]);
+        // No further than the limit.
+        b.strength = 0.1;
+        for _ in 0..10 {
+            paint_square(&mut canvas, &b);
+        }
+        assert_eq!(texel(&canvas, 4, 4), [0, 128, 0, 0]);
+        assert_eq!(texel(&canvas, 0, 0), [0, 0, 0, 0]);
+        assert!(canvas.end_stroke());
+        // A texel above the limit is left alone; taking away goes down to 0.
+        canvas.dab_centers(center, 0.25);
+        paint_square(&mut canvas, &brush(center, Target::Add(1, 60)));
+        assert_eq!(texel(&canvas, 4, 4), [0, 128, 0, 0]);
+        assert!(!canvas.end_stroke());
+        canvas.dab_centers(center, 0.25);
+        let mut off = brush(center, Target::Subtract(1));
+        off.strength = 0.25;
+        paint_square(&mut canvas, &off);
+        assert_eq!(texel(&canvas, 4, 4), [0, 64, 0, 0]);
+        paint_square(&mut canvas, &off);
+        paint_square(&mut canvas, &off);
+        assert_eq!(texel(&canvas, 4, 4), [0, 0, 0, 0]);
+        assert!(canvas.end_stroke());
+    }
+
+    #[test]
+    fn heat_runs_from_blue_to_red_over_gray() {
+        assert_eq!(heat(0), [128, 128, 128]);
+        assert_eq!(heat(1), [0, 0, 255]);
+        assert_eq!(heat(128), [0, 255, 0]);
+        assert_eq!(heat(255), [255, 0, 0]);
+        let [r, g, b] = heat(64);
+        assert!(r == 0 && g > 250 && b == 255, "{r} {g} {b}");
+        let mut canvas = quad_canvas(2);
+        canvas.pixels[..4].copy_from_slice(&[0, 255, 0, 0]);
+        let mut out = vec![0; 16];
+        canvas.display_into(Display::Heat(1), [0, 0, 1, 1], &mut out);
+        assert_eq!(out[..8], [255, 0, 0, 255, 128, 128, 128, 255]);
+        assert_eq!(canvas.texel_at([0.2, 0.2]), [0, 255, 0, 0]);
+        assert_eq!(canvas.texel_at([1.2, -0.8]), [0, 255, 0, 0]);
+        assert_eq!(canvas.texel_at([0.7, 0.2]), [0, 0, 0, 0]);
+    }
+
+    #[test]
     fn far_triangles_are_left_alone() {
         let mut canvas = quad_canvas(8);
         let center = Vec3::new(0.5, 0.5, 5.0);
@@ -775,6 +920,16 @@ mod tests {
         assert_eq!(paints[0].channels, Channels::Rg);
         assert_eq!(paints[0].size, 512);
         assert_eq!(paints[1], Paint::new("dirt".into()));
+        let weights: toml::Table =
+            "[[paints]]\nname = \"w\"\nmode = \"weights\"\nchannels = \"r\"\n"
+                .parse()
+                .unwrap();
+        let weights = parse(weights["paints"].clone()).unwrap();
+        assert_eq!(weights[0].mode, Mode::Weights);
+        assert_eq!(weights[0].label(), "Weights R 1024");
+        let mut out = String::new();
+        write(&weights, &mut out);
+        assert!(out.ends_with("mode = \"weights\"\nsize = 1024\nchannels = \"r\"\n"));
         let mut out = String::new();
         write(&paints, &mut out);
         assert_eq!(
