@@ -2678,6 +2678,13 @@ fn sync_paint_view(
     };
     // The texture: remade for a new size or display, else updated where the canvas changed.
     let size = paint.canvas.size;
+    // A texture of another size is a new image, with new materials: the materials' bindings
+    // would keep showing the old one.
+    if assets.shown.is_some_and(|(shown, _)| shown != size) {
+        assets.image = None;
+        assets.lit = None;
+        assets.unlit = None;
+    }
     let fresh = assets.shown == Some((size, paint.display));
     let image = match &assets.image {
         Some(handle) if fresh => handle.clone(),
