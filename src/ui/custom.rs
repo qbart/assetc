@@ -1311,26 +1311,25 @@ fn textures_choice(ui: &mut Ui, edit: &mut CustomEdit, shader: &Shader) {
             let hint = format!("{name}, by name: {stem}.{name}.<ext>");
             let reset = key_row(ui, [&label, &hint], "", set, |ui, width| {
                 fixed(ui, width, |ui| {
-                    egui::ComboBox::from_id_salt(("acmat_texture", &name))
-                        .width(width)
-                        .truncate()
-                        .selected_text(text)
-                        .show_ui(ui, |ui| {
-                            let by = by_name
-                                .as_ref()
-                                .map_or("By name: none".to_owned(), |(p, _)| {
-                                    format!("By name: {p}")
-                                });
-                            if ui.selectable_label(!set, by).clicked() {
-                                choice = Some(None);
-                            }
-                            for f in edit.files.iter().filter(|f| usage.accepts(Path::new(f))) {
-                                let on = edit.edit.texture(&name).is_some_and(|t| t.path == *f);
-                                if ui.selectable_label(on, f).clicked() {
-                                    choice = Some(Some(f.clone()));
-                                }
-                            }
-                        });
+                    let by = by_name
+                        .as_ref()
+                        .map_or("By name: none".to_owned(), |(p, _)| format!("By name: {p}"));
+                    let files: Vec<&str> = edit
+                        .files
+                        .iter()
+                        .filter(|f| usage.accepts(Path::new(f)))
+                        .map(String::as_str)
+                        .collect();
+                    let current = edit.edit.texture(&name).map(|t| t.path.as_str());
+                    choice = super::picker::file_picker(
+                        ui,
+                        ("acmat_texture", &name),
+                        width,
+                        text,
+                        &by,
+                        &files,
+                        current,
+                    );
                 });
             });
             if reset {

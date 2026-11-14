@@ -743,21 +743,19 @@ fn textures_section(ui: &mut Ui, edit: &mut MaterialEdit) {
                 |ui, _| {
                     let width = (ui.available_width() - 32.0).max(24.0);
                     fixed(ui, width, |ui| {
-                        egui::ComboBox::from_id_salt(("amat_texture", slot.name()))
-                            .width(width)
-                            .truncate()
-                            .selected_text(shown)
-                            .show_ui(ui, |ui| {
-                                if ui.selectable_label(set.is_none(), &by_name_text).clicked() {
-                                    chosen = Some(None);
-                                }
-                                for choice in &edit.choices {
-                                    let on = set.as_deref() == Some(choice.as_str());
-                                    if ui.selectable_label(on, choice).clicked() {
-                                        chosen = Some(Some(choice.clone()));
-                                    }
-                                }
-                            });
+                        let files: Vec<&str> = edit.choices.iter().map(String::as_str).collect();
+                        let picked = super::picker::file_picker(
+                            ui,
+                            ("amat_texture", slot.name()),
+                            width,
+                            shown,
+                            &by_name_text,
+                            &files,
+                            set.as_deref(),
+                        );
+                        if picked.is_some() {
+                            chosen = picked;
+                        }
                     });
                     if set.is_some()
                         && icon_button(ui, Icon::RotateCcw, "Reset to default", true).clicked()
@@ -846,21 +844,16 @@ pub fn canvas_material(
             .corner_radius(6)
             .inner_margin(Margin::same(4))
             .show(ui, |ui| {
-                egui::ComboBox::from_id_salt("amat_light")
-                    .width(size.x - 8.0)
-                    .truncate()
-                    .selected_text(light.as_deref().unwrap_or("Studio"))
-                    .show_ui(ui, |ui| {
-                        if ui.selectable_label(light.is_none(), "Studio").clicked() {
-                            chosen = Some(None);
-                        }
-                        for choice in &edit.lights {
-                            let on = light.as_deref() == Some(choice.as_str());
-                            if ui.selectable_label(on, choice).clicked() {
-                                chosen = Some(Some(choice.clone()));
-                            }
-                        }
-                    });
+                let files: Vec<&str> = edit.lights.iter().map(String::as_str).collect();
+                chosen = super::picker::file_picker(
+                    ui,
+                    "amat_light",
+                    size.x - 8.0,
+                    light.as_deref().unwrap_or("Studio"),
+                    "Studio",
+                    &files,
+                    light.as_deref(),
+                );
             });
     });
     chosen.filter(|c| c != light)

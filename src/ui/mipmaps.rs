@@ -327,21 +327,16 @@ fn file_row(
     let hint = format!("[files] {level}: the image of level {level}");
     let reset = key_row(ui, [&label, &hint], "", set.is_some(), |ui, width| {
         fixed(ui, width, |ui| {
-            egui::ComboBox::from_id_salt("amipmap_level_file")
-                .width(width)
-                .truncate()
-                .selected_text(text)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(set.is_none(), &by_name).clicked() {
-                        choice = Some(None);
-                    }
-                    for file in files {
-                        let on = set.as_deref() == Some(file.as_str());
-                        if ui.selectable_label(on, file).clicked() {
-                            choice = Some(Some(file.clone()));
-                        }
-                    }
-                });
+            let files: Vec<&str> = files.iter().map(String::as_str).collect();
+            choice = super::picker::file_picker(
+                ui,
+                "amipmap_level_file",
+                width,
+                text,
+                &by_name,
+                &files,
+                set.as_deref(),
+            );
         });
     });
     if reset {

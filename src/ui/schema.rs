@@ -1015,23 +1015,24 @@ pub(super) fn value_editor(
         // The input's files of that kind.
         let current = default.as_str().unwrap_or_default().to_owned();
         let shown = if current.is_empty() { "—" } else { &current };
-        egui::ComboBox::from_id_salt(("asset", path))
-            .width(DEFAULT_W - 8.0)
-            .selected_text(shown)
-            .show_ui(ui, |ui| {
-                if ui.selectable_label(current.is_empty(), "—").clicked() {
-                    *default = Value::String(String::new());
-                }
-                for file in editors
-                    .assets
-                    .iter()
-                    .filter(|f| aschema::asset_kind(f) == Some(*kind))
-                {
-                    if ui.selectable_label(*file == current, file).clicked() {
-                        *default = Value::String(file.clone());
-                    }
-                }
-            });
+        let files: Vec<&str> = editors
+            .assets
+            .iter()
+            .filter(|f| aschema::asset_kind(f) == Some(*kind))
+            .map(String::as_str)
+            .collect();
+        let picked = super::picker::file_picker(
+            ui,
+            ("asset", path),
+            DEFAULT_W - 8.0,
+            shown,
+            "—",
+            &files,
+            Some(current.as_str()).filter(|c| !c.is_empty()),
+        );
+        if let Some(file) = picked {
+            *default = Value::String(file.unwrap_or_default());
+        }
         return;
     }
     if let Some(Ty::Ref(target)) = ty {

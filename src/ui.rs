@@ -56,6 +56,7 @@ mod graph;
 mod material_edit;
 mod mipmaps;
 mod pack_view;
+mod picker;
 mod schema;
 mod structs_edit;
 mod tree_nav;
