@@ -141,6 +141,7 @@ pub fn rename(
         moves.push((sidecar, crate::amod::path_for(&target)));
     }
     moves.extend(renamed_paints(path, name));
+    moves.extend(renamed_mips(path, name));
     relocate_all(input, root, &moves)?;
     Ok(target)
 }
@@ -162,6 +163,11 @@ pub fn delete(input: &Path, path: &Path) -> Result<(), String> {
             for paint in crate::texture_paint::files_of(path) {
                 fs::remove_file(paint).map_err(|e| e.to_string())?;
             }
+        }
+        // A texture's mip chain settings; its level files are kept.
+        let amipmap = crate::mipmap::path_for(path);
+        if amipmap.is_file() {
+            fs::remove_file(amipmap).map_err(|e| e.to_string())?;
         }
         Ok(())
     }
@@ -308,10 +314,46 @@ fn renamed_paints(path: &Path, name: &str) -> Vec<(PathBuf, PathBuf)> {
         .collect()
 }
 
-/// The file whose sidecar `path` is, when that file exists.
+/// A texture's `.amipmap`, its level files by name and their sidecars, and their names when
+/// the texture is renamed to `name`; see docs/features/file-operations.md#rename.
+fn renamed_mips(path: &Path, name: &str) -> Vec<(PathBuf, PathBuf)> {
+    let amipmap = crate::mipmap::path_for(path);
+    if !amipmap.is_file() {
+        return Vec::new();
+    }
+    let target = path.with_file_name(name);
+    let mut moves = vec![(amipmap, crate::mipmap::path_for(&target))];
+    let old = path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let (old, new) = (
+        crate::build::strip_extension(&old),
+        crate::build::strip_extension(name),
+    );
+    if old != new {
+        for (_, file) in crate::mipmap::named_files(path) {
+            let file_name = file.file_name().unwrap_or_default().to_string_lossy();
+            let Some(rest) = file_name.strip_prefix(old) else {
+                continue;
+            };
+            let to = file.with_file_name(format!("{new}{rest}"));
+            let sidecar = crate::amod::path_for(&file);
+            if sidecar.is_file() {
+                moves.push((sidecar, crate::amod::path_for(&to)));
+            }
+            moves.push((file, to));
+        }
+    }
+    moves
+}
+
+/// The file whose sidecar or `.amipmap` `path` is, when that file exists.
 fn sidecar_file(path: &Path) -> Option<PathBuf> {
     let main = path.with_extension("");
-    (crate::amod::is_sidecar(path) && main.is_file()).then_some(main)
+    ((crate::amod::is_sidecar(path) || crate::mipmap::is_amipmap(path)) && main.is_file())
+        .then_some(main)
 }
 
 fn is_gltf(path: &Path) -> bool {
@@ -360,6 +402,12 @@ pub fn companions(input: Option<&Path>, path: &Path) -> Vec<PathBuf> {
         // A model's texture paints; see docs/features/texture-paint.md#files.
         if crate::model::is_model(path) {
             out.extend(crate::texture_paint::files_of(path));
+        }
+        // A texture's mip chain and its levels by name; see docs/features/mipmaps.md#files.
+        let amipmap = crate::mipmap::path_for(path);
+        if amipmap.is_file() {
+            out.push(amipmap);
+            out.extend(crate::mipmap::named_files(path).into_iter().map(|(_, f)| f));
         }
         let sidecars: Vec<PathBuf> = out
             .iter()
@@ -571,6 +619,69 @@ mod tests {
         assert_eq!(tree, input.join("tree.atree"));
         let parsed = crate::atree::parse(&fs::read_to_string(&tree).unwrap()).unwrap();
         assert_eq!(parsed, crate::atree::new());
+    }
+
+    #[test]
+    fn mip_chains_follow_their_texture() {
+        let (_dir, input) = input();
+        let write = |rel: &str, text: &str| fs::write(input.join(rel), text).unwrap();
+        for file in [
+            "rock.png",
+            "rock.mip1.png",
+            "rock.mip1.png.amod",
+            "rock.mip2.tga",
+            "rocks.mip1.png",
+            "far.png",
+        ] {
+            write(file, "x");
+        }
+        write("rock.png.amipmap", "[files]\n3 = \"far.png\"\n");
+        let rock = input.join("rock.png");
+        // The file and its levels by name, with their sidecars; chosen files stay.
+        assert_eq!(
+            companions(Some(&input), &rock),
+            [
+                rock.clone(),
+                input.join("rock.png.amipmap"),
+                input.join("rock.mip1.png"),
+                input.join("rock.mip2.tga"),
+                input.join("rock.mip1.png.amod"),
+            ]
+        );
+        assert_eq!(moving_with(&input, &input.join("rock.png.amipmap")), 4);
+
+        let moved = move_into(&input, None, &rock, &input.join("sub")).unwrap();
+        assert_eq!((moved.more, moved.fixed), (4, 1));
+        let read = |rel: &str| fs::read_to_string(input.join(rel)).unwrap();
+        assert_eq!(
+            read("sub/rock.png.amipmap"),
+            "[files]\n3 = \"../far.png\"\n"
+        );
+        assert!(input.join("sub/rock.mip2.tga").is_file() && input.join("far.png").is_file());
+        // A chosen file that moves is followed.
+        fs::create_dir_all(input.join("shared")).unwrap();
+        move_into(&input, None, &input.join("far.png"), &input.join("shared")).unwrap();
+        assert_eq!(
+            read("sub/rock.png.amipmap"),
+            "[files]\n3 = \"../shared/far.png\"\n"
+        );
+
+        let stone = rename(&input, None, &input.join("sub/rock.png"), "stone.jpg").unwrap();
+        for file in [
+            "stone.jpg.amipmap",
+            "stone.mip1.png",
+            "stone.mip1.png.amod",
+            "stone.mip2.tga",
+        ] {
+            assert!(input.join("sub").join(file).is_file(), "{file}");
+        }
+        assert!(!input.join("sub/rock.mip1.png").exists());
+        assert!(input.join("rocks.mip1.png").is_file());
+
+        // Deleting the texture removes its settings, not the level images.
+        delete(&input, &stone).unwrap();
+        assert!(!input.join("sub/stone.jpg.amipmap").exists());
+        assert!(input.join("sub/stone.mip1.png").is_file());
     }
 
     #[test]

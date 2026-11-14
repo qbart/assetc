@@ -40,6 +40,7 @@ enum Ext {
     Shader,
     CustomMaterial,
     Material,
+    Mipmap,
     Other,
 }
 
@@ -56,6 +57,7 @@ impl Format {
             "ashader" => (Self::Source(Ext::Shader), false),
             "acmat" => (Self::Source(Ext::CustomMaterial), false),
             "amat" => (Self::Source(Ext::Material), false),
+            "amipmap" => (Self::Source(Ext::Mipmap), false),
             "amod" | "agradient" | "apalette" | "anoise" => (Self::Source(Ext::Other), false),
             "gltf" => (Self::Gltf, true),
             _ => return None,
@@ -77,6 +79,7 @@ impl Format {
                 ["shader"] | ["textures", _] | ["textures", _, "path"],
             ) => true,
             (Self::Source(Ext::Material), ["textures", _]) => true,
+            (Self::Source(Ext::Mipmap), ["files", _]) => true,
             (Self::Gltf, ["buffers" | "images", "uri"]) => true,
             _ => false,
         }
