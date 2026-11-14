@@ -34,7 +34,8 @@ width are in `DESC`.
 | `COLORS`   | no       | `u8[4][set_count × vertex_count]`: every set's colors, set after set |
 | `UVSET`    | no       | [`UvSet`](#uvset-32-bytes)`[uv_set_count]`, see [UV sets](#uv-sets) |
 | `UVS`      | no       | `f32[2][uv_set_count × vertex_count]`: every UV set's coordinates, set after set |
-| `STRINGS`  | no       | `u8[]`: UTF-8 text of color sets, properties, shapes, regions and paths, back to back, see [Strings](#strings) |
+| `PAINTS`   | no       | [`Paint`](#paint-64-bytes)`[]`, see [Texture paints](#texture-paints) |
+| `STRINGS`  | no       | `u8[]`: UTF-8 text of color sets, UV sets, paints, properties, shapes, regions and paths, back to back, see [Strings](#strings) |
 | `PROPS`    | no       | [`Property`](#property-32-bytes)`[]`: the model's properties, sorted by key |
 | `SHAPES`   | no       | [`Shape`](#shape-96-bytes)`[]`, see [Shapes](#shapes) |
 | `SHAPEPTS` | no       | `f32[3][]`: the hulls' points |
@@ -53,8 +54,9 @@ together, as do `SKIN` and `SKELETON` (only for skinned meshes), and
 `LOCATORS` and `LOCNAMES` (only for models with locators); `LOCTAGS`
 follows them when a locator has tags. `COLORSET` and `COLORS` come
 together, when the mesh has color sets; `UVSET` and `UVS` likewise, when it
-has UV sets. `STRINGS` comes when color sets, UV sets,
-properties, shapes, regions or paths do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
+has UV sets. `PAINTS` comes when the model has texture paints. `STRINGS`
+comes when color sets, UV sets, paints, properties, shapes, regions or
+paths do; then `PROPS` (with properties), `SHAPES`, `SHAPEPTS`
 and `SHAPEPRP` (with shapes; `SHAPEPTS` only with a hull, `SHAPEPRP` only
 when a shape has properties), `REGIONS`, `REGTAGS` (when a region has tags)
 and `TRIREGN` (with regions), `PATHS`, `PATHPTS`, `PATHSMP` and `PATHPRP`
@@ -375,6 +377,33 @@ sets' order.
 |     12 |    4 | `name_len`    | u32                                                   |
 |     16 |    8 | `texture`     | u64, asset ID of the texture the coordinates sample (`P/<set>.colors`) |
 |     24 |    8 | `reserved`    | `0`                                                   |
+
+## Texture paints
+
+The model's [texture paints](../features/texture-paint.md), one record per
+paint in the sidecar's order. The paint's texels are not in the mesh: each
+is the texture `texture` names (`P/<name>.paint.ktx2`, `P` the model's
+input path without its extension), sampled with the mesh's `uv`. Find a
+paint by `name_hash`.
+
+### Paint (64 bytes)
+
+| Offset | Size | Field         | Notes                                                 |
+|-------:|-----:|---------------|-------------------------------------------------------|
+|      0 |    8 | `name_hash`   | u64, FNV-1a-64 of the name                            |
+|      8 |    4 | `name_offset` | u32, in `STRINGS`                                     |
+|     12 |    4 | `name_len`    | u32                                                   |
+|     16 |    8 | `texture`     | u64, asset ID of the paint's texture (`P/<name>.paint`) |
+|     24 |    4 | `mode`        | u32: `0` color, `1` channels, `2` weights, `3` distance |
+|     28 |    4 | `channels`    | u32: how many channels the texture has, R first: `4` in color mode, `1`–`4` in the others |
+|     32 |    4 | `size`        | u32, texels per side                                  |
+|     36 |    4 | `measure`     | u32, distance mode: `0` along the surface, `1` straight line; `0` in the other modes |
+|     40 |   16 | `range`       | f32 × 4, distance mode: per channel (R, G, B, A), the distance a value of 1 stands for, in the mesh's units, so `distance = value × range`; `0` for a channel without a point, one whose farthest distance was never recorded, and in the other modes |
+|     56 |    8 | `reserved`    | `0`                                                   |
+
+`range` is the paint's [Range](../features/texture-paint.md#distance-map)
+when it is set, else the farthest distance the channel was last measured
+with (its point's `farthest` in the [sidecar](amod.md#paints)).
 
 ## Paths
 

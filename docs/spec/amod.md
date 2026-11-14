@@ -173,6 +173,7 @@ Each table of `points`:
 | `channel`  | string              | `"r"`, `"g"`, `"b"` or `"a"`; each at most once |
 | `triangle` | array of 3 integers | `[mesh, primitive, triangle]`: the triangle of primitive `primitive` of glTF mesh `mesh` the point lies in, as in a region's `triangles` |
 | `at`       | array of 2 numbers  | the weights of the triangle's second and third corner at the point (barycentric coordinates; the first corner's is the rest): each 0 or more, together at most 1 |
+| `farthest` | number              | optional, 0 or more: the distance of the farthest spot from the point when the channel was last measured, in the model's units; written by assetc, read by the build for the mesh's [`PAINTS`](amesh.bin.md#texture-paints) range |
 
 ## `[[events]]`
 

@@ -137,8 +137,10 @@ In Distance mode the card's body, after Channels, is:
   `Farthest`. Hover: `The distance stored as 1; Farthest: the farthest spot
   of the model`.
 - The **scale**, as in Weights mode but without a tick, and under it, once
-  the chosen channel has been measured in this session, a weak `Farthest
-  spot: <d>` (in the model's units, three decimals).
+  the chosen channel has been measured, a weak `Farthest spot: <d>` (in the
+  model's units, three decimals). It is saved with the point, so it shows
+  again when the model is opened later, and the build writes it into the
+  mesh as the channel's range while Range is `Farthest`.
 - **Recompute** (button, enabled while any channel has a point): measures
   every channel that has a point again, for a model that has changed or is
   posed differently.
@@ -331,8 +333,21 @@ not written, few GPUs sample them.)
 - Mip levels are computed as for [textures](textures.md) in the format's
   color space (Color: sRGB), from all four channels, before the channels
   are dropped.
-- The mesh is unchanged: a game samples the texture with the mesh's `uv`
-  (`TEXCOORD_0`), and finds it by the asset path.
+- The mesh's geometry is unchanged: a game samples the texture with the
+  mesh's `uv` (`TEXCOORD_0`), and finds it by the asset path.
+- The mesh lists its paints in a [`PAINTS`](../spec/amesh.bin.md#texture-paints)
+  chunk: each paint's name, its texture's asset ID, mode, channels and size,
+  and for a distance map its measure and, per channel, the **range**: the
+  distance a value of 1 stands for, in the mesh's units, so a shader gets
+  the distance back as `value × range`. The range is the paint's Range, or
+  with Range `Farthest` the farthest distance the channel was last measured
+  with (saved with its point as `farthest`; `0` when it never was). The
+  [SDK](sdk.md) reads it as `Mesh::paints`.
+- In the Output tree, the compiled mesh's Info tab has a **Paints** row (the
+  paints' names, or `none`) and its Chunks tab lists `PAINTS` like any
+  chunk: one row per paint with its name, hash, texture, mode, channels,
+  size, measure and range. The model's own Info tab (Input tree) has a
+  **Paints** row too: how many, or `none`.
 - A paint without an `.apaint` file compiles to an unpainted texture of its
   Size.
 - The model's build reads the `.apaint` files, so painting rebuilds it.
@@ -364,5 +379,4 @@ not sources of their own (the build counts them as skipped).
 - A pen's pressure for the Weights brush (the window library does not
   report it), weights kept normalized across channels (summing to 1), and
   smoothing or blurring weights.
-- Showing a paint in the compiled mesh preview, and a model Info row for
-  paints.
+- Showing a paint in the compiled mesh preview.
