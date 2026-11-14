@@ -5,8 +5,9 @@ Pushing a version tag builds the `assetc` program (the CLI and GUI, package
 binaries as a GitHub release. It is a GitHub Actions workflow,
 `.github/workflows/release.yml`.
 
-The [SDK](sdk.md) is not part of it: the `assetc` crate is only published by
-hand, with `make publish` (see [Publishing](sdk.md#publishing)).
+The [SDK](sdk.md) and [`assetc-colors`](colors.md) are not part of it: the
+crates are only published by hand, with `make publish` (see
+[Publishing](colors.md#publishing)).
 
 ## Trigger
 
@@ -33,8 +34,10 @@ all of them hold the new one, in one pushed commit:
 |-------|------|
 | `Cargo.toml` | `version` of `assetc-core`: the one the tag is checked against, and what the program reports (`assetc --version`, the status bar, a texture's `KTXwriter`) |
 | `sdk/Cargo.toml` | `version` of the `assetc` crate (the SDK), kept the same |
+| `colors/Cargo.toml` | `version` of the [`assetc-colors`](colors.md) crate, kept the same |
 | `demo/Cargo.toml` | `version` of `assetc-demo`, kept the same |
-| `Cargo.lock` | the three packages' entries; `cargo update --workspace` writes them. The release builds with `--locked`, so a stale lock file fails it |
+| `Cargo.toml` `[dependencies]` | the `version` of the `assetc-colors` path dependency |
+| `Cargo.lock` | the four packages' entries; `cargo update --workspace` writes them. The release builds with `--locked`, so a stale lock file fails it |
 | `docs/features/gui.md`, `docs/features/inspector.md` | the `assetc <version>` shown in the status bar's and the Writer row's examples |
 
 To check, before tagging (`0.2.0` being the old version; hits in

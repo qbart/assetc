@@ -43,11 +43,12 @@ Like git with `.git`, assetc finds its project by looking for `assetc.toml` in t
 | `make run` / `make build` / `make release` | `cargo run`, debug build, release build |
 | `make install` | Release build, copied to `~/bin/assetc` |
 | `make demo` | Packs the samples, then shows them in the [demo](#demo) |
-| `make publish-check` / `make publish` | Dry run / publish of the [`assetc` crate](#sdk-the-assetc-crate) to crates.io |
+| `make publish-check` / `make publish` | Dry run / publish of every published crate to crates.io: [`assetc-colors`](docs/features/colors.md), then the [`assetc` SDK](#sdk-the-assetc-crate) |
+| `make publish-colors`, `make publish-sdk` (and `publish-check-colors`, `publish-check-sdk`) | Publish (dry run) one of them |
 
 ### Releases
 
-Pushing a tag `v<version>` (matching the version in `Cargo.toml`) builds `assetc` for Linux x64, macOS Apple silicon and Windows x64 on GitHub Actions and attaches the archives to a GitHub release; see [docs/features/release.md](docs/features/release.md). The SDK crate is published by hand (`make publish`).
+Pushing a tag `v<version>` (matching the version in `Cargo.toml`) builds `assetc` for Linux x64, macOS Apple silicon and Windows x64 on GitHub Actions and attaches the archives to a GitHub release; see [docs/features/release.md](docs/features/release.md). The crates are published by hand (`make publish`).
 
 ## Configuration (`assetc.toml`)
 
@@ -173,6 +174,17 @@ let texture: Texture = assets.load_path("ui/fire.ktx2")?;
 ```
 
 The compiler itself is the unpublished `assetc-core` package at the repository root (its binary is `assetc`). See [docs/features/sdk.md](docs/features/sdk.md) and [sdk/README.md](sdk/README.md).
+
+## Colors: the `assetc-colors` crate
+
+[`colors/`](colors/) is assetc's color logic as a crate of its own, so other programs get the same results: sRGB and linear conversion, HSV and HSL, hex colors, gradients (with dithering), the cell grid of gradient and palette images, color modifiers (levels, brightness and contrast, posterize, colorize, …), blend modes, 3D color LUTs, color vision simulation and the paint heatmap. Like the SDK it depends on nothing but `std`.
+
+```toml
+[dependencies]
+assetc-colors = "0.2"
+```
+
+See [docs/features/colors.md](docs/features/colors.md) and [colors/README.md](colors/README.md).
 
 ## Sample assets
 
