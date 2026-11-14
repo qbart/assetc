@@ -28,7 +28,8 @@ Rows are top to bottom, as the texture is (row 0 is `v = 0` of
 `TEXCOORD_0`). Each texel is R, G, B, A, stored exactly:
 
 - Color mode: an sRGB color with straight alpha.
-- Channels and Weights modes: four linear values 0–255, one per channel.
+- Channels, Weights and Distance modes: four linear values 0–255, one per
+  channel.
 - Unpainted: `0, 0, 0, 0`.
 
 assetc reads any PNG the [`image`](https://docs.rs/image) crate reads

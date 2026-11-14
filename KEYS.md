@@ -194,6 +194,13 @@ While a texture paint paints (see [`docs/features/texture-paint.md`](docs/featur
 | Left button held on the model (Weights mode) | Build weight up under the brush (Paint on) or take it away (Erase on) for as long as it is held |
 | Right drag                             | Orbit the camera                             |
 
+While a distance point is picked (see [`docs/features/texture-paint.md`](docs/features/texture-paint.md#picking-the-point)):
+
+| Input                                  | Action                                       |
+|----------------------------------------|----------------------------------------------|
+| Left click / drag on the model         | Put the point there and measure from it      |
+| Right drag                             | Orbit the camera                             |
+
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
 
 | Input                                  | Action                                       |

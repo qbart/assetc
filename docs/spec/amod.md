@@ -156,9 +156,23 @@ per paint; its texels are in the [`.apaint`](apaint.md) file
 | Key        | Type    | Default    | Meaning |
 |------------|---------|------------|---------|
 | `name`     | string  | (required) | non-empty, ASCII letters, digits, `_` and `-` only, unique among the file's paints |
-| `mode`     | string  | `"color"`  | `"color"`, `"channels"` or `"weights"` |
+| `mode`     | string  | `"color"`  | `"color"`, `"channels"`, `"weights"` or `"distance"` |
 | `size`     | integer | `1024`     | width and height in texels: `256`, `512`, `1024`, `2048` or `4096` |
-| `channels` | string  | `"rgba"`   | channels and weights modes: `"r"`, `"rg"`, `"rgb"` or `"rgba"`; ignored in color mode |
+| `channels` | string  | `"rgba"`   | every mode but color: `"r"`, `"rg"`, `"rgb"` or `"rgba"`; ignored in color mode |
+| `measure`  | string  | `"surface"` | distance mode: `"surface"` (along the surface) or `"straight"` (straight line) |
+| `range`    | number  | `0`        | distance mode: the distance stored as 1, in the model's units, 0 or more; `0` is the farthest spot's |
+| `points`   | array of tables | `[]` | distance mode: the point each channel is measured from, see below |
+
+`measure`, `range` and `points` are read in every mode and used in distance
+mode; assetc writes each only when it differs from its default.
+
+Each table of `points`:
+
+| Key        | Type                | Meaning |
+|------------|---------------------|---------|
+| `channel`  | string              | `"r"`, `"g"`, `"b"` or `"a"`; each at most once |
+| `triangle` | array of 3 integers | `[mesh, primitive, triangle]`: the triangle of primitive `primitive` of glTF mesh `mesh` the point lies in, as in a region's `triangles` |
+| `at`       | array of 2 numbers  | the weights of the triangle's second and third corner at the point (barycentric coordinates; the first corner's is the rest): each 0 or more, together at most 1 |
 
 ## `[[events]]`
 
