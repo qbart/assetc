@@ -14,7 +14,8 @@ hand, with `make publish` (see [Publishing](sdk.md#publishing)).
   the `version` of `assetc-core` in the root `Cargo.toml`.
 - A tag that does not match that version fails the release before anything
   is built: `tag v0.3.0 does not match assetc-core 0.2.0 in Cargo.toml`.
-  Bump the version, commit, then tag that commit:
+  Set the [version](#version) everywhere, commit, push, then tag that
+  commit:
 
   ```
   $ git tag v0.2.0
@@ -22,6 +23,29 @@ hand, with `make publish` (see [Publishing](sdk.md#publishing)).
   ```
 
 - Other pushes and tags not starting with `v` run nothing.
+
+## Version
+
+The version is written in several places, and a release is tagged only when
+all of them hold the new one, in one pushed commit:
+
+| Place | What |
+|-------|------|
+| `Cargo.toml` | `version` of `assetc-core`: the one the tag is checked against, and what the program reports (`assetc --version`, the status bar, a texture's `KTXwriter`) |
+| `sdk/Cargo.toml` | `version` of the `assetc` crate (the SDK), kept the same |
+| `demo/Cargo.toml` | `version` of `assetc-demo`, kept the same |
+| `Cargo.lock` | the three packages' entries; `cargo update --workspace` writes them. The release builds with `--locked`, so a stale lock file fails it |
+| `docs/features/gui.md`, `docs/features/inspector.md` | the `assetc <version>` shown in the status bar's and the Writer row's examples |
+
+To check, before tagging (`0.2.0` being the old version; hits in
+`Cargo.lock` for other crates and the example tags in this file do not
+count):
+
+```
+$ cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | "\(.name) \(.version)"'
+$ git grep -n '0\.2\.0' -- . ':!docs/features/release.md'
+$ cargo build --locked
+```
 
 ## Builds
 
