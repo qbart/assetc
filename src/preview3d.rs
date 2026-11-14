@@ -2853,7 +2853,8 @@ fn paint_surface(
         &roots,
         &meshes,
         &bindposes,
-        |_| true,
+        // The model's own primitives: not the ground grid.
+        |id| id.is_some(),
         |mesh| posed.push(mesh),
     );
     let corners = |mesh: &PosedMesh, t: &[usize; 3]| {

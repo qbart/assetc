@@ -150,6 +150,7 @@ struct Welded {
     faces: Vec<Vec<u32>>,
     stride: usize,
     /// The bridges: two vertices of parts that do not touch and the gap between them.
+    #[cfg(test)]
     gaps: Vec<(u32, u32, f32)>,
 }
 
@@ -240,6 +241,7 @@ impl Welded {
             edges,
             faces,
             stride,
+            #[cfg(test)]
             gaps,
         }
     }
