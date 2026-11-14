@@ -80,7 +80,8 @@ Keeps the output up to date while you edit the input: a build, then an
 
     | Asset | Files it reads |
     |-------|----------------|
-    | texture, LUT, HDR map, font | its source |
+    | texture | its source and its `.amod`; with an [`.amipmap`](mipmaps.md), that file, its level files and their `.amod`s |
+    | LUT, HDR map, font | its source |
     | ORM texture | its channel sources |
     | `.glb` model | the file |
     | `.gltf` model | every file in its folder and below (buffers and images it may refer to) |

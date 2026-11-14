@@ -50,6 +50,10 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.atree` (any case) | tree | `<asset path>.atree.bin`, see [`trees.md`](trees.md#build) |
 | anything else      | —          | ignored, counted as skipped                   |
 
+A texture with an [`.amipmap`](mipmaps.md) file next to it has a custom mip
+chain; the images that file takes as levels are part of that texture and not
+built on their own.
+
 Texture sources that belong to a material are compiled as that material
 describes (slot color space, ORM packing), see [`materials.md`](materials.md).
 

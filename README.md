@@ -139,7 +139,7 @@ Every binary format is little-endian. Most are [chunked files](docs/spec/chunks.
 
 Many assets can carry [attached structs](docs/features/structs.md): values of your own schema types on the asset, a node, an edge or a color ([astruct.md](docs/spec/astruct.md)).
 
-The source formats assetc reads and its GUI writes are specified too: [`.amat`](docs/spec/amat.md), [`.acmat`](docs/spec/acmat.md), [`.ashader`](docs/spec/ashader.md), [`.amod`](docs/spec/amod.md), [`.anoise`](docs/spec/anoise.md), [`.agradient`](docs/spec/agradient.md), [`.apalette`](docs/spec/apalette.md), [`atlas.toml`](docs/spec/atlas.toml.md), and the data files of the [a/1 property format](docs/aschema.md) ([`.aschema`](docs/spec/aschema.md), [`.adata`](docs/spec/adata.md), [`.agraph`](docs/spec/agraph.md), [`.atree`](docs/spec/atree.md)).
+The source formats assetc reads and its GUI writes are specified too: [`.amat`](docs/spec/amat.md), [`.acmat`](docs/spec/acmat.md), [`.ashader`](docs/spec/ashader.md), [`.amod`](docs/spec/amod.md), [`.amipmap`](docs/spec/amipmap.md), [`.apaint`](docs/spec/apaint.md), [`.anoise`](docs/spec/anoise.md), [`.agradient`](docs/spec/agradient.md), [`.apalette`](docs/spec/apalette.md), [`atlas.toml`](docs/spec/atlas.toml.md), and the data files of the [a/1 property format](docs/aschema.md) ([`.aschema`](docs/spec/aschema.md), [`.adata`](docs/spec/adata.md), [`.agraph`](docs/spec/agraph.md), [`.atree`](docs/spec/atree.md)).
 
 ## GUI
 

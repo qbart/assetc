@@ -105,7 +105,8 @@ folder (and below, for a `.gltf`):
 
 Each companion brings its own sidecar too. A folder moves with everything in
 it and has no companions. Dragging a texture of a material moves only that
-texture.
+texture. Dragging an `.amipmap` row moves its texture, as dragging a sidecar
+does.
 
 ### Paths
 
@@ -125,6 +126,7 @@ input-relative ones stay input-relative.
 | `.acmat` | `shader`, `[textures]` paths (strings or `path` of a table) | |
 | `.amat` | `[textures]` paths | |
 | `.gltf` | `buffers[].uri`, `images[].uri` (with `%20` for spaces, as the model reader) | |
+| `.amipmap` | `[files]` paths | |
 | assetc sources above, `.aschema` and `.anoise` | | any other string value that is exactly the input-relative path of a moved file or folder: [`asset<K>`](../aschema.md) values (in instances, struct values, `[params]`, schema defaults) and an `.amod` locator's `preview` |
 | `assetc.toml` | | `[[locators.presets]] from`, also under `[targets.<name>]` |
 
@@ -165,8 +167,9 @@ copied whether or not other models use them).
   confirming button), in the [dialog look](gui.md#dialogs). Escape or
   clicking outside cancels.
 - Deleting is permanent (not moved to a trash). A file's
-  [`.amod`](../spec/amod.md) sidecar is deleted with it, and a model's
-  [`.apaint`](../spec/apaint.md) files too.
+  [`.amod`](../spec/amod.md) sidecar is deleted with it, a model's
+  [`.apaint`](../spec/apaint.md) files and a texture's
+  [`.amipmap`](../spec/amipmap.md) too (its level files are kept).
 - On success the tree is rescanned and the selection is cleared.
 
 ## Safety

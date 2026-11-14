@@ -228,6 +228,7 @@ The icon follows the entry's type, by extension (any case):
 | mesh: `gltf`, `glb`, `obj`, `amesh.bin`       | `torus`                   |
 | animation: `aanim.bin`                        | `film`                    |
 | per-file settings: `amod`                     | `settings-2` (dimmed)     |
+| a texture's mip chain: `amipmap`              | `images` (dimmed)         |
 | an atlas's settings: `atlas.toml` inside a `*.atlas` folder | `settings-2` (dimmed) |
 | anything else                                 | `file`                    |
 
