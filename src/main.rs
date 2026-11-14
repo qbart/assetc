@@ -30,6 +30,7 @@ mod logo;
 mod lut;
 mod manifest;
 mod material;
+mod mipmap;
 mod model;
 mod noise;
 mod pack;

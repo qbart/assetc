@@ -91,7 +91,8 @@ pub fn mip_chain(base: Image, color: ColorSpace) -> Vec<Image> {
     }
 }
 
-fn downsample(src: &Image, color: ColorSpace) -> Image {
+/// The next smaller level of `src`, box filtered; see docs/features/textures.md#mipmaps.
+pub fn downsample(src: &Image, color: ColorSpace) -> Image {
     let (sw, sh) = (src.width as usize, src.height as usize);
     let (dw, dh) = ((sw / 2).max(1), (sh / 2).max(1));
     let mut pixels = Vec::with_capacity(dw * dh * 4);

@@ -221,14 +221,20 @@ pub fn run_cached(
                 usage,
                 mipmaps,
                 flip_green,
+                custom,
             } => compile_texture(
-                &input.join(source),
+                (input, source),
                 &dest,
                 (*color, *usage),
                 *mipmaps,
                 *flip_green,
+                custom.as_ref(),
             )
-            .map(|levels| levels_detail(*color, levels)),
+            .map(|(levels, custom)| match custom {
+                0 => levels_detail(*color, levels),
+                // See docs/features/mipmaps.md#build.
+                n => format!("{}, {n} custom", levels_detail(*color, levels)),
+            }),
             Job::Orm { sources } => compile_orm(input, sources, &dest)
                 .map(|levels| levels_detail(ColorSpace::Linear, levels)),
             Job::Model {
@@ -402,10 +408,25 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
         _ => false,
     };
     let mut reads: Vec<PathBuf> = match job {
-        Job::Texture { source, .. }
-        | Job::Lut { source, .. }
-        | Job::Cubemap { source }
-        | Job::Font { source } => vec![input.join(source)],
+        // With its custom mip chain's files, and the modifiers of every image; see
+        // docs/features/mipmaps.md#build.
+        Job::Texture { source, custom, .. } => {
+            let mut reads = vec![input.join(source)];
+            if let Some(chain) = custom {
+                reads.push(crate::mipmap::path_for(&input.join(source)));
+                reads.extend(chain.files.values().map(|file| input.join(&file.path)));
+            }
+            let sidecars: Vec<PathBuf> = reads
+                .iter()
+                .filter(|file| is_image(file))
+                .map(|file| crate::amod::path_for(file))
+                .collect();
+            reads.extend(sidecars);
+            reads
+        }
+        Job::Lut { source, .. } | Job::Cubemap { source } | Job::Font { source } => {
+            vec![input.join(source)]
+        }
         Job::Orm { sources } => sources.iter().flatten().map(|s| input.join(s)).collect(),
         Job::Model { source, .. } if source.to_ascii_lowercase().ends_with(".gltf") => {
             files_under(input.join(source).parent().unwrap_or(input))
@@ -964,21 +985,40 @@ pub fn is_noise(file: &Path) -> bool {
         .is_some_and(|ext| ext.eq_ignore_ascii_case("anoise"))
 }
 
-/// Returns the number of levels written.
+/// Compiles `source` (relative to `input`), with the levels of its `custom` chain when it has
+/// one (see docs/features/mipmaps.md); returns the number of levels written and how many of
+/// them came from files.
 fn compile_texture(
-    source: &Path,
+    (input, source): (&Path, &str),
     dest: &Path,
     color: (ColorSpace, Usage),
     mipmaps: bool,
     flip_green: bool,
-) -> Result<usize, String> {
-    let mut image = decode(source)?;
-    if flip_green {
-        for pixel in image.pixels_mut() {
-            pixel[1] = 255 - pixel[1];
+    custom: Option<&crate::mipmap::Chain>,
+) -> Result<(usize, usize), String> {
+    let load = |rel: &str| -> Result<image::RgbaImage, String> {
+        let mut image = decode(&input.join(rel))?;
+        if flip_green {
+            for pixel in image.pixels_mut() {
+                pixel[1] = 255 - pixel[1];
+            }
         }
-    }
-    write_texture(image, dest, color, mipmaps)
+        Ok(image)
+    };
+    let image = load(source)?;
+    let Some(chain) = custom else {
+        return write_texture(image, dest, color, mipmaps).map(|levels| (levels, 0));
+    };
+    let as_level = |image: image::RgbaImage| texture::Image {
+        width: image.width(),
+        height: image.height(),
+        pixels: image.into_raw(),
+    };
+    let (levels, custom) = crate::mipmap::build(as_level(image), color.0, chain, |rel| {
+        load(rel).map(as_level)
+    })?;
+    write(dest, &crate::ktx2::encode_rgba8(color.0, color.1, &levels))?;
+    Ok((levels.len(), custom))
 }
 
 /// Packs the red channels of occlusion, roughness, metallic into R, G, B;
@@ -1916,6 +1956,140 @@ mod tests {
         let ktx = fs::read(output.join("rock_n.ktx2")).unwrap();
         let header = ::ktx2::Reader::new(&ktx[..]).unwrap().header();
         assert_eq!(header.format, Some(::ktx2::Format::R8G8B8A8_UNORM));
+    }
+
+    /// Every level of a built texture: (width, red of its first texel).
+    fn levels_of(path: &Path) -> Vec<(u32, u8)> {
+        let info = crate::ktx2::read(&fs::read(path).unwrap()).unwrap();
+        std::iter::once(info.level0.unwrap())
+            .chain(info.mips)
+            .map(|level| (level.width, level.pixels[0]))
+            .collect()
+    }
+
+    #[test]
+    fn custom_mip_chains() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        gray(&input.join("t/rock.png"), 8, 8, 10);
+        gray(&input.join("t/rock.mip1.png"), 4, 4, 200);
+        gray(&input.join("shared/far.png"), 1, 1, 50);
+        gray(&input.join("ui/icon.png"), 4, 4, 90);
+        fs::write(
+            input.join("t/rock.png.amipmap"),
+            "[files]\n3 = \"../shared/far.png\"\n",
+        )
+        .unwrap();
+        // Its own setting wins over `no_mipmaps`.
+        fs::write(input.join("ui/icon.png.amipmap"), "levels = 2\n").unwrap();
+        let config = with_textures(&config::Textures {
+            linear: vec!["**".into()],
+            no_mipmaps: vec!["ui/**".into()],
+            ..Default::default()
+        });
+        let mut cache = Cache::default();
+
+        let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        let built: Vec<_> = outcome
+            .built
+            .iter()
+            .map(|b| (b.output.as_str(), b.detail.as_str()))
+            .collect();
+        // The level files are part of the texture, not textures of their own.
+        assert_eq!(
+            built,
+            [
+                ("t/rock.ktx2", "linear, 4 levels, 2 custom"),
+                ("ui/icon.ktx2", "linear, 2 levels")
+            ]
+        );
+        assert_eq!(outcome.skipped, 2);
+        // Level 1 by name, level 2 generated from it, level 3 chosen.
+        assert_eq!(
+            levels_of(&output.join("t/rock.ktx2")),
+            [(8, 10), (4, 200), (2, 200), (1, 50)]
+        );
+        assert_eq!(levels_of(&output.join("ui/icon.ktx2")), [(4, 90), (2, 90)]);
+        let again = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(again.summary(), "Built nothing (2 skipped, 2 up to date)");
+
+        // A changed level file, a level file's modifiers and the `.amipmap` rebuild it.
+        png(&input.join("t/rock.mip1.png"), 4, 4);
+        let changed = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(
+            changed.summary(),
+            "Built 1 texture (2 skipped, 1 up to date)"
+        );
+        assert_eq!(levels_of(&output.join("t/rock.ktx2"))[1], (4, 0));
+        fs::write(
+            input.join("t/rock.mip1.png.amod"),
+            "[[modifiers]]\ntype = \"invert\"\n",
+        )
+        .unwrap();
+        let changed = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(
+            changed.summary(),
+            "Built 1 texture (3 skipped, 1 up to date)"
+        );
+        assert_eq!(levels_of(&output.join("t/rock.ktx2"))[1], (4, 255));
+        fs::write(input.join("t/rock.png.amipmap"), "levels = 2\n").unwrap();
+        let changed = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(changed.built[0].detail, "linear, 2 levels, 1 custom");
+        assert_eq!(levels_of(&output.join("t/rock.ktx2")).len(), 2);
+
+        // A level of the wrong size fails its texture; a bad `.amipmap` is reported for it.
+        gray(&input.join("t/rock.mip1.png"), 3, 3, 0);
+        fs::write(input.join("ui/icon.png.amipmap"), "levels = 0\n").unwrap();
+        let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
+        let mut failures: Vec<_> = outcome
+            .failures
+            .iter()
+            .map(|f| (f.source.as_str(), f.message.as_str()))
+            .collect();
+        failures.sort();
+        assert_eq!(
+            failures,
+            [
+                ("t/rock.png", "level 1 (rock.mip1.png) is 3 × 3, not 4 × 4"),
+                ("ui/icon.png.amipmap", "levels must be 1 or more"),
+            ]
+        );
+
+        // Without the `.amipmap`, the level file is an ordinary texture.
+        fs::remove_file(input.join("t/rock.png.amipmap")).unwrap();
+        fs::remove_file(input.join("ui/icon.png.amipmap")).unwrap();
+        let outcome = run(&input, &output, &config).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert!(output.join("t/rock.mip1.ktx2").is_file());
+        assert_eq!(levels_of(&output.join("t/rock.ktx2")).len(), 4);
+        assert_eq!(levels_of(&output.join("ui/icon.ktx2")).len(), 1);
+    }
+
+    #[test]
+    fn packed_textures_have_no_custom_mip_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        gray(&input.join("brick.png"), 4, 4, 10);
+        gray(&input.join("brick.r.png"), 4, 4, 10);
+        fs::write(input.join("brick.png.amipmap"), "levels = 2\n").unwrap();
+        fs::write(input.join("brick.r.png.amipmap"), "").unwrap();
+        let outcome = run(&input, &output, &config::Config::default()).unwrap();
+        let failures: Vec<_> = outcome
+            .failures
+            .iter()
+            .map(|f| (f.source.as_str(), f.message.as_str()))
+            .collect();
+        assert_eq!(
+            failures,
+            [(
+                "brick.r.png.amipmap",
+                "brick.r.png is only packed into another texture, which generates its \
+                 mipmaps"
+            )]
+        );
+        // A material's own texture keeps its chain.
+        assert_eq!(levels_of(&output.join("brick.ktx2")).len(), 2);
     }
 
     #[test]

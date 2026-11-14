@@ -52,6 +52,8 @@ pub enum Job {
         mipmaps: bool,
         /// DirectX normal map: invert green.
         flip_green: bool,
+        /// Its `.amipmap`'s chain, used instead of `mipmaps`; see docs/features/mipmaps.md.
+        custom: Option<crate::mipmap::Chain>,
     },
     /// Sources (relative to `input`) of the R (occlusion), G (roughness), B (metallic) channels.
     Orm { sources: [Option<String>; 3] },
@@ -272,6 +274,21 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
     flatten_atlases(&nodes, &mut files, &mut atlases);
 
     let mut plan = Plan::default();
+    // Custom mip chains, and the files that are their levels; see docs/features/mipmaps.md.
+    let rels: Vec<String> = files
+        .iter()
+        .filter_map(|file| relative(input, file).ok())
+        .collect();
+    let crate::mipmap::Chains {
+        mut chains,
+        level_files,
+        failures,
+    } = crate::mipmap::chains(input, &rels);
+    plan.failures.extend(
+        failures
+            .into_iter()
+            .map(|(source, message)| Failure { source, message }),
+    );
     let mut sources = Vec::new();
     let mut groups: BTreeMap<(String, String), Group> = BTreeMap::new();
     // `.acmat` files, and every file and atlas folder for their textures by name.
@@ -329,6 +346,10 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 continue;
             }
         };
+        // A level of a custom mip chain is part of its texture.
+        if level_files.contains(&rel) {
+            continue;
+        }
         listing.insert(rel.clone());
         let (dir, name) = split_dir(&rel);
         if crate::shader::is_shader(file) {
@@ -809,7 +830,18 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
         }
         let (color, flip_green, claimed_mipmaps) = match claims.get(rel) {
             Some(claim) => (claim.color, claim.flip_green, claim.mipmaps),
-            None if orm_inputs.contains(rel) => continue,
+            None if orm_inputs.contains(rel) => {
+                if chains.remove(rel).is_some() {
+                    plan.failures.push(Failure {
+                        source: format!("{rel}{}", crate::mipmap::SUFFIX),
+                        message: format!(
+                            "{} is only packed into another texture, which generates its mipmaps",
+                            split_dir(rel).1
+                        ),
+                    });
+                }
+                continue;
+            }
             // Noise is data: linear unless a material slot says otherwise.
             None if is_noise(Path::new(rel)) => (ColorSpace::Linear, false, true),
             None => (settings.color_space(rel), false, true),
@@ -840,6 +872,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                     && !is_gradient(Path::new(rel))
                     && !crate::palette::is_palette(Path::new(rel)),
                 flip_green,
+                custom: chains.remove(rel),
             },
         });
     }
