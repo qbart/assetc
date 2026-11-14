@@ -10412,16 +10412,20 @@ fn heat_scale(ui: &mut Ui, value: f32) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
     let bar = Rect::from_min_size(rect.min + vec2(2.0, 2.0), vec2(rect.width() - 4.0, 12.0));
     let painter = ui.painter();
-    // One strip per weight a texel can hold.
-    for v in 0..=255u8 {
-        let x = |v: f32| bar.left() + bar.width() * v / 256.0;
-        let strip = Rect::from_min_max(
-            pos2(x(f32::from(v)), bar.top()),
-            pos2(x(f32::from(v) + 1.0), bar.bottom()),
-        );
-        let [r, g, b] = texture_paint::heat(v);
-        painter.rect_filled(strip, 0.0, egui::Color32::from_rgb(r, g, b));
+    // Blended between the stops as the heatmap is: per sRGB channel.
+    let mut mesh = egui::Mesh::default();
+    for k in 0..=4u32 {
+        let x = bar.left() + bar.width() * k as f32 / 4.0;
+        let color = heat_color32((k as f32 / 4.0).max(1.0 / 255.0));
+        mesh.colored_vertex(pos2(x, bar.top()), color);
+        mesh.colored_vertex(pos2(x, bar.bottom()), color);
+        if k > 0 {
+            let i = k * 2;
+            mesh.add_triangle(i - 2, i - 1, i);
+            mesh.add_triangle(i - 1, i, i + 1);
+        }
     }
+    painter.add(egui::Shape::mesh(mesh));
     let x = bar.left() + bar.width() * value.clamp(0.0, 1.0);
     painter.line_segment(
         [pos2(x, bar.top() - 2.0), pos2(x, bar.bottom() + 2.0)],
