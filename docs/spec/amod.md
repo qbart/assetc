@@ -156,9 +156,9 @@ per paint; its texels are in the [`.apaint`](apaint.md) file
 | Key        | Type    | Default    | Meaning |
 |------------|---------|------------|---------|
 | `name`     | string  | (required) | non-empty, ASCII letters, digits, `_` and `-` only, unique among the file's paints |
-| `mode`     | string  | `"color"`  | `"color"` or `"channels"` |
+| `mode`     | string  | `"color"`  | `"color"`, `"channels"` or `"weights"` |
 | `size`     | integer | `1024`     | width and height in texels: `256`, `512`, `1024`, `2048` or `4096` |
-| `channels` | string  | `"rgba"`   | channels mode: `"r"`, `"rg"`, `"rgb"` or `"rgba"`; ignored in color mode |
+| `channels` | string  | `"rgba"`   | channels and weights modes: `"r"`, `"rg"`, `"rgb"` or `"rgba"`; ignored in color mode |
 
 ## `[[events]]`
 

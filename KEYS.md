@@ -191,6 +191,7 @@ While a texture paint paints (see [`docs/features/texture-paint.md`](docs/featur
 |----------------------------------------|----------------------------------------------|
 | Left drag / click on the model         | Paint (Paint on) or erase (Erase on) texels under the brush |
 | `Shift` + left drag / click            | The other one: erase while painting, paint while erasing |
+| Left button held on the model (Weights mode) | Build weight up under the brush (Paint on) or take it away (Erase on) for as long as it is held |
 | Right drag                             | Orbit the camera                             |
 
 While a path draws (see [`docs/features/paths.md`](docs/features/paths.md#drawing)):
