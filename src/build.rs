@@ -2035,7 +2035,19 @@ mod tests {
         assert_eq!(levels_of(&output.join("t/rock.ktx2"))[1], (4, 255));
         fs::write(input.join("t/rock.png.amipmap"), "levels = 2\n").unwrap();
         let changed = run_cached(&input, &output, &config, &mut cache).unwrap();
-        assert_eq!(changed.built[0].detail, "linear, 2 levels, 1 custom");
+        let built: Vec<_> = changed
+            .built
+            .iter()
+            .map(|b| (b.output.as_str(), b.detail.as_str()))
+            .collect();
+        // No longer a level, the chosen file is a texture again.
+        assert_eq!(
+            built,
+            [
+                ("shared/far.ktx2", "linear, 1 level"),
+                ("t/rock.ktx2", "linear, 2 levels, 1 custom")
+            ]
+        );
         assert_eq!(levels_of(&output.join("t/rock.ktx2")).len(), 2);
 
         // A level of the wrong size fails its texture; a bad `.amipmap` is reported for it.
