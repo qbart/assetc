@@ -2886,6 +2886,7 @@ fn paint_dabs(
             strength,
             target: ray.target,
         };
+        canvas.begin_dab();
         for mesh in posed {
             let Some(uvs) = mesh.uvs else {
                 continue;

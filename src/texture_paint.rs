@@ -446,6 +446,12 @@ struct Stroke {
     weights: Vec<f32>,
     /// The last dab's center, to fill the stroke in between.
     last: Option<Vec3>,
+    /// A stroke that builds up: per texel, the last dab that reached it and the largest
+    /// falloff (of 65535) it got from that dab, so a texel two triangles share gets a dab
+    /// once. Empty until such a dab paints.
+    dabs: Vec<[u16; 2]>,
+    /// The dab being painted, from 1.
+    dab: u16,
 }
 
 impl Canvas {
@@ -500,6 +506,8 @@ impl Canvas {
             base: self.pixels.clone(),
             weights: vec![0.0; size * size],
             last: None,
+            dabs: Vec::new(),
+            dab: 0,
         });
         let step = (radius / 4.0).max(1e-6);
         let out = match stroke.last {
@@ -513,6 +521,20 @@ impl Canvas {
         };
         stroke.last = Some(center);
         out
+    }
+
+    /// Starts the next dab of the stroke in progress: the triangles painted until the next
+    /// call are one dab's.
+    pub fn begin_dab(&mut self) {
+        let Some(stroke) = &mut self.stroke else {
+            return;
+        };
+        stroke.dab = stroke.dab.wrapping_add(1);
+        if stroke.dab == 0 {
+            // The numbers have run out: start over.
+            stroke.dabs.fill([0; 2]);
+            stroke.dab = 1;
+        }
     }
 
     /// Paints the texels of the triangle with posed corners `corners` and `TEXCOORD_0`
@@ -596,7 +618,8 @@ impl Canvas {
                 if d >= 1.0 {
                     continue;
                 }
-                let w = brush.strength * falloff(d, brush.hardness);
+                let reach = falloff(d, brush.hardness);
+                let w = brush.strength * reach;
                 let (xi, yi) = (
                     x.rem_euclid(size as i64) as usize,
                     y.rem_euclid(size as i64) as usize,
@@ -605,6 +628,19 @@ impl Canvas {
                 let base = &stroke.base[i * 4..i * 4 + 4];
                 let texel = &mut self.pixels[i * 4..i * 4 + 4];
                 if let Target::Add(k, _) | Target::Subtract(k) = brush.target {
+                    // Only what this dab has not brought the texel yet (through another
+                    // triangle).
+                    if stroke.dabs.is_empty() {
+                        stroke.dabs = vec![[0; 2]; size * size];
+                    }
+                    let reach = (reach * 65535.0).round() as u16;
+                    let [dab, reached] = stroke.dabs[i];
+                    let reached = if dab == stroke.dab { reached } else { 0 };
+                    if reach <= reached {
+                        continue;
+                    }
+                    stroke.dabs[i] = [stroke.dab, reach];
+                    let w = brush.strength * f32::from(reach - reached) / 65535.0;
                     // What the stroke has added so far is kept exactly, so the smallest
                     // dabs add up too.
                     let from = f32::from(base[k]) / 255.0;
@@ -814,22 +850,26 @@ mod tests {
     fn weights_build_up_to_the_limit_and_come_off_again() {
         let mut canvas = quad_canvas(8);
         let center = Vec3::new(0.5, 0.5, 0.0);
-        // Each dab brings a tenth; smaller than one step of a texel, a thousandth.
+        // Each dab brings a tenth, once, also to the texels both triangles reach; smaller
+        // than one step of a texel, a thousandth.
         let mut b = brush(center, Target::Add(1, 128));
         b.strength = 0.1;
         canvas.dab_centers(center, 0.25);
         for _ in 0..3 {
+            canvas.begin_dab();
             paint_square(&mut canvas, &b);
         }
         assert_eq!(texel(&canvas, 4, 4), [0, 77, 0, 0]);
         b.strength = 0.001;
         for _ in 0..100 {
+            canvas.begin_dab();
             paint_square(&mut canvas, &b);
         }
         assert_eq!(texel(&canvas, 4, 4), [0, 102, 0, 0]);
         // No further than the limit.
         b.strength = 0.1;
         for _ in 0..10 {
+            canvas.begin_dab();
             paint_square(&mut canvas, &b);
         }
         assert_eq!(texel(&canvas, 4, 4), [0, 128, 0, 0]);
@@ -837,15 +877,19 @@ mod tests {
         assert!(canvas.end_stroke());
         // A texel above the limit is left alone; taking away goes down to 0.
         canvas.dab_centers(center, 0.25);
+        canvas.begin_dab();
         paint_square(&mut canvas, &brush(center, Target::Add(1, 60)));
         assert_eq!(texel(&canvas, 4, 4), [0, 128, 0, 0]);
         assert!(!canvas.end_stroke());
         canvas.dab_centers(center, 0.25);
         let mut off = brush(center, Target::Subtract(1));
         off.strength = 0.25;
+        canvas.begin_dab();
         paint_square(&mut canvas, &off);
         assert_eq!(texel(&canvas, 4, 4), [0, 64, 0, 0]);
+        canvas.begin_dab();
         paint_square(&mut canvas, &off);
+        canvas.begin_dab();
         paint_square(&mut canvas, &off);
         assert_eq!(texel(&canvas, 4, 4), [0, 0, 0, 0]);
         assert!(canvas.end_stroke());
