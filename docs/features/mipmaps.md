@@ -128,16 +128,21 @@ writes and edits the `.amipmap`:
     <name>.mip<n>.<ext> next to the texture, else they are generated from
     the level above.`
 - **Levels**: one row per level the build writes, as for a compiled texture:
-  `Level <n>`, its size, and where it comes from, in `TEXT_WEAK`:
-  the texture's file name for level 0, `Generated`, the chosen file's path,
-  or the file by name followed by ` (by name)`. A level with a problem shows
-  the problem under its row in `CHANNEL_R` (and is previewed generated).
+  `Level <n>`, where it comes from, and its size. The source is the
+  texture's file name for level 0, `Generated`, or the name of the file by
+  name, in `TEXT_WEAK`; a chosen file's path is in `ACCENT` (as what a file
+  sets is). A source too long for the row loses its start to `…`; hovering
+  the row says it in full (`rock.mip1.png, by its name`, `rock_half.png,
+  chosen`, `Generated from level 2`, `The texture itself`). A level with a
+  problem shows the problem under its row in `CHANNEL_R` (and is previewed
+  generated).
   Clicking a row shows that level in the canvas, as for a compiled texture;
   level 0 to start with.
 - With Custom mip chain on and a level other than 0 chosen, **Level `<n>`
   file**: a dropdown of `By name: <file>` (or `By name: none`), which removes
   the level's `[files]` entry, and every texture source of the input except
-  the texture itself, as paths relative to its folder; choosing one sets
+  the texture itself, as paths relative to its folder (the ones in that
+  folder first, then the rest, each by name); choosing one sets
   `[files] n`. `ACCENT` with Reset while set.
 - When the `.amipmap` does not apply or does not parse, its
   [failure](#build) is shown in `CHANNEL_R` at the top, and the chain is shown

@@ -24,7 +24,8 @@ pub struct MipmapEdit {
     name: String,
     /// Its levels by name: the file name of each.
     named: BTreeMap<u32, String>,
-    /// The other texture sources of the input, relative to the texture's folder.
+    /// The other texture sources of the input, relative to the texture's folder; the ones in
+    /// that folder first.
     files: Vec<String>,
 }
 
@@ -44,7 +45,8 @@ pub fn prepare(input: &Path, file: &Path) -> MipmapEdit {
         .filter(|f| crate::build::is_texture_source(f) && f != file)
         .map(|f| crate::adata::relative(dir, &f))
         .collect();
-    files.sort();
+    // The texture's own folder first: its levels are most likely there.
+    files.sort_by_key(|f| (f.contains('/'), f.clone()));
     let mut named = BTreeMap::new();
     for (level, path) in mipmap::named_files(file) {
         let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -173,8 +175,8 @@ fn levels_row(ui: &mut Ui, amipmap: &mut Amipmap, chain: &MipChain) {
     }
 }
 
-/// One row per level: its number, size and where it comes from, with its problem below;
-/// returns the clicked row.
+/// One row per level: its number, size and where it comes from (a chosen file in `ACCENT`,
+/// as what the `.amipmap` sets is), with its problem below; returns the clicked row.
 fn level_rows(ui: &mut Ui, chain: &MipChain, texture: &str, chosen: usize) -> Option<usize> {
     let mut clicked = None;
     ui.scope(|ui| {
@@ -203,24 +205,29 @@ fn level_rows(ui: &mut Ui, chain: &MipChain, texture: &str, chosen: usize) -> Op
                 FontId::proportional(13.0),
                 TEXT_WEAK,
             );
-            let source = match &level.file {
-                _ if i == 0 => texture.to_owned(),
-                Some((file, true)) => format!("{file} (by name)"),
-                Some((file, false)) => file.clone(),
-                None => "Generated".to_owned(),
+            let (source, color, hover) = match &level.file {
+                _ if i == 0 => (texture, TEXT_WEAK, "The texture itself".to_owned()),
+                Some((file, true)) => (file.as_str(), TEXT_WEAK, format!("{file}, by its name")),
+                Some((file, false)) => (file.as_str(), ACCENT, format!("{file}, chosen")),
+                None => (
+                    "Generated",
+                    TEXT_WEAK,
+                    format!("Generated from level {}", i - 1),
+                ),
             };
             let room = size.left() - label.right() - 24.0;
             let font = FontId::proportional(13.0);
             painter.text(
                 pos2(label.right() + 12.0, y),
                 Align2::LEFT_CENTER,
-                elide_start(painter, &source, &font, room),
+                elide_start(painter, source, &font, room),
                 font,
-                TEXT_WEAK,
+                color,
             );
             if response.clicked() {
                 clicked = Some(i);
             }
+            response.on_hover_text(hover);
             if let Some(problem) = &level.problem {
                 Frame::new()
                     .inner_margin(Margin::symmetric(10, 2))
