@@ -260,6 +260,13 @@ struct TextureBrush {
     reload: u64,
     /// The chosen paint's texels are all unpainted.
     blank: bool,
+    /// Distance mode: measure every channel that has a point again.
+    recompute: bool,
+    /// Distance mode: the farthest spot's distance of each channel measured in this session,
+    /// in the model's units.
+    farthest: [Option<f32>; 4],
+    /// Distances were measured again and the file is not written yet.
+    unsaved: bool,
     /// A failed file operation, for the status bar.
     notice: Option<String>,
 }
@@ -279,6 +286,9 @@ impl Default for TextureBrush {
             stroking: false,
             reload: 0,
             blank: true,
+            recompute: false,
+            farthest: [None; 4],
+            unsaved: false,
             notice: None,
         }
     }
@@ -7299,6 +7309,9 @@ fn canvas_model(
                 let canvas = texture_paint::Canvas::new(paint.size, pixels);
                 tools.texture.blank = canvas.is_blank();
                 tools.texture.stroking = false;
+                tools.texture.farthest = [None; 4];
+                tools.texture.unsaved = false;
+                preview.paint_distance_done = None;
                 preview.paint = Some(preview3d::PaintView {
                     key,
                     canvas,
@@ -7314,6 +7327,9 @@ fn canvas_model(
                     texture_paint::Mode::Weights => texture_paint::Display::Heat(
                         tools.texture.channel.min(paint.channels.count() - 1),
                     ),
+                    texture_paint::Mode::Distance => texture_paint::Display::Distance(
+                        tools.texture.channel.min(paint.channels.count() - 1),
+                    ),
                 };
             }
         }
@@ -7322,8 +7338,12 @@ fn canvas_model(
     // Painting: a dab each frame while the left button is down, the file written when it is
     // released; see docs/features/texture-paint.md#painting.
     let texture_erase = tools.texture.rubber != ui.input(|i| i.modifiers.shift);
+    let measuring = chosen_paint
+        .as_ref()
+        .is_some_and(|(paint, _)| paint.mode == texture_paint::Mode::Distance);
     if let Some((paint, _)) = &chosen_paint
         && brushing
+        && !measuring
         && let Some(p) = pointer.filter(|p| rect.contains(*p))
         && ui.input(|i| i.pointer.primary_down())
         && response.is_pointer_button_down_on()
@@ -7342,7 +7362,9 @@ fn canvas_model(
             texture_paint::Mode::Weights if texture_erase => {
                 texture_paint::Target::Subtract(channel)
             }
-            texture_paint::Mode::Weights => texture_paint::Target::Add(channel, value),
+            texture_paint::Mode::Weights | texture_paint::Mode::Distance => {
+                texture_paint::Target::Add(channel, value)
+            }
         };
         preview.paint_ray = Some(preview3d::PaintRay {
             origin,
@@ -7356,10 +7378,72 @@ fn canvas_model(
         tools.texture.stroking = true;
         ui.ctx().request_repaint();
     }
+    // Distances: the chosen channel's point where the pointer is pressed, and every point
+    // again when asked; see docs/features/texture-paint.md#distance-map.
+    preview.paint_point = None;
+    if let Some((paint, _)) = &chosen_paint
+        && measuring
+    {
+        let count = paint.channels.count();
+        let channel = tools.texture.channel.min(count - 1);
+        preview.paint_point = paint.points[channel];
+        let mut job: Option<preview3d::DistanceJob> = None;
+        if brushing
+            && let Some(p) = pointer.filter(|p| rect.contains(*p))
+            && ui.input(|i| i.pointer.primary_down())
+            && response.is_pointer_button_down_on()
+        {
+            let (origin, dir) = camera.ray(p);
+            job.get_or_insert_default().pick = Some((channel, origin, dir));
+            tools.texture.stroking = true;
+        }
+        if std::mem::take(&mut tools.texture.recompute) {
+            job.get_or_insert_default().fills = (0..count)
+                .filter_map(|k| Some((k, paint.points[k]?)))
+                .collect();
+        }
+        if let Some(mut job) = job {
+            (job.measure, job.range) = (paint.measure, paint.range);
+            preview.paint_distance = Some(job);
+            ui.ctx().request_repaint();
+        }
+    } else {
+        tools.texture.recompute = false;
+    }
+    if let Some(done) = preview.paint_distance_done.take()
+        && measuring
+    {
+        for &(channel, farthest) in &done.filled {
+            tools.texture.farthest[channel] = Some(farthest);
+        }
+        if let Some((channel, point)) = done.picked
+            && let Some(edit) = &mut edit
+            && let Some(paint) = edit.paint.and_then(|i| edit.edit.paints.get_mut(i))
+        {
+            paint.points[channel] = Some(point);
+        }
+        tools.texture.unsaved |= !done.filled.is_empty();
+        ui.ctx().request_repaint();
+    }
+    // Measured again without a press (Recompute, a new Measure or Range): written once
+    // nothing is held.
+    if tools.texture.unsaved
+        && !tools.texture.stroking
+        && !ui.input(|i| i.pointer.any_down())
+        && let (Some((paint, file)), Some(view)) = (&chosen_paint, &preview.paint)
+    {
+        tools.texture.unsaved = false;
+        out.rescan = !file.is_file();
+        if let Err(e) = texture_paint::write_file(file, paint.size, &view.canvas.pixels) {
+            tools.texture.notice = Some(format!("Saving failed: {e}"));
+        }
+        tools.texture.blank = view.canvas.is_blank();
+    }
     // The weight under the pointer is read every frame; see
     // docs/features/texture-paint.md#building-weight-up.
     if let Some((paint, _)) = &chosen_paint
-        && paint.mode == texture_paint::Mode::Weights
+        && paint.mode != texture_paint::Mode::Color
+        && paint.mode != texture_paint::Mode::Channels
         && brushing
         && let Some(p) = pointer.filter(|p| rect.contains(*p))
     {
@@ -7369,7 +7453,7 @@ fn canvas_model(
     if tools.texture.stroking && !ui.input(|i| i.pointer.primary_down()) {
         tools.texture.stroking = false;
         if let (Some((paint, file)), Some(view)) = (&chosen_paint, &mut preview.paint)
-            && view.canvas.end_stroke()
+            && (view.canvas.end_stroke() || std::mem::take(&mut tools.texture.unsaved))
         {
             out.rescan = !file.is_file();
             if let Err(e) = texture_paint::write_file(file, paint.size, &view.canvas.pixels) {
@@ -7745,6 +7829,16 @@ fn canvas_model(
         };
         painter.circle_stroke(p, tools.brush, Stroke::new(1.0, color));
     }
+    // The chosen channel's point of a distance map; see
+    // docs/features/texture-paint.md#3d-view.
+    if measuring
+        && let Some(at) = preview.paint_point_at
+        && let Some(dot) = camera.project(at).filter(|p| rect.contains(*p))
+    {
+        painter.circle_stroke(dot, 6.0, Stroke::new(3.0, BG_PANEL));
+        painter.circle_stroke(dot, 6.0, Stroke::new(1.5, TEXT));
+        painter.circle_filled(dot, 2.0, TEXT);
+    }
     // The texture paint's brush; see docs/features/texture-paint.md#painting.
     if let Some((paint, _)) = &chosen_paint
         && brushing
@@ -7752,6 +7846,7 @@ fn canvas_model(
     {
         let brush = &tools.texture;
         let color = match paint.mode {
+            _ if measuring => TEXT,
             _ if texture_erase => TEXT,
             texture_paint::Mode::Color => {
                 let [r, g, b, _] = brush.color;
@@ -7760,36 +7855,52 @@ fn canvas_model(
             texture_paint::Mode::Channels => {
                 PAINT_CHANNELS[brush.channel.min(paint.channels.count() - 1)].1
             }
-            texture_paint::Mode::Weights => heat_color32(brush.value),
+            texture_paint::Mode::Weights | texture_paint::Mode::Distance => {
+                heat_color32(brush.value)
+            }
         };
-        painter.circle_stroke(p, brush.size, Stroke::new(1.0, color));
-        // The weight under the pointer, beside the brush.
-        if paint.mode == texture_paint::Mode::Weights
-            && let Some(texel) = preview.paint_probed
+        // How far the brush reaches from the pointer, for what is written beside it.
+        let reach = if measuring {
+            // A crosshair: the point goes where its middle is.
+            for axis in [vec2(1.0, 0.0), vec2(0.0, 1.0)] {
+                for side in [-1.0, 1.0] {
+                    let stroke = Stroke::new(1.0, color);
+                    painter.line_segment([p + axis * side * 4.0, p + axis * side * 11.0], stroke);
+                }
+            }
+            8.0
+        } else {
+            painter.circle_stroke(p, brush.size, Stroke::new(1.0, color));
+            if brush.hardness < 1.0 {
+                let inner = brush.size * brush.hardness;
+                let points: Vec<egui::Pos2> = (0..=48)
+                    .map(|k| {
+                        let a = k as f32 / 48.0 * std::f32::consts::TAU;
+                        p + vec2(a.cos(), a.sin()) * inner
+                    })
+                    .collect();
+                painter.extend(egui::Shape::dashed_line(
+                    &points,
+                    Stroke::new(1.0, color),
+                    4.0,
+                    4.0,
+                ));
+            }
+            brush.size * std::f32::consts::FRAC_1_SQRT_2
+        };
+        // The value under the pointer, beside the brush.
+        if matches!(
+            paint.mode,
+            texture_paint::Mode::Weights | texture_paint::Mode::Distance
+        ) && let Some(texel) = preview.paint_probed
         {
             let weight = f32::from(texel[brush.channel.min(paint.channels.count() - 1)]) / 255.0;
-            let at =
-                p + vec2(brush.size, brush.size) * std::f32::consts::FRAC_1_SQRT_2 + vec2(8.0, 8.0);
+            let at = p + vec2(reach, reach) + vec2(8.0, 8.0);
             let text =
                 painter.layout_no_wrap(format!("{weight:.2}"), FontId::proportional(13.0), TEXT);
             let plate = Rect::from_min_size(at, text.size()).expand2(vec2(5.0, 2.0));
             painter.rect_filled(plate, 3.0, BG_PANEL);
             painter.galley(at, text, TEXT);
-        }
-        if brush.hardness < 1.0 {
-            let inner = brush.size * brush.hardness;
-            let points: Vec<egui::Pos2> = (0..=48)
-                .map(|k| {
-                    let a = k as f32 / 48.0 * std::f32::consts::TAU;
-                    p + vec2(a.cos(), a.sin()) * inner
-                })
-                .collect();
-            painter.extend(egui::Shape::dashed_line(
-                &points,
-                Stroke::new(1.0, color),
-                4.0,
-                4.0,
-            ));
         }
     }
 
@@ -10304,6 +10415,40 @@ fn paint_fields(
             brush.channel = 0;
         }
     }
+    if paint.mode == Mode::Distance {
+        distance_fields(ui, paint, brush);
+    } else {
+        brush_fields(ui, paint, brush);
+    }
+    ui.add_space(4.0);
+    let clear = ui.add_enabled(!brush.blank, egui::Button::new("Clear"));
+    if clear.clicked()
+        && let Some(file) = file
+    {
+        let blank = texture_paint::blank(paint.size);
+        if let Err(e) = texture_paint::write_file(file, paint.size, &blank) {
+            failed = Some(format!("Saving failed: {e}"));
+        }
+        brush.reload += 1;
+        brush.blank = true;
+        paint.points = [None; 4];
+    }
+    ui.weak(if paint.mode == Mode::Distance {
+        "Click or drag on the model to set the point distances are measured from. Right drag \
+         orbits."
+    } else if paint.mode == Mode::Weights {
+        "Hold or drag on the model to build weight up; go slower or over it again for more. \
+         Shift + drag takes it away. Right drag orbits."
+    } else {
+        "Drag on the model to paint or erase. Shift + drag does the other. Right drag orbits."
+    });
+    failed
+}
+
+/// The brush of a paint that is painted: Paint and Erase, the brush's size and what it paints;
+/// see docs/features/texture-paint.md#texture-paint-tab.
+fn brush_fields(ui: &mut Ui, paint: &texture_paint::Paint, brush: &mut TextureBrush) {
+    use texture_paint::Mode;
     // Paint and Erase: at most one on, as the regions' are.
     ui.horizontal(|ui| {
         let buttons = [
@@ -10348,24 +10493,8 @@ fn paint_fields(
             prop_row(ui, "Color", |_, _| {});
             brush.picker.show(ui, &mut brush.color);
         }
-        Mode::Channels | Mode::Weights => {
-            prop_row(ui, "Channel", |ui, _| {
-                for (k, (label, color)) in PAINT_CHANNELS
-                    .into_iter()
-                    .take(paint.channels.count())
-                    .enumerate()
-                {
-                    let on = brush.channel == k;
-                    let text = RichText::new(label).color(if on { color } else { TEXT });
-                    let mut button = egui::Button::new(text);
-                    if on {
-                        button = button.fill(ACCENT.gamma_multiply(0.25));
-                    }
-                    if ui.add(button).clicked() {
-                        brush.channel = k;
-                    }
-                }
-            });
+        Mode::Channels | Mode::Weights | Mode::Distance => {
+            channel_row(ui, paint.channels.count(), &mut brush.channel);
             prop_row(ui, "Value", |ui, _| {
                 ui.spacing_mut().slider_width = 100.0;
                 let slider =
@@ -10375,29 +10504,85 @@ fn paint_fields(
                 }
             });
             if weights {
-                heat_scale(ui, brush.value);
+                heat_scale(ui, Some(brush.value));
             }
         }
     }
-    ui.add_space(4.0);
-    let clear = ui.add_enabled(!brush.blank, egui::Button::new("Clear"));
-    if clear.clicked()
-        && let Some(file) = file
-    {
-        let blank = texture_paint::blank(paint.size);
-        if let Err(e) = texture_paint::write_file(file, paint.size, &blank) {
-            failed = Some(format!("Saving failed: {e}"));
+}
+
+/// The Channel row: one toggle button per channel of the first `count`, exactly one on.
+fn channel_row(ui: &mut Ui, count: usize, channel: &mut usize) {
+    prop_row(ui, "Channel", |ui, _| {
+        for (k, (label, color)) in PAINT_CHANNELS.into_iter().take(count).enumerate() {
+            let on = *channel == k;
+            let text = RichText::new(label).color(if on { color } else { TEXT });
+            let mut button = egui::Button::new(text);
+            if on {
+                button = button.fill(ACCENT.gamma_multiply(0.25));
+            }
+            if ui.add(button).clicked() {
+                *channel = k;
+            }
         }
-        brush.reload += 1;
-        brush.blank = true;
-    }
-    ui.weak(if weights {
-        "Hold or drag on the model to build weight up; go slower or over it again for more. \
-         Shift + drag takes it away. Right drag orbits."
-    } else {
-        "Drag on the model to paint or erase. Shift + drag does the other. Right drag orbits."
     });
-    failed
+}
+
+/// The fields of a distance map; see docs/features/texture-paint.md#distance-tab.
+fn distance_fields(ui: &mut Ui, paint: &mut texture_paint::Paint, brush: &mut TextureBrush) {
+    use crate::distance_map::Measure;
+    ui.horizontal(|ui| {
+        let mut button =
+            egui::Button::image_and_text(Icon::Crosshair.image(14.0, TEXT), "Pick point");
+        if brush.on {
+            button = button.fill(ACCENT.gamma_multiply(0.25));
+        }
+        if ui.add(button).clicked() {
+            (brush.on, brush.rubber) = (!brush.on, false);
+        }
+    });
+    let count = paint.channels.count();
+    channel_row(ui, count, &mut brush.channel);
+    let farthest = brush.farthest[brush.channel.min(count - 1)];
+    let (measure, range) = (paint.measure, paint.range);
+    prop_row(ui, "Measure", |ui, width| {
+        egui::ComboBox::from_id_salt("paint_measure")
+            .width(width - 8.0)
+            .selected_text(paint.measure.name())
+            .show_ui(ui, |ui| {
+                for measure in Measure::ALL {
+                    ui.selectable_value(&mut paint.measure, measure, measure.name());
+                }
+            });
+    });
+    prop_row(ui, "Range", |ui, width| {
+        let field = egui::DragValue::new(&mut paint.range)
+            .range(0.0..=f32::MAX)
+            .speed(farthest.unwrap_or(1.0).max(1e-3) * 0.005)
+            .custom_formatter(|v, _| {
+                if v > 0.0 {
+                    format!("{v:.3}")
+                } else {
+                    "Farthest".to_owned()
+                }
+            });
+        ui.add_sized(vec2(width - 8.0, 22.0), field)
+            .on_hover_text("The distance stored as 1; Farthest: the farthest spot of the model");
+    });
+    if paint.measure != measure || paint.range != range {
+        brush.recompute = true;
+    }
+    heat_scale(ui, None);
+    if let Some(farthest) = farthest {
+        ui.weak(format!("Farthest spot: {farthest:.3}"));
+    }
+    ui.add_space(4.0);
+    let any = paint.points.iter().take(count).any(Option::is_some);
+    if ui
+        .add_enabled(any, egui::Button::new("Recompute"))
+        .clicked()
+    {
+        brush.recompute = true;
+    }
 }
 
 /// The heatmap color of weight `v` (0–1); see docs/features/texture-paint.md#heatmap.
@@ -10406,9 +10591,9 @@ fn heat_color32(v: f32) -> egui::Color32 {
     egui::Color32::from_rgb(r, g, b)
 }
 
-/// The heatmap's scale from 0 to 1 with a tick at `value`; see
+/// The heatmap's scale from 0 to 1, with a tick at `value` when there is one; see
 /// docs/features/texture-paint.md#texture-paint-tab.
-fn heat_scale(ui: &mut Ui, value: f32) {
+fn heat_scale(ui: &mut Ui, value: Option<f32>) {
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::hover());
     let bar = Rect::from_min_size(rect.min + vec2(2.0, 2.0), vec2(rect.width() - 4.0, 12.0));
     let painter = ui.painter();
@@ -10426,11 +10611,13 @@ fn heat_scale(ui: &mut Ui, value: f32) {
         }
     }
     painter.add(egui::Shape::mesh(mesh));
-    let x = bar.left() + bar.width() * value.clamp(0.0, 1.0);
-    painter.line_segment(
-        [pos2(x, bar.top() - 2.0), pos2(x, bar.bottom() + 2.0)],
-        Stroke::new(2.0, TEXT),
-    );
+    if let Some(value) = value {
+        let x = bar.left() + bar.width() * value.clamp(0.0, 1.0);
+        painter.line_segment(
+            [pos2(x, bar.top() - 2.0), pos2(x, bar.bottom() + 2.0)],
+            Stroke::new(2.0, TEXT),
+        );
+    }
     for (at, label, align) in [
         (0.0, "0", Align2::LEFT_TOP),
         (0.5, "0.5", Align2::CENTER_TOP),

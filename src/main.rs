@@ -14,6 +14,7 @@ mod chunks;
 mod color_picker;
 mod compiled;
 mod config;
+mod distance_map;
 mod enrich;
 mod fileops;
 mod font;

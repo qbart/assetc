@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use bevy::math::Vec3;
 
+use crate::distance_map::{Measure, Point};
 use crate::texture::{ColorSpace, Image};
 
 /// The sizes a paint can have, in texels per side.
@@ -23,16 +24,19 @@ pub enum Mode {
     Channels,
     /// The same masks, built up by the brush and shown as a heatmap.
     Weights,
+    /// The same masks, filled with distances from a point on the model.
+    Distance,
 }
 
 impl Mode {
-    pub const ALL: [Self; 3] = [Self::Color, Self::Channels, Self::Weights];
+    pub const ALL: [Self; 4] = [Self::Color, Self::Channels, Self::Weights, Self::Distance];
 
     pub fn key(self) -> &'static str {
         match self {
             Self::Color => "color",
             Self::Channels => "channels",
             Self::Weights => "weights",
+            Self::Distance => "distance",
         }
     }
 
@@ -41,6 +45,7 @@ impl Mode {
             Self::Color => "Color",
             Self::Channels => "Channels",
             Self::Weights => "Weights",
+            Self::Distance => "Distance",
         }
     }
 }
@@ -94,8 +99,15 @@ pub struct Paint {
     pub mode: Mode,
     /// Texels per side, one of [`SIZES`].
     pub size: u32,
-    /// Channels and Weights modes only.
+    /// Every mode but Color.
     pub channels: Channels,
+    /// Distance mode: how distances are measured.
+    pub measure: Measure,
+    /// Distance mode: the distance stored as 1, in the model's units; 0: the farthest
+    /// spot's.
+    pub range: f32,
+    /// Distance mode: the point each channel (R, G, B, A) is measured from.
+    pub points: [Option<Point>; 4],
 }
 
 impl Paint {
@@ -105,6 +117,9 @@ impl Paint {
             mode: Mode::Color,
             size: DEFAULT_SIZE,
             channels: Channels::Rgba,
+            measure: Measure::Surface,
+            range: 0.0,
+            points: [None; 4],
         }
     }
 
@@ -114,6 +129,7 @@ impl Paint {
             Mode::Color => format!("Color {}", self.size),
             Mode::Channels => format!("{} {}", self.channels.name(), self.size),
             Mode::Weights => format!("Weights {} {}", self.channels.name(), self.size),
+            Mode::Distance => format!("Distance {} {}", self.channels.name(), self.size),
         }
     }
 }
@@ -162,7 +178,7 @@ pub fn parse(value: toml::Value) -> Result<Vec<Paint>, String> {
                 .find(|m| m.key() == k)
                 .ok_or_else(|| {
                     fail(format!(
-                        "unknown mode {k:?} (use color, channels or weights)"
+                        "unknown mode {k:?} (use color, channels, weights or distance)"
                     ))
                 })?,
         };
@@ -181,6 +197,23 @@ pub fn parse(value: toml::Value) -> Result<Vec<Paint>, String> {
                 .ok_or_else(|| fail(format!("size {n} is not 256, 512, 1024, 2048 or 4096")))?,
             Some(_) => return Err(fail("size is not an integer".into())),
         };
+        let measure = match key(&mut table, "measure")? {
+            None => Measure::Surface,
+            Some(k) => Measure::ALL
+                .into_iter()
+                .find(|m| m.key() == k)
+                .ok_or_else(|| fail(format!("unknown measure {k:?} (use surface or straight)")))?,
+        };
+        let range = match table.remove("range") {
+            None => 0.0,
+            Some(value) => number(&value)
+                .filter(|r| r.is_finite() && *r >= 0.0)
+                .ok_or_else(|| fail("range is not a number, 0 or more".into()))?,
+        };
+        let points = match table.remove("points") {
+            None => [None; 4],
+            Some(value) => parse_points(value).map_err(fail)?,
+        };
         if let Some(key) = table.keys().next() {
             return Err(fail(format!("unknown key {key:?}")));
         }
@@ -189,10 +222,76 @@ pub fn parse(value: toml::Value) -> Result<Vec<Paint>, String> {
             mode,
             size,
             channels,
+            measure,
+            range,
+            points,
         });
     }
     Ok(out)
 }
+
+fn number(value: &toml::Value) -> Option<f32> {
+    value
+        .as_float()
+        .or_else(|| value.as_integer().map(|i| i as f64))
+        .map(|f| f as f32)
+}
+
+/// The `points` of a paint; see docs/spec/amod.md#paints.
+fn parse_points(value: toml::Value) -> Result<[Option<Point>; 4], String> {
+    let toml::Value::Array(items) = value else {
+        return Err("points is not an array of tables".into());
+    };
+    let mut out = [None; 4];
+    for item in items {
+        let toml::Value::Table(mut table) = item else {
+            return Err("points is not an array of tables".into());
+        };
+        let channel = match table.remove("channel") {
+            Some(toml::Value::String(c)) => CHANNEL_KEYS
+                .iter()
+                .position(|k| *k == c)
+                .ok_or_else(|| format!("point: unknown channel {c:?} (use r, g, b or a)"))?,
+            _ => return Err("point: no channel".into()),
+        };
+        let fail = |e: &str| format!("point {}: {e}", CHANNEL_KEYS[channel]);
+        if out[channel].is_some() {
+            return Err(fail("set twice"));
+        }
+        let triangle: Vec<u32> = table
+            .remove("triangle")
+            .and_then(|v| v.as_array().cloned())
+            .filter(|a| a.len() == 3)
+            .and_then(|a| {
+                a.iter()
+                    .map(|i| i.as_integer().and_then(|i| u32::try_from(i).ok()))
+                    .collect()
+            })
+            .ok_or_else(|| fail("triangle is not [mesh, primitive, triangle]"))?;
+        let at: Vec<f32> = table
+            .remove("at")
+            .and_then(|v| v.as_array().cloned())
+            .filter(|a| a.len() == 2)
+            .and_then(|a| a.iter().map(number).collect())
+            .filter(|at: &Vec<f32>| {
+                at.iter().all(|k| k.is_finite() && *k >= 0.0) && at[0] + at[1] <= 1.0 + 1e-4
+            })
+            .ok_or_else(|| fail("at is not two weights, 0 or more and together at most 1"))?;
+        if let Some(key) = table.keys().next() {
+            return Err(fail(&format!("unknown key {key:?}")));
+        }
+        out[channel] = Some(Point {
+            mesh: triangle[0],
+            primitive: triangle[1],
+            triangle: triangle[2],
+            at: [at[0], at[1]],
+        });
+    }
+    Ok(out)
+}
+
+/// The channels' names in files, R to A.
+const CHANNEL_KEYS: [&str; 4] = ["r", "g", "b", "a"];
 
 /// Appends the `[[paints]]` tables; see docs/spec/amod.md#written-form.
 pub fn write(paints: &[Paint], out: &mut String) {
@@ -203,6 +302,27 @@ pub fn write(paints: &[Paint], out: &mut String) {
         *out += &format!("size = {}\n", paint.size);
         if paint.mode != Mode::Color {
             *out += &format!("channels = \"{}\"\n", paint.channels.key());
+        }
+        if paint.measure != Measure::Surface {
+            *out += &format!("measure = \"{}\"\n", paint.measure.key());
+        }
+        if paint.range > 0.0 {
+            *out += &format!("range = {:?}\n", paint.range);
+        }
+        let points: Vec<String> = paint
+            .points
+            .iter()
+            .enumerate()
+            .filter_map(|(k, point)| {
+                let p = point.as_ref()?;
+                Some(format!(
+                    "    {{ channel = \"{}\", triangle = [{}, {}, {}], at = [{:?}, {:?}] }},\n",
+                    CHANNEL_KEYS[k], p.mesh, p.primitive, p.triangle, p.at[0], p.at[1]
+                ))
+            })
+            .collect();
+        if !points.is_empty() {
+            *out += &format!("points = [\n{}]\n", points.concat());
         }
     }
 }
@@ -423,6 +543,8 @@ pub enum Display {
     Channel(usize),
     /// One channel alone, as a heatmap.
     Heat(usize),
+    /// One channel alone, as a heatmap on which 0 is blue too.
+    Distance(usize),
 }
 
 /// The texels of a paint being painted.
@@ -482,6 +604,15 @@ impl Canvas {
 
     pub fn is_blank(&self) -> bool {
         self.pixels.iter().all(|&b| b == 0)
+    }
+
+    /// Sets channel `k` (0 R … 3 A) of every texel, one value each, rows top to bottom.
+    pub fn set_channel(&mut self, k: usize, values: &[u8]) {
+        for (texel, &value) in self.pixels.as_chunks_mut::<4>().0.iter_mut().zip(values) {
+            texel[k] = value;
+        }
+        self.generation += 1;
+        self.dirty = Some([0, 0, self.size - 1, self.size - 1]);
     }
 
     /// The texel at `TEXCOORD_0` coordinates `uv` (the nearest one; coordinates repeat).
@@ -720,6 +851,10 @@ impl Canvas {
                     }
                     Display::Heat(k) => {
                         let [r, g, b] = heat(t[k]);
+                        [r, g, b, 255]
+                    }
+                    Display::Distance(k) => {
+                        let [r, g, b] = heat(t[k].max(1));
                         [r, g, b, 255]
                     }
                 };
@@ -974,6 +1109,36 @@ mod tests {
         let mut out = String::new();
         write(&weights, &mut out);
         assert!(out.ends_with("mode = \"weights\"\nsize = 1024\nchannels = \"r\"\n"));
+        // Distance: its measure, range and points.
+        let text = "[[paints]]\nname = \"far\"\nmode = \"distance\"\nsize = 256\nchannels = \"rg\"\nmeasure = \"straight\"\nrange = 2.5\npoints = [\n    { channel = \"g\", triangle = [1, 0, 152], at = [0.25, 0.5] },\n]\n";
+        let table: toml::Table = text.parse().unwrap();
+        let far = parse(table["paints"].clone()).unwrap();
+        assert_eq!(far[0].measure, Measure::Straight);
+        assert_eq!(far[0].range, 2.5);
+        let point = Point {
+            mesh: 1,
+            primitive: 0,
+            triangle: 152,
+            at: [0.25, 0.5],
+        };
+        assert_eq!(far[0].points, [None, Some(point), None, None]);
+        assert_eq!(far[0].label(), "Distance RG 256");
+        let mut out = String::new();
+        write(&far, &mut out);
+        assert_eq!(out, format!("\n{text}"));
+        for bad in [
+            "measure = \"air\"",
+            "range = -1",
+            "points = [{ channel = \"x\", triangle = [0, 0, 0], at = [0, 0] }]",
+            "points = [{ channel = \"r\", triangle = [0, 0], at = [0, 0] }]",
+            "points = [{ channel = \"r\", triangle = [0, 0, 0], at = [0.75, 0.5] }]",
+            "points = [{ channel = \"r\", triangle = [0, 0, 0], at = [0, 0] }, { channel = \"r\", triangle = [0, 0, 1], at = [0, 0] }]",
+        ] {
+            let table: toml::Table = format!("[[paints]]\nname = \"a\"\n{bad}\n")
+                .parse()
+                .unwrap();
+            assert!(parse(table["paints"].clone()).is_err(), "{bad}");
+        }
         let mut out = String::new();
         write(&paints, &mut out);
         assert_eq!(

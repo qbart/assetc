@@ -276,6 +276,37 @@ pub struct Preview3d {
     pub paint_probe: Option<(Vec3, Vec3)>,
     /// The paint's texel where the last probe (or painting ray) hit the model.
     pub paint_probed: Option<[u8; 4]>,
+    /// Distances to fill the paint's channels with this frame, taken by [`paint_surface`];
+    /// see docs/features/texture-paint.md#distance-map.
+    pub paint_distance: Option<DistanceJob>,
+    /// What the last [`DistanceJob`] did, for the UI to take.
+    pub paint_distance_done: Option<DistanceDone>,
+    /// A point of the paint to report in `paint_point_at` this frame.
+    pub paint_point: Option<crate::distance_map::Point>,
+    /// Where `paint_point` is on the model as posed; written by [`paint_surface`].
+    pub paint_point_at: Option<Vec3>,
+}
+
+/// Channels of the shown paint to fill with distances from points on the model.
+#[derive(Clone, Debug, Default)]
+pub struct DistanceJob {
+    /// A channel (0 R … 3 A) whose point is where this ray (origin and unit direction) hits
+    /// the model.
+    pub pick: Option<(usize, Vec3, Vec3)>,
+    /// Channels and the points to measure them from.
+    pub fills: Vec<(usize, crate::distance_map::Point)>,
+    pub measure: crate::distance_map::Measure,
+    /// The distance stored as 1, in the model's units; 0: the farthest spot's.
+    pub range: f32,
+}
+
+/// What a [`DistanceJob`] did.
+#[derive(Clone, Debug, Default)]
+pub struct DistanceDone {
+    /// The channel picked for and its point, when the ray hit a glTF primitive.
+    pub picked: Option<(usize, crate::distance_map::Point)>,
+    /// The channels filled, each with its farthest spot's distance in the model's units.
+    pub filled: Vec<(usize, f32)>,
 }
 
 /// A texture paint on the shown model; see docs/features/texture-paint.md#3d-view.
@@ -2796,12 +2827,16 @@ fn paint_surface(
     meshes: Res<Assets<Mesh>>,
     bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
 ) {
+    use crate::distance_map::{Part, Point, barycentric};
     let ray = preview.paint_ray.take();
     let probe = preview.paint_probe.take();
+    let job = preview.paint_distance.take();
+    let marked = preview.paint_point.take();
     preview.paint_probed = None;
-    let Some((origin, dir)) = ray.map(|r| (r.origin, r.dir)).or(probe) else {
+    preview.paint_point_at = None;
+    if ray.is_none() && probe.is_none() && job.is_none() && marked.is_none() {
         return;
-    };
+    }
     let Some(model) = loaded.0.as_ref().filter(|m| m.fitted.is_some()) else {
         return;
     };
@@ -2824,25 +2859,88 @@ fn paint_surface(
     let corners = |mesh: &PosedMesh, t: &[usize; 3]| {
         t.map(|i| mesh.world.get(i).copied().unwrap_or(Vec3::NAN))
     };
-    // The nearest hit, as for a surface ray, and the triangle hit.
-    let mut nearest: Option<(f32, &PosedMesh, &[usize; 3])> = None;
-    for mesh in &posed {
-        for t in mesh.indices.as_chunks::<3>().0 {
-            let [a, b, c] = corners(mesh, t);
-            if let Some(d) = ray_triangle(origin, dir, a, b, c)
-                && nearest.is_none_or(|(n, ..)| d < n)
-            {
-                nearest = Some((d, mesh, t));
+    // The nearest hit of a ray, as for a surface ray: how far, the mesh and the triangle.
+    let nearest = |origin: Vec3, dir: Vec3| {
+        let mut nearest: Option<(f32, usize, usize)> = None;
+        for (m, mesh) in posed.iter().enumerate() {
+            for (i, t) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+                let [a, b, c] = corners(mesh, t);
+                if let Some(d) = ray_triangle(origin, dir, a, b, c)
+                    && nearest.is_none_or(|(n, ..)| d < n)
+                {
+                    nearest = Some((d, m, i));
+                }
             }
         }
+        nearest
+    };
+    let triangle = |m: usize, i: usize| &posed[m].indices.as_chunks::<3>().0[i];
+    let parts: Vec<Part> = posed
+        .iter()
+        .map(|mesh| Part {
+            id: mesh.id,
+            positions: &mesh.world,
+            indices: &mesh.indices,
+            uvs: mesh.uvs,
+        })
+        .collect();
+    if let Some(point) = marked {
+        preview.paint_point_at = crate::distance_map::locate(&parts, &point).map(|(.., at)| at);
     }
-    let Some((distance, hit_mesh, hit)) = nearest else {
+    // Distances: each channel from its point, the picked one from where its ray hits; see
+    // docs/features/texture-paint.md#distance-map.
+    if let Some(job) = job {
+        let scale = model
+            .fitted
+            .map_or(1.0, |f| f.scale.max_element())
+            .max(1e-12);
+        let mut done = DistanceDone::default();
+        let mut fills: Vec<(usize, usize, usize, Vec3)> = job
+            .fills
+            .iter()
+            .filter_map(|(channel, point)| {
+                let (part, t, at) = crate::distance_map::locate(&parts, point)?;
+                Some((*channel, part, t, at))
+            })
+            .collect();
+        if let Some((channel, origin, dir)) = job.pick
+            && let Some((distance, m, i)) = nearest(origin, dir)
+        {
+            let at = origin + dir * distance;
+            let [_, k1, k2] = barycentric(at, corners(&posed[m], triangle(m, i)));
+            let k1 = k1.clamp(0.0, 1.0);
+            if let Some((mesh, primitive)) = posed[m].id {
+                let point = Point {
+                    mesh,
+                    primitive,
+                    triangle: i as u32,
+                    at: [k1, k2.clamp(0.0, 1.0 - k1)],
+                };
+                done.picked = Some((channel, point));
+            }
+            fills.retain(|fill| fill.0 != channel);
+            fills.push((channel, m, i, at));
+        }
+        for (channel, part, t, at) in fills {
+            let field = crate::distance_map::measure(&parts, at, (part, t), job.measure);
+            let size = paint.canvas.size;
+            let values = crate::distance_map::rasterize(&parts, &field, job.range * scale, size);
+            paint.canvas.set_channel(channel, &values);
+            done.filled.push((channel, field.farthest / scale));
+        }
+        preview.paint_distance_done = Some(done);
+    }
+    let Some((origin, dir)) = ray.map(|r| (r.origin, r.dir)).or(probe) else {
+        return;
+    };
+    let Some((distance, m, i)) = nearest(origin, dir) else {
         // Off the model: the stroke goes on from the next hit without joining up.
         if ray.is_some() {
             paint.canvas.lift();
         }
         return;
     };
+    let (hit_mesh, hit) = (&posed[m], triangle(m, i));
     let center = origin + dir * distance;
     if let Some(ray) = ray {
         paint_dabs(&mut paint.canvas, &posed, &ray, center, time.delta_secs());
@@ -2904,20 +3002,6 @@ fn paint_dabs(
     }
 }
 
-/// The barycentric coordinates of `p`, a point in the plane of triangle `a b c`.
-fn barycentric(p: Vec3, [a, b, c]: [Vec3; 3]) -> [f32; 3] {
-    let (e1, e2, v) = (b - a, c - a, p - a);
-    let (d11, d12, d22) = (e1.dot(e1), e1.dot(e2), e2.dot(e2));
-    let (d1, d2) = (v.dot(e1), v.dot(e2));
-    let det = d11 * d22 - d12 * d12;
-    if det.abs() < 1e-20 {
-        return [1.0, 0.0, 0.0];
-    }
-    let k1 = (d22 * d1 - d12 * d2) / det;
-    let k2 = (d11 * d2 - d12 * d1) / det;
-    [1.0 - k1 - k2, k1, k2]
-}
-
 /// Distance along the ray to triangle `a b c` (either side), Möller–Trumbore.
 fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
     let (e1, e2) = (b - a, c - a);
@@ -2945,14 +3029,6 @@ fn ray_triangle(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f3
 mod tests {
     use super::*;
     use crate::lut::Lut;
-
-    #[test]
-    fn barycentric_coordinates_weigh_the_corners() {
-        let t = [Vec3::ZERO, Vec3::X * 2.0, Vec3::Y * 2.0];
-        assert_eq!(barycentric(Vec3::ZERO, t), [1.0, 0.0, 0.0]);
-        assert_eq!(barycentric(Vec3::new(1.0, 1.0, 0.0), t), [0.0, 0.5, 0.5]);
-        assert_eq!(barycentric(Vec3::new(0.5, 0.0, 0.0), t), [0.75, 0.25, 0.0]);
-    }
 
     #[test]
     fn rays_hit_triangles_in_front() {
