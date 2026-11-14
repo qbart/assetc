@@ -21,8 +21,9 @@ Its [LICENSE.md](https://github.com/KhronosGroup/glTF-Sample-Assets/blob/main/Mo
 | Rigging and animation | © 2014, [tomkranis](https://sketchfab.com/3d-models/low-poly-fox-by-pixelmannen-animated-371dea88d7e04a76af5763f2a36866bc) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/legalcode) |
 | glTF conversion | © 2017, [@AsoboStudio and @scurest](https://github.com/KhronosGroup/glTF-Sample-Models/pull/150#issuecomment-406300118) | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/legalcode) |
 
-`samples/Fox.glb.amod` (locators, shapes, regions, paths, events and other
-settings for it) is assetc's own, not part of the model.
+`samples/Fox.glb.amod` (locators, shapes, regions, paths, events, texture
+paints and other settings for it) and `samples/Fox.glb.reach.apaint` (a
+distance map measured on it) are assetc's own, not part of the model.
 
 ### `samples/monogram.ttf`
 

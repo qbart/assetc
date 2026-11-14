@@ -225,6 +225,16 @@ name = "team"
 fill = "solid"
 color = "#2563eb"
 
+[[paints]]
+name = "reach"
+mode = "distance"
+size = 256
+channels = "rg"
+points = [
+    { channel = "r", triangle = [0, 0, 27], at = [0.29044342, 0.5894357], farthest = 170.11821 },
+    { channel = "g", triangle = [0, 0, 275], at = [0.49752423, 0.22806321], farthest = 137.2403 },
+]
+
 [[events]]
 animation = "Walk"
 name = "footstep"
