@@ -148,6 +148,20 @@ writes and edits the `.amipmap`:
   the texture itself, as paths relative to its folder (the ones in that
   folder first, then the rest, each by name); choosing one sets
   `[files] n`. `ACCENT` with Reset while set.
+- With Custom mip chain on, **Fill in missing levels** (button, under the
+  level's file): writes an image for every level of the chain that has no
+  file yet, to start drawing from. Each is the level as the build generates
+  it (the level above, [resized](textures.md#mipmaps)), saved as
+  `<name>.mip<n>.png` next to the texture, so it is that level's file
+  [by name](#levels) from then on.
+  - Levels that already have a file, chosen or by name, are left alone, as
+    is any file already at that path: nothing is overwritten. A level whose
+    file has a problem (the wrong size, unreadable) counts as having one.
+  - Only the levels the chain has (`levels`) are written, never level 0.
+  - The build's output does not change until a written file is edited.
+  - Disabled when every level has a file (hover: `Every level has a file`)
+    and while the `.amipmap` is not saved yet. The status bar says how many
+    were written (`Wrote 3 level files`).
 - When the `.amipmap` does not apply or does not parse, its
   [failure](#build) is shown in `CHANNEL_R` at the top, and the chain is shown
   as the build would write it without the file.
