@@ -41,8 +41,12 @@ pub struct Inspection {
     pub specimen: bool,
     /// A glTF model that parsed, previewed in 3D by the canvas.
     pub model: bool,
-    /// A compiled texture's mip levels after level 0 (which is `preview`).
+    /// A texture's mip levels after level 0 (which is `preview`): a compiled texture's, or
+    /// the ones the build will write for a texture source.
     pub mips: Vec<Image>,
+    /// The chain the build writes for a texture source; see
+    /// docs/features/mipmaps.md#mipmaps-tab.
+    pub mip_chain: Option<MipChain>,
     /// A compiled mesh's triangles by meshlet, for the canvas.
     pub compiled_mesh: Option<crate::amesh::Preview>,
     /// The compiled mesh file itself, for the Chunks view.
@@ -73,6 +77,28 @@ pub struct Inspection {
     pub texture_type: Option<String>,
     /// The other glTF models of the input, input-relative and sorted, for locator previews.
     pub models: Vec<String>,
+}
+
+/// The mip chain the build writes for a texture source.
+#[derive(Debug, Default)]
+pub struct MipChain {
+    /// One per level written, level 0 first.
+    pub levels: Vec<MipLevel>,
+    /// The levels of a full chain: the most the texture can have.
+    pub full: usize,
+    /// Why its `.amipmap` cannot be used, if it has one that cannot.
+    pub problem: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct MipLevel {
+    pub width: u32,
+    pub height: u32,
+    /// The file it comes from, as shown, and whether that was found by name; `None` for
+    /// level 0 and generated levels.
+    pub file: Option<(String, bool)>,
+    /// Why its file cannot be used.
+    pub problem: Option<String>,
 }
 
 /// A file's data as a table, for the canvas; see docs/features/inspector.md#data-tables.
@@ -400,6 +426,7 @@ fn source_texture(
     let rgb = color.has_color();
     out.channels = [rgb, rgb, rgb, color.has_alpha()];
     let (width, height) = image.dimensions();
+    let mut image = to_image(image);
     let asset_path = strip_extension(rel);
     out.rows
         .push(("Dimensions", format!("{width} × {height} px")));
@@ -437,24 +464,53 @@ fn source_texture(
                 let orm_path = format!("{}.orm", u.material.strip_suffix(".amat.bin")?);
                 Some((plan.by_asset_path(&orm_path)?, channel))
             });
+            // What its `.amipmap` fails with; see docs/features/mipmaps.md#build.
+            let amipmap = format!("{rel}{}", crate::mipmap::SUFFIX);
+            let failure = plan.failures.iter().find(|f| f.source == amipmap);
+            let input = project.input_dir().unwrap_or_default();
             if let Some(asset) = plan.texture(rel)
-                && let Job::Texture { color, mipmaps, .. } = asset.job
+                && let Job::Texture {
+                    color,
+                    mipmaps,
+                    custom,
+                    ..
+                } = &asset.job
             {
-                let levels = if mipmaps {
-                    texture::level_count(width, height)
-                } else {
-                    1
+                out.rows.push(("Color", color_name(*color).into()));
+                if crate::mipmap::applies_to(file) {
+                    image = source_mips(&input, image, *color, *mipmaps, custom.as_ref(), out);
+                }
+                let levels = match &out.mip_chain {
+                    Some(chain) => chain.levels.len(),
+                    None if *mipmaps => texture::level_count(width, height),
+                    None => 1,
                 };
-                out.rows.push(("Color", color_name(color).into()));
                 out.rows.push(("Mip levels", levels.to_string()));
+                if let (Some(chain), Some(_)) = (&out.mip_chain, custom) {
+                    let problem = chain
+                        .problem
+                        .clone()
+                        .or_else(|| chain.levels.iter().find_map(|l| l.problem.clone()));
+                    let files = chain.levels.iter().filter(|l| l.file.is_some()).count();
+                    let value =
+                        problem.unwrap_or_else(|| format!("{files} of {levels} levels from files"));
+                    out.rows.push(("Custom mipmaps", value));
+                }
                 output = Some((asset.output.clone(), ""));
             } else if let Some((orm, channel)) = orm_use {
                 out.rows
                     .push(("Color", color_name(ColorSpace::Linear).into()));
+                if crate::mipmap::applies_to(file) {
+                    image = source_mips(&input, image, ColorSpace::Linear, true, None, out);
+                }
                 let levels = texture::level_count(width, height);
                 out.rows.push(("Mip levels", levels.to_string()));
                 let channel = [" (channel R)", " (channel G)", " (channel B)"][channel];
                 output = Some((orm.output.clone(), channel));
+            }
+            if let Some(failure) = failure {
+                out.rows.push(("Custom mipmaps", failure.message.clone()));
+                out.mip_chain.get_or_insert_default().problem = Some(failure.message.clone());
             }
         }
         Some(Err(e)) => {
@@ -468,8 +524,60 @@ fn source_texture(
         output.unwrap_or_else(|| (manifest::Kind::Texture.output_path(asset_path), ""));
     output_row(project, &output_rel, note, out);
 
-    out.preview = Some(to_image(image));
+    out.preview = Some(image);
     Ok(())
+}
+
+/// The levels the build writes for the texture source `base`, for the Mipmaps tab: fills
+/// `out.mips` and `out.mip_chain` and returns level 0. A level whose file cannot be used is
+/// shown generated, with its problem. See docs/features/mipmaps.md#mipmaps-tab.
+fn source_mips(
+    input: &Path,
+    base: Image,
+    color: ColorSpace,
+    mipmaps: bool,
+    custom: Option<&crate::mipmap::Chain>,
+    out: &mut Inspection,
+) -> Image {
+    use crate::mipmap::Level;
+    let full = texture::level_count(base.width, base.height);
+    let (levels, problem) = match custom {
+        Some(chain) => crate::mipmap::levels(base, color, chain, |rel| {
+            decode(&input.join(rel)).map(|(image, _)| to_image(image))
+        }),
+        None => {
+            let images = if mipmaps {
+                texture::mip_chain(base, color)
+            } else {
+                vec![base]
+            };
+            let generated = |image| Level {
+                image,
+                file: None,
+                problem: None,
+            };
+            (images.into_iter().map(generated).collect(), None)
+        }
+    };
+    let mut chain = MipChain {
+        levels: Vec::new(),
+        full,
+        problem,
+    };
+    let mut images = Vec::new();
+    for level in levels {
+        chain.levels.push(MipLevel {
+            width: level.image.width,
+            height: level.image.height,
+            file: level.file.map(|f| (f.shown, f.named)),
+            problem: level.problem,
+        });
+        images.push(level.image);
+    }
+    out.mip_chain = Some(chain);
+    let base = images.remove(0);
+    out.mips = images;
+    base
 }
 
 fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), String> {
@@ -1645,6 +1753,62 @@ mod tests {
         image::RgbaImage::from_pixel(w, h, image::Rgba([1, 2, 3, 255]))
             .save(path)
             .unwrap();
+    }
+
+    #[test]
+    fn source_textures_show_their_mip_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = project(dir.path(), config::Textures::default());
+        let input = project.input_dir().unwrap();
+        let file = input.join("rock.png");
+        png(&file, 8, 8);
+        png(&input.join("rock.mip1.png"), 4, 4);
+        png(&input.join("rock.mip2.png"), 3, 3);
+
+        // Generated: every level, nothing from files.
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Mip levels"), "4");
+        assert!(i.rows.iter().all(|(label, _)| *label != "Custom mipmaps"));
+        let chain = i.mip_chain.as_ref().unwrap();
+        assert_eq!((chain.levels.len(), chain.full, i.mips.len()), (4, 4, 3));
+        assert!(chain.levels.iter().all(|l| l.file.is_none()));
+
+        fs::write(input.join("rock.png.amipmap"), "levels = 3\n").unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Mip levels"), "3");
+        // The level that does not fit is shown generated, with its problem.
+        assert_eq!(
+            row(&i, "Custom mipmaps"),
+            "level 2 (rock.mip2.png) is 3 × 3, not 2 × 2"
+        );
+        let chain = i.mip_chain.as_ref().unwrap();
+        let levels: Vec<_> = chain
+            .levels
+            .iter()
+            .map(|l| (l.width, l.file.clone(), l.problem.is_some()))
+            .collect();
+        assert_eq!(
+            levels,
+            [
+                (8, None, false),
+                (4, Some(("rock.mip1.png".into(), true)), false),
+                (2, Some(("rock.mip2.png".into(), true)), true),
+            ]
+        );
+        assert_eq!(i.mips.len(), 2);
+        assert_eq!(i.preview.as_ref().map(|p| p.width), Some(8));
+
+        png(&input.join("rock.mip2.png"), 2, 2);
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Custom mipmaps"), "2 of 3 levels from files");
+
+        // A file that does not parse: the chain as built without it, and why.
+        fs::write(input.join("rock.png.amipmap"), "levels = 0\n").unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Custom mipmaps"), "levels must be 1 or more");
+        let chain = i.mip_chain.as_ref().unwrap();
+        assert_eq!(chain.problem.as_deref(), Some("levels must be 1 or more"));
+        assert_eq!(chain.levels.len(), 4);
     }
 
     fn row<'a>(inspection: &'a Inspection, label: &str) -> &'a str {

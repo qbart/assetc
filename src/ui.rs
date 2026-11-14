@@ -54,6 +54,7 @@ mod custom;
 mod data;
 mod graph;
 mod material_edit;
+mod mipmaps;
 mod pack_view;
 mod schema;
 mod structs_edit;
@@ -358,9 +359,12 @@ struct Inspected {
     inspection: Inspection,
     /// The uploaded image, kept to build single-channel views.
     pixels: Option<Image>,
-    /// A compiled texture's mip levels, level 0 first (empty otherwise), and which one
-    /// `pixels` / `preview` show.
+    /// A texture's mip levels (a compiled texture's, or the ones the build will write for a
+    /// source), level 0 first (empty otherwise), and which one `pixels` / `preview` show.
     levels: Vec<Image>,
+    /// A texture source's `.amipmap`, edited in the Mipmaps tab; see
+    /// docs/features/mipmaps.md#mipmaps-tab.
+    mipmap: Option<mipmaps::MipmapEdit>,
     shown_level: usize,
     preview: Option<egui::TextureHandle>,
     /// Single-channel view of `pixels`, built on demand.
@@ -826,7 +830,7 @@ impl InspectorTab {
     fn enabled(self, selection: Option<&Selection>, inspected: Option<&Inspected>) -> bool {
         match self {
             Self::Info => true,
-            Self::Mipmaps => inspected.is_some_and(|i| i.levels.len() > 1),
+            Self::Mipmaps => inspected.is_some_and(|i| i.levels.len() > 1 || i.mipmap.is_some()),
             Self::Lods => inspected
                 .and_then(|i| i.compiled_mesh.as_ref())
                 .is_some_and(|m| m.levels.len() > 1),
@@ -1487,6 +1491,7 @@ struct Prepared {
     /// gives it, and the locators it inherits.
     mesh: Option<Result<PreparedMesh, String>>,
     sidecar: Option<Result<Amod, String>>,
+    mipmap: Option<mipmaps::MipmapEdit>,
     model: Option<(PathBuf, u64)>,
     geometry: Option<model::ModelGeometry>,
     compiled_mesh: Option<crate::amesh::Preview>,
@@ -1663,6 +1668,15 @@ fn prepare(
     // Images carry modifiers in their sidecar; see docs/features/textures.md#modifiers.
     let sidecar = (selection.location == Location::Input && build::is_image(&selection.path))
         .then(|| Ok(amod::read(&selection.path)?.unwrap_or_default()));
+    // Textures can have a custom mip chain; see docs/features/mipmaps.md#mipmaps-tab.
+    let mipmap = project
+        .input_dir()
+        .filter(|_| {
+            selection.location == Location::Input
+                && crate::mipmap::applies_to(&selection.path)
+                && selection.path.is_file()
+        })
+        .map(|input| mipmaps::prepare(&input, &selection.path));
     let geometry = (selection.location == Location::Input && model::is_model(&selection.path))
         .then(|| model::geometry(&selection.path).ok())
         .flatten();
@@ -1690,6 +1704,7 @@ fn prepare(
         refs,
         rel,
         sidecar,
+        mipmap,
         geometry,
         compiled_mesh: inspection.compiled_mesh.take(),
         compiled_materials: std::mem::take(&mut inspection.compiled_materials),
@@ -1937,6 +1952,7 @@ fn inspected(
         inspection: prepared.inspection,
         pixels: prepared.pixels,
         levels,
+        mipmap: prepared.mipmap,
         shown_level: 0,
         preview,
         channel_preview: None,
@@ -2871,6 +2887,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "ashader" => Icon::Sparkles,
         "spv" => Icon::Binary,
         "amod" => Icon::Settings2,
+        "amipmap" => Icon::Images,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
         "exr" => Icon::SunMedium,
@@ -2914,6 +2931,7 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     let dim = !is_dir
         && (amod::is_sidecar(&node.path)
             || crate::texture_paint::is_apaint(&node.path)
+            || crate::mipmap::is_amipmap(&node.path)
             || is_atlas_config(&node.path));
     let selected = cx
         .selection
@@ -3686,6 +3704,26 @@ fn right_sidebar(
                     let choice = state.lod_levels.entry(inspected.path.clone()).or_default();
                     if let Some(mesh) = &inspected.compiled_mesh {
                         lods_tab(ui, mesh, choice);
+                    }
+                }
+                (InspectorTab::Mipmaps, Some(inspected), Some(_)) if inspected.mipmap.is_some() => {
+                    let choice = state.mip_levels.entry(inspected.path.clone()).or_default();
+                    let written = match mipmaps::source_tab(ui, inspected, choice) {
+                        Some(mipmaps::Save::Write(amipmap)) => {
+                            Some(crate::mipmap::write(&inspected.path, &amipmap))
+                        }
+                        Some(mipmaps::Save::Delete) => Some(std::fs::remove_file(
+                            crate::mipmap::path_for(&inspected.path),
+                        )),
+                        None => None,
+                    };
+                    match written {
+                        Some(Ok(())) => {
+                            state.reinspect = true;
+                            state.rescan = true;
+                        }
+                        Some(Err(e)) => state.notice = Some(format!("Saving failed: {e}")),
+                        None => {}
                     }
                 }
                 (InspectorTab::Mipmaps, Some(inspected), Some(_)) => {
