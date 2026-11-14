@@ -27,6 +27,17 @@ pub struct MipmapEdit {
     /// The other texture sources of the input, relative to the texture's folder; the ones in
     /// that folder first.
     files: Vec<String>,
+    /// The levels of the chain that have no file, as the build generates them: level
+    /// numbers and images. Empty without an `.amipmap`.
+    missing: Vec<(u32, crate::texture::Image)>,
+}
+
+impl MipmapEdit {
+    /// Writes a file for every level that has none; how many. See
+    /// docs/features/mipmaps.md#mipmaps-tab.
+    pub fn fill(&self, texture: &Path) -> Result<usize, String> {
+        mipmap::fill(texture, &self.missing)
+    }
 }
 
 /// What the tab asks for.
@@ -34,11 +45,25 @@ pub enum Save {
     Write(Amipmap),
     /// Remove the `.amipmap`.
     Delete,
+    /// Write a file for every level that has none.
+    Fill,
 }
 
-/// Reads what the tab edits for the texture source `file` under `input`.
-pub fn prepare(input: &Path, file: &Path) -> MipmapEdit {
+/// Reads what the tab edits for the texture source `file` under `input`, inspected as
+/// `inspection`.
+pub fn prepare(input: &Path, file: &Path, inspection: &crate::inspect::Inspection) -> MipmapEdit {
     let saved = mipmap::read(file);
+    let missing = match (&saved, &inspection.mip_chain) {
+        (Ok(Some(_)), Some(chain)) => chain
+            .levels
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, level)| level.file.is_none())
+            .filter_map(|(i, _)| Some((i as u32, inspection.mips.get(i - 1)?.clone())))
+            .collect(),
+        _ => Vec::new(),
+    };
     let dir = file.parent().unwrap_or(input);
     let mut files: Vec<String> = crate::build::files_under(input)
         .into_iter()
@@ -62,6 +87,7 @@ pub fn prepare(input: &Path, file: &Path) -> MipmapEdit {
             .into_owned(),
         named,
         files,
+        missing,
     }
 }
 
@@ -128,6 +154,25 @@ pub fn source_tab(ui: &mut Ui, inspected: &mut Inspected, choice: &mut usize) ->
                 {
                     ui.add_space(4.0);
                     file_row(ui, amipmap, level as u32, &edit.named, &edit.files);
+                }
+                // Files to start drawing from, for the levels that have none.
+                if edit.edit.is_some() {
+                    ui.add_space(8.0);
+                    let saved = matches!(&edit.saved, Ok(Some(_)));
+                    let button = egui::Button::new("Fill in missing levels");
+                    let stem = crate::build::strip_extension(&edit.name);
+                    let hint = format!(
+                        "Writes {stem}.mip<n>.png for every level without a file, resized \
+                         from the level above. Existing files are kept."
+                    );
+                    if ui
+                        .add_enabled(saved && !edit.missing.is_empty(), button)
+                        .on_hover_text(hint)
+                        .on_disabled_hover_text("Every level has a file")
+                        .clicked()
+                    {
+                        save = Some(Save::Fill);
+                    }
                 }
             });
         });

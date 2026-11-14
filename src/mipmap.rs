@@ -397,9 +397,71 @@ pub fn build(
     Ok((levels.into_iter().map(|l| l.image).collect(), custom))
 }
 
+/// Writes `levels`, level numbers and their images, as files by name of `texture`
+/// (`<name>.mip<n>.png` next to it), leaving out every level that has a file by name by now
+/// and never writing over a file; returns how many were written. See
+/// docs/features/mipmaps.md#mipmaps-tab.
+pub fn fill(texture: &Path, levels: &[(u32, Image)]) -> Result<usize, String> {
+    let name = texture
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let stem = crate::build::strip_extension(&name);
+    let named: Vec<u32> = named_files(texture).into_iter().map(|(n, _)| n).collect();
+    let mut written = 0;
+    for (level, image) in levels {
+        let path = texture.with_file_name(format!("{stem}.mip{level}.png"));
+        if *level == 0 || named.contains(level) || path.exists() {
+            continue;
+        }
+        image::save_buffer(
+            &path,
+            &image.pixels,
+            image.width,
+            image.height,
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+        written += 1;
+    }
+    Ok(written)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fills_in_only_levels_without_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let texture = dir.path().join("rock.png");
+        std::fs::write(&texture, "").unwrap();
+        std::fs::write(dir.path().join("rock.mip2.tga"), "mine").unwrap();
+        std::fs::write(dir.path().join("rock.mip3.png"), "mine too").unwrap();
+        let levels = [
+            (0, flat(8, 8, 1)),
+            (1, flat(4, 4, 10)),
+            (2, flat(2, 2, 20)),
+            (3, flat(1, 1, 30)),
+        ];
+        assert_eq!(fill(&texture, &levels), Ok(1));
+        let written = image::open(dir.path().join("rock.mip1.png"))
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(written.dimensions(), (4, 4));
+        assert_eq!(written.get_pixel(0, 0).0, [10; 4]);
+        // Level 0 and the levels that have a file are left alone.
+        assert!(!dir.path().join("rock.mip0.png").exists());
+        assert!(!dir.path().join("rock.mip2.png").exists());
+        assert_eq!(
+            std::fs::read(dir.path().join("rock.mip3.png")).unwrap(),
+            b"mine too"
+        );
+        assert_eq!(named_files(&texture).len(), 3);
+        // Again: nothing left to write.
+        assert_eq!(fill(&texture, &levels), Ok(0));
+    }
 
     fn flat(width: u32, height: u32, value: u8) -> Image {
         Image {

@@ -1687,7 +1687,7 @@ fn prepare(
                 && crate::mipmap::applies_to(&selection.path)
                 && selection.path.is_file()
         })
-        .map(|input| mipmaps::prepare(&input, &selection.path));
+        .map(|input| mipmaps::prepare(&input, &selection.path, &inspection));
     let geometry = (selection.location == Location::Input && model::is_model(&selection.path))
         .then(|| model::geometry(&selection.path).ok())
         .flatten();
@@ -3719,19 +3719,33 @@ fn right_sidebar(
                 }
                 (InspectorTab::Mipmaps, Some(inspected), Some(_)) if inspected.mipmap.is_some() => {
                     let choice = state.mip_levels.entry(inspected.path.clone()).or_default();
+                    // What was saved: a line for the status bar, when there is one to say.
                     let written = match mipmaps::source_tab(ui, inspected, choice) {
-                        Some(mipmaps::Save::Write(amipmap)) => {
-                            Some(crate::mipmap::write(&inspected.path, &amipmap))
-                        }
-                        Some(mipmaps::Save::Delete) => Some(std::fs::remove_file(
-                            crate::mipmap::path_for(&inspected.path),
-                        )),
+                        Some(mipmaps::Save::Write(amipmap)) => Some(
+                            crate::mipmap::write(&inspected.path, &amipmap)
+                                .map(|()| None)
+                                .map_err(|e| e.to_string()),
+                        ),
+                        Some(mipmaps::Save::Delete) => Some(
+                            std::fs::remove_file(crate::mipmap::path_for(&inspected.path))
+                                .map(|()| None)
+                                .map_err(|e| e.to_string()),
+                        ),
+                        Some(mipmaps::Save::Fill) => inspected.mipmap.as_ref().map(|edit| {
+                            edit.fill(&inspected.path).map(|n| {
+                                let files = if n == 1 { "file" } else { "files" };
+                                Some(format!("Wrote {n} level {files}"))
+                            })
+                        }),
                         None => None,
                     };
                     match written {
-                        Some(Ok(())) => {
+                        Some(Ok(said)) => {
                             state.reinspect = true;
                             state.rescan = true;
+                            if said.is_some() {
+                                state.notice = said;
+                            }
                         }
                         Some(Err(e)) => state.notice = Some(format!("Saving failed: {e}")),
                         None => {}
