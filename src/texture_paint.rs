@@ -108,6 +108,9 @@ pub struct Paint {
     pub range: f32,
     /// Distance mode: the point each channel (R, G, B, A) is measured from.
     pub points: [Option<Point>; 4],
+    /// Distance mode: per channel, the farthest spot's distance when it was last measured, in
+    /// the model's units; 0 while unknown.
+    pub farthest: [f32; 4],
 }
 
 impl Paint {
@@ -120,6 +123,7 @@ impl Paint {
             measure: Measure::Surface,
             range: 0.0,
             points: [None; 4],
+            farthest: [0.0; 4],
         }
     }
 
@@ -130,6 +134,44 @@ impl Paint {
             Mode::Channels => format!("{} {}", self.channels.name(), self.size),
             Mode::Weights => format!("Weights {} {}", self.channels.name(), self.size),
             Mode::Distance => format!("Distance {} {}", self.channels.name(), self.size),
+        }
+    }
+}
+
+impl Paint {
+    /// Its record in the model's mesh, its texture being asset `texture`; see
+    /// docs/spec/amesh.bin.md#texture-paints.
+    pub fn record(&self, texture: u64) -> crate::amesh::CompiledPaint {
+        let distance = self.mode == Mode::Distance;
+        let channels = match self.mode {
+            Mode::Color => 4,
+            _ => self.channels.count(),
+        };
+        let range = std::array::from_fn(|k| {
+            if !distance || k >= channels || self.points[k].is_none() {
+                0.0
+            } else if self.range > 0.0 {
+                self.range
+            } else {
+                self.farthest[k]
+            }
+        });
+        crate::amesh::CompiledPaint {
+            name: self.name.clone(),
+            texture,
+            mode: match self.mode {
+                Mode::Color => 0,
+                Mode::Channels => 1,
+                Mode::Weights => 2,
+                Mode::Distance => 3,
+            },
+            channels: channels as u32,
+            size: self.size,
+            measure: match (distance, self.measure) {
+                (true, Measure::Straight) => 1,
+                _ => 0,
+            },
+            range,
         }
     }
 }
@@ -210,8 +252,8 @@ pub fn parse(value: toml::Value) -> Result<Vec<Paint>, String> {
                 .filter(|r| r.is_finite() && *r >= 0.0)
                 .ok_or_else(|| fail("range is not a number, 0 or more".into()))?,
         };
-        let points = match table.remove("points") {
-            None => [None; 4],
+        let (points, farthest) = match table.remove("points") {
+            None => ([None; 4], [0.0; 4]),
             Some(value) => parse_points(value).map_err(fail)?,
         };
         if let Some(key) = table.keys().next() {
@@ -225,6 +267,7 @@ pub fn parse(value: toml::Value) -> Result<Vec<Paint>, String> {
             measure,
             range,
             points,
+            farthest,
         });
     }
     Ok(out)
@@ -237,12 +280,14 @@ fn number(value: &toml::Value) -> Option<f32> {
         .map(|f| f as f32)
 }
 
-/// The `points` of a paint; see docs/spec/amod.md#paints.
-fn parse_points(value: toml::Value) -> Result<[Option<Point>; 4], String> {
+/// The `points` of a paint and their channels' farthest distances; see
+/// docs/spec/amod.md#paints.
+fn parse_points(value: toml::Value) -> Result<([Option<Point>; 4], [f32; 4]), String> {
     let toml::Value::Array(items) = value else {
         return Err("points is not an array of tables".into());
     };
     let mut out = [None; 4];
+    let mut farthest = [0.0; 4];
     for item in items {
         let toml::Value::Table(mut table) = item else {
             return Err("points is not an array of tables".into());
@@ -277,6 +322,11 @@ fn parse_points(value: toml::Value) -> Result<[Option<Point>; 4], String> {
                 at.iter().all(|k| k.is_finite() && *k >= 0.0) && at[0] + at[1] <= 1.0 + 1e-4
             })
             .ok_or_else(|| fail("at is not two weights, 0 or more and together at most 1"))?;
+        if let Some(value) = table.remove("farthest") {
+            farthest[channel] = number(&value)
+                .filter(|f| f.is_finite() && *f >= 0.0)
+                .ok_or_else(|| fail("farthest is not a number, 0 or more"))?;
+        }
         if let Some(key) = table.keys().next() {
             return Err(fail(&format!("unknown key {key:?}")));
         }
@@ -287,7 +337,7 @@ fn parse_points(value: toml::Value) -> Result<[Option<Point>; 4], String> {
             at: [at[0], at[1]],
         });
     }
-    Ok(out)
+    Ok((out, farthest))
 }
 
 /// The channels' names in files, R to A.
@@ -315,8 +365,12 @@ pub fn write(paints: &[Paint], out: &mut String) {
             .enumerate()
             .filter_map(|(k, point)| {
                 let p = point.as_ref()?;
+                let farthest = match paint.farthest[k] {
+                    f if f > 0.0 => format!(", farthest = {f:?}"),
+                    _ => String::new(),
+                };
                 Some(format!(
-                    "    {{ channel = \"{}\", triangle = [{}, {}, {}], at = [{:?}, {:?}] }},\n",
+                    "    {{ channel = \"{}\", triangle = [{}, {}, {}], at = [{:?}, {:?}]{farthest} }},\n",
                     CHANNEL_KEYS[k], p.mesh, p.primitive, p.triangle, p.at[0], p.at[1]
                 ))
             })
@@ -1110,7 +1164,7 @@ mod tests {
         write(&weights, &mut out);
         assert!(out.ends_with("mode = \"weights\"\nsize = 1024\nchannels = \"r\"\n"));
         // Distance: its measure, range and points.
-        let text = "[[paints]]\nname = \"far\"\nmode = \"distance\"\nsize = 256\nchannels = \"rg\"\nmeasure = \"straight\"\nrange = 2.5\npoints = [\n    { channel = \"g\", triangle = [1, 0, 152], at = [0.25, 0.5] },\n]\n";
+        let text = "[[paints]]\nname = \"far\"\nmode = \"distance\"\nsize = 256\nchannels = \"rg\"\nmeasure = \"straight\"\nrange = 2.5\npoints = [\n    { channel = \"g\", triangle = [1, 0, 152], at = [0.25, 0.5], farthest = 3.5 },\n]\n";
         let table: toml::Table = text.parse().unwrap();
         let far = parse(table["paints"].clone()).unwrap();
         assert_eq!(far[0].measure, Measure::Straight);
@@ -1122,6 +1176,7 @@ mod tests {
             at: [0.25, 0.5],
         };
         assert_eq!(far[0].points, [None, Some(point), None, None]);
+        assert_eq!(far[0].farthest, [0.0, 3.5, 0.0, 0.0]);
         assert_eq!(far[0].label(), "Distance RG 256");
         let mut out = String::new();
         write(&far, &mut out);
@@ -1129,6 +1184,7 @@ mod tests {
         for bad in [
             "measure = \"air\"",
             "range = -1",
+            "points = [{ channel = \"r\", triangle = [0, 0, 0], at = [0, 0], farthest = -2 }]",
             "points = [{ channel = \"x\", triangle = [0, 0, 0], at = [0, 0] }]",
             "points = [{ channel = \"r\", triangle = [0, 0], at = [0, 0] }]",
             "points = [{ channel = \"r\", triangle = [0, 0, 0], at = [0.75, 0.5] }]",

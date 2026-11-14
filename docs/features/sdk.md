@@ -86,7 +86,7 @@ into string tables are resolved to `String`s, hashes are kept as `u64`.
 | `chunks` | `ChunkFile` | any chunked file: format name, version, chunks by name | [`chunks.md`](../spec/chunks.md) |
 | `texture` | `Texture` | `*.ktx2`: format (`Rgba8Srgb`, `Rgba8Unorm`, `Rgba16Float`, `R8Unorm`, `Rg8Unorm`), size, depth, faces, layers, every mip level's bytes, and its `usage` (`assetc.usage`, `None` without it) | [`ktx2.md`](../spec/ktx2.md) |
 | `material` | `Material` | `*.amat.bin` (version 1 or 2), with its struct data | [`amat.bin.md`](../spec/amat.bin.md) |
-| `mesh` | `Mesh` | `*.amesh.bin`: vertices (normals and tangents unpacked to `f32`), indices, submeshes, material IDs, meshlets, levels of detail, skin, skeleton, locators, color and UV sets, properties, shapes, regions, paths | [`amesh.bin.md`](../spec/amesh.bin.md) |
+| `mesh` | `Mesh` | `*.amesh.bin`: vertices (normals and tangents unpacked to `f32`), indices, submeshes, material IDs, meshlets, levels of detail, skin, skeleton, locators, color and UV sets, texture paints (`Mesh::paints`; `Paint::distance` turns a distance map's value back into a distance), properties, shapes, regions, paths | [`amesh.bin.md`](../spec/amesh.bin.md) |
 | `anim` | `Animation` | `*.aanim.bin`: clips, channels with their keys, events; plus sampling a channel at a time | [`aanim.bin.md`](../spec/aanim.bin.md) |
 | `font` | `Font` | `*.afont.bin`: metrics, glyphs by codepoint, kerning; plus laying out a line of text | [`afont.bin.md`](../spec/afont.bin.md) |
 | `atlas` | `Atlas` | `*.aatlas.bin`: frames by name | [`aatlas.bin.md`](../spec/aatlas.bin.md) |

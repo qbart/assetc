@@ -263,9 +263,6 @@ struct TextureBrush {
     blank: bool,
     /// Distance mode: measure every channel that has a point again.
     recompute: bool,
-    /// Distance mode: the farthest spot's distance of each channel measured in this session,
-    /// in the model's units.
-    farthest: [Option<f32>; 4],
     /// Distances were measured again and the file is not written yet.
     unsaved: bool,
     /// A failed file operation, for the status bar.
@@ -288,7 +285,6 @@ impl Default for TextureBrush {
             reload: 0,
             blank: true,
             recompute: false,
-            farthest: [None; 4],
             unsaved: false,
             notice: None,
         }
@@ -7324,7 +7320,6 @@ fn canvas_model(
                 let canvas = texture_paint::Canvas::new(paint.size, pixels);
                 tools.texture.blank = canvas.is_blank();
                 tools.texture.stroking = false;
-                tools.texture.farthest = [None; 4];
                 tools.texture.unsaved = false;
                 preview.paint_distance_done = None;
                 preview.paint = Some(preview3d::PaintView {
@@ -7428,14 +7423,16 @@ fn canvas_model(
     if let Some(done) = preview.paint_distance_done.take()
         && measuring
     {
-        for &(channel, farthest) in &done.filled {
-            tools.texture.farthest[channel] = Some(farthest);
-        }
-        if let Some((channel, point)) = done.picked
-            && let Some(edit) = &mut edit
+        // The points and their channels' farthest distances are saved with the paint.
+        if let Some(edit) = &mut edit
             && let Some(paint) = edit.paint.and_then(|i| edit.edit.paints.get_mut(i))
         {
-            paint.points[channel] = Some(point);
+            for &(channel, farthest) in &done.filled {
+                paint.farthest[channel] = farthest;
+            }
+            if let Some((channel, point)) = done.picked {
+                paint.points[channel] = Some(point);
+            }
         }
         tools.texture.unsaved |= !done.filled.is_empty();
         ui.ctx().request_repaint();
@@ -10447,6 +10444,7 @@ fn paint_fields(
         brush.reload += 1;
         brush.blank = true;
         paint.points = [None; 4];
+        paint.farthest = [0.0; 4];
     }
     ui.weak(if paint.mode == Mode::Distance {
         "Click or drag on the model to set the point distances are measured from. Right drag \
@@ -10557,7 +10555,7 @@ fn distance_fields(ui: &mut Ui, paint: &mut texture_paint::Paint, brush: &mut Te
     });
     let count = paint.channels.count();
     channel_row(ui, count, &mut brush.channel);
-    let farthest = brush.farthest[brush.channel.min(count - 1)];
+    let farthest = Some(paint.farthest[brush.channel.min(count - 1)]).filter(|f| *f > 0.0);
     let (measure, range) = (paint.measure, paint.range);
     prop_row(ui, "Measure", |ui, width| {
         egui::ComboBox::from_id_salt("paint_measure")

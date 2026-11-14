@@ -977,6 +977,15 @@ pub fn compile(
         paths: resolve_paths(&sidecar.paths, skin_joints.as_deref()).map_err(sidecar_error)?,
         color_sets: set_names,
         uv_sets,
+        paints: sidecar
+            .paints
+            .iter()
+            .map(|paint| {
+                paint.record(fnv1a64(
+                    format!("{asset_path}/{}.paint", paint.name).as_bytes(),
+                ))
+            })
+            .collect(),
     };
     let material_ids: Vec<u64> = outputs
         .materials

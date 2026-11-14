@@ -130,6 +130,60 @@ pub struct ColorSet {
     pub colors: Vec<[u8; 4]>,
 }
 
+/// What a texture paint's texels hold; see docs/spec/amesh.bin.md#texture-paints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaintMode {
+    /// An sRGB color with straight alpha.
+    Color,
+    /// Independent linear masks, one per channel.
+    Channels,
+    /// Linear weights, one per channel.
+    Weights,
+    /// Per channel, the distance from a point on the model, `0`–`1` of [`Paint::range`].
+    Distance,
+    /// A mode this version does not know.
+    Other(u32),
+}
+
+/// How a distance map's distances were measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Measure {
+    /// The shortest way over the mesh.
+    Surface,
+    /// The direct distance through space.
+    Straight,
+    Other(u32),
+}
+
+/// A texture painted onto the model, sampled with the mesh's `uv`; see
+/// docs/spec/amesh.bin.md#texture-paints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Paint {
+    pub name_hash: u64,
+    pub name: String,
+    /// Asset ID of its texture (`<model>/<name>.paint`).
+    pub texture: u64,
+    pub mode: PaintMode,
+    /// How many channels the texture has, R first.
+    pub channels: u32,
+    /// Texels per side.
+    pub size: u32,
+    /// Distance mode only.
+    pub measure: Measure,
+    /// Distance mode: per channel, the distance a value of 1 stands for, in the mesh's units;
+    /// `0` when unknown.
+    pub range: [f32; 4],
+}
+
+impl Paint {
+    /// The distance a sampled `value` (0–1) of `channel` (0 R … 3 A) stands for, in the mesh's
+    /// units; `None` unless this is a distance map whose range for the channel is known.
+    pub fn distance(&self, channel: usize, value: f32) -> Option<f32> {
+        let range = *self.range.get(channel)?;
+        (self.mode == PaintMode::Distance && range > 0.0).then_some(value * range)
+    }
+}
+
 /// Extra texture coordinates; see docs/spec/amesh.bin.md#uv-sets.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct UvSet {
@@ -251,6 +305,8 @@ pub struct Mesh {
     pub locators: Vec<Locator>,
     pub color_sets: Vec<ColorSet>,
     pub uv_sets: Vec<UvSet>,
+    /// The model's texture paints.
+    pub paints: Vec<Paint>,
     /// The model's properties, sorted by key.
     pub properties: Vec<Property>,
     pub shapes: Vec<Shape>,
@@ -515,6 +571,32 @@ impl Mesh {
             })
             .collect::<Result<Vec<_>>>()?;
 
+        let paints = chunk("PAINTS")
+            .records(64)?
+            .map(|p| {
+                Ok(Paint {
+                    name_hash: p.u64(0)?,
+                    name: p.text_ref(8, strings)?,
+                    texture: p.u64(16)?,
+                    mode: match p.u32(24)? {
+                        0 => PaintMode::Color,
+                        1 => PaintMode::Channels,
+                        2 => PaintMode::Weights,
+                        3 => PaintMode::Distance,
+                        other => PaintMode::Other(other),
+                    },
+                    channels: p.u32(28)?,
+                    size: p.u32(32)?,
+                    measure: match p.u32(36)? {
+                        0 => Measure::Surface,
+                        1 => Measure::Straight,
+                        other => Measure::Other(other),
+                    },
+                    range: p.f32s(40)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
         let properties = properties_of(chunk("PROPS"), strings)?;
         let shape_points = points(chunk("SHAPEPTS"))?;
         let shape_props = properties_of(chunk("SHAPEPRP"), strings)?;
@@ -625,6 +707,7 @@ impl Mesh {
             locators,
             color_sets,
             uv_sets,
+            paints,
             properties,
             shapes,
             regions,
@@ -674,6 +757,11 @@ impl Mesh {
     /// The model property whose key hashes to `key_hash`.
     pub fn property(&self, key_hash: u64) -> Option<&Property> {
         self.properties.iter().find(|p| p.key_hash == key_hash)
+    }
+
+    /// The texture paint whose name hashes to `name_hash`.
+    pub fn paint(&self, name_hash: u64) -> Option<&Paint> {
+        self.paints.iter().find(|p| p.name_hash == name_hash)
     }
 }
 
@@ -941,6 +1029,19 @@ pub(crate) mod tests {
         uvset.u64(1).u32(at).u32(len).u64(0x77).u64(0);
         let mut uvs = Out::default();
         uvs.f32s(&[0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+        let mut paints = Out::default();
+        let (at, len) = strings.add("reach");
+        paints
+            .u64(crate::hash::fnv1a64(b"reach"))
+            .u32(at)
+            .u32(len)
+            .u64(0x88)
+            .u32(3)
+            .u32(2)
+            .u32(256)
+            .u32(1)
+            .f32s(&[2.5, 0.0, 0.0, 0.0])
+            .u64(0);
         let mut props = Out::default();
         property(&mut props, &mut strings, "mass", 6.5, None);
         property(&mut props, &mut strings, "species", 0.0, Some("fox"));
@@ -1023,6 +1124,7 @@ pub(crate) mod tests {
             ("COLORS", &colors.0),
             ("UVSET", &uvset.0),
             ("UVS", &uvs.0),
+            ("PAINTS", &paints.0),
             ("STRINGS", &strings.0),
             ("PROPS", &props.0),
             ("SHAPES", &shapes.0),
@@ -1093,6 +1195,19 @@ pub(crate) mod tests {
             ("team_uv", 0x77)
         );
         assert_eq!(m.uv_sets[0].uvs[1], [0.3, 0.4]);
+        let reach = m.paint(crate::hash::fnv1a64(b"reach")).unwrap();
+        assert_eq!(
+            (
+                reach.name.as_str(),
+                reach.texture,
+                reach.mode,
+                reach.measure
+            ),
+            ("reach", 0x88, PaintMode::Distance, Measure::Straight)
+        );
+        assert_eq!((reach.channels, reach.size), (2, 256));
+        assert_eq!(reach.distance(0, 0.5), Some(1.25));
+        assert_eq!(reach.distance(1, 0.5), None);
         let mass = m.property(crate::hash::fnv1a64(b"mass")).unwrap();
         assert_eq!(mass.value, PropertyValue::Float(6.5));
         assert_eq!(m.properties[1].value, PropertyValue::Text("fox".into()));
@@ -1121,8 +1236,8 @@ pub(crate) mod tests {
     fn optional_chunks_read_empty() {
         let optional = [
             "LODIDX", "LODTABLE", "SKIN", "SKELETON", "LOCATORS", "LOCNAMES", "LOCTAGS",
-            "COLORSET", "COLORS", "UVSET", "UVS", "STRINGS", "PROPS", "SHAPES", "SHAPEPTS",
-            "SHAPEPRP", "REGIONS", "REGTAGS", "TRIREGN", "PATHS", "PATHPTS", "PATHSMP",
+            "COLORSET", "COLORS", "UVSET", "UVS", "PAINTS", "STRINGS", "PROPS", "SHAPES",
+            "SHAPEPTS", "SHAPEPRP", "REGIONS", "REGTAGS", "TRIREGN", "PATHS", "PATHPTS", "PATHSMP",
         ];
         let m = Mesh::decode(&mesh(&optional, 0)).unwrap();
         assert_eq!(m.vertices.len(), 3);
@@ -1130,6 +1245,7 @@ pub(crate) mod tests {
         assert_eq!(m.level_indices(0, 0), Some(&[0, 1, 2][..]));
         assert!(m.skin.is_empty() && m.skeleton.is_empty() && m.locators.is_empty());
         assert!(m.color_sets.is_empty() && m.uv_sets.is_empty() && m.properties.is_empty());
+        assert!(m.paints.is_empty());
         assert!(m.shapes.is_empty() && m.regions.is_empty() && m.paths.is_empty());
     }
 

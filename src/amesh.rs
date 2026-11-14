@@ -253,6 +253,22 @@ pub struct CompiledPath {
     pub properties: crate::enrich::Properties,
 }
 
+/// A texture paint's record; see docs/spec/amesh.bin.md#texture-paints.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompiledPaint {
+    pub name: String,
+    /// Asset ID of its texture.
+    pub texture: u64,
+    /// 0 color, 1 channels, 2 weights, 3 distance.
+    pub mode: u32,
+    pub channels: u32,
+    pub size: u32,
+    /// Distance mode: 0 along the surface, 1 straight line.
+    pub measure: u32,
+    /// Distance mode: per channel, the distance a value of 1 stands for; 0 when unknown.
+    pub range: [f32; 4],
+}
+
 /// What a model carries besides its geometry: locators, properties, shapes, regions, paths
 /// (name and tags; their triangles are in [`Primitive::regions`]).
 #[derive(Default)]
@@ -268,6 +284,8 @@ pub struct Extras {
     /// The name and texture asset ID of the UV sets every primitive has; see
     /// docs/spec/amesh.bin.md#uv-sets.
     pub uv_sets: Vec<(String, u64)>,
+    /// The model's texture paints; see docs/spec/amesh.bin.md#texture-paints.
+    pub paints: Vec<CompiledPaint>,
 }
 
 /// The `STRINGS` chunk being built: text back to back.
@@ -834,6 +852,24 @@ pub fn encode(
         }
         writer.chunk("UVSET", sets.take()).chunk("UVS", data.take());
     }
+    if !extras.paints.is_empty() {
+        let mut records = Bytes::default();
+        for paint in &extras.paints {
+            let (at, len) = strings.add(&paint.name);
+            records
+                .u64(crate::hash::fnv1a64(paint.name.as_bytes()))
+                .u32(at)
+                .u32(len)
+                .u64(paint.texture)
+                .u32(paint.mode)
+                .u32(paint.channels)
+                .u32(paint.size)
+                .u32(paint.measure)
+                .f32s(&paint.range)
+                .u64(0);
+        }
+        writer.chunk("PAINTS", records.take());
+    }
     let mut props = Bytes::default();
     put_properties(&mut props, &mut strings, &extras.properties);
     let (mut shapes, mut shape_points, mut shape_props) =
@@ -942,7 +978,14 @@ pub fn encode(
     let has_shapes = !extras.shapes.is_empty();
     let has_regions = !extras.regions.is_empty();
     let has_paths = !extras.paths.is_empty();
-    if !colors.is_empty() || !uvs.is_empty() || has_props || has_shapes || has_regions || has_paths
+    let has_paints = !extras.paints.is_empty();
+    if !colors.is_empty()
+        || !uvs.is_empty()
+        || has_paints
+        || has_props
+        || has_shapes
+        || has_regions
+        || has_paths
     {
         writer.chunk("STRINGS", strings.0);
     }
@@ -1474,6 +1517,14 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
         ("Shapes", shapes),
         ("Regions", regions),
         ("Paths", paths),
+        ("Paints", {
+            let names = paint_names(&reader);
+            if names.is_empty() {
+                "none".into()
+            } else {
+                names.join(", ")
+            }
+        }),
         (
             "Bounds",
             format!(
@@ -1506,6 +1557,23 @@ fn uv_set_names(reader: &chunks::Reader<'_>) -> Vec<String> {
         .map(|s| {
             let at = chunks::u32_at(sets, s, 32, 8).unwrap_or(0) as usize;
             let len = chunks::u32_at(sets, s, 32, 12).unwrap_or(0) as usize;
+            strings
+                .and_then(|t| t.get(at..at + len))
+                .map(|t| String::from_utf8_lossy(t).into_owned())
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// A mesh's texture paints' names, in order; see docs/spec/amesh.bin.md#texture-paints.
+fn paint_names(reader: &chunks::Reader<'_>) -> Vec<String> {
+    let (Some(paints), strings) = (reader.chunk("PAINTS"), reader.chunk("STRINGS")) else {
+        return Vec::new();
+    };
+    (0..paints.len() / 64)
+        .map(|s| {
+            let at = chunks::u32_at(paints, s, 64, 8).unwrap_or(0) as usize;
+            let len = chunks::u32_at(paints, s, 64, 12).unwrap_or(0) as usize;
             strings
                 .and_then(|t| t.get(at..at + len))
                 .map(|t| String::from_utf8_lossy(t).into_owned())
@@ -1576,6 +1644,7 @@ pub fn describe(name: &str) -> &'static str {
         "COLORSET" => "Color sets",
         "COLORS" => "Vertex colors",
         "UVSET" => "UV sets",
+        "PAINTS" => "Texture paints",
         "UVS" => "UV coordinates",
         "SKELETON" => "Skeleton",
         "LOCATORS" => "Locators",
@@ -1678,6 +1747,12 @@ pub fn table(bytes: &[u8], name: &str) -> Option<Table> {
         "SKIN" => array(vec!["Joints", "Weights"], 24),
         "COLORSET" => array(vec!["Name", "Hash", "Format", "Source"], 32),
         "UVSET" => array(vec!["Name", "Hash", "Texture"], 32),
+        "PAINTS" => array(
+            vec![
+                "Name", "Hash", "Texture", "Mode", "Channels", "Size", "Measure", "Range",
+            ],
+            64,
+        ),
         // One row per vertex, one column per set.
         "UVS" => {
             let names = uv_set_names(&reader);
@@ -1916,6 +1991,42 @@ pub fn cell(bytes: &[u8], name: &str, row: usize, column: usize) -> String {
                 }
                 1 => format!("{:#018x}", u64_at(0)),
                 _ => format!("{:#018x}", u64_at(16)),
+            }
+        }
+        "PAINTS" => {
+            let strings = reader.chunk("STRINGS").unwrap_or_default();
+            let u64_at = |offset: usize| {
+                p.get(row * 64 + offset..row * 64 + offset + 8)
+                    .map_or(0, |b| u64::from_le_bytes(b.try_into().unwrap()))
+            };
+            let mode = u32_at(row, 64, 24);
+            match column {
+                0 => {
+                    let (at, len) = (u32_at(row, 64, 8) as usize, u32_at(row, 64, 12) as usize);
+                    strings
+                        .get(at..at + len)
+                        .map(|t| String::from_utf8_lossy(t).into_owned())
+                        .unwrap_or_default()
+                }
+                1 => format!("{:#018x}", u64_at(0)),
+                2 => format!("{:#018x}", u64_at(16)),
+                3 => match mode {
+                    0 => "color".into(),
+                    1 => "channels".into(),
+                    2 => "weights".into(),
+                    3 => "distance".into(),
+                    other => other.to_string(),
+                },
+                4 => u32_at(row, 64, 28).to_string(),
+                5 => u32_at(row, 64, 32).to_string(),
+                6 if mode != 3 => "—".into(),
+                6 => match u32_at(row, 64, 36) {
+                    0 => "surface".into(),
+                    1 => "straight".into(),
+                    other => other.to_string(),
+                },
+                _ if mode != 3 => "—".into(),
+                _ => vector(&floats(row, 64, 40, 4)),
             }
         }
         "UVS" => {
