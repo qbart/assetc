@@ -49,8 +49,8 @@ eleven only in the Input tree
 [`structs.md`](structs.md#structs-tab)),
 **Animations** (`film`), only for models with animations (see
 [`models.md`](models.md#animations-tab)), **Mipmaps** (`images`), only for
-compiled textures with more than one mip level (see
-[Mipmaps tab](#mipmaps-tab)), **Levels of detail** (`bring-to-front`), only
+compiled textures with more than one mip level and for images and `.anoise`
+files in the Input tree (see [Mipmaps tab](#mipmaps-tab)), **Levels of detail** (`bring-to-front`), only
 for compiled meshes with reduced levels (see
 [`models.md`](models.md#levels-of-detail-tab)), and **Assets** (`files`). Hovering
 a tab shows its name.
@@ -117,7 +117,8 @@ decimal, e.g. `12.3 KiB`; plain bytes below 1 KiB, e.g. `512 B`).
 | Asset path | input-relative path without extension, e.g. `textures/Grass`        |
 | Asset ID   | `0x` + 16 lowercase hex digits                                      |
 | Color      | `sRGB` or `linear`, from [`[textures]`](textures.md#settings)       |
-| Mip levels | levels the build will write (`1` if `no_mipmaps` matches)          |
+| Mip levels | levels the build will write (`1` if `no_mipmaps` matches; what its [`.amipmap`](mipmaps.md) says when it has one) |
+| Custom mipmaps | only with an `.amipmap`: `<n> of <levels> levels from files`    |
 | Output     | output-relative path, e.g. `textures/Grass.ktx2`; `(not built)` appended when that file does not exist |
 
 If `[textures]` has an invalid pattern, Color and Mip levels show the error
@@ -248,6 +249,11 @@ switches which level the [canvas](canvas.md) shows.
   stays fitted), so levels can be compared in place; the zoom bar's
   percentage is in the shown level's pixels.
 - The Info tab keeps describing the whole file (Dimensions are level 0's).
+
+For an image or `.anoise` file in the Input tree the tab shows the levels
+the build will write, the same way, and edits the texture's
+[`.amipmap`](mipmaps.md#mipmaps-tab): whether it has a custom mip chain, how
+many levels, and the file of each level.
 
 ## Assets tab
 

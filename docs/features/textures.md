@@ -48,7 +48,9 @@ Alpha is always linear and straight (not premultiplied).
 ## Mipmaps
 
 Unless the texture matches `no_mipmaps`, a full mip chain is written, down to
-1×1.
+1×1. A texture with an [`.amipmap`](mipmaps.md) file next to it has the
+chain that file describes instead: a chosen number of levels, any of them
+from an image prepared by hand.
 
 - Level count: `floor(log2(max(width, height))) + 1`.
 - Level `n` size: `max(1, floor(width / 2^n))` × `max(1, floor(height / 2^n))`.
@@ -97,4 +99,8 @@ CLI lines show the settings used, for example:
 textures/Grass.png -> textures/Grass.ktx2 (srgb, 10 levels)
 textures/rock_n.png -> textures/rock_n.ktx2 (linear, 10 levels)
 ui/button.png -> ui/button.ktx2 (srgb, 1 level)
+textures/rock.png -> textures/rock.ktx2 (srgb, 9 levels, 2 custom)
 ```
+
+The last one has an [`.amipmap`](mipmaps.md#build): two of its levels come
+from files.
