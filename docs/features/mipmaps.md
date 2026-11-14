@@ -16,6 +16,10 @@ textures/
                       levels 3 and up: generated from level 2
 ```
 
+[`samples/mipmaps/`](../../samples/mipmaps) is this in small: `tinted.png`
+with six levels, each a different color with its number on it (1 and 2 by
+name, 3 the chosen `tints/blue.png`, 4 and 5 generated from 3).
+
 ## The `.amipmap` file
 
 `<texture file name>.amipmap` (the full file name plus `.amipmap`, as an
