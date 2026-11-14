@@ -84,191 +84,177 @@ pub fn locate(parts: &[Part], point: &Point) -> Option<(usize, usize, Vec3)> {
     ))
 }
 
-/// The distances of a model's vertices from a point on it.
+/// The distances of a model's surface from a point on it.
 pub struct Field {
-    /// Per part, per vertex; infinite for a vertex no triangle uses.
-    distances: Vec<Vec<f32>>,
     origin: Vec3,
     /// The part and triangle the point lies in.
     home: (usize, usize),
-    measure: Measure,
+    /// Along the surface: the mesh and how far each of its nodes is.
+    surface: Option<(Welded, Vec<f32>)>,
     /// The largest distance of a vertex.
     pub farthest: f32,
 }
 
 /// Measures `parts` from `origin`, a point in triangle `home.1` of part `home.0`.
 pub fn measure(parts: &[Part], origin: Vec3, home: (usize, usize), measure: Measure) -> Field {
-    let mut distances: Vec<Vec<f32>> = parts
-        .iter()
-        .map(|p| vec![f32::INFINITY; p.positions.len()])
-        .collect();
-    match measure {
+    let (surface, farthest) = match measure {
         Measure::Straight => {
-            for (part, out) in parts.iter().zip(&mut distances) {
-                for &i in part.indices {
-                    if let (Some(p), Some(d)) = (part.positions.get(i), out.get_mut(i)) {
-                        *d = p.distance(origin);
-                    }
-                }
-            }
+            let farthest = parts
+                .iter()
+                .flat_map(|part| part.indices.iter().filter_map(|&i| part.positions.get(i)))
+                .map(|p| p.distance(origin))
+                .filter(|d| d.is_finite())
+                .fold(0.0, f32::max);
+            (None, farthest)
         }
         Measure::Surface => {
             let mesh = Welded::new(parts);
-            let seeds: Vec<(u32, f32)> = match parts.get(home.0).and_then(|p| p.triangle(home.1)) {
-                Some((corners, positions)) => corners
-                    .iter()
-                    .zip(positions)
-                    .map(|(&i, p)| (mesh.ids[home.0][i], p.distance(origin)))
-                    .collect(),
-                None => Vec::new(),
-            };
-            let welded = mesh.distances(&seeds);
-            for ((part, out), ids) in parts.iter().zip(&mut distances).zip(&mesh.ids) {
-                for &i in part.indices {
-                    if let (Some(&id), Some(d)) = (ids.get(i), out.get_mut(i))
-                        && id != UNUSED
-                    {
-                        *d = welded[id as usize];
-                    }
-                }
-            }
+            // From the point straight to everything on its triangle's edges.
+            let seeds: Vec<(u32, f32)> = mesh
+                .face(home.0, home.1)
+                .iter()
+                .filter(|&&node| node != UNUSED)
+                .map(|&node| (node, mesh.positions[node as usize].distance(origin)))
+                .collect();
+            let distances = mesh.distances(&seeds);
+            let farthest = distances[..mesh.vertices]
+                .iter()
+                .copied()
+                .filter(|d| d.is_finite())
+                .fold(0.0, f32::max);
+            (Some((mesh, distances)), farthest)
         }
-    }
-    let farthest = distances
-        .iter()
-        .flatten()
-        .copied()
-        .filter(|d| d.is_finite())
-        .fold(0.0, f32::max);
+    };
     Field {
-        distances,
         origin,
         home,
-        measure,
+        surface,
         farthest,
     }
 }
 
 const UNUSED: u32 = u32::MAX;
 
-/// The vertices of a model's triangles with those at one position made one, and the edges
-/// between them.
+/// The surface of a model as a graph to find shortest ways on. Its nodes are the vertices of
+/// the triangles, those at one position made one, and points along the triangles' edges; a
+/// way goes straight across a triangle from any node on its edges to any other, and over
+/// the bridges between parts that do not touch.
 struct Welded {
-    /// Per part, per vertex: its welded vertex, [`UNUSED`] when no triangle uses it.
-    ids: Vec<Vec<u32>>,
+    /// How many nodes are vertices: the first ones.
+    vertices: usize,
     positions: Vec<Vec3>,
-    /// Per welded vertex: its neighbors and how far they are.
+    /// Per node: the nodes it reaches straight and how far they are.
     edges: Vec<Vec<(u32, f32)>>,
+    /// Per part, per triangle: the `stride` nodes on its edges, its corners first;
+    /// [`UNUSED`] for a triangle that is left out.
+    faces: Vec<Vec<u32>>,
+    stride: usize,
+    /// The bridges: two vertices of parts that do not touch and the gap between them.
+    gaps: Vec<(u32, u32, f32)>,
 }
 
 impl Welded {
     fn new(parts: &[Part]) -> Self {
-        let mut ids: Vec<Vec<u32>> = parts
-            .iter()
-            .map(|p| vec![UNUSED; p.positions.len()])
-            .collect();
+        // The vertices, and the triangles between them.
         let mut positions: Vec<Vec3> = Vec::new();
         let mut by_position: HashMap<[u32; 3], u32> = HashMap::new();
-        let mut edges: Vec<Vec<(u32, f32)>> = Vec::new();
-        for (part, ids) in parts.iter().zip(&mut ids) {
-            for t in 0..part.triangles() {
-                let Some((corners, corner_positions)) = part.triangle(t) else {
-                    continue;
-                };
-                if corner_positions.iter().any(|p| !p.is_finite()) {
-                    continue;
+        let mut triangles: Vec<Vec<Option<[u32; 3]>>> = Vec::new();
+        for part in parts {
+            let welded = (0..part.triangles()).map(|t| {
+                let (_, corners) = part.triangle(t)?;
+                if corners.iter().any(|p| !p.is_finite()) {
+                    return None;
                 }
-                let welded = [0, 1, 2].map(|k| {
-                    let p = corner_positions[k];
+                Some(corners.map(|p| {
                     // -0.0 is 0.0.
                     let key = p.to_array().map(|c| (c + 0.0).to_bits());
-                    let id = *by_position.entry(key).or_insert_with(|| {
+                    *by_position.entry(key).or_insert_with(|| {
                         positions.push(p);
-                        edges.push(Vec::new());
                         positions.len() as u32 - 1
-                    });
-                    ids[corners[k]] = id;
-                    id
-                });
+                    })
+                }))
+            });
+            triangles.push(welded.collect());
+        }
+        let vertices = positions.len();
+        let mut touching = Sets::new(vertices);
+        for [a, b, c] in triangles.iter().flatten().flatten() {
+            touching.join(*a, *b);
+            touching.join(*b, *c);
+        }
+        let gaps = bridges(&positions, touching);
+        // Points along the edges: more of them on a coarse mesh, where a triangle is a
+        // large part of the way.
+        let count = triangles.iter().flatten().flatten().count();
+        let along: usize = match count {
+            0..=20_000 => 3,
+            20_001..=60_000 => 2,
+            _ => 1,
+        };
+        let stride = 3 + 3 * along;
+        let mut edges: Vec<Vec<(u32, f32)>> = vec![Vec::new(); vertices];
+        let mut on_edge: HashMap<(u32, u32), u32> = HashMap::new();
+        let mut faces = Vec::new();
+        for part in &triangles {
+            let mut nodes = Vec::with_capacity(part.len() * stride);
+            for triangle in part {
+                let Some(corners) = triangle else {
+                    nodes.extend(std::iter::repeat_n(UNUSED, stride));
+                    continue;
+                };
+                let first = nodes.len();
+                nodes.extend(corners);
                 for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-                    let (a, b) = (welded[a], welded[b]);
-                    if a == b {
-                        continue;
+                    let (a, b) = (corners[a].min(corners[b]), corners[a].max(corners[b]));
+                    let start = *on_edge.entry((a, b)).or_insert_with(|| {
+                        let (from, to) = (positions[a as usize], positions[b as usize]);
+                        for k in 1..=along {
+                            positions.push(from.lerp(to, k as f32 / (along + 1) as f32));
+                            edges.push(Vec::new());
+                        }
+                        (positions.len() - along) as u32
+                    });
+                    nodes.extend(start..start + along as u32);
+                }
+                let face = &nodes[first..];
+                for (i, &a) in face.iter().enumerate() {
+                    for &b in &face[i + 1..] {
+                        if a == b {
+                            continue;
+                        }
+                        let length = positions[a as usize].distance(positions[b as usize]);
+                        edges[a as usize].push((b, length));
+                        edges[b as usize].push((a, length));
                     }
-                    let length = positions[a as usize].distance(positions[b as usize]);
-                    edges[a as usize].push((b, length));
-                    edges[b as usize].push((a, length));
                 }
             }
+            faces.push(nodes);
         }
-        let mut welded = Self {
-            ids,
+        for &(a, b, gap) in &gaps {
+            edges[a as usize].push((b, gap));
+            edges[b as usize].push((a, gap));
+        }
+        Self {
+            vertices,
             positions,
             edges,
-        };
-        for (a, b, length) in welded.bridges() {
-            welded.edges[a as usize].push((b, length));
-            welded.edges[b as usize].push((a, length));
+            faces,
+            stride,
+            gaps,
         }
-        welded
     }
 
-    /// The shortest gaps that join the parts of the mesh that do not touch into one: pairs of
-    /// vertices and how far apart they are; see
-    /// docs/features/texture-paint.md#measure. Each round joins every part to its nearest
-    /// neighbor (Borůvka), the nearest vertices found through a grid.
-    fn bridges(&self) -> Vec<(u32, u32, f32)> {
-        let n = self.positions.len();
-        let mut parts = Sets::new(n);
-        for (a, edges) in self.edges.iter().enumerate() {
-            for &(b, _) in edges {
-                parts.join(a as u32, b);
-            }
-        }
-        let mut out = Vec::new();
-        if n == 0 || parts.count == 1 {
-            return out;
-        }
-        let grid = Grid::new(&self.positions);
-        while parts.count > 1 {
-            let roots: Vec<u32> = (0..n as u32).map(|v| parts.root(v)).collect();
-            let single = grid.single(&roots);
-            let mut members: HashMap<u32, Vec<u32>> = HashMap::new();
-            for (v, &root) in roots.iter().enumerate() {
-                members.entry(root).or_default().push(v as u32);
-            }
-            // The small parts first: what they join need not look for a neighbor itself.
-            let mut order: Vec<(u32, Vec<u32>)> = members.into_iter().collect();
-            order.sort_by_key(|(root, vertices)| (vertices.len(), *root));
-            let mut joined: HashMap<u32, bool> = HashMap::new();
-            let mut found = Vec::new();
-            for (root, vertices) in &order {
-                if joined.get(root).copied().unwrap_or(false) {
-                    continue;
-                }
-                let mut best: Option<(f32, u32, u32)> = None;
-                for &v in vertices {
-                    grid.nearest_other(&self.positions, &roots, &single, v, &mut best);
-                }
-                if let Some((gap, a, b)) = best {
-                    joined.insert(*root, true);
-                    joined.insert(roots[b as usize], true);
-                    found.push((a, b, gap));
-                }
-            }
-            if found.is_empty() {
-                break;
-            }
-            for &(a, b, _) in &found {
-                parts.join(a, b);
-            }
-            out.extend(found);
-        }
-        out
+    /// The nodes on the edges of triangle `t` of part `part`; none when there is no such
+    /// triangle.
+    fn face(&self, part: usize, t: usize) -> &[u32] {
+        self.faces
+            .get(part)
+            .and_then(|nodes| nodes.get(t * self.stride..(t + 1) * self.stride))
+            .unwrap_or(&[])
     }
 
-    /// The length of the shortest way along the edges to each vertex from `seeds`, vertices
-    /// and how far they already are (Dijkstra).
+    /// The length of the shortest way to each node from `seeds`, nodes and how far they
+    /// already are (Dijkstra).
     fn distances(&self, seeds: &[(u32, f32)]) -> Vec<f32> {
         let mut out = vec![f32::INFINITY; self.positions.len()];
         // Distances are not negative, so their bits order as they do.
@@ -294,6 +280,54 @@ impl Welded {
         }
         out
     }
+}
+
+/// The shortest gaps that join the parts of a mesh that do not touch into one: pairs of
+/// vertices and how far apart they are; see docs/features/texture-paint.md#measure.
+/// `touching` holds the vertices of each part. Each round joins every part to its nearest
+/// neighbor (Borůvka), the nearest vertices found through a grid.
+fn bridges(positions: &[Vec3], mut parts: Sets) -> Vec<(u32, u32, f32)> {
+    let n = positions.len();
+    let mut out = Vec::new();
+    if n == 0 || parts.count == 1 {
+        return out;
+    }
+    let grid = Grid::new(positions);
+    while parts.count > 1 {
+        let roots: Vec<u32> = (0..n as u32).map(|v| parts.root(v)).collect();
+        let single = grid.single(&roots);
+        let mut members: HashMap<u32, Vec<u32>> = HashMap::new();
+        for (v, &root) in roots.iter().enumerate() {
+            members.entry(root).or_default().push(v as u32);
+        }
+        // The small parts first: what they join need not look for a neighbor itself.
+        let mut order: Vec<(u32, Vec<u32>)> = members.into_iter().collect();
+        order.sort_by_key(|(root, vertices)| (vertices.len(), *root));
+        let mut joined = vec![false; n];
+        let mut found = Vec::new();
+        for (root, vertices) in &order {
+            if joined[*root as usize] {
+                continue;
+            }
+            let mut best: Option<(f32, u32, u32)> = None;
+            for &v in vertices {
+                grid.nearest_other(positions, &roots, &single, v, &mut best);
+            }
+            if let Some((gap, a, b)) = best {
+                joined[*root as usize] = true;
+                joined[roots[b as usize] as usize] = true;
+                found.push((a, b, gap));
+            }
+        }
+        if found.is_empty() {
+            break;
+        }
+        for &(a, b, _) in &found {
+            parts.join(a, b);
+        }
+        out.extend(found);
+    }
+    out
 }
 
 /// Disjoint sets of vertices (union-find).
@@ -467,41 +501,40 @@ pub fn rasterize(parts: &[Part], field: &Field, range: f32, size: u32) -> Vec<u8
         let Some(uvs) = part.uvs else {
             continue;
         };
-        let distances = &field.distances[index];
         for t in 0..part.triangles() {
             let Some((corners, positions)) = part.triangle(t) else {
                 continue;
             };
-            let Some(texels) = corners
-                .map(|i| uvs.get(i).map(|&[u, v]| Vec2::new(u * s, v * s)))
-                .into_iter()
-                .collect::<Option<Vec<Vec2>>>()
+            let [Some(t0), Some(t1), Some(t2)] =
+                corners.map(|i| uvs.get(i).map(|&[u, v]| Vec2::new(u * s, v * s)))
             else {
                 continue;
             };
-            let texels = [texels[0], texels[1], texels[2]];
-            match field.measure {
-                Measure::Straight => raster.triangle(texels, |k| {
-                    (positions[0] * k[0] + positions[1] * k[1] + positions[2] * k[2])
-                        .distance(field.origin)
-                }),
-                Measure::Surface => {
-                    let d = corners.map(|i| distances[i]);
-                    if d.iter().any(|d| !d.is_finite()) {
+            let spot =
+                |k: [f32; 3]| positions[0] * k[0] + positions[1] * k[1] + positions[2] * k[2];
+            match &field.surface {
+                None => raster.triangle([t0, t1, t2], |k| spot(k).distance(field.origin)),
+                Some((mesh, distances)) => {
+                    let face = mesh.face(index, t);
+                    if face.first().is_none_or(|&node| node == UNUSED) {
                         continue;
                     }
-                    if field.home != (index, t) {
-                        raster.triangle(texels, |k| d[0] * k[0] + d[1] * k[1] + d[2] * k[2]);
-                        continue;
-                    }
-                    // The point's own triangle: three around the point, where it is 0.
-                    let k = barycentric(field.origin, positions);
-                    let middle = texels[0] * k[0] + texels[1] * k[1] + texels[2] * k[2];
-                    for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-                        raster.triangle([middle, texels[a], texels[b]], |k| {
-                            d[a] * k[1] + d[b] * k[2]
-                        });
-                    }
+                    // The point's own triangle is reached straight from the point.
+                    let home = field.home == (index, t);
+                    raster.triangle([t0, t1, t2], |k| {
+                        let spot = spot(k);
+                        let start = if home {
+                            spot.distance(field.origin)
+                        } else {
+                            f32::INFINITY
+                        };
+                        // Straight across the triangle from the nearest way in.
+                        face.iter().fold(start, |best, &node| {
+                            let way = distances[node as usize]
+                                + mesh.positions[node as usize].distance(spot);
+                            best.min(way)
+                        })
+                    });
                 }
             }
         }
@@ -656,16 +689,18 @@ mod tests {
         };
         let parts = [part(0, &low), part(1, &high), part(2, &side)];
         let origin = Vec3::new(0.0, 0.0, 0.0);
-        let far = high.0.iter().position(|p| *p == Vec3::new(0.0, 3.0, 0.0));
         let field = measure(&parts, origin, (0, 0), Measure::Surface);
-        // Across the first square's diagonal and along to (4, 1), up the side's edge to
-        // (4, 2), then 5 along the high strip's edges to (0, 3): squares meet only by
-        // position.
-        let d = field.distances[1][far.unwrap()];
-        assert!((d - (2f32.sqrt() + 3.0 + 1.0 + 5.0)).abs() < 1e-4, "{d}");
+        let (mesh, distances) = field.surface.as_ref().unwrap();
+        let node = mesh.face(1, 1)[2];
+        assert_eq!(mesh.positions[node as usize], Vec3::new(0.0, 3.0, 0.0));
+        // Across the low strip to (4, 1), up the side's edge to (4, 2) and across the high
+        // strip: 2 × √17 + 1 at best, 10.4 along the triangles' edges alone. Squares meet
+        // only by position.
+        let d = distances[node as usize];
+        assert!((9.24..9.5).contains(&d), "{d}");
         assert_eq!(field.farthest, d);
         let straight = measure(&parts, origin, (0, 0), Measure::Straight);
-        assert_eq!(straight.distances[1][far.unwrap()], 3.0);
+        assert_eq!(straight.farthest, 5.0);
     }
 
     #[test]
@@ -677,14 +712,15 @@ mod tests {
         let d = strip(1, Vec3::new(2.75, 40.0, 0.0));
         let parts = [part(0, &a), part(1, &b), part(2, &c), part(3, &d)];
         let field = measure(&parts, Vec3::ZERO, (0, 0), Measure::Surface);
+        let (mesh, distances) = field.surface.as_ref().unwrap();
         // To the far strip's lower right corner: across the three strips and their gaps,
         // then 39 up; a little more or less by where the gaps are crossed.
-        let corner = d.0.iter().position(|p| *p == Vec3::new(3.75, 40.0, 0.0));
-        let way = field.distances[3][corner.unwrap()];
+        let node = mesh.face(3, 0)[1];
+        assert_eq!(mesh.positions[node as usize], Vec3::new(3.75, 40.0, 0.0));
+        let way = distances[node as usize];
         assert!((42.0..45.0).contains(&way), "{way}");
-        assert!(field.distances.iter().flatten().all(|d| d.is_finite()));
-        let mesh = Welded::new(&parts);
-        let mut gaps: Vec<f32> = mesh.bridges().iter().map(|b| b.2).collect();
+        assert!(distances.iter().all(|d| d.is_finite()));
+        let mut gaps: Vec<f32> = mesh.gaps.iter().map(|gap| gap.2).collect();
         gaps.sort_by(f32::total_cmp);
         assert_eq!(gaps, [0.25, 0.5, 39.0]);
     }
@@ -707,14 +743,13 @@ mod tests {
             .map(|(i, m)| part(i as u32, m))
             .collect();
         let field = measure(&parts, Vec3::ZERO, (0, 0), Measure::Surface);
-        assert!(field.distances.iter().flatten().all(|d| d.is_finite()));
+        let (mesh, distances) = field.surface.as_ref().unwrap();
+        assert!(distances.iter().all(|d| d.is_finite()));
         // No shorter than the straight line.
-        for (part, distances) in parts.iter().zip(&field.distances) {
-            for (p, d) in part.positions.iter().zip(distances) {
-                assert!(*d >= p.length() - 1e-3);
-            }
+        for (p, d) in mesh.positions.iter().zip(distances) {
+            assert!(*d >= p.length() - 1e-3);
         }
-        assert_eq!(Welded::new(&parts).bridges().len(), 399);
+        assert_eq!(mesh.gaps.len(), 399);
     }
 
     #[test]

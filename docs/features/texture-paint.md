@@ -265,19 +265,21 @@ farthest spot of the model is 1.
   branch the point is on, through the trunk and up the other branches, so
   two twigs that almost touch are still far apart, and a shader gets what
   it needs to move whole branches together.
-  - The way goes along triangle edges. Vertices at the same position are
-    one (a UV seam or a hard edge does not stop it), in every primitive and
-    mesh of the model alike.
+  - The way goes over the faces: straight across each triangle between
+    its corners and a few points along its edges (three per edge on a model
+    of up to 20,000 triangles, two up to 60,000, one above). Vertices at
+    the same position are one (a UV seam or a hard edge does not stop it),
+    in every primitive and mesh of the model alike.
   - Parts that do not touch (leaf cards, a branch stuck into the trunk
     without being joined to it, separate meshes) are **bridged**: each is
     joined to its nearest neighbor by the shortest gap between two of
     their vertices, and the gap's length counts as part of the way. So
     nothing is unreachable, and a leaf continues the branch nearest to it.
-  - Inside a triangle the value is blended from its three corners; the
-    triangle holding the point is measured from the point itself.
-  - Following edges makes the way a little longer than the true shortest
-    one over the faces (by a few percent on an even mesh, more on long thin
-    triangles).
+  - A texel's distance is the way to the nearest corner or edge point of
+    its triangle plus the straight rest to the texel's spot; in the
+    triangle holding the point it is straight from the point.
+  - Crossing triangles only at those points makes the way a little longer
+    than the true shortest one (a few percent at most).
 - **Straight line**: the direct distance through space from the point to
   each texel's spot on the model, whatever lies between.
 
@@ -357,9 +359,8 @@ not sources of their own (the build counts them as skipped).
 - Undo, layers, a fill tool, brushes from images, and painting in a 2D view
   of the texture.
 - Distance maps measured again by the build when the model changes, from
-  the rest pose whatever is playing, from several points per channel, over
-  the faces instead of along edges, or stored the other way round (1 at the
-  point).
+  the rest pose whatever is playing, from several points per channel, or
+  stored the other way round (1 at the point).
 - A pen's pressure for the Weights brush (the window library does not
   report it), weights kept normalized across channels (summing to 1), and
   smoothing or blurring weights.
