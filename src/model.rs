@@ -1795,6 +1795,31 @@ mod tests {
         assert_eq!(name, "wear");
         assert_eq!(*export, crate::texture_paint::Export::Unorm(2));
         assert_eq!((levels[0].width, levels.len()), (256, 9));
+        // The mesh lists it; see docs/spec/amesh.bin.md#texture-paints.
+        let reader = crate::chunks::Reader::parse(&compiled.mesh, amesh::FORMAT).unwrap();
+        let record = reader.chunk("PAINTS").unwrap();
+        assert_eq!(record.len(), 64);
+        let u32_at = |at: usize| crate::chunks::u32_at(record, 0, 64, at).unwrap();
+        assert_eq!(
+            record[16..24],
+            crate::hash::fnv1a64(b"Fox/wear.paint").to_le_bytes()
+        );
+        assert_eq!([u32_at(24), u32_at(28), u32_at(32)], [1, 2, 256]);
+        let rows = amesh::rows(&compiled.mesh).unwrap();
+        assert!(rows.contains(&("Paints", "wear".into())));
+        // A distance map's range: Range, else the farthest distance it was measured with.
+        let reach = crate::amod::Amod::parse(
+            "[[paints]]\nname = \"reach\"\nmode = \"distance\"\nchannels = \"rg\"\nsize = 256\npoints = [\n    { channel = \"g\", triangle = [0, 0, 1], at = [0.0, 0.0], farthest = 4.5 },\n]\n",
+        )
+        .unwrap();
+        let mesh = compile(&file, "Fox", &options, &reach).unwrap().mesh;
+        let reader = crate::chunks::Reader::parse(&mesh, amesh::FORMAT).unwrap();
+        let record = reader.chunk("PAINTS").unwrap();
+        let range: Vec<f32> = (0..4)
+            .map(|k| crate::chunks::f32_at(record, 0, 64, 40 + k * 4).unwrap())
+            .collect();
+        assert_eq!(range, [0.0, 4.5, 0.0, 0.0]);
+        assert_eq!(crate::chunks::u32_at(record, 0, 64, 24).unwrap(), 3);
         // A file of another size fails.
         let paint = crate::texture_paint::file_for(&file, "wear");
         crate::texture_paint::write_file(&paint, 512, &crate::texture_paint::blank(512)).unwrap();
