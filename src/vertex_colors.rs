@@ -3,26 +3,10 @@
 
 use bevy::math::Vec3;
 
-use crate::enrich::{BlendMode, ColorExport, ColorFill, ColorSet};
+use assetc_colors::space::{linear_to_srgb, srgb_to_linear};
+
+use crate::enrich::{ColorExport, ColorFill, ColorSet};
 use crate::gradient;
-
-/// An sRGB value 0–1 as a linear one.
-fn decode(c: f32) -> f32 {
-    if c <= 0.04045 {
-        c / 12.92
-    } else {
-        ((c + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-/// A linear value 0–1 as an sRGB one.
-fn encode(l: f32) -> f32 {
-    if l <= 0.003_130_8 {
-        l * 12.92
-    } else {
-        1.055 * l.powf(1.0 / 2.4) - 0.055
-    }
-}
 
 fn byte(v: f32) -> u8 {
     (v.clamp(0.0, 1.0) * 255.0).round() as u8
@@ -30,7 +14,7 @@ fn byte(v: f32) -> u8 {
 
 /// sRGB RGBA as stored in a set: R, G and B linear, alpha as it is.
 pub fn stored([r, g, b, a]: [u8; 4]) -> [u8; 4] {
-    let linear = |c: u8| byte(decode(f32::from(c) / 255.0));
+    let linear = |c: u8| byte(srgb_to_linear(f32::from(c) / 255.0));
     [linear(r), linear(g), linear(b), a]
 }
 
@@ -211,7 +195,7 @@ fn blended(
         Some(n) => gltf_colors(gltf, n, positions.len())
             .into_iter()
             .map(|[r, g, b, a]| {
-                let srgb = |c: u8| encode(f32::from(c) / 255.0);
+                let srgb = |c: u8| linear_to_srgb(f32::from(c) / 255.0);
                 [srgb(r), srgb(g), srgb(b), f32::from(a) / 255.0]
             })
             .collect(),
@@ -230,23 +214,7 @@ fn blended(
     under
         .into_iter()
         .zip(own)
-        .map(|(b, t)| {
-            let k = t[3] * blend.amount;
-            let mut out = [0.0; 4];
-            for c in 0..3 {
-                let f = match blend.mode {
-                    BlendMode::Mix => t[c],
-                    BlendMode::Multiply => b[c] * t[c],
-                    BlendMode::Screen => 1.0 - (1.0 - b[c]) * (1.0 - t[c]),
-                    BlendMode::Overlay if b[c] < 0.5 => 2.0 * b[c] * t[c],
-                    BlendMode::Overlay => 1.0 - 2.0 * (1.0 - b[c]) * (1.0 - t[c]),
-                    BlendMode::Add => (b[c] + t[c]).min(1.0),
-                };
-                out[c] = b[c] + (f - b[c]) * k;
-            }
-            out[3] = b[3] + (1.0 - b[3]) * k;
-            out
-        })
+        .map(|(b, t)| assetc_colors::blend::blend(blend.mode, b, t, blend.amount))
         .collect()
 }
 
@@ -259,7 +227,14 @@ pub fn colors(sets: &[ColorSet], i: usize, positions: &[Vec3], gltf: &GltfSets) 
         (None, None) => positions.iter().map(|p| evaluate(set, *p)).collect(),
         (None, Some(_)) => blended(sets, i, positions, gltf, 0)
             .into_iter()
-            .map(|[r, g, b, a]| [byte(decode(r)), byte(decode(g)), byte(decode(b)), byte(a)])
+            .map(|[r, g, b, a]| {
+                [
+                    byte(srgb_to_linear(r)),
+                    byte(srgb_to_linear(g)),
+                    byte(srgb_to_linear(b)),
+                    byte(a),
+                ]
+            })
             .collect(),
     }
 }
@@ -321,7 +296,7 @@ mod tests {
         let blend = |with: &str| {
             Some(Blend {
                 with: with.into(),
-                mode: BlendMode::Mix,
+                mode: crate::enrich::BlendMode::Mix,
                 amount: 0.5,
             })
         };
@@ -339,7 +314,7 @@ mod tests {
         assert_eq!(bases(&sets), [Some("b"), None, None]);
         assert!(blends_with(&sets, 1, 0) && !blends_with(&sets, 0, 1));
         // Half red, half blue in sRGB, stored linear.
-        let half = byte(decode(0.5));
+        let half = byte(srgb_to_linear(0.5));
         assert_eq!(colors(&sets, 1, &[Vec3::ZERO], &[]), [[half, 0, half, 255]]);
         sets[2].blend = blend("b");
         assert!(blends_with(&sets, 2, 0));

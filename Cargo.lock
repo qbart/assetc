@@ -323,11 +323,16 @@ name = "assetc"
 version = "0.2.2"
 
 [[package]]
+name = "assetc-colors"
+version = "0.2.2"
+
+[[package]]
 name = "assetc-core"
 version = "0.2.2"
 dependencies = [
  "ab_glyph",
  "assetc",
+ "assetc-colors",
  "base64 0.23.1",
  "bevy",
  "bevy_egui",

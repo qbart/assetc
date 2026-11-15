@@ -183,6 +183,10 @@ mod tests {
             }
         }
         for name in manifest["dependencies"].as_table().unwrap().keys() {
+            // assetc's own crate, not open source it uses.
+            if name == "assetc-colors" {
+                continue;
+            }
             let listed = part_of(name);
             assert!(
                 PROJECTS.iter().any(|p| p.name.eq_ignore_ascii_case(listed)),

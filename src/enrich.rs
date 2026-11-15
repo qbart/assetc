@@ -806,46 +806,8 @@ impl ColorExport {
 }
 
 /// How a color set is laid over the set it blends with; see
-/// docs/features/vertex-colors.md#blending.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BlendMode {
-    #[default]
-    Mix,
-    Multiply,
-    Screen,
-    Overlay,
-    Add,
-}
-
-impl BlendMode {
-    pub const ALL: [Self; 5] = [
-        Self::Mix,
-        Self::Multiply,
-        Self::Screen,
-        Self::Overlay,
-        Self::Add,
-    ];
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Mix => "mix",
-            Self::Multiply => "multiply",
-            Self::Screen => "screen",
-            Self::Overlay => "overlay",
-            Self::Add => "add",
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Mix => "Mix",
-            Self::Multiply => "Multiply",
-            Self::Screen => "Screen",
-            Self::Overlay => "Overlay",
-            Self::Add => "Add",
-        }
-    }
-}
+/// docs/features/vertex-colors.md#blending. It is assetc-colors'.
+pub use assetc_colors::blend::BlendMode;
 
 /// A set an authored color set is laid over.
 #[derive(Debug, Clone, PartialEq)]

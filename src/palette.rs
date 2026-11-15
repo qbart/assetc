@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use crate::gradient::{CellGrid, Layout, format_color, parse_color, take_grid};
+use crate::gradient::{CellGrid, GridFile, Layout, format_color, parse_color, take_grid};
 use crate::texture::Image;
 
 /// Whether `file` is a palette file (`*.apalette`, any case).
@@ -157,11 +157,7 @@ impl Palette {
     }
 }
 
-impl CellGrid for Palette {
-    fn grid(&self) -> [u32; 4] {
-        [self.width, self.height, self.cell_width, self.cell_height]
-    }
-
+impl GridFile for Palette {
     fn grid_mut(&mut self) -> ([&mut u32; 4], &mut Layout) {
         (
             [
@@ -172,6 +168,12 @@ impl CellGrid for Palette {
             ],
             &mut self.layout,
         )
+    }
+}
+
+impl CellGrid for Palette {
+    fn grid(&self) -> [u32; 4] {
+        [self.width, self.height, self.cell_width, self.cell_height]
     }
 
     fn layout(&self) -> Layout {

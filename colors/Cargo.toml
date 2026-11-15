@@ -1,0 +1,15 @@
+[package]
+name = "assetc-colors"
+version = "0.2.2"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Bartłomiej Wójtowicz"]
+description = "The color logic of assetc: sRGB, HSV and hex colors, gradients with dithering, color modifiers, blend modes, 3D LUTs and color vision simulation"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/qbart/assetc"
+homepage = "https://github.com/qbart/assetc"
+readme = "README.md"
+keywords = ["gamedev", "color", "gradient", "srgb", "lut"]
+categories = ["game-development", "graphics", "multimedia::images"]
+
+[dependencies]

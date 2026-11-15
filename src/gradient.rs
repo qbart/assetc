@@ -1,171 +1,18 @@
 //! `.agradient` files: gradients as stops, one vertical cell each in a grid of one image; see
-//! docs/spec/agradient.md. Rendering follows `img/gradient.go` of SoftKiwiGames/cli.
+//! docs/spec/agradient.md. Blending, dithering and the grid are assetc-colors'.
 
 use std::path::Path;
 
+pub use assetc_colors::gradient::{Dither, Stop, color_at};
+pub use assetc_colors::grid::{CellGrid, Layout};
+use assetc_colors::grid::{MAX_SIZE, check as in_range};
+pub use assetc_colors::space::{format_hex as format_color, parse_hex as parse_color};
+
 use crate::texture::Image;
 
-const MAX_SIZE: i64 = 4096;
-
-const BAYER4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-
-const BAYER8: [[u8; 8]; 8] = [
-    [0, 32, 8, 40, 2, 34, 10, 42],
-    [48, 16, 56, 24, 50, 18, 58, 26],
-    [12, 44, 4, 36, 14, 46, 6, 38],
-    [60, 28, 52, 20, 62, 30, 54, 22],
-    [3, 35, 11, 43, 1, 33, 9, 41],
-    [51, 19, 59, 27, 49, 17, 57, 25],
-    [15, 47, 7, 39, 13, 45, 5, 37],
-    [63, 31, 55, 23, 61, 29, 53, 21],
-];
-
-/// Whether `file` is a gradient file (`*.agradient`, any case).
-pub fn is_gradient(file: &Path) -> bool {
-    file.extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("agradient"))
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Dither {
-    #[default]
-    None,
-    Crosshatch,
-    Pixel,
-}
-
-impl Dither {
-    pub const ALL: [Self; 3] = [Self::None, Self::Crosshatch, Self::Pixel];
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Crosshatch => "crosshatch",
-            Self::Pixel => "pixel",
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::None => "None",
-            Self::Crosshatch => "Crosshatch",
-            Self::Pixel => "Pixel",
-        }
-    }
-}
-
-/// The order gradients fill the grid's cells in.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Layout {
-    /// Left to right, then top to bottom.
-    #[default]
-    Rows,
-    /// Top to bottom, then left to right.
-    Columns,
-}
-
-impl Layout {
-    pub const ALL: [Self; 2] = [Self::Rows, Self::Columns];
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Rows => "rows",
-            Self::Columns => "columns",
-        }
-    }
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Rows => "Rows",
-            Self::Columns => "Columns",
-        }
-    }
-
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::Rows => "Left to right, then down",
-            Self::Columns => "Top to bottom, then right",
-        }
-    }
-}
-
-/// An image split into equal cells, filled in `layout` order: `.agradient` and `.apalette`
-/// files; see docs/spec/agradient.md#image.
-pub trait CellGrid {
-    /// Width, height, cell width, cell height, px.
-    fn grid(&self) -> [u32; 4];
+/// A [`CellGrid`] the editor changes, written to a file.
+pub trait GridFile: CellGrid {
     fn grid_mut(&mut self) -> ([&mut u32; 4], &mut Layout);
-    fn layout(&self) -> Layout;
-    /// How many cells are filled.
-    fn used(&self) -> usize;
-    /// What fills the cells, e.g. `gradients`, for errors.
-    fn noun(&self) -> &'static str;
-
-    fn columns(&self) -> u32 {
-        let [width, _, cell_width, _] = self.grid();
-        width / cell_width.max(1)
-    }
-
-    fn rows(&self) -> u32 {
-        let [_, height, _, cell_height] = self.grid();
-        height / cell_height.max(1)
-    }
-
-    /// Column and row of item `i`'s cell.
-    fn cell(&self, i: usize) -> (u32, u32) {
-        let i = i as u32;
-        match self.layout() {
-            Layout::Rows => (i % self.columns(), i / self.columns()),
-            Layout::Columns => (i / self.rows(), i % self.rows()),
-        }
-    }
-
-    /// How many cells the grid has.
-    fn capacity(&self) -> usize {
-        (self.columns() * self.rows()) as usize
-    }
-
-    /// Checks what the editor can get wrong: sizes and whether the items fit.
-    fn validate(&self) -> Result<(), String> {
-        let [width, height, cell_width, cell_height] = self.grid();
-        for (key, value) in [("width", width), ("height", height)] {
-            in_range(key, i64::from(value), 1, MAX_SIZE)?;
-        }
-        in_range("cell_width", i64::from(cell_width), 1, i64::from(width))?;
-        in_range("cell_height", i64::from(cell_height), 1, i64::from(height))?;
-        let n = self.used();
-        if n > self.capacity() {
-            return Err(format!(
-                "{n} {} need {n} cells but the grid has {}",
-                self.noun(),
-                self.capacity()
-            ));
-        }
-        Ok(())
-    }
-
-    /// The image: cell `i` drawn by `fill(i, cell_width, cell_height)` (RGBA8 rows), the rest
-    /// transparent.
-    fn render_cells(&self, fill: impl Fn(usize, u32, u32) -> Vec<u8>) -> Result<Image, String> {
-        self.validate()?;
-        let [width, height, cell_width, cell_height] = self.grid();
-        let mut pixels = vec![0; (width * height * 4) as usize];
-        for i in 0..self.used() {
-            let (column, row) = self.cell(i);
-            let (left, top) = (column * cell_width, row * cell_height);
-            let cell = fill(i, cell_width, cell_height);
-            let row_bytes = (cell_width * 4) as usize;
-            for (y, row) in cell.chunks_exact(row_bytes).enumerate() {
-                let start = (((top + y as u32) * width + left) * 4) as usize;
-                pixels[start..start + row_bytes].copy_from_slice(row);
-            }
-        }
-        Ok(Image {
-            width,
-            height,
-            pixels,
-        })
-    }
 
     /// The grid's keys in the written form.
     fn grid_toml(&self) -> String {
@@ -175,6 +22,12 @@ pub trait CellGrid {
             self.layout().key()
         )
     }
+}
+
+/// Whether `file` is a gradient file (`*.agradient`, any case).
+pub fn is_gradient(file: &Path) -> bool {
+    file.extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("agradient"))
 }
 
 /// Reads and removes the grid keys from `table`; missing ones get `defaults`.
@@ -189,7 +42,7 @@ pub fn take_grid(
     {
         if let Some(v) = table.remove(key) {
             let v = v.as_integer().ok_or(format!("{key} must be an integer"))?;
-            in_range(key, v, 1, MAX_SIZE)?;
+            in_range(key, v, 1, i64::from(MAX_SIZE))?;
             *value = v as u32;
         }
     }
@@ -201,13 +54,6 @@ pub fn take_grid(
             .ok_or_else(|| format!("unknown layout {v} (use rows or columns)"))?,
     };
     Ok((grid, layout))
-}
-
-/// A color at a position; `color` is straight (not premultiplied) RGBA.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct Stop {
-    pub at: f64,
-    pub color: [u8; 4],
 }
 
 #[derive(Clone, PartialEq, Debug, Default)]
@@ -255,13 +101,7 @@ impl Gradient {
 
     /// `width × height` RGBA8 of this gradient as a cell of the image: first stop at the bottom.
     pub fn render(&self, width: u32, height: u32) -> Vec<u8> {
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        for y in 0..height {
-            let t = position(height - 1 - y, height);
-            for x in 0..width {
-                pixels.extend(shade(&self.stops, self.dither, t, x, y));
-            }
-        }
+        let mut pixels = assetc_colors::gradient::render(&self.stops, self.dither, width, height);
         // Modifiers change the color, never the alpha.
         if self.modifiers.iter().any(|m| m.enabled) {
             let mut rgb: Vec<[f64; 3]> = pixels
@@ -288,72 +128,12 @@ impl Gradient {
     /// `width × height` RGBA8 of this gradient on its side, first stop on the left, as the
     /// editor's bar shows it.
     pub fn render_sideways(&self, width: u32, height: u32) -> Vec<u8> {
-        let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-        for y in 0..height {
-            for x in 0..width {
-                pixels.extend(shade(&self.stops, self.dither, position(x, width), x, y));
-            }
-        }
-        pixels
+        assetc_colors::gradient::render_sideways(&self.stops, self.dither, width, height)
     }
 
     fn is_opaque(&self) -> bool {
         self.stops.iter().all(|s| s.color[3] == 255)
     }
-}
-
-/// The color of `stops` (at least two, ordered) at `t`, without dithering.
-pub fn color_at(stops: &[Stop], t: f64) -> [u8; 4] {
-    shade(stops, Dither::None, t, 0, 0)
-}
-
-/// Position of pixel `i` along a gradient `length` pixels long: the ends are exact.
-fn position(i: u32, length: u32) -> f64 {
-    if length > 1 {
-        i as f64 / (length - 1) as f64
-    } else {
-        0.0
-    }
-}
-
-/// The color of pixel `(x, y)` (cell-local) at position `t`; see docs/spec/agradient.md#image.
-fn shade(stops: &[Stop], dither: Dither, t: f64, x: u32, y: u32) -> [u8; 4] {
-    let mut k = 0;
-    while k + 2 < stops.len() && t > stops[k + 1].at {
-        k += 1;
-    }
-    let (a, b) = (stops[k], stops[k + 1]);
-    let span = b.at - a.at;
-    let s = if span > 0.0 {
-        ((t - a.at) / span).clamp(0.0, 1.0)
-    } else {
-        0.0
-    };
-    let (x, y) = (x as usize, y as usize);
-    let d = match dither {
-        Dither::Pixel => {
-            let threshold = f64::from(BAYER4[y % 4][x % 4]) / 16.0;
-            return if s > threshold { b.color } else { a.color };
-        }
-        Dither::None => 0.5,
-        Dither::Crosshatch => f64::from(BAYER8[y % 8][x % 8]) / 64.0,
-    };
-    let (aa, ba) = (f64::from(a.color[3]), f64::from(b.color[3]));
-    let alpha = aa + (ba - aa) * s;
-    let stored = quantize(alpha, 0.5);
-    if stored == 0 {
-        return [0; 4];
-    }
-    let channel = |c: usize| {
-        let pa = f64::from(a.color[c]) * aa / 255.0;
-        let pb = f64::from(b.color[c]) * ba / 255.0;
-        quantize((pa + (pb - pa) * s) * 255.0 / alpha, d)
-    };
-    [channel(0), channel(1), channel(2), stored]
-}
-
-fn quantize(v: f64, d: f64) -> u8 {
-    (v + d).floor().clamp(0.0, 255.0) as u8
 }
 
 /// An `.agradient` file; see docs/spec/agradient.md.
@@ -494,11 +274,7 @@ impl Gradients {
     }
 }
 
-impl CellGrid for Gradients {
-    fn grid(&self) -> [u32; 4] {
-        [self.width, self.height, self.cell_width, self.cell_height]
-    }
-
+impl GridFile for Gradients {
     fn grid_mut(&mut self) -> ([&mut u32; 4], &mut Layout) {
         (
             [
@@ -509,6 +285,12 @@ impl CellGrid for Gradients {
             ],
             &mut self.layout,
         )
+    }
+}
+
+impl CellGrid for Gradients {
+    fn grid(&self) -> [u32; 4] {
+        [self.width, self.height, self.cell_width, self.cell_height]
     }
 
     fn layout(&self) -> Layout {
@@ -620,26 +402,6 @@ fn parse_stop(item: toml::Value) -> Result<Stop, String> {
     Ok(Stop { at, color })
 }
 
-/// `#rrggbb` or `#rrggbbaa` (the `#` optional, any case) as straight RGBA.
-pub fn parse_color(text: &str) -> Option<[u8; 4]> {
-    let hex = text.trim().strip_prefix('#').unwrap_or(text.trim());
-    if !matches!(hex.len(), 6 | 8) || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    let byte = |i: usize| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok();
-    let alpha = if hex.len() == 8 { byte(3)? } else { 255 };
-    Some([byte(0)?, byte(1)?, byte(2)?, alpha])
-}
-
-/// `#rrggbb`, or `#rrggbbaa` when not opaque.
-pub fn format_color([r, g, b, a]: [u8; 4]) -> String {
-    if a == 255 {
-        format!("#{r:02x}{g:02x}{b:02x}")
-    } else {
-        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
-    }
-}
-
 /// Shortest form that reads back the same, always with a decimal point.
 fn float(v: f64) -> String {
     let s = v.to_string();
@@ -647,14 +409,6 @@ fn float(v: f64) -> String {
         s
     } else {
         format!("{s}.0")
-    }
-}
-
-fn in_range(key: &str, v: i64, min: i64, max: i64) -> Result<(), String> {
-    if (min..=max).contains(&v) {
-        Ok(())
-    } else {
-        Err(format!("{key} {v} is outside {min}–{max}"))
     }
 }
 
@@ -797,21 +551,6 @@ stops = [
     }
 
     #[test]
-    fn blending_is_premultiplied() {
-        // Fading to transparent keeps the color instead of darkening toward black.
-        let mut g = Gradient::new(String::new());
-        g.stops[0].color = [255, 0, 0, 255];
-        g.stops[1].color = [0, 0, 0, 0];
-        let mid = g.color_at(0.5);
-        assert_eq!(mid, [255, 0, 0, 128]);
-        // Opaque black to white rounds to the middle.
-        assert_eq!(
-            Gradient::new(String::new()).color_at(0.5),
-            [128, 128, 128, 255]
-        );
-    }
-
-    #[test]
     fn pixel_dither_keeps_the_palette() {
         let mut g = Gradient::new(String::new());
         g.dither = Dither::Pixel;
@@ -861,14 +600,5 @@ stops = [
         );
         assert!(err("[[gradients]]\nstops = [{ at = 2, color = \"#000000\" }, { at = 1, color = \"#ffffff\" }]").contains("outside 0–1"));
         assert!(err("[[gradients]]\ndither = \"fancy\"\nstops = []").contains("unknown dither"));
-    }
-
-    #[test]
-    fn colors_parse_and_format() {
-        assert_eq!(parse_color("#FF8000"), Some([255, 128, 0, 255]));
-        assert_eq!(parse_color("ff800080"), Some([255, 128, 0, 128]));
-        assert_eq!(parse_color("#fff"), None);
-        assert_eq!(format_color([255, 128, 0, 255]), "#ff8000");
-        assert_eq!(format_color([255, 128, 0, 128]), "#ff800080");
     }
 }

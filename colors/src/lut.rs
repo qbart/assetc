@@ -1,6 +1,6 @@
 //! 3D color LUTs in the `.cube` format, see docs/features/lut.md.
 
-use crate::texture::Image;
+use crate::Image;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Lut {

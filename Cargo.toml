@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "sdk", "demo"]
+members = [".", "sdk", "colors", "demo"]
 
 # The compiler (CLI and GUI); only the SDK in sdk/ is published, as `assetc`.
 [package]
@@ -14,6 +14,7 @@ name = "assetc"
 path = "src/main.rs"
 
 [dependencies]
+assetc-colors = { path = "colors", version = "0.2.2" }
 ab_glyph = "0.2.32"
 base64 = "0.23.1"
 # Only to turn on `pure`: Bevy's copy is then built without C or assembly.

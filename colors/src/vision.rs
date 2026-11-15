@@ -1,6 +1,7 @@
-//! Color vision deficiency simulation for the canvas; see docs/features/canvas.md#color-vision.
+//! Color vision deficiency simulation, as assetc's canvas shows it; see
+//! docs/features/canvas.md#color-vision in the assetc repository.
 
-use std::sync::LazyLock;
+use crate::space::{linear_to_srgb, srgb_byte_to_linear};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Vision {
@@ -85,19 +86,17 @@ sharpness. About 1 in 30,000 people; blue cone monochromacy is rarer, about 1 in
 
     /// RGBA8 pixels (sRGB encoded) as this deficiency sees them; alpha is kept.
     pub fn simulate(self, pixels: &[u8]) -> Vec<u8> {
-        static LINEAR: LazyLock<[f32; 256]> =
-            LazyLock::new(|| std::array::from_fn(|v| srgb_to_linear(v as f32 / 255.0)));
         let m = self.matrix();
         let mut out = Vec::with_capacity(pixels.len());
         for px in pixels.as_chunks::<4>().0 {
             let rgb = [
-                LINEAR[px[0] as usize],
-                LINEAR[px[1] as usize],
-                LINEAR[px[2] as usize],
+                srgb_byte_to_linear(px[0]),
+                srgb_byte_to_linear(px[1]),
+                srgb_byte_to_linear(px[2]),
             ];
             for row in m {
                 let v = (row[0] * rgb[0] + row[1] * rgb[1] + row[2] * rgb[2]).clamp(0.0, 1.0);
-                out.push((crate::texture::linear_to_srgb(v) * 255.0).round() as u8);
+                out.push((linear_to_srgb(v) * 255.0).round() as u8);
             }
             out.push(px[3]);
         }
@@ -105,26 +104,9 @@ sharpness. About 1 in 30,000 people; blue cone monochromacy is rarer, about 1 in
     }
 }
 
-fn srgb_to_linear(v: f32) -> f32 {
-    if v <= 0.04045 {
-        v / 12.92
-    } else {
-        ((v + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn hints_match_the_spec() {
-        let spec = include_str!("../docs/features/canvas.md");
-        for vision in Vision::ALL {
-            let line = format!("- **{}**: {}", vision.name(), vision.hint());
-            assert!(spec.contains(&line), "{line}");
-        }
-    }
 
     #[test]
     fn grays_and_alpha_stay() {

@@ -28,7 +28,6 @@ mod inspect;
 mod ktx2;
 mod licenses;
 mod logo;
-mod lut;
 mod manifest;
 mod material;
 mod mipmap;
@@ -50,7 +49,9 @@ mod theme;
 mod tree;
 mod ui;
 mod vertex_colors;
-mod vision;
+
+// Color logic is the assetc-colors crate's; see docs/features/colors.md.
+use assetc_colors::{lut, vision};
 
 use std::collections::BTreeMap;
 use std::env;

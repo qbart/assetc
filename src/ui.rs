@@ -23,7 +23,7 @@ use crate::enrich::{self, PropValue, Properties, Region, ShapeType};
 use crate::fileops;
 use crate::gizmo;
 use crate::gradient::{
-    self, CellGrid, Dither, Gradient, Gradients, Layout as GradientLayout, Stop,
+    self, CellGrid, Dither, Gradient, Gradients, GridFile, Layout as GradientLayout, Stop,
 };
 use crate::icons::Icon;
 use crate::inspect::{self, Inspection, Location};
@@ -4563,7 +4563,7 @@ fn gradient_output_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Gradien
 
 /// The Output section of an `.agradient` or `.apalette` file: image size, cells and layout; see
 /// docs/features/gradients.md#parameters-tab.
-fn grid_section(ui: &mut Ui, file: &mut impl CellGrid) {
+fn grid_section(ui: &mut Ui, file: &mut impl GridFile) {
     prop_section(
         ui,
         "grid_output",
@@ -11362,6 +11362,15 @@ fn placeholder(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_vision_hints_match_the_spec() {
+        let spec = include_str!("../docs/features/canvas.md");
+        for vision in crate::vision::Vision::ALL {
+            let line = format!("- **{}**: {}", vision.name(), vision.hint());
+            assert!(spec.contains(&line), "{line}");
+        }
+    }
 
     #[test]
     fn steps_land_on_hundredths() {

@@ -15,7 +15,7 @@ use crate::color_picker::{self, Picker};
 use crate::icons::Icon;
 use crate::material::{AlphaMode, HeightMode, Material, NormalY, Slot, Source, TextureIds};
 use crate::preview3d::{CubemapUpload, MaterialTextures, Preview3d, Shape};
-use crate::texture::{Image, linear_to_srgb};
+use crate::texture::{Image, linear_to_srgb, srgb_to_linear};
 use crate::theme::{BG_BAR, STROKE, TEXT, TEXT_WEAK};
 use crate::vision::Vision;
 
@@ -705,13 +705,7 @@ fn to_linear(rgba: [u8; 4], before: [f32; 4]) -> [f32; 4] {
             return before[i];
         }
         let v = f32::from(rgba[i]) / 255.0;
-        let v = if i == 3 {
-            v
-        } else if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        };
+        let v = if i == 3 { v } else { srgb_to_linear(v) };
         (v * 1e4).round() / 1e4
     })
 }

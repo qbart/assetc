@@ -705,15 +705,7 @@ pub fn hdr_faces(file: &Path) -> Result<Vec<Image>, String> {
 fn preview_faces(hdr: &crate::hdr::Hdr) -> Vec<Image> {
     let size = crate::hdr::face_size(hdr.height);
     let preview = hdr.cubemap(size.min(512));
-    let encode = |l: f32| {
-        let l = l.clamp(0.0, 1.0);
-        let s = if l <= 0.003_130_8 {
-            l * 12.92
-        } else {
-            1.055 * l.powf(1.0 / 2.4) - 0.055
-        };
-        (s * 255.0).round() as u8
-    };
+    let encode = assetc_colors::space::linear_to_srgb_byte;
     let level = &preview[0];
     level
         .faces

@@ -1,26 +1,13 @@
 //! Texture settings and mip generation, see docs/features/textures.md.
 
-use std::fmt;
-use std::sync::LazyLock;
-
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 
 use crate::config;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColorSpace {
-    Srgb,
-    Linear,
-}
-
-impl fmt::Display for ColorSpace {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Srgb => "srgb",
-            Self::Linear => "linear",
-        })
-    }
-}
+// Colors and images are assetc-colors'; see docs/features/colors.md.
+pub use assetc_colors::Image;
+use assetc_colors::space::srgb_byte_to_linear;
+pub use assetc_colors::space::{ColorSpace, linear_to_srgb, srgb_to_linear};
 
 /// `[textures]` with its patterns compiled.
 pub struct Settings {
@@ -65,14 +52,6 @@ pub fn glob_set(patterns: &[String]) -> Result<GlobSet, globset::Error> {
     set.build()
 }
 
-/// An RGBA8 image, rows top to bottom.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Image {
-    pub width: u32,
-    pub height: u32,
-    pub pixels: Vec<u8>,
-}
-
 /// Levels in a full chain down to 1×1: `floor(log2(max(width, height))) + 1`.
 pub fn level_count(width: u32, height: u32) -> usize {
     (u32::BITS - width.max(height).max(1).leading_zeros()) as usize
@@ -106,7 +85,7 @@ pub fn downsample(src: &Image, color: ColorSpace) -> Image {
                     let p = &src.pixels[(sy * sw + sx) * 4..][..4];
                     for c in 0..4 {
                         sum[c] += match (color, c) {
-                            (ColorSpace::Srgb, 0..3) => SRGB_TO_LINEAR[p[c] as usize],
+                            (ColorSpace::Srgb, 0..3) => srgb_byte_to_linear(p[c]),
                             _ => p[c] as f32 / 255.0,
                         };
                     }
@@ -127,34 +106,6 @@ pub fn downsample(src: &Image, color: ColorSpace) -> Image {
         width: dw as u32,
         height: dh as u32,
         pixels,
-    }
-}
-
-static SRGB_TO_LINEAR: LazyLock<[f32; 256]> = LazyLock::new(|| {
-    std::array::from_fn(|i| {
-        let v = i as f32 / 255.0;
-        if v <= 0.04045 {
-            v / 12.92
-        } else {
-            ((v + 0.055) / 1.055).powf(2.4)
-        }
-    })
-});
-
-/// An sRGB-encoded channel (0–1) as linear light.
-pub fn srgb_to_linear(v: f32) -> f32 {
-    if v <= 0.04045 {
-        v / 12.92
-    } else {
-        ((v + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-pub fn linear_to_srgb(v: f32) -> f32 {
-    if v <= 0.0031308 {
-        v * 12.92
-    } else {
-        1.055 * v.powf(1.0 / 2.4) - 0.055
     }
 }
 

@@ -6,88 +6,11 @@ use std::f64::consts::{FRAC_1_SQRT_2, TAU};
 
 use crate::texture::Image;
 
-/// The type of a parameter, with its range and default.
-#[derive(Debug, Clone, Copy)]
-pub enum ParamKind {
-    Int {
-        min: i64,
-        max: i64,
-        default: i64,
-    },
-    Float {
-        min: f64,
-        max: f64,
-        default: f64,
-    },
-    Choice {
-        options: &'static [&'static str],
-        default: usize,
-    },
-    /// A float in 0..=1.
-    Gray {
-        default: f64,
-    },
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ParamSpec {
-    pub key: &'static str,
-    pub label: &'static str,
-    pub kind: ParamKind,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    Int(i64),
-    /// Floats and grays.
-    Float(f64),
-    Choice(usize),
-}
-
-/// Parameter values, in the order of their [`ParamSpec`]s.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Params(pub Vec<Value>);
-
-const fn int(
-    key: &'static str,
-    label: &'static str,
-    min: i64,
-    max: i64,
-    default: i64,
-) -> ParamSpec {
-    ParamSpec {
-        key,
-        label,
-        kind: ParamKind::Int { min, max, default },
-    }
-}
-
-const fn float(
-    key: &'static str,
-    label: &'static str,
-    min: f64,
-    max: f64,
-    default: f64,
-) -> ParamSpec {
-    ParamSpec {
-        key,
-        label,
-        kind: ParamKind::Float { min, max, default },
-    }
-}
-
-const fn choice(
-    key: &'static str,
-    label: &'static str,
-    options: &'static [&'static str],
-    default: usize,
-) -> ParamSpec {
-    ParamSpec {
-        key,
-        label,
-        kind: ParamKind::Choice { options, default },
-    }
-}
+// Parameters and color modifiers are assetc-colors'; see docs/features/colors.md.
+pub use assetc_colors::modifier::{
+    Modifier, ModifierKind, ParamKind, ParamSpec, Params, Value, apply_modifiers,
+};
+use assetc_colors::modifier::{choice, float, int};
 
 const SEED: ParamSpec = int("seed", "Seed", 0, u32::MAX as i64, 0);
 const BASIS: ParamSpec = choice("basis", "Basis", &["value", "perlin", "simplex"], 1);
@@ -330,115 +253,6 @@ impl GeneratorKind {
     }
 }
 
-const MODIFIER_NONE: &[ParamSpec] = &[];
-const MODIFIER_LEVELS: &[ParamSpec] = &[
-    float("black", "Black", 0.0, 1.0, 0.0),
-    float("white", "White", 0.0, 1.0, 1.0),
-    float("gamma", "Gamma", 0.1, 10.0, 1.0),
-];
-const MODIFIER_BRIGHTNESS_CONTRAST: &[ParamSpec] = &[
-    float("brightness", "Brightness", -1.0, 1.0, 0.0),
-    float("contrast", "Contrast", -1.0, 1.0, 0.0),
-];
-const MODIFIER_THRESHOLD: &[ParamSpec] = &[
-    float("level", "Level", 0.0, 1.0, 0.5),
-    float("softness", "Softness", 0.0, 0.5, 0.0),
-];
-const MODIFIER_POSTERIZE: &[ParamSpec] = &[int("steps", "Steps", 2, 32, 4)];
-const MODIFIER_BLUR: &[ParamSpec] = &[
-    int("radius", "Radius", 1, 64, 2),
-    choice("edges", "Edges", &["wrap", "clamp"], 0),
-];
-const MODIFIER_COLORIZE: &[ParamSpec] = &[
-    float("hue", "Hue", 0.0, 360.0, 180.0),
-    float("saturation", "Saturation", 0.0, 1.0, 0.5),
-    float("lightness", "Lightness", -1.0, 1.0, 0.0),
-];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModifierKind {
-    Invert,
-    Levels,
-    BrightnessContrast,
-    Threshold,
-    Posterize,
-    Blur,
-    Normalize,
-    Colorize,
-}
-
-impl ModifierKind {
-    pub const ALL: [Self; 8] = [
-        Self::Invert,
-        Self::Levels,
-        Self::BrightnessContrast,
-        Self::Threshold,
-        Self::Posterize,
-        Self::Blur,
-        Self::Normalize,
-        Self::Colorize,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Invert => "Invert",
-            Self::Levels => "Levels",
-            Self::BrightnessContrast => "Brightness / Contrast",
-            Self::Threshold => "Threshold",
-            Self::Posterize => "Posterize",
-            Self::Blur => "Blur",
-            Self::Normalize => "Normalize",
-            Self::Colorize => "Colorize",
-        }
-    }
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Invert => "invert",
-            Self::Levels => "levels",
-            Self::BrightnessContrast => "brightness-contrast",
-            Self::Threshold => "threshold",
-            Self::Posterize => "posterize",
-            Self::Blur => "blur",
-            Self::Normalize => "normalize",
-            Self::Colorize => "colorize",
-        }
-    }
-
-    pub fn specs(self) -> &'static [ParamSpec] {
-        match self {
-            Self::Invert | Self::Normalize => MODIFIER_NONE,
-            Self::Levels => MODIFIER_LEVELS,
-            Self::BrightnessContrast => MODIFIER_BRIGHTNESS_CONTRAST,
-            Self::Threshold => MODIFIER_THRESHOLD,
-            Self::Posterize => MODIFIER_POSTERIZE,
-            Self::Blur => MODIFIER_BLUR,
-            Self::Colorize => MODIFIER_COLORIZE,
-        }
-    }
-
-    fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|k| k.key() == key)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Modifier {
-    pub kind: ModifierKind,
-    pub enabled: bool,
-    pub params: Params,
-}
-
-impl Modifier {
-    pub fn new(kind: ModifierKind) -> Self {
-        Self {
-            kind,
-            enabled: true,
-            params: Params::defaults(kind.specs()),
-        }
-    }
-}
-
 /// An `.anoise` file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Noise {
@@ -457,89 +271,54 @@ impl Default for Noise {
     }
 }
 
-impl Params {
-    pub fn defaults(specs: &[ParamSpec]) -> Self {
-        Self(
-            specs
-                .iter()
-                .map(|spec| match spec.kind {
-                    ParamKind::Int { default, .. } => Value::Int(default),
-                    ParamKind::Float { default, .. } | ParamKind::Gray { default } => {
-                        Value::Float(default)
-                    }
-                    ParamKind::Choice { default, .. } => Value::Choice(default),
-                })
-                .collect(),
-        )
+/// Reads `specs` from `table` (removing them); missing keys get defaults.
+fn take_params(specs: &[ParamSpec], table: &mut toml::Table) -> Result<Params, String> {
+    let mut params = Params::defaults(specs);
+    for (spec, value) in specs.iter().zip(&mut params.0) {
+        let Some(raw) = table.remove(spec.key) else {
+            continue;
+        };
+        let bad = || format!("{} has an invalid value {raw}", spec.key);
+        *value = match spec.kind {
+            ParamKind::Int { min, max, .. } => {
+                let v = raw.as_integer().ok_or_else(bad)?;
+                in_range(spec.key, v as f64, min as f64, max as f64)?;
+                Value::Int(v)
+            }
+            ParamKind::Float { min, max, .. } => {
+                let v = number(&raw).ok_or_else(bad)?;
+                in_range(spec.key, v, min, max)?;
+                Value::Float(v)
+            }
+            ParamKind::Gray { .. } => {
+                let v = number(&raw).ok_or_else(bad)?;
+                in_range(spec.key, v, 0.0, 1.0)?;
+                Value::Float(v)
+            }
+            ParamKind::Choice { options, .. } => {
+                let v = raw.as_str().ok_or_else(bad)?;
+                let i = options
+                    .iter()
+                    .position(|o| *o == v)
+                    .ok_or_else(|| format!("{} must be one of {}", spec.key, options.join(", ")))?;
+                Value::Choice(i)
+            }
+        };
     }
+    Ok(params)
+}
 
-    /// Reads `specs` from `table` (removing them); missing keys get defaults.
-    fn take(specs: &[ParamSpec], table: &mut toml::Table) -> Result<Self, String> {
-        let mut params = Self::defaults(specs);
-        for (spec, value) in specs.iter().zip(&mut params.0) {
-            let Some(raw) = table.remove(spec.key) else {
-                continue;
-            };
-            let bad = || format!("{} has an invalid value {raw}", spec.key);
-            *value = match spec.kind {
-                ParamKind::Int { min, max, .. } => {
-                    let v = raw.as_integer().ok_or_else(bad)?;
-                    in_range(spec.key, v as f64, min as f64, max as f64)?;
-                    Value::Int(v)
-                }
-                ParamKind::Float { min, max, .. } => {
-                    let v = number(&raw).ok_or_else(bad)?;
-                    in_range(spec.key, v, min, max)?;
-                    Value::Float(v)
-                }
-                ParamKind::Gray { .. } => {
-                    let v = number(&raw).ok_or_else(bad)?;
-                    in_range(spec.key, v, 0.0, 1.0)?;
-                    Value::Float(v)
-                }
-                ParamKind::Choice { options, .. } => {
-                    let v = raw.as_str().ok_or_else(bad)?;
-                    let i = options.iter().position(|o| *o == v).ok_or_else(|| {
-                        format!("{} must be one of {}", spec.key, options.join(", "))
-                    })?;
-                    Value::Choice(i)
-                }
-            };
-        }
-        Ok(params)
-    }
-
-    fn write(&self, specs: &[ParamSpec], out: &mut String) {
-        for (spec, value) in specs.iter().zip(&self.0) {
-            let value = match (value, spec.kind) {
-                (Value::Int(v), _) => toml::Value::Integer(*v),
-                (Value::Float(v), _) => toml::Value::Float(*v),
-                (Value::Choice(i), ParamKind::Choice { options, .. }) => {
-                    toml::Value::String(options[*i].into())
-                }
-                (Value::Choice(_), _) => unreachable!("choice without options"),
-            };
-            out.push_str(&format!("{} = {value}\n", spec.key));
-        }
-    }
-
-    /// The value of `key` as text, as shown in the Inspector.
-    pub fn display(&self, specs: &[ParamSpec], i: usize) -> String {
-        match (&self.0[i], specs[i].kind) {
-            (Value::Int(v), _) => v.to_string(),
-            (Value::Float(v), _) => format!("{v:.2}"),
-            (Value::Choice(c), ParamKind::Choice { options, .. }) => options[*c].into(),
-            (Value::Choice(c), _) => c.to_string(),
-        }
-    }
-
-    fn get<'a>(&'a self, specs: &[ParamSpec], key: &str) -> &'a Value {
-        self.find(specs, key)
-            .unwrap_or_else(|| panic!("no parameter {key}"))
-    }
-
-    fn find<'a>(&'a self, specs: &[ParamSpec], key: &str) -> Option<&'a Value> {
-        specs.iter().position(|s| s.key == key).map(|i| &self.0[i])
+fn write_params(params: &Params, specs: &[ParamSpec], out: &mut String) {
+    for (spec, value) in specs.iter().zip(&params.0) {
+        let value = match (value, spec.kind) {
+            (Value::Int(v), _) => toml::Value::Integer(*v),
+            (Value::Float(v), _) => toml::Value::Float(*v),
+            (Value::Choice(i), ParamKind::Choice { options, .. }) => {
+                toml::Value::String(options[*i].into())
+            }
+            (Value::Choice(_), _) => unreachable!("choice without options"),
+        };
+        out.push_str(&format!("{} = {value}\n", spec.key));
     }
 }
 
@@ -625,7 +404,7 @@ impl Noise {
                 let toml::Value::Table(mut values) = value else {
                     return Err(format!("[{section}] must be a table"));
                 };
-                let params = Params::take(generator.specs(), &mut values)
+                let params = take_params(generator.specs(), &mut values)
                     .map_err(|e| format!("[{section}] {e}"))?;
                 if let Some(key) = values.keys().next() {
                     return Err(format!("[{section}] has no parameter {key}"));
@@ -656,11 +435,11 @@ impl Noise {
             self.size,
             self.kind.section()
         );
-        self.params.write(self.kind.specs(), &mut out);
+        write_params(&self.params, self.kind.specs(), &mut out);
         for (kind, params) in &self.kept {
             if *params != Params::defaults(kind.specs()) {
                 out.push_str(&format!("\n[{}]\n", kind.section()));
-                params.write(kind.specs(), &mut out);
+                write_params(params, kind.specs(), &mut out);
             }
         }
         write_modifiers(&self.modifiers, &mut out);
@@ -680,9 +459,7 @@ impl Noise {
     pub fn generate(&self) -> Image {
         let size = self.size as usize;
         let mut pixels = generate_field(self.kind, &self.params, size);
-        for m in self.modifiers.iter().filter(|m| m.enabled) {
-            apply_modifier(m, &mut pixels, size, size);
-        }
+        apply_modifiers(&self.modifiers, &mut pixels, size, size);
         Image {
             width: self.size,
             height: self.size,
@@ -722,7 +499,7 @@ pub fn write_modifier_tables(modifiers: &[Modifier], table: &str, out: &mut Stri
             toml::Value::String(m.kind.key().into()),
             m.enabled
         ));
-        m.params.write(m.kind.specs(), out);
+        write_params(&m.params, m.kind.specs(), out);
     }
 }
 
@@ -741,18 +518,6 @@ pub fn modifier_summary(modifiers: &[Modifier]) -> String {
         .join(", ")
 }
 
-/// Runs the enabled modifiers on a `width × height` RGB image (0–1 per channel).
-pub fn apply_modifiers(
-    modifiers: &[Modifier],
-    pixels: &mut [[f64; 3]],
-    width: usize,
-    height: usize,
-) {
-    for m in modifiers.iter().filter(|m| m.enabled) {
-        apply_modifier(m, pixels, width, height);
-    }
-}
-
 fn parse_modifier(item: toml::Value) -> Result<Modifier, String> {
     let toml::Value::Table(mut table) = item else {
         return Err("not a table".into());
@@ -765,7 +530,7 @@ fn parse_modifier(item: toml::Value) -> Result<Modifier, String> {
         None => true,
         Some(v) => v.as_bool().ok_or("enabled must be true or false")?,
     };
-    let params = Params::take(kind.specs(), &mut table)?;
+    let params = take_params(kind.specs(), &mut table)?;
     if let Some(key) = table.keys().next() {
         return Err(format!("{} has no parameter {key}", kind.key()));
     }
@@ -1177,186 +942,8 @@ fn voronoi(
     value.clamp(0.0, 1.0)
 }
 
-// ---- Modifiers ------------------------------------------------------------------------
-
-fn apply_modifier(m: &Modifier, pixels: &mut [[f64; 3]], width: usize, height: usize) {
-    let specs = m.kind.specs();
-    let float = |key| match m.params.get(specs, key) {
-        Value::Float(v) => *v,
-        _ => unreachable!(),
-    };
-    let int = |key| match m.params.get(specs, key) {
-        Value::Int(v) => *v,
-        _ => unreachable!(),
-    };
-    let each = |pixels: &mut [[f64; 3]], f: &dyn Fn(f64) -> f64| {
-        for c in pixels.iter_mut().flatten() {
-            *c = f(*c).clamp(0.0, 1.0);
-        }
-    };
-    match m.kind {
-        ModifierKind::Invert => each(pixels, &|c| 1.0 - c),
-        ModifierKind::Levels => {
-            let (black, white, gamma) = (float("black"), float("white"), float("gamma"));
-            each(pixels, &|c| {
-                if white <= black {
-                    if c >= black { 1.0 } else { 0.0 }
-                } else {
-                    ((c - black) / (white - black))
-                        .clamp(0.0, 1.0)
-                        .powf(1.0 / gamma)
-                }
-            });
-        }
-        ModifierKind::BrightnessContrast => {
-            let (brightness, contrast) = (float("brightness"), float("contrast"));
-            each(pixels, &|c| (c - 0.5) * (1.0 + contrast) + 0.5 + brightness);
-        }
-        ModifierKind::Threshold => {
-            let (level, softness) = (float("level"), float("softness"));
-            each(pixels, &|c| {
-                if softness == 0.0 {
-                    if c >= level { 1.0 } else { 0.0 }
-                } else {
-                    let t = ((c - (level - softness)) / (2.0 * softness)).clamp(0.0, 1.0);
-                    t * t * (3.0 - 2.0 * t)
-                }
-            });
-        }
-        ModifierKind::Posterize => {
-            let steps = (int("steps") - 1) as f64;
-            each(pixels, &|c| (c * steps).round() / steps);
-        }
-        ModifierKind::Blur => {
-            let radius = int("radius") as usize;
-            let wrap = matches!(m.params.get(specs, "edges"), Value::Choice(0));
-            for _ in 0..3 {
-                box_blur(pixels, width, height, radius, true, wrap);
-                box_blur(pixels, width, height, radius, false, wrap);
-            }
-        }
-        ModifierKind::Normalize => {
-            let (min, max) = pixels
-                .iter()
-                .flatten()
-                .fold((f64::MAX, f64::MIN), |(lo, hi), c| (lo.min(*c), hi.max(*c)));
-            if max > min {
-                each(pixels, &|c| (c - min) / (max - min));
-            }
-        }
-        ModifierKind::Colorize => {
-            let (hue, saturation, lightness) =
-                (float("hue"), float("saturation"), float("lightness"));
-            for c in pixels.iter_mut() {
-                let l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-                let l = if lightness > 0.0 {
-                    l * (1.0 - lightness) + lightness
-                } else {
-                    l * (1.0 + lightness)
-                };
-                *c = hsl_to_rgb(hue, saturation, l).map(|v| v.clamp(0.0, 1.0));
-            }
-        }
-    }
-}
-
-/// HSL (hue in degrees) to RGB; see docs/spec/anoise.md#colorize.
-fn hsl_to_rgb(hue: f64, saturation: f64, l: f64) -> [f64; 3] {
-    let c = (1.0 - (2.0 * l - 1.0).abs()) * saturation;
-    let h = (hue / 60.0).clamp(0.0, 6.0);
-    let x = c * (1.0 - (h % 2.0 - 1.0).abs());
-    let (r, g, b) = match h as u32 {
-        0 => (c, x, 0.0),
-        1 => (x, c, 0.0),
-        2 => (0.0, c, x),
-        3 => (0.0, x, c),
-        4 => (x, 0.0, c),
-        _ => (c, 0.0, x),
-    };
-    let m = l - c / 2.0;
-    [r + m, g + m, b + m]
-}
-
-/// One `(2 radius + 1)`-wide box blur pass along rows or columns of a `width × height` image;
-/// past the edges it wraps around or repeats the edge pixel.
-fn box_blur(
-    pixels: &mut [[f64; 3]],
-    width: usize,
-    height: usize,
-    radius: usize,
-    rows: bool,
-    wrap: bool,
-) {
-    let (lines, length) = if rows {
-        (height, width)
-    } else {
-        (width, height)
-    };
-    let span = (2 * radius + 1) as f64;
-    let index = |line: usize, k: usize| {
-        if rows {
-            line * width + k
-        } else {
-            k * width + line
-        }
-    };
-    let mut out = vec![[0.0; 3]; length];
-    for line in 0..lines {
-        let at = |k: isize| {
-            let k = if wrap {
-                k.rem_euclid(length as isize)
-            } else {
-                k.clamp(0, length as isize - 1)
-            };
-            pixels[index(line, k as usize)]
-        };
-        let mut sum = [0.0; 3];
-        for k in -(radius as isize)..=radius as isize {
-            let p = at(k);
-            (0..3).for_each(|c| sum[c] += p[c]);
-        }
-        for (k, slot) in out.iter_mut().enumerate() {
-            *slot = sum.map(|s| s / span);
-            let (enter, leave) = (
-                at(k as isize + radius as isize + 1),
-                at(k as isize - radius as isize),
-            );
-            (0..3).for_each(|c| sum[c] += enter[c] - leave[c]);
-        }
-        for (k, value) in out.iter().enumerate() {
-            pixels[index(line, k)] = *value;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn blur_works_on_any_size_with_either_edge() {
-        // A 4 × 2 image, white in the leftmost column only.
-        let image = || {
-            (0..8)
-                .map(|i| if i % 4 == 0 { [1.0; 3] } else { [0.0; 3] })
-                .collect::<Vec<_>>()
-        };
-        let mut blur = Modifier::new(ModifierKind::Blur);
-        blur.params.0[0] = Value::Int(1);
-        let mut wrapped = image();
-        apply_modifiers(std::slice::from_ref(&blur), &mut wrapped, 4, 2);
-        blur.params.0[1] = Value::Choice(1);
-        let mut clamped = image();
-        apply_modifiers(std::slice::from_ref(&blur), &mut clamped, 4, 2);
-        // Wrapping carries the left column into the right one; clamping does not.
-        assert!(wrapped[3][0] > clamped[3][0]);
-        // Rows stay alike: the blur is per line of the right length.
-        assert_eq!(wrapped[0], wrapped[4]);
-        // Disabled modifiers are skipped.
-        blur.enabled = false;
-        let mut untouched = image();
-        apply_modifiers(&[blur], &mut untouched, 4, 2);
-        assert_eq!(untouched, image());
-    }
-
     use super::*;
 
     fn small(kind: GeneratorKind) -> Noise {
@@ -1520,60 +1107,6 @@ mod tests {
         let values: Vec<u8> = image.pixels.iter().step_by(4).copied().collect();
         let (lo, hi) = (values.iter().min().unwrap(), values.iter().max().unwrap());
         assert!(*lo < 90 && *hi > 165, "{lo}..{hi}");
-    }
-
-    #[test]
-    fn modifiers() {
-        let apply = |kind: ModifierKind, set: &[(usize, Value)], input: [f64; 3]| {
-            let mut m = Modifier::new(kind);
-            for (i, v) in set {
-                m.params.0[*i] = v.clone();
-            }
-            let mut pixels = vec![input; 4];
-            apply_modifier(&m, &mut pixels, 2, 2);
-            pixels[0]
-        };
-        assert_eq!(apply(ModifierKind::Invert, &[], [0.25; 3]), [0.75; 3]);
-        assert_eq!(
-            apply(ModifierKind::Levels, &[(0, Value::Float(0.5))], [0.75; 3]),
-            [0.5; 3]
-        );
-        assert_eq!(apply(ModifierKind::Threshold, &[], [0.6; 3]), [1.0; 3]);
-        assert_eq!(
-            apply(ModifierKind::Posterize, &[(0, Value::Int(2))], [0.4; 3]),
-            [0.0; 3]
-        );
-        // Colorize: mid gray at full saturation is the pure hue; no saturation keeps gray.
-        let colorize = |hue, saturation, lightness, c| {
-            let params = [
-                (0, Value::Float(hue)),
-                (1, Value::Float(saturation)),
-                (2, Value::Float(lightness)),
-            ];
-            apply(ModifierKind::Colorize, &params, c).map(|v| (v * 1e6).round() / 1e6)
-        };
-        assert_eq!(colorize(0.0, 1.0, 0.0, [0.5; 3]), [1.0, 0.0, 0.0]);
-        assert_eq!(colorize(120.0, 1.0, 0.0, [0.5; 3]), [0.0, 1.0, 0.0]);
-        assert_eq!(colorize(240.0, 1.0, 0.0, [0.5; 3]), [0.0, 0.0, 1.0]);
-        assert_eq!(colorize(360.0, 1.0, 0.0, [0.5; 3]), [1.0, 0.0, 0.0]);
-        assert_eq!(colorize(60.0, 0.0, 0.0, [0.25; 3]), [0.25; 3]);
-        assert_eq!(colorize(30.0, 1.0, 1.0, [0.0; 3]), [1.0; 3]);
-        assert_eq!(colorize(30.0, 1.0, -1.0, [1.0; 3]), [0.0; 3]);
-        assert_eq!(colorize(30.0, 1.0, -0.5, [1.0; 3]), [1.0, 0.5, 0.0]);
-        // Blur of a uniform image keeps it; blur spreads a single bright pixel.
-        assert_eq!(
-            apply(ModifierKind::Blur, &[], [0.3; 3]).map(|c| (c * 1e6).round()),
-            [300000.0; 3]
-        );
-        let mut pixels = vec![[0.0; 3]; 16];
-        pixels[5] = [1.0; 3];
-        apply_modifier(&Modifier::new(ModifierKind::Blur), &mut pixels, 4, 4);
-        let total: f64 = pixels.iter().map(|c| c[0]).sum();
-        assert!((total - 1.0).abs() < 1e-9 && pixels[5][0] < 1.0);
-        // Normalize stretches to 0..1.
-        let mut pixels = vec![[0.2; 3], [0.6; 3]];
-        apply_modifier(&Modifier::new(ModifierKind::Normalize), &mut pixels, 2, 1);
-        assert_eq!(pixels, [[0.0; 3], [1.0; 3]]);
     }
 
     fn with(kind: GeneratorKind, size: u32, set: &[(&str, Value)]) -> Image {
