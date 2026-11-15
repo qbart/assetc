@@ -15,7 +15,7 @@ byte.
 - **No dependencies** but `std`: no file formats (TOML, PNG, KTX2), no UI,
   no engine. It works on plain values: colors as `[u8; 4]` or floats,
   images as RGBA8 bytes.
-- The version is the workspace's (`0.2.2`), set in `colors/Cargo.toml` with
+- The version is the workspace's, set in `colors/Cargo.toml` with
   the others (see [Version](release.md#version)).
 - Author Bartłomiej Wójtowicz; licensed `MIT OR Apache-2.0`
   (`colors/LICENSE-MIT`, `colors/LICENSE-APACHE`). Needs Rust 1.88 or newer
