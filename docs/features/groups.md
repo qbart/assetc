@@ -58,7 +58,7 @@ listed in the order shown in the tree.
 | **Name** | the [guessed name](#name) |
 | one row per file: its name, a slot dropdown, and the name it will get | the [guessed slot](#slots) |
 | **Normal map** (shown when a file is in the normal slot) | `OpenGL (+Y up)`, or `DirectX (+Y down)` when the normal file's name says `dx` or `directx` |
-| **Put the files in a new folder** | on, unless the files' folder holds nothing else |
+| **Put the files in a new folder** | on, unless the files' folder holds nothing but the used files (with their sidecars, `.amipmap`s and mip level files) |
 | **Rename files to the naming convention** | on |
 
 The slot dropdown lists the seven slots (`Base color`, `Normal`, …, see

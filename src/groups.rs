@@ -115,17 +115,20 @@ pub fn guess_name(stems: &[&str]) -> String {
     while len > 0 && !at_boundary(len) {
         len = first[..len].char_indices().last().map_or(0, |(i, _)| i);
     }
-    let whole = |name: &str| stems.iter().any(|s| *s == name);
     // Nothing shared: the first name.
     let mut name = if len == 0 { first } else { &first[..len] };
+    // A whole file name (resolutions aside) may end in one slot word, which goes too.
+    let mut whole = stems.contains(&name);
     loop {
         name = name.trim_end_matches(SEPARATORS);
         let Some((head, last)) = name.rsplit_once(SEPARATORS) else {
             break;
         };
-        // Resolutions go; so does a slot word ending a whole file name.
-        if is_resolution(last) || (whole(name) && decide(last).is_some()) {
+        if is_resolution(last) {
             name = head;
+        } else if whole && decide(last).is_some() {
+            name = head;
+            whole = false;
         } else {
             break;
         }
@@ -201,12 +204,9 @@ impl MaterialPlan {
             folder: false,
             rename: true,
         };
-        plan.folder = holds_others(&plan.source_dir(), &plan.paths());
+        let used: Vec<PathBuf> = plan.used().map(|(f, _)| f.to_path_buf()).collect();
+        plan.folder = holds_others(&plan.source_dir(), &used);
         plan
-    }
-
-    fn paths(&self) -> Vec<PathBuf> {
-        self.files.iter().map(|(f, _)| f.clone()).collect()
     }
 
     /// The used files and their slots.
@@ -409,7 +409,7 @@ mod tests {
     #[test]
     fn plans_take_one_file_per_slot() {
         let dir = tempfile::tempdir().unwrap();
-        let plan = MaterialPlan::new(files(
+        let mut plan = MaterialPlan::new(files(
             dir.path(),
             &[
                 "Metal_Color.png",
@@ -430,8 +430,13 @@ mod tests {
             ]
         );
         assert_eq!(plan.normal_y, NormalY::Gl);
-        // Nothing else in the folder: no new folder.
-        assert!(!plan.folder && plan.rename);
+        // The DirectX map not used stays in the folder: the others get their own.
+        assert!(plan.folder && plan.rename);
+        assert_eq!(
+            plan.destination(&plan.files[0].0, Slot::BaseColor),
+            dir.path().join("Metal/Metal.png")
+        );
+        plan.folder = false;
         assert_eq!(
             plan.destination(&plan.files[2].0, Slot::Normal),
             dir.path().join("Metal.n.png")

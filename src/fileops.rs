@@ -678,6 +678,61 @@ mod tests {
     }
 
     #[test]
+    fn makes_materials_from_selected_files() {
+        let (_dir, input) = input();
+        let write = |rel: &str, text: &str| fs::write(input.join(rel), text).unwrap();
+        for file in [
+            "sub/Wall_2K_Color.png",
+            "sub/Wall_2K_Color.png.amod",
+            "sub/Wall_2K_NormalDX.png",
+            "sub/Wall_2K_Roughness.jpg",
+            "sub/Wall_2K_Roughness.mip1.jpg",
+            "sub/Wall_2K_Preview.jpg",
+        ] {
+            write(file, "x");
+        }
+        write("sub/Wall_2K_Roughness.jpg.amipmap", "levels = 2\n");
+        // Another material uses the roughness map: its path follows.
+        write(
+            "other.amat",
+            "[textures]\nroughness = \"sub/Wall_2K_Roughness.jpg\"\n",
+        );
+        let files = ["Color.png", "NormalDX.png", "Roughness.jpg", "Preview.jpg"]
+            .map(|f| input.join(format!("sub/Wall_2K_{f}")))
+            .to_vec();
+        let plan = crate::groups::MaterialPlan::new(files);
+        assert_eq!(plan.name, "Wall");
+        // The preview is not used and stays, so the others get a folder.
+        assert!(plan.folder && plan.rename);
+        let (amat, fixed) = make_material(&input, None, &plan).unwrap();
+        assert_eq!((amat.clone(), fixed), (input.join("sub/Wall/Wall.amat"), 1));
+        let read = |rel: &str| fs::read_to_string(input.join(rel)).unwrap();
+        assert_eq!(read("sub/Wall/Wall.amat"), "normal_y = \"dx\"\n");
+        for file in [
+            "Wall.png",
+            "Wall.png.amod",
+            "Wall.n.png",
+            "Wall.r.jpg",
+            "Wall.r.jpg.amipmap",
+            "Wall.r.mip1.jpg",
+        ] {
+            assert!(input.join("sub/Wall").join(file).is_file(), "{file}");
+        }
+        assert!(input.join("sub/Wall_2K_Preview.jpg").is_file());
+        assert_eq!(
+            read("other.amat"),
+            "[textures]\nroughness = \"sub/Wall/Wall.r.jpg\"\n"
+        );
+        // Made again, the files are gone: nothing changes, the new folder is removed.
+        let again = crate::groups::MaterialPlan {
+            name: "Again".into(),
+            ..plan
+        };
+        assert!(make_material(&input, None, &again).is_err());
+        assert!(!input.join("sub/Again").exists());
+    }
+
+    #[test]
     fn mip_chains_follow_their_texture() {
         let (_dir, input) = input();
         let write = |rel: &str, text: &str| fs::write(input.join(rel), text).unwrap();
