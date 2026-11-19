@@ -188,6 +188,11 @@ roughness = 0.5
 Renaming it to the name of existing textures (e.g. `brick.amat` next to
 `brick.jpg`, `brick.n.jpg`) makes those textures its slots.
 
+**Make Material…** on [several selected textures](groups.md#make-material)
+makes a material from them: it guesses each file's slot from its name
+(`*_NormalGL.png` → normal), and can move them into a new folder and rename
+them to the convention.
+
 ## Inspector
 
 - **Material source** (Input `*.amat`): the Info tab shows Asset path, Asset

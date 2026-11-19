@@ -44,9 +44,11 @@ trees, the others in the Input tree only.
 | `Page Up` / `Page Down` | Move the selection by a page of rows |
 | `Enter`         | On a folder: open / close it; while renaming: commit |
 | Right click     | File operations menu                       |
+| `Ctrl` + click (`Cmd` on macOS) | Input tree: add the row to the selection or take it out (see [`docs/features/groups.md`](docs/features/groups.md#selecting-several-rows)) |
+| `Shift` + click | Input tree: select the rows from the selected row to the clicked one |
 | `F2`            | Rename the selected entry (after a press in the sidebar) |
 | `Delete`        | Delete the selected entry, asks first (after a press in the sidebar) |
-| `Escape`        | While renaming: cancel; while dragging a row: cancel the move |
+| `Escape`        | While renaming: cancel; while dragging a row: cancel the move; with several rows selected: keep only the selected row |
 | Drag a row onto a folder | Move it there with its companions, fixing paths |
 | Drop files from outside | Copy them into the folder under the pointer (or the selected one) |
 

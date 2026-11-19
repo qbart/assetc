@@ -28,7 +28,11 @@ Right-clicking an Input row, or the empty area below the last row (the
 | Rename               | the row                                   | rows               |
 | Delete               | the row                                   | rows               |
 
-Right-clicking a row also selects it.
+Right-clicking a row also selects it, alone, unless it is one of [several
+selected rows](groups.md#selecting-several-rows): then the selection stays and,
+when every selected row is a texture source, the menu starts with **Make
+Material…** (see [`groups.md`](groups.md#context-menu)). Rename and Delete act
+on the right-clicked row.
 
 ## New Folder
 

@@ -132,7 +132,9 @@ Each tab shows a tree of the directory configured in `assetc.toml`
   by type (see [Tree icons](#tree-icons)), name. Rows are 22 px tall, indented
   14 px per level, and highlight with `BG_HEADER` on hover. Clicking a folder
   row opens / closes it **and** selects it; clicking a file row selects it
-  (see [`inspector.md`](inspector.md#selection)).
+  (see [`inspector.md`](inspector.md#selection)). In the Input tree,
+  `Ctrl` / `Shift` + click select [several rows](groups.md#selecting-several-rows),
+  which the context menu can [make into one asset](groups.md).
   Right-clicking an Input row opens the [file operations](file-operations.md)
   menu; dragging an Input row onto a folder [moves](file-operations.md#move)
   it, and files dropped from outside are
