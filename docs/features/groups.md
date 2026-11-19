@@ -28,8 +28,11 @@ In the Input tree (see [`gui.md`](gui.md#file-browser)):
   selects it alone. Rows that no longer exist after a rescan leave the
   selection.
 - The Output tree selects one row at a time.
-- Dragging, **Rename**, **Delete**, `F2` and `Delete` act on one row as
-  before: the dragged or right-clicked row, or the selected row for keys.
+- Dragging a selected row [moves every selected row](file-operations.md#several-rows)
+  into the folder it is dropped on; dragging a row that is not selected moves
+  that row alone.
+- **Rename**, **Delete**, `F2` and `Delete` act on one row as before: the
+  right-clicked row, or the selected row for keys.
 
 ## Context menu
 

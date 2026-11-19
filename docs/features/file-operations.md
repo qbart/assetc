@@ -70,7 +70,8 @@ or from what moved (see [Paths](#paths)).
   a press without moving is still a click. Sidecar rows and atlas settings
   rows drag like any row; a sidecar moves with its file when the file exists.
 - While dragging, a label follows the pointer: the row's icon and name, and
-  `+ N` in `TEXT_WEAK` when `N` companions go with it, on `BG_PANEL` with a
+  `+ N` in `TEXT_WEAK` when `N` other entries go with it (companions and
+  [other selected rows](#several-rows)), on `BG_PANEL` with a
   1 px `STROKE` border and 4 px corners (as a tooltip).
 - **Target**: the row under the pointer. A folder row is that folder; a file
   row (or a sidecar row) is the folder it is in; the empty area below the
@@ -92,6 +93,23 @@ or from what moved (see [Paths](#paths)).
   overwritten; if moving a companion fails, what moved before is moved back.
 - Moving changes the [asset path](build.md#asset-ids), so the moved assets'
   IDs (and the IDs other assets store for them) change at the next build.
+
+### Several rows
+
+Dragging a row that is one of [several selected rows](groups.md#selecting-several-rows)
+moves all of them, each with its companions, as one move:
+
+- An entry inside a selected folder, or a companion of another selected
+  entry (a sidecar of a selected file, a material's texture next to its
+  selected `.amat`), moves with it and is not moved twice.
+- Entries already in the target folder stay. The target is not outlined, and
+  dropping does nothing, when every entry is already there or when it is one
+  of the selected folders or inside one.
+- All or nothing: a name taken in the target fails the whole move and what
+  moved before is moved back.
+- On success the moved rows stay selected, the dragged row as the selected
+  one, and the status bar shows `Moved <dragged row's name> to <folder> with
+  N more`, `N` counting the other rows and every companion.
 
 ### Companions
 
