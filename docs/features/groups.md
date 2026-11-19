@@ -65,9 +65,9 @@ The slot dropdown lists the seven slots (`Base color`, `Normal`, …, see
 [`materials.md`](materials.md#slots)) and `Not used`. A file not used stays
 where it is, with its name.
 
-The name column shows `→ <new name>` in `TEXT_WEAK`, with the folder when
-the files move into one (`→ brick/brick.n.png`), or `stays` when the file
-neither moves nor is renamed.
+The last column shows, in `TEXT_WEAK`, where the file goes, relative to the
+files' folder (`brick/brick.n.png` when they move into a new folder), or
+`stays` when the file neither moves nor is renamed.
 
 ### Name
 

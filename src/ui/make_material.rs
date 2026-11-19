@@ -66,6 +66,19 @@ fn weak(text: &str) -> RichText {
     RichText::new(text).size(13.0).color(TEXT_WEAK)
 }
 
+/// `text` left-aligned in `width`, cut with … when longer.
+fn fixed(ui: &mut egui::Ui, width: f32, text: RichText) -> egui::Response {
+    ui.allocate_ui_with_layout(
+        vec2(width, 20.0),
+        Layout::left_to_right(Align::Center),
+        |ui| {
+            ui.set_min_width(width);
+            ui.add(egui::Label::new(text).truncate())
+        },
+    )
+    .inner
+}
+
 fn slot_name(slot: Option<Slot>) -> &'static str {
     slot.map_or("Not used", Slot::label)
 }
@@ -86,12 +99,12 @@ fn goes_to(plan: &MaterialPlan, file: &Path, slot: Option<Slot>) -> String {
     if to == file {
         return "stays".into();
     }
-    format!("→ {}", crate::adata::relative(&plan.source_dir(), &to))
+    crate::adata::relative(&plan.source_dir(), &to)
 }
 
 fn fields(ui: &mut egui::Ui, plan: &mut MaterialPlan) {
     ui.horizontal(|ui| {
-        ui.add_sized([96.0, 22.0], egui::Label::new(label("Name")));
+        fixed(ui, 96.0, label("Name"));
         ui.add(
             TextEdit::singleline(&mut plan.name)
                 .desired_width(WIDTH - 104.0)
@@ -113,8 +126,7 @@ fn fields(ui: &mut egui::Ui, plan: &mut MaterialPlan) {
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_default();
-                        ui.add_sized([200.0, 20.0], egui::Label::new(label(&name)).truncate())
-                            .on_hover_text(&name);
+                        fixed(ui, 200.0, label(&name)).on_hover_text(&name);
                         let mut chosen = slot;
                         ComboBox::from_id_salt(("make_material_slot", i))
                             .width(120.0)
@@ -133,7 +145,7 @@ fn fields(ui: &mut egui::Ui, plan: &mut MaterialPlan) {
     ui.add_space(12.0);
     if plan.used().any(|(_, s)| s == Slot::Normal) {
         ui.horizontal(|ui| {
-            ui.add_sized([96.0, 22.0], egui::Label::new(label("Normal map")));
+            fixed(ui, 96.0, label("Normal map"));
             ComboBox::from_id_salt("make_material_normal")
                 .width(160.0)
                 .selected_text(normal_name(plan.normal_y))
