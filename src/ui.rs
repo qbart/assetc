@@ -2406,7 +2406,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
             let input = project.input_dir().filter(|_| editable);
             // What a drag or a drop from outside would land in; see
             // docs/features/file-operations.md#move.
-            let dragging = state.tree_drag.as_ref().map(|d| d.path.clone());
+            let dragging = state.tree_drag.as_ref().map(|d| d.paths.clone());
             let files_hover = ui.input(|i| !i.raw.hovered_files.is_empty());
             let fallback = project
                 .input_dir()
@@ -2451,7 +2451,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                         .filter(|p| view.contains(*p));
                     let under = pointer.and_then(|p| row_target(&cx.rows, rest, p, input));
                     target = match &dragging {
-                        Some(path) => under.filter(|t| fileops::can_move(path, t)),
+                        Some(paths) => under.filter(|t| fileops::can_move_all(paths, t)),
                         None => under.or(fallback.clone()),
                     };
                     if let Some(t) = &target {
@@ -2490,23 +2490,43 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                     .map(|(_, path, _)| path.clone())
             });
             if let (Some(path), Some(input)) = (cx.drag_start.take(), &input) {
-                let more = fileops::moving_with(input, &path);
+                // A selected row takes the other selected rows with it; see
+                // docs/features/file-operations.md#several-rows.
+                let selected: Vec<PathBuf> = state
+                    .selection
+                    .iter()
+                    .filter(|s| s.location == location)
+                    .map(|s| s.path.clone())
+                    .chain(state.marked.iter().cloned())
+                    .collect();
+                let mut paths = vec![path.clone()];
+                if selected.contains(&path) {
+                    paths.extend(selected.into_iter().filter(|p| *p != path));
+                }
+                let more = paths
+                    .iter()
+                    .map(|p| fileops::moving_with(input, p))
+                    .sum::<usize>()
+                    + paths.len()
+                    - 1;
                 state.tree_drag = Some(TreeDrag {
                     path,
+                    paths,
                     more,
                     hover: None,
                 });
             }
+            let was_dragging = state.tree_drag.is_some();
             let (action, rename_done) = (cx.action, cx.rename_done);
             if let Some(drag) = &mut state.tree_drag {
                 drag_feedback(ui, drag, hovered_folder, &mut state.open);
                 let (cancel, released) =
                     ui.input(|i| (i.key_pressed(egui::Key::Escape), i.pointer.any_released()));
                 if cancel || released {
-                    let path = drag.path.clone();
+                    let paths = drag.paths.clone();
                     state.tree_drag = None;
                     if let (false, Some(dest)) = (cancel, target.clone()) {
-                        apply_file_op(state, project, FileOp::Move(path, dest));
+                        apply_file_op(state, project, FileOp::Move(paths, dest));
                     }
                 }
             }
@@ -2546,7 +2566,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
             // Escape keeps only the selected row.
             if keys_free
                 && !state.marked.is_empty()
-                && state.tree_drag.is_none()
+                && !was_dragging
                 && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 state.marked.clear();
@@ -2810,16 +2830,19 @@ enum FileOp {
     NewShader(PathBuf),
     Rename(PathBuf),
     Delete(PathBuf),
-    /// An entry and the folder to move it into.
-    Move(PathBuf, PathBuf),
+    /// Entries and the folder to move them into.
+    Move(Vec<PathBuf>, PathBuf),
     /// Files from outside the input directory and the folder to copy them into.
     Copy(Vec<PathBuf>, PathBuf),
 }
 
 /// An Input row being dragged, see docs/features/file-operations.md#move.
 struct TreeDrag {
+    /// The row dragged.
     path: PathBuf,
-    /// The companions going with it.
+    /// The entries moving: the row and the other selected rows when it is selected.
+    paths: Vec<PathBuf>,
+    /// The other entries going with it: companions and other rows.
     more: usize,
     /// The closed folder under the pointer, and since when.
     hover: Option<(PathBuf, f64)>,
@@ -3283,15 +3306,17 @@ fn drop_files(state: &mut UiState, project: &Project, paths: Vec<PathBuf>, dest:
             .is_some_and(|r| std::fs::canonicalize(p).is_ok_and(|p| p.starts_with(r)))
     });
     state.browser_tab = BrowserTab::Input;
-    for path in inside {
-        // Moved as the tree names it, under `input`.
-        let rel = std::fs::canonicalize(&path)
-            .ok()
-            .zip(root.as_ref())
-            .and_then(|(p, r)| p.strip_prefix(r).ok().map(|rel| input.join(rel)));
-        if let Some(path) = rel.filter(|p| fileops::can_move(p, &dest)) {
-            apply_file_op(state, project, FileOp::Move(path, dest.clone()));
-        }
+    // Moved as the tree names them, under `input`.
+    let inside: Vec<PathBuf> = inside
+        .iter()
+        .filter_map(|path| {
+            let path = std::fs::canonicalize(path).ok()?;
+            Some(input.join(path.strip_prefix(root.as_ref()?).ok()?))
+        })
+        .filter(|p| fileops::can_move(p, &dest))
+        .collect();
+    if !inside.is_empty() {
+        apply_file_op(state, project, FileOp::Move(inside, dest.clone()));
     }
     if !outside.is_empty() {
         apply_file_op(state, project, FileOp::Copy(outside, dest));
@@ -3378,8 +3403,12 @@ fn apply_file_op(state: &mut UiState, project: &Project, op: FileOp) {
             state.confirm_delete = Some(path);
             return;
         }
-        FileOp::Move(path, dest) => {
-            let moved = fileops::move_into(&input, project.root.as_deref(), &path, &dest);
+        FileOp::Move(paths, dest) => {
+            let root = project.root.as_deref();
+            let moved = match paths.as_slice() {
+                [path] => fileops::move_into(&input, root, path, &dest),
+                _ => fileops::move_all_into(&input, root, &paths, &dest),
+            };
             moved_or_copied(state, &input, &dest, moved, ("Moved", "Move failed"));
             return;
         }
@@ -3414,6 +3443,7 @@ fn moved_or_copied(
             state.open.insert(dest.to_path_buf());
             state.rescan = true;
             select(state, Location::Input, report.path);
+            state.marked = report.others;
             state.tree_scroll = true;
         }
         Err(e) => state.notice = Some(format!("{failed}: {e}")),

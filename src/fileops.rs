@@ -182,6 +182,8 @@ pub struct Report {
     pub more: usize,
     /// The files whose paths were fixed.
     pub fixed: usize,
+    /// Where the other entries moved together went, in order.
+    pub others: Vec<PathBuf>,
 }
 
 /// Moves `path` into folder `dest` with its companions, and fixes the paths that point to or
@@ -223,7 +225,85 @@ pub fn move_into(
         path: dest.join(path.strip_prefix(from).unwrap_or(path)),
         more: moves.len() - 1,
         fixed,
+        others: Vec::new(),
     })
+}
+
+/// Moves several entries into folder `dest` as one move, each with its companions, and fixes
+/// the paths; entries already there stay. See docs/features/file-operations.md#several-rows.
+pub fn move_all_into(
+    input: &Path,
+    root: Option<&Path>,
+    paths: &[PathBuf],
+    dest: &Path,
+) -> Result<Report, String> {
+    check_inside(input, dest, true)?;
+    if !dest.is_dir() {
+        return Err(format!("{} is not a folder", dest.display()));
+    }
+    let mains: Vec<PathBuf> = paths
+        .iter()
+        .map(|p| sidecar_file(p).unwrap_or_else(|| p.clone()))
+        .collect();
+    for main in &mains {
+        check_inside(input, main, false)?;
+        if fs::canonicalize(dest)
+            .is_ok_and(|d| fs::canonicalize(main).is_ok_and(|m| d.starts_with(m)))
+        {
+            return Err("a folder cannot move into itself".into());
+        }
+    }
+    let mut moves: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for main in &mains {
+        // Inside another moving folder: it goes with that folder.
+        if mains.iter().any(|m| m != main && main.starts_with(m)) {
+            continue;
+        }
+        let from = main.parent().unwrap_or(input);
+        if same_path(from, dest) {
+            continue;
+        }
+        for p in companions(Some(input), main) {
+            if !moves.iter().any(|(f, _)| *f == p) {
+                let to = dest.join(p.strip_prefix(from).unwrap_or(&p));
+                moves.push((p, to));
+            }
+        }
+    }
+    if moves.is_empty() {
+        return Err(format!("everything is already in {}", name_of(dest)));
+    }
+    let fixed = relocate_all(input, root, &moves)?;
+    let placed = |p: &PathBuf| {
+        moves
+            .iter()
+            .find_map(|(f, t)| match p.strip_prefix(f) {
+                Ok(rel) if rel.as_os_str().is_empty() => Some(t.clone()),
+                Ok(rel) => Some(t.join(rel)),
+                Err(_) => None,
+            })
+            .unwrap_or_else(|| p.clone())
+    };
+    let mut others: Vec<PathBuf> = paths.iter().map(placed).collect();
+    Ok(Report {
+        path: others.remove(0),
+        more: moves.len() - 1,
+        fixed,
+        others,
+    })
+}
+
+/// Whether moving all of `paths` into `dest` would do something: some entry is not in it
+/// already, and it is none of them nor inside one.
+pub fn can_move_all(paths: &[PathBuf], dest: &Path) -> bool {
+    let mains: Vec<PathBuf> = paths
+        .iter()
+        .map(|p| sidecar_file(p).unwrap_or_else(|| p.clone()))
+        .collect();
+    !mains.iter().any(|m| dest.starts_with(m))
+        && mains
+            .iter()
+            .any(|m| !same_path(m.parent().unwrap_or(Path::new("")), dest))
 }
 
 /// The entries that go with `path` when it moves (its companions, or its file's for a
@@ -273,6 +353,7 @@ pub fn copy_into(input: &Path, paths: &[PathBuf], dest: &Path) -> Result<Report,
         path: dest.join(first.file_name().unwrap_or_default()),
         more: copies.len() - 1,
         fixed: 0,
+        others: Vec::new(),
     })
 }
 
@@ -675,6 +756,59 @@ mod tests {
         assert_eq!(tree, input.join("tree.atree"));
         let parsed = crate::atree::parse(&fs::read_to_string(&tree).unwrap()).unwrap();
         assert_eq!(parsed, crate::atree::new());
+    }
+
+    #[test]
+    fn moves_several_entries_at_once() {
+        let (_dir, input) = input();
+        let write = |rel: &str, text: &str| fs::write(input.join(rel), text).unwrap();
+        fs::create_dir_all(input.join("dir/inner")).unwrap();
+        fs::create_dir_all(input.join("dest")).unwrap();
+        for file in [
+            "a.png",
+            "a.png.amod",
+            "b.png",
+            "dir/inner/c.png",
+            "dest/d.png",
+        ] {
+            write(file, "x");
+        }
+        write("uses.amat", "[textures]\nbase_color = \"b.png\"\n");
+        let dest = input.join("dest");
+        let paths: Vec<PathBuf> = [
+            "a.png",
+            "a.png.amod",
+            "dir",
+            "dir/inner/c.png",
+            "dest/d.png",
+            "b.png",
+        ]
+        .iter()
+        .map(|p| input.join(p))
+        .collect();
+        assert!(can_move_all(&paths, &dest));
+        assert!(!can_move_all(&paths, &input.join("dir/inner")));
+        assert!(!can_move_all(&paths[4..5], &dest));
+        let report = move_all_into(&input, None, &paths, &dest).unwrap();
+        // a.png, its sidecar, dir and b.png: d.png is there, c.png goes with dir.
+        assert_eq!(
+            (report.path.clone(), report.more, report.fixed),
+            (dest.join("a.png"), 3, 1)
+        );
+        assert_eq!(
+            report.others,
+            ["a.png.amod", "dir", "dir/inner/c.png", "d.png", "b.png"].map(|p| dest.join(p))
+        );
+        assert!(report.others.iter().all(|p| p.exists()));
+        assert_eq!(
+            fs::read_to_string(input.join("uses.amat")).unwrap(),
+            "[textures]\nbase_color = \"dest/b.png\"\n"
+        );
+        // All or nothing: a taken name moves nothing back in.
+        write("b.png", "y");
+        let back = [dest.join("a.png"), dest.join("b.png")];
+        assert!(move_all_into(&input, None, &back, &input).is_err());
+        assert!(dest.join("a.png").is_file() && !input.join("a.png").exists());
     }
 
     #[test]
