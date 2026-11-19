@@ -20,6 +20,7 @@ mod fileops;
 mod font;
 mod gizmo;
 mod gradient;
+mod groups;
 mod hash;
 mod hdr;
 mod hull;

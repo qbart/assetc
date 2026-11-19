@@ -788,7 +788,7 @@ pub(super) fn config_dialog(ctx: &egui::Context, dialog: &mut ConfigDialog) -> D
     end
 }
 
-fn dialog_button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Response {
+pub(super) fn dialog_button(ui: &mut Ui, label: &str, primary: bool, enabled: bool) -> Response {
     let (fill, color) = if primary {
         (ACCENT, BG_BAR)
     } else {

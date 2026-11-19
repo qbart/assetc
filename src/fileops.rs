@@ -141,7 +141,7 @@ pub fn rename(
         moves.push((sidecar, crate::amod::path_for(&target)));
     }
     moves.extend(renamed_paints(path, name));
-    moves.extend(renamed_mips(path, name));
+    moves.extend(moved_mips(path, &target));
     relocate_all(input, root, &moves)?;
     Ok(target)
 }
@@ -314,39 +314,95 @@ fn renamed_paints(path: &Path, name: &str) -> Vec<(PathBuf, PathBuf)> {
         .collect()
 }
 
-/// A texture's `.amipmap`, its level files by name and their sidecars, and their names when
-/// the texture is renamed to `name`; see docs/features/file-operations.md#rename.
-fn renamed_mips(path: &Path, name: &str) -> Vec<(PathBuf, PathBuf)> {
+/// A texture's `.amipmap`, its level files by name and their sidecars, and where they go when
+/// the texture moves to `target` (renamed, or into another folder too); see
+/// docs/features/file-operations.md#rename.
+fn moved_mips(path: &Path, target: &Path) -> Vec<(PathBuf, PathBuf)> {
     let amipmap = crate::mipmap::path_for(path);
     if !amipmap.is_file() {
         return Vec::new();
     }
-    let target = path.with_file_name(name);
-    let mut moves = vec![(amipmap, crate::mipmap::path_for(&target))];
-    let old = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
+    let mut moves = vec![(amipmap, crate::mipmap::path_for(target))];
+    let (old, new) = (name_of(path), name_of(target));
     let (old, new) = (
         crate::build::strip_extension(&old),
-        crate::build::strip_extension(name),
+        crate::build::strip_extension(&new),
     );
-    if old != new {
-        for (_, file) in crate::mipmap::named_files(path) {
-            let file_name = file.file_name().unwrap_or_default().to_string_lossy();
-            let Some(rest) = file_name.strip_prefix(old) else {
-                continue;
-            };
-            let to = file.with_file_name(format!("{new}{rest}"));
-            let sidecar = crate::amod::path_for(&file);
-            if sidecar.is_file() {
-                moves.push((sidecar, crate::amod::path_for(&to)));
-            }
-            moves.push((file, to));
+    let dir = target.parent().unwrap_or(Path::new(""));
+    for (_, file) in crate::mipmap::named_files(path) {
+        let file_name = name_of(&file);
+        let Some(rest) = file_name.strip_prefix(old) else {
+            continue;
+        };
+        let to = dir.join(format!("{new}{rest}"));
+        if to == file {
+            continue;
         }
+        let sidecar = crate::amod::path_for(&file);
+        if sidecar.is_file() {
+            moves.push((sidecar, crate::amod::path_for(&to)));
+        }
+        moves.push((file, to));
     }
     moves
+}
+
+/// Makes the material `plan` describes: creates its folder, moves and renames its files with
+/// their companions, fixes paths and writes the `.amat`; see
+/// docs/features/groups.md#making-it. Returns the `.amat` and how many files had paths fixed.
+pub fn make_material(
+    input: &Path,
+    root: Option<&Path>,
+    plan: &crate::groups::MaterialPlan,
+) -> Result<(PathBuf, usize), String> {
+    if let Some(problem) = plan.problems().into_iter().next() {
+        return Err(problem);
+    }
+    let dir = plan.target_dir();
+    check_inside(input, &plan.source_dir(), true)?;
+    let created = !dir.exists();
+    if created {
+        check_inside(input, dir.parent().unwrap_or(input), true)?;
+        fs::create_dir(&dir).map_err(|e| e.to_string())?;
+    }
+    let undo_folder = || {
+        if created {
+            let _ = fs::remove_dir(&dir);
+        }
+    };
+    let mut moves = Vec::new();
+    for (file, slot) in plan.used() {
+        if let Err(e) = check_inside(input, file, false) {
+            undo_folder();
+            return Err(e);
+        }
+        let to = plan.destination(file, slot);
+        if to == file {
+            continue;
+        }
+        let sidecar = crate::amod::path_for(file);
+        if sidecar.is_file() {
+            moves.push((sidecar, crate::amod::path_for(&to)));
+        }
+        moves.extend(moved_mips(file, &to));
+        moves.push((file.to_path_buf(), to));
+    }
+    let amat = plan.amat();
+    let fixed = match relocate_all(input, root, &moves) {
+        Ok(fixed) => fixed,
+        Err(e) => {
+            undo_folder();
+            return Err(e);
+        }
+    };
+    if let Err(e) = fs::write(&amat, plan.source().to_toml()) {
+        for (from, to) in moves.iter().rev() {
+            let _ = fs::rename(to, from);
+        }
+        undo_folder();
+        return Err(e.to_string());
+    }
+    Ok((amat, fixed))
 }
 
 /// The file whose sidecar or `.amipmap` `path` is, when that file exists.

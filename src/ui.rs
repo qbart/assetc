@@ -53,6 +53,7 @@ mod curve;
 mod custom;
 mod data;
 mod graph;
+mod make_material;
 mod material_edit;
 mod mipmaps;
 mod pack_view;
@@ -108,6 +109,11 @@ struct UiState {
     open: HashSet<PathBuf>,
     rename: Option<Rename>,
     confirm_delete: Option<PathBuf>,
+    /// The other Input rows selected with the selected one; see
+    /// docs/features/groups.md#selecting-several-rows.
+    marked: Vec<PathBuf>,
+    /// The Make Material dialog, open; see docs/features/groups.md#make-material.
+    make_material: Option<crate::groups::MaterialPlan>,
     /// An Input row being dragged to a folder.
     tree_drag: Option<TreeDrag>,
     /// A failed file operation, shown in the status bar until the next operation or build.
@@ -667,6 +673,8 @@ impl Default for UiState {
             open: HashSet::new(),
             rename: None,
             confirm_delete: None,
+            marked: Vec::new(),
+            make_material: None,
             tree_drag: None,
             notice: None,
             canvas_options: HashMap::new(),
@@ -1420,6 +1428,7 @@ fn shell(
         });
 
     confirm_delete(&ctx, &mut state, &project);
+    make_material_dialog(&ctx, &mut state, &project);
     if state.licenses {
         state.licenses = licenses_dialog(&ctx);
     }
@@ -1450,6 +1459,7 @@ fn shell(
 
     if std::mem::take(&mut state.rescan) {
         *trees = FileTrees::scan(&project);
+        state.marked.retain(|p| p.exists());
         *assets = Assets::load(&project);
         state.reinspect = true;
     }
@@ -2383,6 +2393,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
             let keys_free = state.keys == KeyArea::Tree
                 && state.rename.is_none()
                 && state.confirm_delete.is_none()
+                && state.make_material.is_none()
                 && state.config.is_none()
                 && !state.licenses
                 && !ui.ctx().egui_wants_keyboard_input();
@@ -2404,6 +2415,7 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
             let mut cx = TreeCx {
                 location,
                 selection: state.selection.as_ref(),
+                marked: &state.marked,
                 open: &mut state.open,
                 editable,
                 rename: &mut state.rename,
@@ -2516,9 +2528,28 @@ fn left_sidebar(ui: &mut Ui, state: &mut UiState, project: &Project, trees: &Fil
                 None => {}
             }
             match action {
-                Some(TreeAction::Select(path)) => select(state, location, path),
+                Some(TreeAction::Select(path)) => {
+                    state.marked.clear();
+                    select(state, location, path);
+                }
+                Some(TreeAction::Toggle(path)) => toggle_row(state, location, path),
+                Some(TreeAction::Extend(path)) => extend_rows(state, nodes, location, path),
+                Some(TreeAction::MakeMaterial(mut files)) => {
+                    let rows = tree_nav::visible_rows(nodes, &state.open);
+                    let order = |f: &PathBuf| rows.iter().position(|r| r.path == *f);
+                    files.sort_by_key(order);
+                    state.make_material = Some(crate::groups::MaterialPlan::new(files));
+                }
                 Some(TreeAction::Op(op)) => apply_file_op(state, project, op),
                 None => {}
+            }
+            // Escape keeps only the selected row.
+            if keys_free
+                && !state.marked.is_empty()
+                && state.tree_drag.is_none()
+                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            {
+                state.marked.clear();
             }
             // F2 / Delete act on the selected Input entry, once the sidebar has the keys.
             let keys_free =
@@ -2714,9 +2745,54 @@ fn select(state: &mut UiState, location: Location, path: PathBuf) {
     let selection = Some(Selection { location, path });
     if state.selection != selection {
         state.selection = selection;
+        state.marked.clear();
         state.reinspect = true;
         state.view = View::default();
     }
+}
+
+/// `Ctrl` + click on an Input row: adds it to the selection or takes it out; see
+/// docs/features/groups.md#selecting-several-rows.
+fn toggle_row(state: &mut UiState, location: Location, path: PathBuf) {
+    let primary = state.selection.as_ref().filter(|s| s.location == location);
+    match primary {
+        None => select(state, location, path),
+        Some(s) if s.path == path => {
+            let next = (!state.marked.is_empty()).then(|| state.marked.remove(0));
+            let rest = std::mem::take(&mut state.marked);
+            match next {
+                Some(next) => select(state, location, next),
+                None => {
+                    state.selection = None;
+                    state.reinspect = true;
+                }
+            }
+            state.marked = rest;
+        }
+        Some(_) => {
+            if let Some(i) = state.marked.iter().position(|p| *p == path) {
+                state.marked.remove(i);
+            } else {
+                state.marked.push(path);
+            }
+        }
+    }
+}
+
+/// `Shift` + click on an Input row: selects the rows shown from the selected one to it.
+fn extend_rows(state: &mut UiState, nodes: &[Node], location: Location, path: PathBuf) {
+    let rows = tree_nav::visible_rows(nodes, &state.open);
+    let at = |p: &Path| rows.iter().position(|r| r.path == p);
+    let primary = state.selection.as_ref().filter(|s| s.location == location);
+    let (Some(from), Some(to)) = (primary.and_then(|s| at(&s.path)), at(&path)) else {
+        select(state, location, path);
+        return;
+    };
+    state.marked = rows[from.min(to)..=from.max(to)]
+        .iter()
+        .map(|r| r.path.clone())
+        .filter(|p| *p != rows[from].path)
+        .collect();
 }
 
 /// A file operation requested from the Input tree, see docs/features/file-operations.md.
@@ -2751,6 +2827,12 @@ struct TreeDrag {
 
 enum TreeAction {
     Select(PathBuf),
+    /// `Ctrl` + click: add the row to the selection or take it out.
+    Toggle(PathBuf),
+    /// `Shift` + click: select the rows from the selected one to this one.
+    Extend(PathBuf),
+    /// Make Material… on these files.
+    MakeMaterial(Vec<PathBuf>),
     Op(FileOp),
 }
 
@@ -2766,6 +2848,8 @@ struct Rename {
 struct TreeCx<'a> {
     location: Location,
     selection: Option<&'a Selection>,
+    /// The rows selected with it.
+    marked: &'a [PathBuf],
     open: &'a mut HashSet<PathBuf>,
     /// File operations are only offered in the Input tree.
     editable: bool,
@@ -2941,9 +3025,10 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
             || crate::texture_paint::is_apaint(&node.path)
             || crate::mipmap::is_amipmap(&node.path)
             || is_atlas_config(&node.path));
-    let selected = cx
+    let primary = cx
         .selection
         .is_some_and(|s| s.location == cx.location && s.path == node.path);
+    let selected = primary || (cx.editable && cx.marked.contains(&node.path));
     let renaming = cx.rename.as_mut().filter(|r| r.path == node.path);
     let mark = cx.marks.and_then(|m| m.of(&node.path));
     let (response, done) = tree_row(
@@ -2971,22 +3056,48 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     if cx.editable && response.drag_started() {
         cx.drag_start = Some(node.path.clone());
     }
+    let modifiers = ui.input(|i| i.modifiers);
     if response.clicked() {
-        if is_dir && !cx.open.remove(&node.path) {
-            cx.open.insert(node.path.clone());
-        }
-        cx.action = Some(TreeAction::Select(node.path.clone()));
+        // Several rows in the Input tree; see docs/features/groups.md#selecting-several-rows.
+        let path = node.path.clone();
+        cx.action = Some(match (cx.editable, modifiers) {
+            (true, m) if m.command => TreeAction::Toggle(path),
+            (true, m) if m.shift => TreeAction::Extend(path),
+            _ => {
+                if is_dir && !cx.open.remove(&node.path) {
+                    cx.open.insert(node.path.clone());
+                }
+                TreeAction::Select(path)
+            }
+        });
     }
     if cx.editable {
-        if response.secondary_clicked() {
+        if response.secondary_clicked() && !selected {
             cx.action = Some(TreeAction::Select(node.path.clone()));
         }
+        // The group a menu item acts on: the selection when this row is in it.
+        let group: Vec<PathBuf> = match cx.selection {
+            Some(s) if selected => std::iter::once(s.path.clone())
+                .chain(cx.marked.iter().cloned())
+                .collect(),
+            _ => vec![node.path.clone()],
+        };
         response.context_menu(|ui| {
             let dir = if is_dir {
                 node.path.clone()
             } else {
                 node.path.parent().unwrap_or(&node.path).to_path_buf()
             };
+            if group
+                .iter()
+                .all(|p| p.is_file() && crate::build::is_texture_source(p))
+            {
+                if menu_item(ui, "Make Material…", None).clicked() {
+                    cx.action = Some(TreeAction::MakeMaterial(group.clone()));
+                    ui.close();
+                }
+                ui.separator();
+            }
             create_items(ui, &dir, &mut cx.action);
             ui.separator();
             if menu_item(ui, "Rename", None).clicked() {
@@ -3383,6 +3494,52 @@ fn dialog(
         answer = Some(false);
     }
     answer
+}
+
+/// The Make Material dialog and what accepting it does; see
+/// docs/features/groups.md#make-material.
+fn make_material_dialog(ctx: &egui::Context, state: &mut UiState, project: &Project) {
+    let Some(plan) = &mut state.make_material else {
+        return;
+    };
+    match make_material::show(ctx, plan) {
+        make_material::End::Open => return,
+        make_material::End::Cancel => {
+            state.make_material = None;
+            return;
+        }
+        make_material::End::Make => {}
+    }
+    let Some(plan) = state.make_material.take() else {
+        return;
+    };
+    let Some(input) = project.input_dir() else {
+        return;
+    };
+    state.notice = Some(
+        match fileops::make_material(&input, project.root.as_deref(), &plan) {
+            Ok((amat, fixed)) => {
+                state.open.insert(plan.source_dir());
+                state.open.insert(plan.target_dir());
+                state.rescan = true;
+                select(state, Location::Input, amat);
+                state.tree_scroll = true;
+                let n = plan.used().count();
+                let mut text = format!(
+                    "Made material {} from {n} file{}",
+                    plan.name,
+                    if n == 1 { "" } else { "s" }
+                );
+                match fixed {
+                    0 => {}
+                    1 => text += "; fixed paths in 1 file",
+                    k => text += &format!("; fixed paths in {k} files"),
+                }
+                text
+            }
+            Err(e) => format!("Make Material failed: {e}"),
+        },
+    );
 }
 
 /// The delete confirmation dialog, see docs/features/file-operations.md#delete.
