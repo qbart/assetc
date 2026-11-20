@@ -26,6 +26,8 @@ no_mipmaps = ["ui/**"]
 | `no_mipmaps` | base level only                              | full mip chain             |
 | `volume_luts` | color LUT (`*.cube`) as a 3D texture, see [`lut.md`](lut.md#build) | 2D strip |
 
+One more key is not a glob list: `format` (see [Format](#format)).
+
 Glob syntax:
 
 - `*` matches any run of characters except `/`.
@@ -36,12 +38,64 @@ Glob syntax:
 - Matching is case-sensitive.
 - An invalid pattern fails the whole build before any source is compiled.
 
+## Format
+
+`[textures] format` picks the GPU format every texture of the build is
+written in, one per [target](../spec/assetc.toml.md#targets): a desktop
+target takes `bc`, a mobile one `astc`, and so on.
+
+```toml
+[textures]
+format = "bc"            # the default
+
+[targets.mobile]
+textures = { format = "astc" }
+```
+
+| `format` | Written as | 8-bit RGBA | R (texture paint) | RG (texture paint) | HDR cubemap |
+|----------|------------|------------|-------------------|--------------------|-------------|
+| `bc` (default) | BCn blocks, for desktop GPUs | `BC7` | `BC4` | `BC5` | `BC6H` (unsigned) |
+| `astc`   | ASTC 4 × 4 blocks, for mobile GPUs | ASTC 4 × 4 LDR | ASTC 4 × 4, R in R, G, B; alpha 1 | ASTC 4 × 4, R in R, G, B; G in alpha | ASTC 4 × 4 HDR |
+| `uastc`  | Basis Universal UASTC 4 × 4, zstd supercompressed; a game transcodes it to what the GPU takes when loading | UASTC LDR | UASTC LDR, R in R, G, B; alpha 1 | UASTC LDR, R in R, G, B; G in alpha | UASTC HDR 4 × 4 |
+| `rgba`   | uncompressed | `R8G8B8A8` | `R8` | `R8G8` | `R16G16B16A16_SFLOAT` |
+| `rgb`    | uncompressed, alpha dropped | `R8G8B8` | `R8` | `R8G8` | `R16G16B16_SFLOAT` |
+
+- The [color space](#color-space) still applies: sRGB textures get the
+  `_SRGB` variant of the format (`BC7_SRGB_BLOCK`, `ASTC_4x4_SRGB_BLOCK`,
+  `R8G8B8_SRGB`, UASTC with the sRGB transfer function), linear ones the
+  `_UNORM` variant. R and RG textures are always linear. Mip levels are
+  made from the 8-bit images as below, then each level is encoded.
+- Normal maps are encoded like any other linear RGBA texture (`BC7`, not
+  `BC5`), so a shader reads X, Y, Z from R, G, B whatever the format.
+- **Lookup textures stay `rgba`** whatever `format` says, since block
+  compression would change the exact texels they are read for:
+  [gradients](gradients.md), [palettes](palettes.md),
+  [color LUTs](lut.md) and a model's
+  [vertex color textures](vertex-colors.md#export).
+- Encoding uses the [ktx-rs](https://crates.io/crates/ktx-rs) crate (a Rust
+  port of KTX-Software, libktx):
+  - `bc`: each level is encoded to UASTC 4 × 4 (Basis Universal encoder,
+    default level) and transcoded to the BC format. An RG texture is
+    encoded with R in R, G, B and G in alpha so that BC5 gets R and G.
+  - `astc`: astcenc, 4 × 4 blocks, LDR, medium quality; HDR goes through
+    UASTC HDR 4 × 4 transcoded to ASTC 4 × 4 HDR, as the ASTC HDR encoder
+    is not available.
+  - `uastc`: the UASTC LDR 4 × 4 encoder (default level) or the UASTC HDR
+    4 × 4 encoder, then zstd level 18 supercompression.
+- An unknown value is an error when `assetc.toml` is read: `textures.format:
+  unknown variant ...`.
+- Changing `format` rebuilds every texture.
+
+See [`docs/spec/ktx2.md`](../spec/ktx2.md#formats) for what each format
+writes.
+
 ## Color space
 
-- **sRGB** (default): the pixels are color. The texture is written as
-  `R8G8B8A8_SRGB`, so the GPU decodes it to linear when sampling.
-- **linear**: the pixels are data and are used as-is. The texture is written as
-  `R8G8B8A8_UNORM`.
+- **sRGB** (default): the pixels are color. The texture is written in the
+  `_SRGB` variant of its [format](#format) (`BC7_SRGB_BLOCK`,
+  `R8G8B8A8_SRGB`, …), so the GPU decodes it to linear when sampling.
+- **linear**: the pixels are data and are used as-is. The texture is
+  written in the `_UNORM` variant (`BC7_UNORM_BLOCK`, `R8G8B8A8_UNORM`, …).
 
 Alpha is always linear and straight (not premultiplied).
 
@@ -96,11 +150,13 @@ in the Inspector's Modifiers tab.
 CLI lines show the settings used, for example:
 
 ```
-textures/Grass.png -> textures/Grass.ktx2 (srgb, 10 levels)
-textures/rock_n.png -> textures/rock_n.ktx2 (linear, 10 levels)
-ui/button.png -> ui/button.ktx2 (srgb, 1 level)
-textures/rock.png -> textures/rock.ktx2 (srgb, 9 levels, 2 custom)
+textures/Grass.png -> textures/Grass.ktx2 (bc7, srgb, 10 levels)
+textures/rock_n.png -> textures/rock_n.ktx2 (bc7, linear, 10 levels)
+ui/button.png -> ui/button.ktx2 (bc7, srgb, 1 level)
+textures/rock.png -> textures/rock.ktx2 (bc7, srgb, 9 levels, 2 custom)
 ```
 
-The last one has an [`.amipmap`](mipmaps.md#build): two of its levels come
-from files.
+The first word is the format written: `bc7`, `bc4`, `bc5`, `bc6h`,
+`astc 4x4`, `astc 4x4 hdr`, `uastc`, `uastc hdr`, `rgba8`, `rgb8`, `r8`,
+`rg8`, `rgba16f` or `rgb16f`. The last one has an
+[`.amipmap`](mipmaps.md#build): two of its levels come from files.

@@ -61,7 +61,9 @@ Textures are decoded to 8-bit RGBA (other bit depths and color types are
 converted; JPEGs, having no alpha, get alpha 255; baseline and progressive
 JPEGs are supported; TGAs may be uncompressed or RLE-compressed, true-color,
 grayscale or color-mapped, with either origin). Color space and mipmaps follow the `[textures]` settings, see
-[`textures.md`](textures.md). No compression yet.
+[`textures.md`](textures.md); so does the GPU format they are written in
+(`bc` by default, or `astc`, `uastc`, `rgba`, `rgb`, see
+[`textures.md`](textures.md#format)).
 
 ## Outputs
 
@@ -152,8 +154,8 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
 
 ```
 $ assetc build
-textures/Grass.png -> textures/Grass.ktx2 (srgb, 10 levels)
-textures/dirt.png -> textures/dirt.ktx2 (srgb, 9 levels)
+textures/Grass.png -> textures/Grass.ktx2 (bc7, srgb, 10 levels)
+textures/dirt.png -> textures/dirt.ktx2 (bc7, srgb, 9 levels)
 removed textures/old.ktx2
 Built 2 textures (1 skipped, 1 removed) into /path/to/project/build
 ```

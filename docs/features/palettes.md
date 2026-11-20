@@ -83,7 +83,7 @@ Output). An invalid file shows an **Error** row and no image.
   the image, and its [attached structs](structs.md); see
   [`apalette.bin.md`](../spec/apalette.bin.md). The image and the data are
   two assets: the CLI prints `<source> -> <asset path>.apalette.bin (<n>
-  colors)` and `<source> -> <asset path>.ktx2 (srgb, 1 level)`, and the
+  colors)` and `<source> -> <asset path>.ktx2 (rgba8, srgb, 1 level)`, and the
   summary counts both.
 
 ## Keybindings

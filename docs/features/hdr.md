@@ -41,9 +41,12 @@ pure-Rust [`exr`](https://crates.io/crates/exr) crate.
   along −Z, +X is a quarter to the right.
 - **Mipmaps**: a full chain down to 1 × 1; each level's texel is the average
   of the 2 × 2 texels under it, per face.
-- Colors are kept linear and unclamped, written as half floats
-  (`R16G16B16A16_SFLOAT`); values beyond the half-float range become its
-  largest finite value.
+- Colors are kept linear and unclamped as half floats; values beyond the
+  half-float range become its largest finite value. The levels are then
+  written in the build's [texture format](textures.md#format): `BC6H`
+  (unsigned: negative values become 0) for `bc`, ASTC 4 × 4 HDR for
+  `astc`, UASTC HDR 4 × 4 for `uastc`, `R16G16B16A16_SFLOAT` for `rgba`,
+  `R16G16B16_SFLOAT` for `rgb`.
 
 ## Build
 
@@ -51,7 +54,7 @@ pure-Rust [`exr`](https://crates.io/crates/exr) crate.
 |--------|------------|--------|
 | `*.exr` (any case) | texture (cubemap) | `<asset path>.ktx2`, asset path the input-relative path without the extension |
 
-The CLI line reads `<source> -> <output> (cubemap 512², rgba16f, 10 levels)`.
+The CLI line reads `<source> -> <output> (cubemap 512², bc6h, 10 levels)`.
 
 ## Preview and Inspector
 
@@ -65,7 +68,7 @@ The CLI line reads `<source> -> <output> (cubemap 512², rgba16f, 10 levels)`.
   **Face size** (`512 px`), **Mip levels**, **Asset path**, **Asset ID**,
   **Output** (as for textures, `(not built)` appended when missing).
 - A compiled cubemap (`.ktx2` with six faces) in the Output tree shows
-  Dimensions, Format `R16G16B16A16_SFLOAT`, **Faces** `6` and Mip levels; it
+  Dimensions, Format (`BC6H_UFLOAT_BLOCK`, …), **Faces** `6` and Mip levels; it
   has no 2D preview.
 
 ## Not yet

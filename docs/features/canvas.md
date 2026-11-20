@@ -56,7 +56,7 @@ Both modes show the same messages when there is no image to show.
 |-----------------------------------|-------------------------------------------|
 | nothing                           | "Select a file to preview"                |
 | source texture (Input `*.png`, `*.jpg`, `*.jpeg`, `*.tga`) | the decoded image |
-| compiled texture (Output `*.ktx2`)| level 0 (a 3D texture's slices side by side, left to right), if the file is in assetc's own KTX2 subset (`R8G8B8A8_SRGB` / `R8G8B8A8_UNORM`, no supercompression, see [`ktx2.md`](../spec/ktx2.md)); otherwise "No preview for this format" |
+| compiled texture (Output `*.ktx2`)| level 0 (a 3D texture's slices side by side, left to right), decoded to 8-bit RGBA, if it is a 2D or 3D texture (not a cubemap or array) in an 8-bit format of the [texture formats](textures.md#format): `R8G8B8A8`, `R8G8B8`, `R8`, `R8G8` (R as gray, RG as red and green), `BC7`, `BC4` (as gray), `BC5` (red and green), ASTC 4 × 4 LDR or UASTC LDR (transcoded), shown as stored; otherwise "No preview for this format" |
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
 | an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
 | a font (Input `*.ttf`, `*.otf`)   | its specimen sheet, without the toolbar, see [`fonts.md`](fonts.md#specimen) |

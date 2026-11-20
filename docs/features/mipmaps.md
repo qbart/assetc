@@ -84,7 +84,7 @@ Without an `.amipmap`, a file named `rock.mip1.png` is an ordinary texture.
   from files:
 
   ```
-  textures/rock.png -> textures/rock.ktx2 (srgb, 9 levels, 2 custom)
+  textures/rock.png -> textures/rock.ktx2 (bc7, srgb, 9 levels, 2 custom)
   ```
 
 - The `.amipmap` is the texture's own setting and wins over

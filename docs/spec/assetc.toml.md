@@ -33,9 +33,10 @@ for glob syntax and what each setting does.
 | `linear`     | array of strings | `[]`    | Globs of textures holding linear data, not sRGB color. |
 | `no_mipmaps` | array of strings | `[]`    | Globs of textures written without mipmaps.        |
 | `volume_luts` | array of strings | `[]`   | Globs of color LUTs (`*.cube`) compiled as 3D textures instead of 2D strips, see [`lut.md`](../features/lut.md#build). |
+| `format`     | string           | `"bc"`  | GPU format of every texture: `"bc"`, `"astc"`, `"uastc"`, `"rgba"` or `"rgb"`, see [`textures.md`](../features/textures.md#format). Usually set per [target](#targets). |
 
-Patterns are matched against the source path relative to `input`, with its
-extension (`textures/rock_n.png`).
+Patterns (every key but `format`) are matched against the source path
+relative to `input`, with its extension (`textures/rock_n.png`).
 
 ### `[meshes]`
 
@@ -166,8 +167,8 @@ output = "build"
 no_mipmaps = ["ui/**"]
 
 [targets.mobile]
-# Writes to build-mobile; mipmaps for ui too, fewer levels of detail.
-textures = { no_mipmaps = [] }
+# Writes to build-mobile: ASTC, mipmaps for ui too, fewer levels of detail.
+textures = { format = "astc", no_mipmaps = [] }
 meshes = { lod_ratios = [0.5] }
 
 [targets.preview]

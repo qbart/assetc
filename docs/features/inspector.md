@@ -131,10 +131,10 @@ instead.
 | Type       | what the container holds, from its header: `2D`, `Cubemap` (6 faces), `3D` (`pixelDepth` > 0), or `2D array` / `Cubemap array` (`layerCount` > 0, with ` of <n>` layers) |
 | Usage      | what the texture is for, the [`assetc.usage`](../spec/ktx2.md#keyvalue-data) key: `color`, `data`, `normal`, `orm`, `height`, `noise`, `gradient`, `palette`, `atlas`, `font`, `lut`, `environment`; `—` without the key (another writer, or an older build) |
 | Dimensions | `W × H` px (level 0), or `W × H × D` px for a 3D texture (shown as its slices side by side) |
-| Format     | `R8G8B8A8_SRGB`, `R8G8B8A8_UNORM`, `R16G16B16A16_SFLOAT`, or `vkFormat <n>` for any other |
+| Format     | the `vkFormat` name without `VK_FORMAT_` (`BC7_SRGB_BLOCK`, `ASTC_4x4_UNORM_BLOCK`, `R8G8B8A8_SRGB`, …), plus ` (UASTC, zstd)` for a supercompressed UASTC texture; `vkFormat <n>` for a value ktx-rs does not name |
 | Color space | the data format descriptor's transfer function: `sRGB` or `linear` |
 | Mip levels | `levelCount`                                                        |
-| Writer     | the `KTXwriter` value (`assetc 0.2.2`), when there is one            |
+| Writer     | the `KTXwriter` value (`assetc 0.2.2 / libktx v4.4.2-2`), when there is one |
 | Asset path | output-relative path without extension                              |
 | Asset ID   | as above                                                            |
 
@@ -233,8 +233,8 @@ and also offers **Chunks** in the view bar.
 
 ## Mipmaps tab
 
-Shown for a compiled texture (`.ktx2` in the Output tree) in assetc's own
-format (see [`ktx2.md`](../spec/ktx2.md)) with more than one mip level. It
+Shown for a compiled texture (`.ktx2` in the Output tree) the canvas can
+[preview](canvas.md) with more than one mip level. It
 switches which level the [canvas](canvas.md) shows.
 
 - One full-width row per level, 28 px tall, inside 8 px margins: `Level <n>`

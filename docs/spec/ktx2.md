@@ -1,27 +1,56 @@
 # `.ktx2` textures
 
 Textures are written as [KTX 2.0](https://registry.khronos.org/KTX/specs/2.0/ktxspec.v2.html)
-files. assetc writes only the subset described here; any conforming KTX2
-reader can load them.
+files by [ktx-rs](https://crates.io/crates/ktx-rs) (a Rust port of
+KTX-Software's libktx: its texture writer, encoders and data format
+descriptors). assetc writes only the subset described here; any conforming
+KTX2 reader can load them, and every file passes `ktx validate` (with
+warning 7010 for the custom `assetc.usage` key).
 
 ## Profile
 
 | Property                  | Value                                         |
 |---------------------------|-----------------------------------------------|
-| `vkFormat`                | `VK_FORMAT_R8G8B8A8_SRGB` (`43`) for sRGB textures, `VK_FORMAT_R8G8B8A8_UNORM` (`37`) for linear ones; see [One and two channels](#one-and-two-channels) for `R8_UNORM` and `R8G8_UNORM` |
-| `typeSize`                | `1`                                           |
+| `vkFormat`                | per [format](#formats)                        |
+| `typeSize`                | `1`; `2` for the half-float formats           |
 | `pixelWidth`/`pixelHeight`| source image size                             |
 | `pixelDepth`              | `0` (2D); `N` for color LUT volumes, see [Color LUTs](#color-luts) |
 | `layerCount`              | `0` (not an array)                            |
-| `faceCount`               | `1`                                           |
+| `faceCount`               | `1`; `6` for [cubemaps](#cubemaps)            |
 | `levelCount`              | `1` without mipmaps, else `floor(log2(max(w, h))) + 1` (full chain to 1×1) |
-| `supercompressionScheme`  | `0` (none)                                    |
+| `supercompressionScheme`  | `0` (none); `2` (zstd) for `uastc`            |
 | Orientation               | `rd` (rows top to bottom), the KTX2 default   |
 | Alpha                     | straight (not premultiplied)                  |
 
-Color space and mipmaps are chosen per texture, see
-[`docs/features/textures.md`](../features/textures.md), which also defines how
-mip levels are computed.
+Color space, mipmaps and the format are chosen per texture and per build,
+see [`docs/features/textures.md`](../features/textures.md), which also
+defines how mip levels are computed and which encoder makes each format.
+
+## Formats
+
+The `[textures] format` setting (see
+[`textures.md`](../features/textures.md#format)) picks the row; the image
+kind picks the column. `S`/`U` is the sRGB or linear variant, from the
+texture's color space (R, RG and HDR are always linear).
+
+| `format` | RGBA (and RGB) images | R | RG | HDR cubemap |
+|----------|-----------------------|---|----|-------------|
+| `bc`     | `BC7_SRGB_BLOCK` (146) / `BC7_UNORM_BLOCK` (145) | `BC4_UNORM_BLOCK` (139) | `BC5_UNORM_BLOCK` (141) | `BC6H_UFLOAT_BLOCK` (143) |
+| `astc`   | `ASTC_4x4_SRGB_BLOCK` (158) / `ASTC_4x4_UNORM_BLOCK` (157) | `ASTC_4x4_UNORM_BLOCK` | `ASTC_4x4_UNORM_BLOCK` | `ASTC_4x4_SFLOAT_BLOCK` (1000066000) |
+| `uastc`  | `UNDEFINED` (0), UASTC LDR 4×4, zstd | as RGBA, linear | as RGBA, linear | `ASTC_4x4_SFLOAT_BLOCK`, UASTC HDR 4×4, zstd |
+| `rgba`   | `R8G8B8A8_SRGB` (43) / `R8G8B8A8_UNORM` (37) | `R8_UNORM` (9) | `R8G8_UNORM` (16) | `R16G16B16A16_SFLOAT` (97) |
+| `rgb`    | `R8G8B8_SRGB` (29) / `R8G8B8_UNORM` (23) | `R8_UNORM` | `R8G8_UNORM` | `R16G16B16_SFLOAT` (90) |
+
+Texels in the block formats:
+
+- **R** in ASTC and UASTC: `R R R 1` (as libktx swizzles one channel);
+  read R. In BC4: R.
+- **RG** in ASTC and UASTC: `R R R G`; read R and alpha. In BC5: R, G.
+- **RGBA**: R, G, B, A in every format; normal maps are RGBA too (X, Y, Z
+  in R, G, B), not BC5.
+- `rgb` drops alpha from RGBA images (`R8G8B8`, `R16G16B16_SFLOAT`).
+- Lookup textures (gradients, palettes, color LUTs, a model's vertex color
+  textures) are written as `rgba` whatever the format.
 
 ## File layout
 
@@ -34,17 +63,33 @@ All integers little-endian. Offsets are absolute file offsets. `L` is
 |        12 |     36 | header: the nine u32 fields from the table above, in KTX2 order          |
 |        48 |     32 | index: `dfdByteOffset` u32, `dfdByteLength` u32, `kvdByteOffset` u32, `kvdByteLength` u32, `sgdByteOffset` u64 (`0`), `sgdByteLength` u64 (`0`) |
 |        80 |   24·L | level index, level 0 (largest) first: `byteOffset` u64, `byteLength` u64, `uncompressedByteLength` u64 |
-|   80+24·L |     92 | data format descriptor, see below                                        |
-|  172+24·L |      … | key/value data, see below                                                |
-|         … |      … | zero padding to a multiple of 4                                          |
+|   80+24·L |      … | data format descriptor, see below                                        |
+|         … |      … | key/value data, see below                                                |
+|         … |      … | zero padding to the level alignment                                      |
 |         … |      … | level images, **smallest level first** (level `L-1` … level 0), as KTX2 requires |
 
-Each level image is its pixels, rows top to bottom, each pixel `R G B A`, no
-row padding: `byteLength` = `uncompressedByteLength` = `w_n · h_n · 4`.
-Images follow each other with no gaps; since every size is a multiple of 4,
-every `byteOffset` is 4-aligned.
+- Uncompressed levels: the texels, rows top to bottom, no row padding:
+  `byteLength` = `uncompressedByteLength` = `w_n · h_n · texel size`
+  (4 for `R8G8B8A8`, 3 for `R8G8B8`, 8 / 6 for the half-float formats).
+- Block levels: 4×4 blocks, rows of blocks top to bottom,
+  `ceil(w_n / 4) · ceil(h_n / 4)` blocks of 16 bytes (8 for `BC4`); a level
+  smaller than a block still takes one block per 4×4 started.
+- `uastc`: each level is zstd-compressed on its own: `byteLength` is the
+  compressed size, `uncompressedByteLength` the UASTC size (16 bytes a
+  block).
+- Each level image starts at a multiple of the level alignment: the least
+  common multiple of the texel (or block) size and 4 (`1` with
+  supercompression), with zero padding before it.
 
-## Data format descriptor (92 bytes)
+## Data format descriptor
+
+A Khronos Basic descriptor block, as libktx makes it for the `vkFormat`
+(`vk2dfd`); for `uastc`, the UASTC (`166`) or UASTC HDR 4×4 color model
+libktx's Basis encoder writes. Block formats have `texelBlockDimension`
+`3, 3, 0, 0` (4×4), one sample over the whole block and `transferFunction`
+`2` (sRGB) for the `_SRGB` formats and sRGB UASTC, else `1` (linear).
+
+The uncompressed RGBA formats' descriptor in full (92 bytes):
 
 `dfdTotalSize` u32 = `92`, followed by one Khronos Basic descriptor block.
 The two formats differ only in `transferFunction`:
@@ -81,7 +126,8 @@ Sample layout: `bitOffset` u16, `bitLength` u8, `channelType` u8,
 ## One and two channels
 
 [Texture paints](../features/texture-paint.md#build) in Channels mode with R
-or RG are written with fewer channels; everything else above stays the same:
+or RG are written with fewer channels (formats `rgba` and `rgb`; the block
+formats are in [Formats](#formats)); everything else above stays the same:
 
 | Property | R | RG |
 |----------|---|----|
@@ -103,7 +149,9 @@ image to the next multiple of 4, `byteOffset` points at the image and
 ## Key/value data
 
 Two entries, sorted by key as KTX2 requires: `KTXwriter` =
-`assetc <version>`, then `assetc.usage` = what the texture is for. Each is
+`assetc <version> / libktx <version>` (`assetc 0.2.2 / libktx v4.4.2-2`:
+assetc's, then the libktx version ktx-rs ports), then `assetc.usage` = what
+the texture is for. Each is
 
 ```
 keyAndValueByteLength u32   = len(key) + 1 + len(value) + 1
@@ -142,19 +190,21 @@ instead:
 
 | Property      | Value |
 |---------------|-------|
-| `vkFormat`    | `VK_FORMAT_R16G16B16A16_SFLOAT` (`97`) |
-| `typeSize`    | `2` |
+| `vkFormat`    | the HDR column of [Formats](#formats); `R16G16B16A16_SFLOAT` (`97`) for `rgba` |
+| `typeSize`    | `2` for the half-float formats, else `1` |
 | `pixelWidth` / `pixelHeight` | the face size (square, a power of two) |
 | `pixelDepth`, `layerCount` | `0` |
 | `faceCount`   | `6` |
 | `levelCount`  | `log2(size) + 1` (full chain to 1 × 1) |
 
-The level images start at a multiple of 8 bytes (the texel size), so the
-padding after the key/value data is to a multiple of 8. Each level image holds the six faces back to back in the order +X, −X, +Y,
-−Y, +Z, −Z, each face its rows top to bottom, each texel `R G B A` as IEEE
-half floats: `byteLength` = `6 × w_n × h_n × 8`.
+Each level image holds the six faces back to back in the order +X, −X,
++Y, −Y, +Z, −Z, each face its rows (of texels or blocks) top to bottom. In
+`rgba`, each texel is `R G B A` as IEEE half floats: `byteLength` =
+`6 × w_n × h_n × 8`, the level images starting at a multiple of 8 bytes
+(the texel size).
 
-The data format descriptor is the same 92 bytes with these differences:
+For `R16G16B16A16_SFLOAT`, the data format descriptor is the same 92 bytes
+with these differences:
 `transferFunction` `1` (linear), `bytesPlane[0]` `8`, and each sample has
 `bitOffset` `0`, `16`, `32`, `48`, `bitLength` `15` (16 bits), the channel
 (`0x00`, `0x01`, `0x02`, `0x0F`) with the `SIGNED` (`0x40`) and `FLOAT`

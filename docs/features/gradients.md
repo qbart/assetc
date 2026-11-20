@@ -156,5 +156,5 @@ and no image.
   the image, and its [attached structs](structs.md); see
   [`agradient.bin.md`](../spec/agradient.bin.md). The image and the data are
   two assets: the CLI prints `<source> -> <asset path>.agradient.bin (<n>
-  gradients)` and `<source> -> <asset path>.ktx2 (srgb, 1 level)`, and the
+  gradients)` and `<source> -> <asset path>.ktx2 (rgba8, srgb, 1 level)`, and the
   summary counts both.

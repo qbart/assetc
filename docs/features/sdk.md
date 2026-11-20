@@ -64,6 +64,18 @@ directory, so a game can ship a pack and develop against loose files.
 | `assets.read(id)` | The asset's bytes (`Cow<[u8]>`: borrowed from a pack, read from disk for a directory). |
 | `assets.load::<T>(id)` | Reads and decodes: `T` is any format type below (`Texture`, `Mesh`, …). |
 
+`texture::Format` names every format of the [texture
+formats](textures.md#format): `Rgba8Srgb`, `Rgba8Unorm`, `Rgb8Srgb`,
+`Rgb8Unorm`, `R8Unorm`, `Rg8Unorm`, `Rgba16Float`, `Rgb16Float`,
+`Bc7Srgb`, `Bc7Unorm`, `Bc4Unorm`, `Bc5Unorm`, `Bc6hUfloat`, `Astc4x4Srgb`,
+`Astc4x4Unorm`, `Astc4x4Float` and `Uastc`. `Format::block()` gives the
+block size in texels and bytes (`(1, 4)` for `Rgba8*`, `(4, 16)` for
+`Bc7*`). A `Uastc` texture's levels are zstd-compressed UASTC as the file
+stores them; the SDK does not inflate or transcode them (it depends on
+nothing but `std`), so a game hands the file to a KTX2 transcoder such as
+[ktx-rs](https://crates.io/crates/ktx-rs) (`Texture2::create_from_memory`,
+`transcode_basis`).
+
 A texture's ID is the hash of its asset path without `.ktx2`, as in the
 [manifest](../spec/aman.bin.md); materials, meshes, fonts and atlases refer
 to textures and materials by these IDs, so `assets.load::<Texture>(id)`
@@ -85,7 +97,7 @@ into string tables are resolved to `String`s, hashes are kept as `u64`.
 | `pack` | `Pack`, `PackEntry` | `*.pak` | [`pak.md`](../spec/pak.md) |
 | `manifest` | `Manifest`, `ManifestEntry` | `assetc.aman.bin` | [`aman.bin.md`](../spec/aman.bin.md) |
 | `chunks` | `ChunkFile` | any chunked file: format name, version, chunks by name | [`chunks.md`](../spec/chunks.md) |
-| `texture` | `Texture` | `*.ktx2`: format (`Rgba8Srgb`, `Rgba8Unorm`, `Rgba16Float`, `R8Unorm`, `Rg8Unorm`), size, depth, faces, layers, every mip level's bytes, and its `usage` (`assetc.usage`, `None` without it) | [`ktx2.md`](../spec/ktx2.md) |
+| `texture` | `Texture` | `*.ktx2`: format (see below), size, depth, faces, layers, every mip level's bytes as stored (blocks for BC and ASTC, ready to upload), and its `usage` (`assetc.usage`, `None` without it) | [`ktx2.md`](../spec/ktx2.md#formats) |
 | `material` | `Material` | `*.amat.bin` (version 1 or 2), with its struct data | [`amat.bin.md`](../spec/amat.bin.md) |
 | `mesh` | `Mesh` | `*.amesh.bin`: vertices (normals and tangents unpacked to `f32`), indices, submeshes, material IDs, meshlets, levels of detail, skin, skeleton, locators, color and UV sets, texture paints (`Mesh::paints`; `Paint::distance` turns a distance map's value back into a distance), properties, shapes, regions, paths | [`amesh.bin.md`](../spec/amesh.bin.md) |
 | `anim` | `Animation` | `*.aanim.bin`: clips, channels with their keys, events; plus sampling a channel at a time | [`aanim.bin.md`](../spec/aanim.bin.md) |

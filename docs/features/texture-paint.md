@@ -317,7 +317,7 @@ Each paint compiles to a texture `P/<name>.paint.ktx2` (asset path
 `P/<name>.paint`, `P` the model's input-relative path without its
 extension), built with the model's other textures, with a full mip chain:
 
-| Mode     | Channels | Format             | `assetc.usage` | Texels |
+| Mode     | Channels | Written as (format `rgba`) | `assetc.usage` | Texels |
 |----------|----------|--------------------|----------------|--------|
 | Color    |          | `R8G8B8A8_SRGB`    | `color`        | RGBA as painted |
 | Channels | R        | `R8_UNORM`         | `data`         | R |
@@ -327,8 +327,11 @@ extension), built with the model's other textures, with a full mip chain:
 | Weights  | any      | as Channels        | `data`         | as Channels |
 | Distance | any      | as Channels        | `data`         | as Channels |
 
-(See [`ktx2.md`](../spec/ktx2.md) for the formats; three-channel formats are
-not written, few GPUs sample them.)
+Other [texture formats](textures.md#format) encode these: an RGBA texture
+as any texture (`BC7`, ASTC, UASTC, or `R8G8B8` for `rgb`), an R texture as
+`BC4` (R in R, G, B for ASTC and UASTC), an RG texture as `BC5` (G in alpha
+for ASTC and UASTC). `rgb` writes R and RG textures as `rgba` does. (See
+[`ktx2.md`](../spec/ktx2.md#formats).)
 
 - Mip levels are computed as for [textures](textures.md) in the format's
   color space (Color: sRGB), from all four channels, before the channels

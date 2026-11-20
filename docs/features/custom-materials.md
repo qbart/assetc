@@ -332,8 +332,8 @@ has an error.
 
 ```
 shaders/water.ashader -> shaders/water.ashader.bin (shader: 64-byte params, 4 textures, fragment)
-water/lake.png -> water/lake.ktx2 (srgb, 11 levels)
-water/lake.foam.png, water/lake.depth.png -> water/lake.mask.ktx2 (linear, 11 levels)
+water/lake.png -> water/lake.ktx2 (bc7, srgb, 11 levels)
+water/lake.foam.png, water/lake.depth.png -> water/lake.mask.ktx2 (bc7, linear, 11 levels)
 water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
 ```
 

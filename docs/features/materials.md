@@ -163,9 +163,9 @@ The material fails, and with it the build (no manifest is written), when:
 ## CLI
 
 ```
-brick/brick.jpg -> brick/brick.ktx2 (srgb, 11 levels)
-brick/brick.n.jpg -> brick/brick.n.ktx2 (linear, 11 levels)
-brick/brick.ao.jpg, brick/brick.r.jpg -> brick/brick.orm.ktx2 (linear, 11 levels)
+brick/brick.jpg -> brick/brick.ktx2 (bc7, srgb, 11 levels)
+brick/brick.n.jpg -> brick/brick.n.ktx2 (bc7, linear, 11 levels)
+brick/brick.ao.jpg, brick/brick.r.jpg -> brick/brick.orm.ktx2 (bc7, linear, 11 levels)
 brick/brick.* -> brick/brick.amat.bin (material: base_color, normal, orm, height)
 Built 4 textures, 1 material (3 skipped)
 ```
