@@ -68,10 +68,12 @@ directory, so a game can ship a pack and develop against loose files.
 formats](textures.md#format): `Rgba8Srgb`, `Rgba8Unorm`, `Rgb8Srgb`,
 `Rgb8Unorm`, `R8Unorm`, `Rg8Unorm`, `Rgba16Float`, `Rgb16Float`,
 `Bc7Srgb`, `Bc7Unorm`, `Bc4Unorm`, `Bc5Unorm`, `Bc6hUfloat`, `Astc4x4Srgb`,
-`Astc4x4Unorm`, `Astc4x4Float` and `Uastc`. `Format::block()` gives the
-block size in texels and bytes (`(1, 4)` for `Rgba8*`, `(4, 16)` for
-`Bc7*`). A `Uastc` texture's levels are zstd-compressed UASTC as the file
-stores them; the SDK does not inflate or transcode them (it depends on
+`Astc4x4Unorm`, `Astc4x4Float`, `Uastc` and `UastcHdr`. `Format::block()`
+gives the block size in texels and bytes (`(1, 4)` for `Rgba8*`, `(4, 16)`
+for `Bc7*`), `is_block()` whether it is a block format. `Texture::srgb`
+(`is_srgb()`) is the descriptor's sRGB transfer function, `Texture::zstd`
+whether the levels are zstd-compressed. A `Uastc` or `UastcHdr` texture's
+levels are zstd-compressed UASTC as the file stores them; the SDK does not inflate or transcode them (it depends on
 nothing but `std`), so a game hands the file to a KTX2 transcoder such as
 [ktx-rs](https://crates.io/crates/ktx-rs) (`Texture2::create_from_memory`,
 `transcode_basis`).

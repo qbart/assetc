@@ -11,6 +11,7 @@ use assetc as sdk;
 use bevy::core_pipeline::Skybox;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
+use bevy::image::{CompressedImageFormatSupport, CompressedImageFormats};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
 use bevy::light::GeneratedEnvironmentMapLight;
 use bevy::prelude::*;
@@ -78,27 +79,37 @@ pub struct Demo {
 
 /// Textures uploaded so far, by asset ID: each is converted once and shared.
 #[derive(Resource, Default)]
-pub struct Textures(pub HashMap<u64, Option<Handle<Image>>>);
+pub struct Textures {
+    by_id: HashMap<u64, Result<Handle<Image>, String>>,
+    /// The block formats the GPU samples; see docs/features/demo.md#layout.
+    pub support: CompressedImageFormats,
+}
 
 impl Textures {
-    /// The texture `id` as a Bevy image (`None` for `0`, a missing ID or a bad file).
+    /// The texture `id` as a Bevy image, or why there is none (`0`, a missing ID, a bad file,
+    /// a format the GPU cannot take).
     pub fn get(
         &mut self,
         id: u64,
         assets: &sdk::Assets,
         images: &mut Assets<Image>,
-    ) -> Option<Handle<Image>> {
+    ) -> Result<Handle<Image>, String> {
         if id == 0 {
-            return None;
+            return Err("no texture".into());
         }
-        self.0
+        let support = self.support;
+        self.by_id
             .entry(id)
-            .or_insert_with(|| match assets.load::<sdk::Texture>(id) {
-                Ok(texture) => Some(images.add(convert::image(&texture))),
-                Err(e) => {
+            .or_insert_with(|| {
+                let image = assets
+                    .load::<sdk::Texture>(id)
+                    .map_err(|e| e.to_string())
+                    .and_then(|texture| convert::image(&texture, support))
+                    .map(|image| images.add(image));
+                if let Err(e) = &image {
                     warn!("{e}");
-                    None
                 }
+                image
             })
             .clone()
     }
@@ -162,14 +173,27 @@ pub struct Camera3dMarker;
 #[derive(Component)]
 pub struct Camera2dMarker;
 
-fn setup(mut commands: Commands, mut demo: ResMut<Demo>, mut images: ResMut<Assets<Image>>) {
+fn setup(
+    mut commands: Commands,
+    mut demo: ResMut<Demo>,
+    mut images: ResMut<Assets<Image>>,
+    mut textures: ResMut<Textures>,
+    support: Option<Res<CompressedImageFormatSupport>>,
+) {
+    textures.support = support.map_or(CompressedImageFormats::NONE, |s| s.0);
     // The sky: the pack's first cubemap, by path.
     if let Some(assets) = &demo.assets {
         let cubemap = assets
             .of_kind(sdk::Kind::Texture)
             .filter_map(|e| assets.load::<sdk::Texture>(e.id).ok())
             .find(sdk::Texture::is_cubemap);
-        demo.sky = cubemap.map(|t| images.add(convert::image(&t)));
+        demo.sky = cubemap
+            .and_then(|t| {
+                convert::image(&t, textures.support)
+                    .inspect_err(|e| warn!("{e}"))
+                    .ok()
+            })
+            .map(|image| images.add(image));
     }
     let mut camera3d = commands.spawn((
         Camera3dMarker,

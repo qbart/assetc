@@ -19,6 +19,7 @@ input = \"assets\"
 output = \"build\"
 
 # [textures]
+# format = \"bc\"   # or \"astc\", \"uastc\", \"rgba\", \"rgb\"
 # linear = [\"**/*_n.png\"]
 # no_mipmaps = [\"ui/**\"]
 
@@ -103,6 +104,8 @@ pub struct Textures {
     pub no_mipmaps: Vec<String>,
     /// Globs of color LUTs compiled as 3D textures instead of 2D strips.
     pub volume_luts: Vec<String>,
+    /// The GPU format every texture is written in; see docs/features/textures.md#format.
+    pub format: crate::ktx2::Format,
 }
 
 /// Mesh build settings, see docs/spec/assetc.toml.md#meshes.
@@ -452,6 +455,40 @@ mod tests {
             template.meshes.overrides[0].patch.meshlet_max_vertices,
             Some(128)
         );
+    }
+
+    #[test]
+    fn texture_format_per_target() {
+        use crate::ktx2::Format;
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join(FILE_NAME),
+            "[textures]\nno_mipmaps = [\"ui/**\"]\n\
+             [targets.mobile]\ntextures = { format = \"astc\" }\n\
+             [targets.raw]\ntextures = { format = \"rgb\" }\n",
+        )
+        .unwrap();
+        let project = load(dir.path()).unwrap();
+        assert_eq!(project.config.textures.format, Format::Bc);
+        let mobile = project.config.target("mobile").unwrap();
+        assert_eq!(mobile.textures.format, Format::Astc);
+        assert_eq!(mobile.textures.no_mipmaps, ["ui/**"]);
+        assert_eq!(
+            project.config.target("raw").unwrap().textures.format,
+            Format::Rgb
+        );
+        for (text, format) in [("uastc", Format::Uastc), ("rgba", Format::Rgba)] {
+            fs::write(
+                dir.path().join(FILE_NAME),
+                format!("[textures]\nformat = \"{text}\"\n"),
+            )
+            .unwrap();
+            assert_eq!(load(dir.path()).unwrap().config.textures.format, format);
+        }
+
+        fs::write(dir.path().join(FILE_NAME), "[textures]\nformat = \"dxt\"\n").unwrap();
+        let error = load(dir.path()).unwrap_err().to_string();
+        assert!(error.contains("unknown variant `dxt`"), "{error}");
     }
 
     #[test]

@@ -131,7 +131,7 @@ instead.
 | Type       | what the container holds, from its header: `2D`, `Cubemap` (6 faces), `3D` (`pixelDepth` > 0), or `2D array` / `Cubemap array` (`layerCount` > 0, with ` of <n>` layers) |
 | Usage      | what the texture is for, the [`assetc.usage`](../spec/ktx2.md#keyvalue-data) key: `color`, `data`, `normal`, `orm`, `height`, `noise`, `gradient`, `palette`, `atlas`, `font`, `lut`, `environment`; `—` without the key (another writer, or an older build) |
 | Dimensions | `W × H` px (level 0), or `W × H × D` px for a 3D texture (shown as its slices side by side) |
-| Format     | the `vkFormat` name without `VK_FORMAT_` (`BC7_SRGB_BLOCK`, `ASTC_4x4_UNORM_BLOCK`, `R8G8B8A8_SRGB`, …), plus ` (UASTC, zstd)` for a supercompressed UASTC texture; `vkFormat <n>` for a value ktx-rs does not name |
+| Format     | the `vkFormat` name without `VK_FORMAT_` (`BC7_SRGB_BLOCK`, `ASTC_4x4_UNORM_BLOCK`, `R8G8B8A8_SRGB`, …), `UASTC (zstd)` or `UASTC HDR 4x4 (zstd)` for a UASTC texture; `vkFormat <n>` for a value ktx-rs does not name |
 | Color space | the data format descriptor's transfer function: `sRGB` or `linear` |
 | Mip levels | `levelCount`                                                        |
 | Writer     | the `KTXwriter` value (`assetc 0.2.2 / libktx v4.4.2-2`), when there is one |

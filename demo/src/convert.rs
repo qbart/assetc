@@ -2,21 +2,65 @@
 
 use assetc as sdk;
 use bevy::asset::RenderAssetUsages;
+use bevy::image::CompressedImageFormats;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    Extent3d, TextureDataOrder, TextureDimension, TextureFormat, TextureViewDescriptor,
-    TextureViewDimension,
+    AstcBlock, AstcChannel, Extent3d, TextureDataOrder, TextureDimension, TextureFormat,
+    TextureViewDescriptor, TextureViewDimension,
 };
 
-/// A texture with all its mip levels: 2D, cubemap (six layers) or volume.
-pub fn image(t: &sdk::Texture) -> Image {
-    let format = match t.format {
-        sdk::texture::Format::Rgba8Srgb => TextureFormat::Rgba8UnormSrgb,
-        sdk::texture::Format::Rgba8Unorm => TextureFormat::Rgba8Unorm,
-        sdk::texture::Format::Rgba16Float => TextureFormat::Rgba16Float,
-        sdk::texture::Format::R8Unorm => TextureFormat::R8Unorm,
-        sdk::texture::Format::Rg8Unorm => TextureFormat::Rg8Unorm,
+/// A texture with all its mip levels: 2D, cubemap (six layers) or volume. Block formats go
+/// to the GPU as they are when `support` has them; three-channel ones are widened to RGBA. See
+/// docs/features/demo.md#layout.
+pub fn image(t: &sdk::Texture, support: CompressedImageFormats) -> Result<Image, String> {
+    use sdk::texture::Format as F;
+    let need = |flag: CompressedImageFormats, name: &str| {
+        if support.contains(flag) {
+            Ok(())
+        } else {
+            Err(format!("{name}: not supported by this GPU"))
+        }
+    };
+    let astc = |channel| TextureFormat::Astc {
+        block: AstcBlock::B4x4,
+        channel,
+    };
+    // The bytes of alpha 1 after each texel of a three-channel format.
+    let (format, alpha): (_, &[u8]) = match t.format {
+        F::Rgba8Srgb => (TextureFormat::Rgba8UnormSrgb, &[]),
+        F::Rgba8Unorm => (TextureFormat::Rgba8Unorm, &[]),
+        F::Rgb8Srgb => (TextureFormat::Rgba8UnormSrgb, &[255]),
+        F::Rgb8Unorm => (TextureFormat::Rgba8Unorm, &[255]),
+        F::Rgba16Float => (TextureFormat::Rgba16Float, &[]),
+        // Half-float 1.0, little-endian.
+        F::Rgb16Float => (TextureFormat::Rgba16Float, &[0x00, 0x3C]),
+        F::R8Unorm => (TextureFormat::R8Unorm, &[]),
+        F::Rg8Unorm => (TextureFormat::Rg8Unorm, &[]),
+        F::Bc7Srgb | F::Bc7Unorm | F::Bc4Unorm | F::Bc5Unorm | F::Bc6hUfloat => {
+            need(CompressedImageFormats::BC, "BC")?;
+            let format = match t.format {
+                F::Bc7Srgb => TextureFormat::Bc7RgbaUnormSrgb,
+                F::Bc7Unorm => TextureFormat::Bc7RgbaUnorm,
+                F::Bc4Unorm => TextureFormat::Bc4RUnorm,
+                F::Bc5Unorm => TextureFormat::Bc5RgUnorm,
+                _ => TextureFormat::Bc6hRgbUfloat,
+            };
+            (format, &[])
+        }
+        F::Astc4x4Srgb => {
+            need(CompressedImageFormats::ASTC_LDR, "ASTC")?;
+            (astc(AstcChannel::UnormSrgb), &[])
+        }
+        F::Astc4x4Unorm => {
+            need(CompressedImageFormats::ASTC_LDR, "ASTC")?;
+            (astc(AstcChannel::Unorm), &[])
+        }
+        F::Astc4x4Float => {
+            need(CompressedImageFormats::ASTC_HDR, "ASTC HDR")?;
+            (astc(AstcChannel::Hdr), &[])
+        }
+        F::Uastc | F::UastcHdr => return Err("UASTC: needs a transcoder".into()),
     };
     let (dimension, layers) = if t.is_volume() {
         (TextureDimension::D3, t.depth)
@@ -34,10 +78,12 @@ pub fn image(t: &sdk::Texture) -> Image {
         RenderAssetUsages::RENDER_WORLD,
     );
     // KTX2 keeps each level's faces together: mip-major.
+    let texel = t.format.bytes_per_texel();
     image.data = Some(
         t.levels
             .iter()
-            .flat_map(|l| l.data.iter().copied())
+            .flat_map(|l| l.data.chunks(texel))
+            .flat_map(|texel| texel.iter().chain(alpha).copied())
             .collect(),
     );
     image.data_order = TextureDataOrder::MipMajor;
@@ -56,7 +102,7 @@ pub fn image(t: &sdk::Texture) -> Image {
         mipmap_filter: ImageFilterMode::Linear,
         ..default()
     });
-    image
+    Ok(image)
 }
 
 /// Level 0 of a height texture as Bevy's depth map: `1 - height`, linear.

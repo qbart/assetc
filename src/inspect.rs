@@ -1865,12 +1865,20 @@ mod tests {
             &output.join("textures/rock_n.ktx2"),
         );
         assert_eq!(row(&compiled, "Kind"), "Compiled texture");
-        assert_eq!(row(&compiled, "Format"), "R8G8B8A8_UNORM");
+        assert_eq!(row(&compiled, "Format"), "BC7_UNORM_BLOCK");
         assert_eq!(row(&compiled, "Mip levels"), "4");
         assert_eq!(row(&compiled, "Asset ID"), row(&i, "Asset ID"));
         let sizes: Vec<_> = compiled.mips.iter().map(|m| (m.width, m.height)).collect();
         assert_eq!(sizes.len(), 3);
-        assert_eq!(compiled.preview.unwrap().pixels[..4], [1, 2, 3, 255]);
+        // Decoded from BC7, the build's default format: close to the source.
+        let texel = &compiled.preview.unwrap().pixels[..4];
+        assert!(
+            texel
+                .iter()
+                .zip([1u8, 2, 3, 255])
+                .all(|(a, b)| a.abs_diff(b) <= 3),
+            "{texel:?}"
+        );
 
         let m = inspect(
             &project,

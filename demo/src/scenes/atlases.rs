@@ -29,7 +29,7 @@ pub fn spawn(s: &mut Spawn) {
         let Ok(atlas) = assets.load::<sdk::Atlas>(entry.id) else {
             continue;
         };
-        let Some(image) = s.textures.get(atlas.texture, &assets, &mut s.images) else {
+        let Ok(image) = s.textures.get(atlas.texture, &assets, &mut s.images) else {
             continue;
         };
         let name = entry.path.trim_end_matches(".aatlas.bin");

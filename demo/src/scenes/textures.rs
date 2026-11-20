@@ -27,9 +27,8 @@ pub fn spawn(s: &mut Spawn) {
         if texture.is_cubemap() || texture.is_volume() {
             continue;
         }
-        let Some(image) = s.textures.get(entry.id, &assets, &mut s.images) else {
-            continue;
-        };
+        // A format the GPU cannot take shows as a gray tile naming it.
+        let image = s.textures.get(entry.id, &assets, &mut s.images);
         let (col, row) = (shown % columns, shown / columns);
         shown += 1;
         let center = Vec2::new(
@@ -42,20 +41,28 @@ pub fn spawn(s: &mut Spawn) {
         } else {
             Vec2::new(TILE * aspect, TILE)
         };
-        s.commands.spawn((
-            InScene,
-            Sprite {
-                image,
+        let sprite = match &image {
+            Ok(image) => Sprite {
+                image: image.clone(),
                 custom_size: Some(size),
                 ..default()
             },
+            Err(_) => Sprite::from_color(Color::srgb(0.3, 0.3, 0.3), size),
+        };
+        s.commands.spawn((
+            InScene,
+            sprite,
             Transform::from_translation(center.extend(0.0)),
         ));
         let name = entry.path.trim_end_matches(".ktx2");
+        let mut caption = format!("{name}\n{} x {}", texture.width, texture.height);
+        if let Err(why) = &image {
+            caption += &format!("\n{why}");
+        }
         text_2d(
             &mut s.commands,
             center - Vec2::new(0.0, TILE / 2.0 + 6.0),
-            format!("{name}\n{} x {}", texture.width, texture.height),
+            caption,
             12.0,
             TEXT_WEAK,
         );

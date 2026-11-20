@@ -343,7 +343,7 @@ dependencies = [
  "globset",
  "half",
  "image",
- "ktx2",
+ "ktx-rs",
  "matma",
  "meshopt-pure",
  "naga",
@@ -3740,6 +3740,25 @@ name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
+
+[[package]]
+name = "ktx-rs"
+version = "4.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f12067b6259a26ec0d194386f140c16caebcd1647e25ca2886a34e34207fd2b"
+dependencies = [
+ "bytemuck",
+ "ktx-rs-macros",
+ "miniz_oxide 0.9.1",
+ "ruzstd",
+ "zstd-pure-rs",
+]
+
+[[package]]
+name = "ktx-rs-macros"
+version = "4.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e91204558dc718c9e003b55b6023960a2980e2c89127de709a9cd63bbc13a07"
 
 [[package]]
 name = "ktx2"
@@ -7248,6 +7267,12 @@ name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
+
+[[package]]
+name = "zstd-pure-rs"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71cafafebc1c81515698e9b97846d619f993db5cbcf50b72e4c6e58a8477b86f"
 
 [[package]]
 name = "zune-core"

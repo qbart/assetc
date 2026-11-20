@@ -120,7 +120,7 @@ fn spawn_model(
             Some(m) => {
                 let textures = &mut s.textures;
                 let images = &mut s.images;
-                convert::material(&m, |id| textures.get(id, assets, images), None)
+                convert::material(&m, |id| textures.get(id, assets, images).ok(), None)
             }
             None => StandardMaterial::default(),
         };

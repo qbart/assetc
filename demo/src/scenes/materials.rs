@@ -31,7 +31,7 @@ pub fn spawn(s: &mut Spawn) -> Orbit {
             .map(|image| s.images.add(image));
         let textures = &mut s.textures;
         let images = &mut s.images;
-        let material = convert::material(&m, |id| textures.get(id, &assets, images), depth);
+        let material = convert::material(&m, |id| textures.get(id, &assets, images).ok(), depth);
         let (col, row) = (i % PER_ROW, i / PER_ROW);
         let at = Vec3::new(
             (col as f32 - (columns as f32 - 1.0) / 2.0) * SPACING,

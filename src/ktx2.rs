@@ -1,18 +1,83 @@
-//! KTX2 writer for the subset in docs/spec/ktx2.md, and a header reader for inspecting files.
+//! KTX2 writing and reading through ktx-rs, in the formats of docs/spec/ktx2.md.
+
+use ktx::basisu::gpu_texture::unpack_bc7;
+use ktx::dfd::khr_df::{
+    KHR_DF_MODEL_UASTC_HDR_4x4, KHR_DF_MODEL_UASTC_LDR_4x4, KHR_DF_TRANSFER_SRGB,
+};
+use ktx::encode_params::{
+    AstcParams, BasisParams, KTX_ASTC_PARAMS_SIZE, KTX_BASIS_CODEC_UASTC_HDR_4X4,
+    KTX_BASIS_CODEC_UASTC_LDR_4X4, KTX_BASIS_PARAMS_SIZE, KTX_PACK_ASTC_BLOCK_DIMENSION_4X4,
+    KTX_PACK_ASTC_ENCODER_MODE_LDR, KTX_PACK_ASTC_QUALITY_LEVEL_MEDIUM,
+    KTX_PACK_UASTC_LEVEL_DEFAULT,
+};
+use ktx::texture::KtxTexture;
+use ktx::vkformat::vk_format_string;
+use ktx::{
+    ErrorCode, KTX_FACESLICE_WHOLE_LEVEL, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, SupercmpScheme,
+    Texture2, TextureCreateInfo, TextureCreateStorage, TranscodeFmt, VkFormat,
+};
+use serde::Deserialize;
 
 use crate::texture::{ColorSpace, Image};
 
-const IDENTIFIER: [u8; 12] = [
-    0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A,
-];
-const VK_FORMAT_R8_UNORM: u32 = 9;
-const VK_FORMAT_R8G8_UNORM: u32 = 16;
-const VK_FORMAT_R8G8B8A8_UNORM: u32 = 37;
-const VK_FORMAT_R8G8B8A8_SRGB: u32 = 43;
-const VK_FORMAT_R16G16B16A16_SFLOAT: u32 = 97;
-const LEVEL_INDEX_OFFSET: usize = 80;
-const LEVEL_INDEX_ENTRY: usize = 24;
-const DFD_SIZE: u32 = 92;
+/// The DFD color models of UASTC LDR and HDR 4 × 4.
+const UASTC_LDR: u32 = KHR_DF_MODEL_UASTC_LDR_4x4;
+const UASTC_HDR: u32 = KHR_DF_MODEL_UASTC_HDR_4x4;
+
+/// zstd level of `uastc` textures; see docs/features/textures.md#format.
+const ZSTD_LEVEL: u32 = 18;
+
+/// The GPU format every texture of a build is written in, `[textures] format`; see
+/// docs/features/textures.md#format.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Format {
+    #[default]
+    Bc,
+    Astc,
+    Uastc,
+    Rgba,
+    Rgb,
+}
+
+impl Format {
+    /// Lookup textures stay `rgba`: block compression would change the texels they are read for.
+    pub fn for_usage(self, usage: Usage) -> Self {
+        match usage {
+            Usage::Gradient | Usage::Palette | Usage::Lut => Self::Rgba,
+            _ => self,
+        }
+    }
+
+    /// The format's word in a build line (`bc7`, `astc 4x4`, `rgba8`, …).
+    pub fn token(self, kind: Kind) -> &'static str {
+        match (self, kind) {
+            (Self::Bc, Kind::Rgba) => "bc7",
+            (Self::Bc, Kind::R) => "bc4",
+            (Self::Bc, Kind::Rg) => "bc5",
+            (Self::Bc, Kind::Hdr) => "bc6h",
+            (Self::Astc, Kind::Hdr) => "astc 4x4 hdr",
+            (Self::Astc, _) => "astc 4x4",
+            (Self::Uastc, Kind::Hdr) => "uastc hdr",
+            (Self::Uastc, _) => "uastc",
+            (_, Kind::R) => "r8",
+            (_, Kind::Rg) => "rg8",
+            (Self::Rgba, Kind::Rgba) => "rgba8",
+            (Self::Rgb, Kind::Rgba) => "rgb8",
+            (Self::Rgba, Kind::Hdr) => "rgba16f",
+            (Self::Rgb, Kind::Hdr) => "rgb16f",
+        }
+    }
+}
+
+/// What the images hold: 8-bit RGBA, one or two 8-bit channels, or half-float RGBA.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Rgba,
+    R,
+    Rg,
+    Hdr,
+}
 
 /// What a texture is for, its `assetc.usage` key; see docs/spec/ktx2.md#keyvalue-data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,7 +124,12 @@ impl Usage {
 }
 
 /// Encodes RGBA8 mip levels (largest first, each half the previous) as a KTX2 file.
-pub fn encode_rgba8(color: ColorSpace, usage: Usage, levels: &[Image]) -> Vec<u8> {
+pub fn encode_rgba8(
+    format: Format,
+    color: ColorSpace,
+    usage: Usage,
+    levels: &[Image],
+) -> Result<Vec<u8>, String> {
     for level in levels {
         assert_eq!(
             level.pixels.len(),
@@ -67,18 +137,19 @@ pub fn encode_rgba8(color: ColorSpace, usage: Usage, levels: &[Image]) -> Vec<u8
         );
     }
     let data: Vec<&[u8]> = levels.iter().map(|l| l.pixels.as_slice()).collect();
-    encode(
-        color,
-        4,
-        usage,
-        [levels[0].width, levels[0].height, 0],
-        &data,
-    )
+    let size = [levels[0].width, levels[0].height, 0];
+    let format = format.for_usage(usage);
+    encode(format, Kind::Rgba, color, usage, (size, 1), &data)
 }
 
 /// Encodes the first `channels` (1 R or 2 RG) of RGBA8 mip levels as a linear KTX2 file; see
 /// docs/spec/ktx2.md#one-and-two-channels.
-pub fn encode_unorm(channels: usize, usage: Usage, levels: &[Image]) -> Vec<u8> {
+pub fn encode_unorm(
+    format: Format,
+    channels: usize,
+    usage: Usage,
+    levels: &[Image],
+) -> Result<Vec<u8>, String> {
     assert!(matches!(channels, 1 | 2));
     let data: Vec<Vec<u8>> = levels
         .iter()
@@ -94,122 +165,27 @@ pub fn encode_unorm(channels: usize, usage: Usage, levels: &[Image]) -> Vec<u8> 
         .collect();
     let data: Vec<&[u8]> = data.iter().map(Vec::as_slice).collect();
     let size = [levels[0].width, levels[0].height, 0];
-    encode(ColorSpace::Linear, channels, usage, size, &data)
+    let kind = if channels == 1 { Kind::R } else { Kind::Rg };
+    encode(format, kind, ColorSpace::Linear, usage, (size, 1), &data)
 }
 
 /// Encodes one RGBA8 3D texture level, `size` = width, height, depth; `pixels` are depth
-/// slices of rows, top to bottom. See docs/spec/ktx2.md#volume.
+/// slices of rows, top to bottom. Always `rgba`; see docs/spec/ktx2.md#volume.
 pub fn encode_rgba8_volume(
     color: ColorSpace,
     usage: Usage,
     size: [u32; 3],
     pixels: &[u8],
-) -> Vec<u8> {
+) -> Result<Vec<u8>, String> {
     assert_eq!(
         pixels.len(),
         size.iter().map(|&s| s as usize).product::<usize>() * 4
     );
-    encode(color, 4, usage, size, &[pixels])
+    encode(Format::Rgba, Kind::Rgba, color, usage, (size, 1), &[pixels])
 }
 
-/// `size` is level 0's width, height and depth (0 for 2D); `channels` is 4 (RGBA, sRGB or
-/// linear), or 1 or 2 (R, RG, linear).
-fn encode(
-    color: ColorSpace,
-    channels: usize,
-    usage: Usage,
-    size: [u32; 3],
-    levels: &[&[u8]],
-) -> Vec<u8> {
-    let format = match (channels, color) {
-        (1, _) => VK_FORMAT_R8_UNORM,
-        (2, _) => VK_FORMAT_R8G8_UNORM,
-        (_, ColorSpace::Srgb) => VK_FORMAT_R8G8B8A8_SRGB,
-        (_, ColorSpace::Linear) => VK_FORMAT_R8G8B8A8_UNORM,
-    };
-    let dfd_size = dfd_size(channels);
-    let kvd = key_value_data(usage);
-    let dfd_offset = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * levels.len();
-    let kvd_offset = dfd_offset + dfd_size as usize;
-    let data_offset = (kvd_offset + kvd.len()).next_multiple_of(4);
-
-    // Images are stored smallest level first, each at a multiple of 4; the index lists level 0
-    // first.
-    let mut offsets = vec![0; levels.len()];
-    let mut offset = data_offset;
-    for (i, level) in levels.iter().enumerate().rev() {
-        offsets[i] = offset;
-        offset = (offset + level.len()).next_multiple_of(4);
-    }
-
-    let mut out = Vec::with_capacity(offset);
-    out.extend_from_slice(&IDENTIFIER);
-    let level_count = levels.len() as u32;
-    let [width, height, depth] = size;
-    for v in [format, 1, width, height, depth, 0, 1, level_count, 0] {
-        put_u32(&mut out, v);
-    }
-    put_u32(&mut out, dfd_offset as u32);
-    put_u32(&mut out, dfd_size);
-    put_u32(&mut out, kvd_offset as u32);
-    put_u32(&mut out, kvd.len() as u32);
-    put_u64(&mut out, 0);
-    put_u64(&mut out, 0);
-    debug_assert_eq!(out.len(), LEVEL_INDEX_OFFSET);
-
-    for (level, offset) in levels.iter().zip(&offsets) {
-        put_u64(&mut out, *offset as u64);
-        put_u64(&mut out, level.len() as u64);
-        put_u64(&mut out, level.len() as u64);
-    }
-    debug_assert_eq!(out.len(), dfd_offset);
-
-    write_dfd(&mut out, color, channels);
-    out.extend_from_slice(&kvd);
-    out.resize(data_offset, 0);
-    for level in levels.iter().rev() {
-        out.extend_from_slice(level);
-        out.resize(out.len().next_multiple_of(4), 0);
-    }
-    out
-}
-
-/// The data format descriptor's size for `channels` 8-bit channels: 28 bytes and 16 a sample.
-fn dfd_size(channels: usize) -> u32 {
-    28 + 16 * channels as u32
-}
-
-fn write_dfd(out: &mut Vec<u8>, color: ColorSpace, channels: usize) {
-    // Alpha is flagged linear only when the color channels are sRGB.
-    let (transfer, alpha) = match color {
-        ColorSpace::Srgb if channels == 4 => (2, 0x1F),
-        _ => (1, 0x0F),
-    };
-    let size = dfd_size(channels);
-    put_u32(out, size);
-    put_u32(out, 0); // vendorId 0, descriptorType 0
-    put_u16(out, 2); // versionNumber
-    put_u16(out, size as u16 - 4); // descriptorBlockSize
-    out.extend_from_slice(&[1, 1, transfer, 0]); // RGBSDA, BT.709, transfer, straight alpha
-    out.extend_from_slice(&[0; 4]); // texelBlockDimension
-    out.extend_from_slice(&[channels as u8, 0, 0, 0, 0, 0, 0, 0]); // bytesPlane
-    for (channel, channel_type) in [0x00u8, 0x01, 0x02, alpha]
-        .into_iter()
-        .take(channels)
-        .enumerate()
-    {
-        put_u16(out, channel as u16 * 8);
-        out.push(7); // bitLength - 1
-        out.push(channel_type);
-        out.extend_from_slice(&[0; 4]); // samplePosition
-        put_u32(out, 0);
-        put_u32(out, 255);
-    }
-}
-
-/// Encodes an HDR cubemap's levels (largest first) as half floats; see
-/// docs/spec/ktx2.md#cubemaps.
-pub fn encode_cubemap_rgba16f(levels: &[crate::hdr::Level]) -> Vec<u8> {
+/// Encodes an HDR cubemap's levels (largest first); see docs/spec/ktx2.md#cubemaps.
+pub fn encode_cubemap(format: Format, levels: &[crate::hdr::Level]) -> Result<Vec<u8>, String> {
     let size = levels[0].size as u32;
     let data: Vec<Vec<u8>> = levels
         .iter()
@@ -225,64 +201,143 @@ pub fn encode_cubemap_rgba16f(levels: &[crate::hdr::Level]) -> Vec<u8> {
             bytes
         })
         .collect();
-    let kvd = key_value_data(Usage::Environment);
-    let dfd_offset = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * data.len();
-    let kvd_offset = dfd_offset + DFD_SIZE as usize;
-    let data_offset = (kvd_offset + kvd.len()).next_multiple_of(8);
-    let mut offsets = vec![0; data.len()];
-    let mut offset = data_offset;
-    for (i, level) in data.iter().enumerate().rev() {
-        offsets[i] = offset;
-        offset += level.len();
+    let data: Vec<&[u8]> = data.iter().map(Vec::as_slice).collect();
+    let usage = Usage::Environment;
+    encode(
+        format,
+        Kind::Hdr,
+        ColorSpace::Linear,
+        usage,
+        ([size, size, 0], 6),
+        &data,
+    )
+}
+
+fn error(e: ErrorCode) -> String {
+    format!("KTX2: {}", ktx::ktx_error_string(e))
+}
+
+fn threads() -> u32 {
+    std::thread::available_parallelism().map_or(1, |n| n.get() as u32)
+}
+
+/// `levels` hold each level's faces (or depth slices) back to back, in `kind`'s layout; `size` is
+/// level 0's width, height and depth (0 for 2D).
+fn encode(
+    format: Format,
+    kind: Kind,
+    color: ColorSpace,
+    usage: Usage,
+    (size, faces): ([u32; 3], u32),
+    levels: &[&[u8]],
+) -> Result<Vec<u8>, String> {
+    let srgb = color == ColorSpace::Srgb;
+    // `rgb` drops alpha: every 4th byte of RGBA8, every 4th half of RGBA16F.
+    let drop_alpha = |bytes: usize| -> Vec<Vec<u8>> {
+        levels
+            .iter()
+            .map(|level| {
+                level
+                    .chunks_exact(4 * bytes)
+                    .flat_map(|texel| texel[..3 * bytes].iter().copied())
+                    .collect()
+            })
+            .collect()
+    };
+    let (vk_format, rgb) = match (kind, format) {
+        (Kind::Rgba, Format::Rgb) if srgb => (VkFormat::R8G8B8_SRGB, Some(drop_alpha(1))),
+        (Kind::Rgba, Format::Rgb) => (VkFormat::R8G8B8_UNORM, Some(drop_alpha(1))),
+        (Kind::Hdr, Format::Rgb) => (VkFormat::R16G16B16_SFLOAT, Some(drop_alpha(2))),
+        (Kind::Rgba, _) if srgb => (VkFormat::R8G8B8A8_SRGB, None),
+        (Kind::Rgba, _) => (VkFormat::R8G8B8A8_UNORM, None),
+        (Kind::R, _) => (VkFormat::R8_UNORM, None),
+        (Kind::Rg, _) => (VkFormat::R8G8_UNORM, None),
+        (Kind::Hdr, _) => (VkFormat::R16G16B16A16_SFLOAT, None),
+    };
+    let [width, height, depth] = size;
+    let info = TextureCreateInfo {
+        gl_internalformat: 0,
+        vk_format,
+        dfd: None,
+        base_width: width,
+        base_height: height,
+        base_depth: depth.max(1),
+        num_dimensions: if depth > 0 { 3 } else { 2 },
+        num_levels: levels.len() as u32,
+        num_layers: 1,
+        num_faces: faces,
+        is_array: false,
+        generate_mipmaps: false,
+    };
+    let mut texture = Texture2::create(&info, TextureCreateStorage::AllocStorage).map_err(error)?;
+    for (i, level) in levels.iter().enumerate() {
+        let level = rgb.as_ref().map_or(*level, |rgb| rgb[i].as_slice());
+        texture
+            .set_image_from_memory(i as u32, 0, KTX_FACESLICE_WHOLE_LEVEL, level)
+            .map_err(error)?;
     }
-    let mut out = Vec::with_capacity(offset);
-    out.extend_from_slice(&IDENTIFIER);
-    for v in [
-        VK_FORMAT_R16G16B16A16_SFLOAT,
-        2,
-        size,
-        size,
-        0,
-        0,
-        6,
-        data.len() as u32,
-        0,
-    ] {
-        put_u32(&mut out, v);
+    let writer = format!("assetc {}\0", env!("CARGO_PKG_VERSION"));
+    let kv = &mut texture.kv_data_head;
+    kv.add_kv_pair("KTXwriter", writer.as_bytes())
+        .map_err(error)?;
+    kv.add_kv_pair(USAGE_KEY, format!("{}\0", usage.key()).as_bytes())
+        .map_err(error)?;
+
+    let hdr = kind == Kind::Hdr;
+    match format {
+        Format::Rgba | Format::Rgb => {}
+        Format::Astc if hdr => {
+            uastc(&mut texture, kind)?;
+            texture
+                .transcode_basis(TranscodeFmt::ASTC_HDR_4x4_RGBA, 0)
+                .map_err(error)?;
+        }
+        Format::Astc => {
+            let params = AstcParams {
+                struct_size: KTX_ASTC_PARAMS_SIZE,
+                thread_count: threads(),
+                block_dimension: KTX_PACK_ASTC_BLOCK_DIMENSION_4X4,
+                mode: KTX_PACK_ASTC_ENCODER_MODE_LDR,
+                quality_level: KTX_PACK_ASTC_QUALITY_LEVEL_MEDIUM,
+                ..Default::default()
+            };
+            texture.compress_astc_ex(&params).map_err(error)?;
+        }
+        Format::Bc => {
+            uastc(&mut texture, kind)?;
+            let target = match kind {
+                Kind::Rgba => TranscodeFmt::BC7_RGBA,
+                Kind::R => TranscodeFmt::BC4_R,
+                Kind::Rg => TranscodeFmt::BC5_RG,
+                Kind::Hdr => TranscodeFmt::BC6HU_RGB,
+            };
+            texture.transcode_basis(target, 0).map_err(error)?;
+        }
+        Format::Uastc => {
+            uastc(&mut texture, kind)?;
+            texture.deflate_zstd(ZSTD_LEVEL).map_err(error)?;
+        }
     }
-    put_u32(&mut out, dfd_offset as u32);
-    put_u32(&mut out, DFD_SIZE);
-    put_u32(&mut out, kvd_offset as u32);
-    put_u32(&mut out, kvd.len() as u32);
-    put_u64(&mut out, 0);
-    put_u64(&mut out, 0);
-    for (level, offset) in data.iter().zip(&offsets) {
-        put_u64(&mut out, *offset as u64);
-        put_u64(&mut out, level.len() as u64);
-        put_u64(&mut out, level.len() as u64);
-    }
-    // The data format descriptor: four signed float halves, linear.
-    put_u32(&mut out, DFD_SIZE);
-    put_u32(&mut out, 0);
-    put_u16(&mut out, 2);
-    put_u16(&mut out, 88);
-    out.extend_from_slice(&[1, 1, 1, 0]);
-    out.extend_from_slice(&[0; 4]);
-    out.extend_from_slice(&[8, 0, 0, 0, 0, 0, 0, 0]);
-    for (k, channel) in [0x00u8, 0x01, 0x02, 0x0F].into_iter().enumerate() {
-        put_u16(&mut out, k as u16 * 16);
-        out.push(15);
-        out.push(channel | 0x40 | 0x80);
-        out.extend_from_slice(&[0; 4]);
-        put_u32(&mut out, 0xBF80_0000);
-        put_u32(&mut out, 0x3F80_0000);
-    }
-    out.extend_from_slice(&kvd);
-    out.resize(data_offset, 0);
-    for level in data.iter().rev() {
-        out.extend_from_slice(level);
-    }
-    out
+    texture.write_to_memory().map_err(error)
+}
+
+/// Encodes to UASTC 4 × 4 (HDR for half floats); RG as `R R R G`, so that BC5 (R and alpha of
+/// UASTC) gets R and G.
+fn uastc(texture: &mut Texture2, kind: Kind) -> Result<(), String> {
+    let params = BasisParams {
+        struct_size: KTX_BASIS_PARAMS_SIZE,
+        thread_count: threads(),
+        codec: match kind {
+            Kind::Hdr => KTX_BASIS_CODEC_UASTC_HDR_4X4,
+            _ => KTX_BASIS_CODEC_UASTC_LDR_4X4,
+        },
+        uastc_flags: KTX_PACK_UASTC_LEVEL_DEFAULT,
+        uastc_hdr_level: 2,
+        uastc_hdr_quality: 1,
+        input_swizzle: if kind == Kind::Rg { *b"rrrg" } else { [0; 4] },
+        ..Default::default()
+    };
+    texture.compress_basis_ex(&params).map_err(error)
 }
 
 /// What the Inspector shows of a `.ktx2` file.
@@ -303,10 +358,12 @@ pub struct Info {
     /// `KTXwriter` and `assetc.usage`, when there.
     pub writer: Option<String>,
     pub usage: Option<String>,
-    /// Level 0, only for the subset assetc writes; a 3D texture's slices side by side.
+    /// Level 0 as 8-bit RGBA, for the formats the preview decodes; a 3D texture's slices side
+    /// by side.
     pub level0: Option<Image>,
     /// Levels 1 and up, decoded like level 0 (empty when level 0 is not).
     pub mips: Vec<Image>,
+    format: String,
 }
 
 impl Info {
@@ -323,99 +380,71 @@ impl Info {
         }
     }
 
+    /// The `vkFormat` name without `VK_FORMAT_`, or `UASTC (zstd)` and the like.
     pub fn format_name(&self) -> String {
-        match self.vk_format {
-            VK_FORMAT_R8G8B8A8_SRGB => "R8G8B8A8_SRGB".into(),
-            VK_FORMAT_R8G8B8A8_UNORM => "R8G8B8A8_UNORM".into(),
-            VK_FORMAT_R8_UNORM => "R8_UNORM".into(),
-            VK_FORMAT_R8G8_UNORM => "R8G8_UNORM".into(),
-            VK_FORMAT_R16G16B16A16_SFLOAT => "R16G16B16A16_SFLOAT".into(),
-            n => format!("vkFormat {n}"),
-        }
+        self.format.clone()
     }
 }
 
+/// The DFD's color model (the low byte of its fourth word).
+fn color_model(texture: &Texture2) -> u32 {
+    texture.p_dfd.get(3).map_or(0, |w| w & 0xFF)
+}
+
+const IDENTIFIER: [u8; 12] = [
+    0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A,
+];
+
 pub fn read(bytes: &[u8]) -> Result<Info, String> {
-    if bytes.len() < LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY || bytes[..12] != IDENTIFIER {
+    if !bytes.starts_with(&IDENTIFIER) {
         return Err("not a KTX2 file".into());
     }
-    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
-    let u64_at = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap());
-    let [
-        vk_format,
-        _,
-        width,
-        height,
-        depth,
-        layers,
-        faces,
-        levels,
-        supercompression,
-    ] = std::array::from_fn(|i| u32_at(12 + i * 4));
-
-    let plain = layers == 0 && faces == 1 && supercompression == 0;
-    // Bytes per texel of the 8-bit formats assetc writes.
-    let texel = match vk_format {
-        VK_FORMAT_R8G8B8A8_SRGB | VK_FORMAT_R8G8B8A8_UNORM => 4,
-        VK_FORMAT_R8_UNORM => 1,
-        VK_FORMAT_R8G8_UNORM => 2,
-        _ => 0,
+    let mut texture = Texture2::create_from_memory(bytes, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT)
+        .map_err(error)?;
+    let model = color_model(&texture);
+    // Loading inflates the levels, so the scheme comes from the header.
+    let scheme = bytes
+        .get(44..48)
+        .map(|b| u32::from_le_bytes(b.try_into().unwrap()));
+    let zstd = scheme == Some(SupercmpScheme::ZSTD.0);
+    let compression = if zstd { " (zstd)" } else { "" };
+    let format = match model {
+        UASTC_LDR => format!("UASTC{compression}"),
+        UASTC_HDR => format!("UASTC HDR 4x4{compression}"),
+        _ => match vk_format_string(texture.vk_format).strip_prefix("VK_FORMAT_") {
+            Some(name) => format!("{name}{compression}"),
+            None => format!("vkFormat {}{compression}", texture.vk_format.0),
+        },
     };
-    let rgba8 = texel > 0;
-    // Level `i` is `max(1, size >> i)` on each axis; its entry is in the level index.
-    // A 3D level is laid out as its depth slices side by side.
-    let level = |i: u32| {
-        let entry = LEVEL_INDEX_OFFSET + LEVEL_INDEX_ENTRY * i as usize;
-        if entry + LEVEL_INDEX_ENTRY > bytes.len() {
-            return None;
-        }
-        let (offset, length) = (u64_at(entry), u64_at(entry + 8));
-        let (w, h, d) = (
-            (width >> i).max(1),
-            (height >> i).max(1),
-            (depth >> i).max(1),
-        );
-        let end = offset.checked_add(length)?;
-        if length != w as u64 * h as u64 * d as u64 * texel as u64 || end > bytes.len() as u64 {
-            return None;
-        }
-        let data = &bytes[offset as usize..end as usize];
-        let row = w as usize * texel;
-        let mut pixels = Vec::with_capacity(w as usize * h as usize * d as usize * 4);
-        for y in 0..h as usize {
-            for z in 0..d as usize {
-                let start = (z * h as usize + y) * row;
-                let row = &data[start..start + row];
-                match texel {
-                    // R shows as gray, RG as red and green.
-                    1 => pixels.extend(row.iter().flat_map(|&r| [r, r, r, 255])),
-                    2 => pixels.extend(
-                        row.as_chunks::<2>()
-                            .0
-                            .iter()
-                            .flat_map(|&[r, g]| [r, g, 0, 255]),
-                    ),
-                    _ => pixels.extend_from_slice(row),
-                }
-            }
-        }
-        Some(Image {
-            width: w * d,
-            height: h,
-            pixels,
-        })
+    let value = |texture: &Texture2, key: &str| {
+        let value = texture.kv_data_head.find_value(key).ok()?;
+        let value = value.strip_suffix(&[0]).unwrap_or(value);
+        Some(String::from_utf8_lossy(value).into_owned())
     };
-    let level0 = (plain && rgba8).then(|| level(0)).flatten();
-    // Volumes show level 0 only.
-    let mips = if level0.is_some() && depth == 0 {
-        (1..levels.max(1)).map_while(level).collect()
+    let writer = value(&texture, "KTXwriter");
+    let usage = value(&texture, USAGE_KEY);
+    let srgb = texture.get_transfer_function_e() == KHR_DF_TRANSFER_SRGB;
+    let (width, height) = (texture.base_width, texture.base_height);
+    let depth = if texture.num_dimensions == 3 {
+        texture.base_depth
+    } else {
+        0
+    };
+    let (faces, levels) = (texture.num_faces, texture.num_levels);
+    let layers = if texture.is_array {
+        texture.num_layers
+    } else {
+        0
+    };
+    let vk_format = texture.vk_format.0;
+    let mut images = if faces == 1 && layers == 0 {
+        decode(&mut texture, model).unwrap_or_default()
     } else {
         Vec::new()
     };
-    let dfd = u32_at(48) as usize;
-    let srgb = bytes.get(dfd + 14) == Some(&2);
-    let pairs = key_values(bytes);
-    let value = |key: &str| pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone());
+    let level0 = (!images.is_empty()).then(|| images.remove(0));
+    // Volumes show level 0 only.
+    let mips = if depth == 0 { images } else { Vec::new() };
     Ok(Info {
         vk_format,
         width,
@@ -425,77 +454,155 @@ pub fn read(bytes: &[u8]) -> Result<Info, String> {
         faces: faces.max(1),
         layers,
         srgb,
-        writer: value("KTXwriter"),
-        usage: value(USAGE_KEY),
+        writer,
+        usage,
         level0,
         mips,
+        format,
     })
 }
 
-/// `KTXwriter`, then `assetc.usage`: sorted by key, each padded to 4 bytes.
-fn key_value_data(usage: Usage) -> Vec<u8> {
-    let writer = format!("assetc {}", env!("CARGO_PKG_VERSION"));
-    let mut out = Vec::new();
-    for (key, value) in [("KTXwriter", writer.as_str()), (USAGE_KEY, usage.key())] {
-        put_u32(&mut out, (key.len() + 1 + value.len() + 1) as u32);
-        out.extend_from_slice(key.as_bytes());
-        out.push(0);
-        out.extend_from_slice(value.as_bytes());
-        out.push(0);
-        out.resize(out.len().next_multiple_of(4), 0);
+/// How the preview reads a level's data.
+enum Texels {
+    /// Uncompressed, this many 8-bit channels.
+    Plain(usize),
+    Bc7,
+    Bc4,
+    Bc5,
+}
+
+/// Every level as 8-bit RGBA, a 3D level's slices side by side; `None` for formats the preview
+/// does not decode (half floats, BC6H, ASTC HDR).
+fn decode(texture: &mut Texture2, model: u32) -> Option<Vec<Image>> {
+    let texels = match texture.vk_format {
+        VkFormat::R8_UNORM => Texels::Plain(1),
+        VkFormat::R8G8_UNORM => Texels::Plain(2),
+        VkFormat::R8G8B8_UNORM | VkFormat::R8G8B8_SRGB => Texels::Plain(3),
+        VkFormat::R8G8B8A8_UNORM | VkFormat::R8G8B8A8_SRGB => Texels::Plain(4),
+        VkFormat::BC7_UNORM_BLOCK | VkFormat::BC7_SRGB_BLOCK => Texels::Bc7,
+        VkFormat::BC4_UNORM_BLOCK => Texels::Bc4,
+        VkFormat::BC5_UNORM_BLOCK => Texels::Bc5,
+        VkFormat::ASTC_4x4_UNORM_BLOCK | VkFormat::ASTC_4x4_SRGB_BLOCK => {
+            texture.decode_astc().ok()?;
+            Texels::Plain(4)
+        }
+        VkFormat::UNDEFINED if model == UASTC_LDR => {
+            texture.transcode_basis(TranscodeFmt::RGBA32, 0).ok()?;
+            Texels::Plain(4)
+        }
+        _ => return None,
+    };
+    let data = texture.get_data()?;
+    (0..texture.num_levels)
+        .map(|i| {
+            let (w, h, d) = (
+                (texture.base_width >> i).max(1) as usize,
+                (texture.base_height >> i).max(1) as usize,
+                if texture.num_dimensions == 3 {
+                    (texture.base_depth >> i).max(1) as usize
+                } else {
+                    1
+                },
+            );
+            let offset = texture.get_image_offset(i, 0, 0).ok()?;
+            let length = texture.get_level_size(i);
+            let level = data.get(offset..offset.checked_add(length)?)?;
+            let pixels = match texels {
+                Texels::Plain(n) => plain(level, n, (w, h, d))?,
+                Texels::Bc7 | Texels::Bc4 | Texels::Bc5 => blocks(level, &texels, (w, h))?,
+            };
+            Some(Image {
+                width: (w * d) as u32,
+                height: h as u32,
+                pixels,
+            })
+        })
+        .collect()
+}
+
+/// Uncompressed texels to RGBA: R shows as gray, RG as red and green, RGB with alpha 255; a 3D
+/// level's slices side by side.
+fn plain(level: &[u8], n: usize, (w, h, d): (usize, usize, usize)) -> Option<Vec<u8>> {
+    let row = w * n;
+    if level.len() < row * h * d {
+        return None;
     }
-    out
+    let mut pixels = Vec::with_capacity(w * h * d * 4);
+    for y in 0..h {
+        for z in 0..d {
+            let start = (z * h + y) * row;
+            for texel in level[start..start + row].chunks_exact(n) {
+                pixels.extend_from_slice(&match *texel {
+                    [r] => [r, r, r, 255],
+                    [r, g] => [r, g, 0, 255],
+                    [r, g, b] => [r, g, b, 255],
+                    [r, g, b, a] => [r, g, b, a],
+                    _ => return None,
+                });
+            }
+        }
+    }
+    Some(pixels)
+}
+
+/// BC7, BC4 (gray) or BC5 (red and green) 4 × 4 blocks to RGBA.
+fn blocks(level: &[u8], texels: &Texels, (w, h): (usize, usize)) -> Option<Vec<u8>> {
+    let size = if matches!(texels, Texels::Bc4) { 8 } else { 16 };
+    let across = w.div_ceil(4);
+    if level.len() < across * h.div_ceil(4) * size {
+        return None;
+    }
+    let mut pixels = vec![0; w * h * 4];
+    for (i, block) in level.chunks_exact(size).enumerate() {
+        let (bx, by) = (i % across * 4, i / across * 4);
+        if by >= h {
+            break;
+        }
+        let texels: [[u8; 4]; 16] = match texels {
+            Texels::Bc7 => {
+                let mut out = [[0; 4]; 16];
+                unpack_bc7(block.try_into().ok()?, &mut out);
+                out
+            }
+            Texels::Bc4 => bc4(block).map(|r| [r, r, r, 255]),
+            _ => {
+                let (r, g) = (bc4(&block[..8]), bc4(&block[8..]));
+                std::array::from_fn(|k| [r[k], g[k], 0, 255])
+            }
+        };
+        for (k, texel) in texels.iter().enumerate() {
+            let (x, y) = (bx + k % 4, by + k / 4);
+            if x < w && y < h {
+                pixels[(y * w + x) * 4..][..4].copy_from_slice(texel);
+            }
+        }
+    }
+    Some(pixels)
+}
+
+/// The 16 values of a BC4 block (also each half of a BC5 block).
+fn bc4(block: &[u8]) -> [u8; 16] {
+    let (a0, a1) = (block[0] as u32, block[1] as u32);
+    let palette: [u32; 8] = std::array::from_fn(|i| match i as u32 {
+        0 => a0,
+        1 => a1,
+        i if a0 > a1 => ((8 - i) * a0 + (i - 1) * a1) / 7,
+        i @ 2..=5 => ((6 - i) * a0 + (i - 1) * a1) / 5,
+        6 => 0,
+        _ => 255,
+    });
+    let mut bits = [0; 8];
+    bits[..6].copy_from_slice(&block[2..8]);
+    let bits = u64::from_le_bytes(bits);
+    std::array::from_fn(|k| palette[(bits >> (3 * k) & 7) as usize] as u8)
 }
 
 const USAGE_KEY: &str = "assetc.usage";
-
-/// The key/value pairs of a KTX2 file's key/value data, values without their NUL.
-fn key_values(bytes: &[u8]) -> Vec<(String, String)> {
-    let u32_at = |at: usize| {
-        bytes
-            .get(at..at + 4)
-            .map(|b| u32::from_le_bytes(b.try_into().unwrap()) as usize)
-    };
-    let (Some(offset), Some(length)) = (u32_at(56), u32_at(60)) else {
-        return Vec::new();
-    };
-    let end = (offset + length).min(bytes.len());
-    let mut out = Vec::new();
-    let mut at = offset;
-    while at + 4 <= end {
-        let Some(size) = u32_at(at) else { break };
-        let Some(entry) = bytes.get(at + 4..(at + 4 + size).min(end)) else {
-            break;
-        };
-        if let Some(nul) = entry.iter().position(|&b| b == 0) {
-            let key = String::from_utf8_lossy(&entry[..nul]).into_owned();
-            let value = entry[nul + 1..]
-                .strip_suffix(&[0])
-                .unwrap_or(&entry[nul + 1..]);
-            out.push((key, String::from_utf8_lossy(value).into_owned()));
-        }
-        at = (at + 4 + size).next_multiple_of(4);
-    }
-    out
-}
-
-fn put_u16(out: &mut Vec<u8>, v: u16) {
-    out.extend_from_slice(&v.to_le_bytes());
-}
-
-fn put_u32(out: &mut Vec<u8>, v: u32) {
-    out.extend_from_slice(&v.to_le_bytes());
-}
-
-fn put_u64(out: &mut Vec<u8>, v: u64) {
-    out.extend_from_slice(&v.to_le_bytes());
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::texture::mip_chain;
-    use ::ktx2::{Format, Reader, dfd};
 
     fn sample() -> Image {
         let (width, height) = (3, 2);
@@ -507,100 +614,195 @@ mod tests {
         }
     }
 
-    #[test]
-    fn reader_accepts_header_and_level() {
-        let image = sample();
-        let file = encode_rgba8(ColorSpace::Srgb, Usage::Color, std::slice::from_ref(&image));
-        let reader = Reader::new(&file[..]).unwrap();
-        let header = reader.header();
-        assert_eq!(header.format, Some(Format::R8G8B8A8_SRGB));
-        assert_eq!(header.type_size, 1);
-        assert_eq!((header.pixel_width, header.pixel_height), (3, 2));
-        assert_eq!(header.pixel_depth, 0);
-        assert_eq!(header.layer_count, 0);
-        assert_eq!(header.face_count, 1);
-        assert_eq!(header.level_count, 1);
-        assert_eq!(header.supercompression_scheme, None);
+    fn flat(size: u32, texel: [u8; 4]) -> Image {
+        Image {
+            width: size,
+            height: size,
+            pixels: texel.repeat((size * size) as usize),
+        }
+    }
 
-        let levels: Vec<_> = reader.levels().collect();
-        assert_eq!(levels.len(), 1);
-        assert_eq!(levels[0].data, &image.pixels[..]);
+    const ALL: [Format; 5] = [
+        Format::Bc,
+        Format::Astc,
+        Format::Uastc,
+        Format::Rgba,
+        Format::Rgb,
+    ];
+
+    /// `ktx validate` passes, the custom `assetc.usage` key (7010) the only warning.
+    fn assert_valid(file: &[u8]) {
+        let mut issues = Vec::new();
+        let rc = ktx::cli::validate::validate_memory(file, false, false, &mut |r| {
+            issues.push((r.id, r.message.clone()))
+        })
+        .unwrap();
+        assert_eq!(rc, 0, "{issues:?}");
+        assert!(issues.iter().all(|(id, _)| *id == 7010), "{issues:?}");
+    }
+
+    fn close(a: &[u8], b: &[u8]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.abs_diff(*y) <= 3)
+    }
+
+    #[test]
+    fn rgba_round_trips_with_keys() {
+        let levels = mip_chain(sample(), ColorSpace::Srgb);
+        let file = encode_rgba8(Format::Rgba, ColorSpace::Srgb, Usage::Normal, &levels).unwrap();
+        assert_valid(&file);
+        let info = read(&file).unwrap();
+        assert_eq!((info.width, info.height, info.levels), (3, 2, 2));
+        assert_eq!(info.format_name(), "R8G8B8A8_SRGB");
+        assert_eq!(info.type_name(), "2D");
+        assert!(info.srgb);
+        assert_eq!(info.level0, Some(levels[0].clone()));
+        assert_eq!(info.mips, levels[1..]);
+        assert_eq!(info.usage.as_deref(), Some("normal"));
+        let writer = info.writer.unwrap();
+        assert!(
+            writer.starts_with(&format!("assetc {} / libktx ", env!("CARGO_PKG_VERSION"))),
+            "{writer}"
+        );
+
+        let info = read(
+            &encode_rgba8(Format::Rgba, ColorSpace::Linear, Usage::Color, &[sample()]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(info.format_name(), "R8G8B8A8_UNORM");
+        assert!(!info.srgb);
+    }
+
+    #[test]
+    fn every_format_is_valid_and_previews() {
+        let texel = [200, 60, 20, 255];
+        for format in ALL {
+            for color in [ColorSpace::Srgb, ColorSpace::Linear] {
+                let levels = mip_chain(flat(16, texel), color);
+                let file = encode_rgba8(format, color, Usage::of(color), &levels).unwrap();
+                assert_valid(&file);
+                let info = read(&file).unwrap();
+                assert_eq!(info.levels, 5, "{format:?}");
+                assert_eq!(info.srgb, color == ColorSpace::Srgb, "{format:?}");
+                let level0 = info.level0.unwrap();
+                assert_eq!((level0.width, level0.height), (16, 16));
+                assert!(
+                    close(&level0.pixels[..4], &texel),
+                    "{format:?} {:?}",
+                    &level0.pixels[..4]
+                );
+                assert_eq!(info.mips.len(), 4);
+            }
+        }
+        let name = |format, color| {
+            read(&encode_rgba8(format, color, Usage::Color, &[flat(8, texel)]).unwrap())
+                .unwrap()
+                .format_name()
+        };
+        assert_eq!(name(Format::Bc, ColorSpace::Srgb), "BC7_SRGB_BLOCK");
+        assert_eq!(name(Format::Bc, ColorSpace::Linear), "BC7_UNORM_BLOCK");
+        assert_eq!(name(Format::Astc, ColorSpace::Srgb), "ASTC_4x4_SRGB_BLOCK");
+        assert_eq!(name(Format::Uastc, ColorSpace::Srgb), "UASTC (zstd)");
+        assert_eq!(name(Format::Rgb, ColorSpace::Srgb), "R8G8B8_SRGB");
+        assert_eq!(name(Format::Rgb, ColorSpace::Linear), "R8G8B8_UNORM");
+    }
+
+    #[test]
+    fn rgb_drops_alpha() {
+        let file = encode_rgba8(Format::Rgb, ColorSpace::Linear, Usage::Data, &[sample()]).unwrap();
+        let texture =
+            Texture2::create_from_memory(&file, KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT).unwrap();
+        assert_eq!(texture.get_data().unwrap()[..6], [0, 1, 2, 4, 5, 6]);
         assert_eq!(
-            levels[0].uncompressed_byte_length,
-            image.pixels.len() as u64
+            read(&file).unwrap().level0.unwrap().pixels[..8],
+            [0, 1, 2, 255, 4, 5, 6, 255]
         );
     }
 
     #[test]
-    fn dfd_matches_reference_for_both_formats() {
-        for (color, format) in [
-            (ColorSpace::Srgb, Format::R8G8B8A8_SRGB),
-            (ColorSpace::Linear, Format::R8G8B8A8_UNORM),
+    fn one_and_two_channels_in_every_format() {
+        let levels = mip_chain(flat(8, [200, 60, 0, 255]), ColorSpace::Linear);
+        for (channels, names) in [
+            (
+                1,
+                [
+                    "BC4_UNORM_BLOCK",
+                    "ASTC_4x4_UNORM_BLOCK",
+                    "UASTC (zstd)",
+                    "R8_UNORM",
+                    "R8_UNORM",
+                ],
+            ),
+            (
+                2,
+                [
+                    "BC5_UNORM_BLOCK",
+                    "ASTC_4x4_UNORM_BLOCK",
+                    "UASTC (zstd)",
+                    "R8G8_UNORM",
+                    "R8G8_UNORM",
+                ],
+            ),
         ] {
-            let file = encode_rgba8(color, Usage::Color, &[sample()]);
-            let reader = Reader::new(&file[..]).unwrap();
-            assert_eq!(reader.header().format, Some(format));
-            let (expected, _) = dfd::Basic::from_format(format).unwrap();
-            match reader.dfd_blocks() {
-                [dfd::Block::Basic(basic)] => assert_eq!(basic, &expected),
-                other => panic!("unexpected dfd blocks: {other:?}"),
+            for (format, name) in ALL.into_iter().zip(names) {
+                let file = encode_unorm(format, channels, Usage::Data, &levels).unwrap();
+                assert_valid(&file);
+                let info = read(&file).unwrap();
+                assert_eq!(info.format_name(), name);
+                let texel = &info.level0.unwrap().pixels[..4];
+                // BC and the plain formats keep R and G apart; ASTC and UASTC hold R R R G.
+                let expected = match (channels, format) {
+                    (1, _) => [200, 200, 200, 255],
+                    (_, Format::Astc | Format::Uastc) => [200, 200, 200, 60],
+                    _ => [200, 60, 0, 255],
+                };
+                assert!(close(texel, &expected), "{format:?} {channels}: {texel:?}");
             }
         }
     }
 
     #[test]
-    fn one_and_two_channels_match_reference() {
-        let levels = mip_chain(sample(), ColorSpace::Linear);
-        for (channels, format, name) in [
-            (1, Format::R8_UNORM, "R8_UNORM"),
-            (2, Format::R8G8_UNORM, "R8G8_UNORM"),
-        ] {
-            let file = encode_unorm(channels, Usage::Data, &levels);
-            let reader = Reader::new(&file[..]).unwrap();
-            assert_eq!(reader.header().format, Some(format));
-            let (expected, _) = dfd::Basic::from_format(format).unwrap();
-            match reader.dfd_blocks() {
-                [dfd::Block::Basic(basic)] => assert_eq!(basic, &expected),
-                other => panic!("unexpected dfd blocks: {other:?}"),
-            }
-            let read: Vec<_> = reader.levels().collect();
-            for (read, level) in read.iter().zip(&levels) {
-                let packed: Vec<u8> = level
-                    .pixels
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .flat_map(|t| t[..channels].to_vec())
-                    .collect();
-                assert_eq!(read.data, &packed[..]);
-            }
-            let info = super::read(&file).unwrap();
+    fn lookup_textures_stay_rgba() {
+        for usage in [Usage::Gradient, Usage::Palette, Usage::Lut] {
+            let file = encode_rgba8(Format::Bc, ColorSpace::Srgb, usage, &[sample()]).unwrap();
+            assert_eq!(read(&file).unwrap().format_name(), "R8G8B8A8_SRGB");
+        }
+    }
+
+    #[test]
+    fn cubemaps_in_every_format() {
+        let levels: Vec<crate::hdr::Level> = [8usize, 4, 2, 1]
+            .into_iter()
+            .map(|size| crate::hdr::Level {
+                size,
+                faces: std::array::from_fn(|f| vec![[2.5, 0.5, f as f32, 1.0]; size * size]),
+            })
+            .collect();
+        for (format, name) in ALL.into_iter().zip([
+            "BC6H_UFLOAT_BLOCK",
+            "ASTC_4x4_SFLOAT_BLOCK",
+            "UASTC HDR 4x4 (zstd)",
+            "R16G16B16A16_SFLOAT",
+            "R16G16B16_SFLOAT",
+        ]) {
+            let file = encode_cubemap(format, &levels).unwrap();
+            assert_valid(&file);
+            let info = read(&file).unwrap();
             assert_eq!(info.format_name(), name);
-            let level0 = info.level0.unwrap();
-            assert_eq!(level0.pixels.len(), 3 * 2 * 4);
             assert_eq!(
-                level0.pixels[..4],
-                [0, if channels == 1 { 0 } else { 1 }, 0, 255]
+                (info.faces, info.levels, info.type_name().as_str()),
+                (6, 4, "Cubemap")
             );
-            assert_eq!(info.mips.len(), 1);
+            assert_eq!(info.usage.as_deref(), Some("environment"));
+            assert_eq!(info.level0, None);
         }
     }
 
     #[test]
     fn mip_levels_stored_smallest_first() {
         let levels = mip_chain(sample(), ColorSpace::Linear);
-        assert_eq!(levels.len(), 2);
-        let file = encode_rgba8(ColorSpace::Linear, Usage::Color, &levels);
-        let reader = Reader::new(&file[..]).unwrap();
-        assert_eq!(reader.header().level_count, 2);
-
-        let read: Vec<_> = reader.levels().collect();
-        assert_eq!(read.len(), 2);
-        for (read, level) in read.iter().zip(&levels) {
-            assert_eq!(read.data, &level.pixels[..]);
-        }
+        let file = encode_rgba8(Format::Rgba, ColorSpace::Linear, Usage::Color, &levels).unwrap();
         let offset = |i: usize| {
-            let at = LEVEL_INDEX_OFFSET + i * LEVEL_INDEX_ENTRY;
+            let at = 80 + i * 24;
             u64::from_le_bytes(file[at..at + 8].try_into().unwrap())
         };
         assert!(offset(1) < offset(0));
@@ -609,82 +811,24 @@ mod tests {
     }
 
     #[test]
-    fn read_returns_header_and_level0() {
-        let levels = mip_chain(sample(), ColorSpace::Srgb);
-        let info = read(&encode_rgba8(ColorSpace::Srgb, Usage::Color, &levels)).unwrap();
-        assert_eq!((info.width, info.height, info.levels), (3, 2, 2));
-        assert_eq!(info.format_name(), "R8G8B8A8_SRGB");
-        assert_eq!(info.level0, Some(levels[0].clone()));
-        assert_eq!(info.mips, levels[1..]);
-
-        let info = read(&encode_rgba8(ColorSpace::Linear, Usage::Color, &[sample()])).unwrap();
-        assert_eq!(info.format_name(), "R8G8B8A8_UNORM");
-    }
-
-    #[test]
     fn volumes_are_3d_and_preview_as_slices() {
         // 2 × 1 × 2: texel (x, 0, z) has red x, blue z.
         let pixels = [
             0, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 255, 0, 255, 255,
         ];
-        let file = encode_rgba8_volume(ColorSpace::Linear, Usage::Lut, [2, 1, 2], &pixels);
-        let reader = ::ktx2::Reader::new(&file[..]).unwrap();
-        let header = reader.header();
-        assert_eq!(
-            (header.pixel_width, header.pixel_height, header.pixel_depth),
-            (2, 1, 2)
-        );
-        assert_eq!(reader.levels().next().unwrap().data, &pixels[..]);
+        let file = encode_rgba8_volume(ColorSpace::Linear, Usage::Lut, [2, 1, 2], &pixels).unwrap();
+        assert_valid(&file);
         let info = read(&file).unwrap();
-        assert_eq!(info.depth, 2);
+        assert_eq!((info.width, info.height, info.depth), (2, 1, 2));
+        assert_eq!(info.type_name(), "3D");
         let level0 = info.level0.unwrap();
         assert_eq!((level0.width, level0.height), (4, 1));
         assert_eq!(level0.pixels, pixels);
     }
 
     #[test]
-    fn read_without_preview_for_other_formats() {
-        let mut file = encode_rgba8(ColorSpace::Srgb, Usage::Color, &[sample()]);
-        file[12..16].copy_from_slice(&131u32.to_le_bytes()); // BC1
-        let info = read(&file).unwrap();
-        assert_eq!(info.format_name(), "vkFormat 131");
-        assert_eq!(info.level0, None);
-    }
-
-    #[test]
     fn read_rejects_non_ktx2() {
         assert!(read(b"not a ktx2 file at all").is_err());
         assert!(read(&[0; 200]).is_err());
-    }
-
-    #[test]
-    fn writer_key_and_alignment() {
-        let image = sample();
-        let file = encode_rgba8(
-            ColorSpace::Srgb,
-            Usage::Normal,
-            std::slice::from_ref(&image),
-        );
-        let reader = Reader::new(&file[..]).unwrap();
-        let kv: Vec<_> = reader.key_value_data().collect();
-        assert_eq!(kv.len(), 2);
-        assert_eq!(kv[0].0, "KTXwriter");
-        assert_eq!(
-            kv[0].1,
-            format!("assetc {}\0", env!("CARGO_PKG_VERSION")).as_bytes()
-        );
-        assert_eq!(kv[1], ("assetc.usage", &b"normal\0"[..]));
-        // Read back with the container's type and color space.
-        let info = read(&file).unwrap();
-        assert_eq!(info.usage.as_deref(), Some("normal"));
-        assert_eq!(
-            info.writer,
-            Some(format!("assetc {}", env!("CARGO_PKG_VERSION")))
-        );
-        assert_eq!(info.type_name(), "2D");
-        assert!(info.srgb);
-        let level_offset = u64::from_le_bytes(file[80..88].try_into().unwrap());
-        assert_eq!(level_offset % 4, 0);
-        assert_eq!(file.len() as u64, level_offset + image.pixels.len() as u64);
     }
 }
