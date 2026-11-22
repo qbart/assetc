@@ -172,19 +172,11 @@ fn textures(
             }
         }
     };
-    let fit = |image: image::RgbaImage| {
-        let (width, height) = image.dimensions();
-        let image = Image {
-            width,
-            height,
-            pixels: image.into_raw(),
-        };
-        crate::inspect::fit_within(image, MAX_SIDE)
-    };
+    let fit = |image: Image| crate::inspect::fit_within(image, MAX_SIDE);
     let base_color = load(Slot::BaseColor).map(fit);
     let normal = load(Slot::Normal).map(|mut image| {
         if source.normal_y == Some(NormalY::Dx) {
-            for pixel in image.pixels_mut() {
+            for pixel in image.texels_mut().iter_mut() {
                 pixel[1] = 255 - pixel[1];
             }
         }
@@ -192,16 +184,16 @@ fn textures(
     });
     let emissive = load(Slot::Emissive).map(fit);
     let depth = load(Slot::Height).map(|mut image| {
-        for pixel in image.pixels_mut() {
+        for pixel in image.texels_mut().iter_mut() {
             let depth = 255 - pixel[0];
-            *pixel = image::Rgba([depth, depth, depth, 255]);
+            *pixel = [depth, depth, depth, 255];
         }
         fit(image)
     });
     // Packed like the build: occlusion R, roughness G, metallic B; see
     // docs/features/materials.md#orm-packing.
     let orm_slots = [Slot::Occlusion, Slot::Roughness, Slot::Metallic];
-    let inputs: Vec<(usize, image::RgbaImage)> = orm_slots
+    let inputs: Vec<(usize, crate::imagefile::Image)> = orm_slots
         .into_iter()
         .enumerate()
         .filter_map(|(channel, slot)| Some((channel, load(slot)?)))
@@ -212,9 +204,9 @@ fn textures(
             None
         }
         Some((width, height)) => {
-            let mut packed = image::RgbaImage::from_pixel(width, height, image::Rgba([255; 4]));
+            let mut packed = crate::imagefile::Image::filled(width, height, [255; 4]);
             for (channel, image) in &inputs {
-                for (out, src) in packed.pixels_mut().zip(image.pixels()) {
+                for (out, src) in packed.texels_mut().iter_mut().zip(image.texels()) {
                     out[*channel] = src[0];
                 }
             }

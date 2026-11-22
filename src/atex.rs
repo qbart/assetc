@@ -347,7 +347,9 @@ pub fn encode_cubemap(target: Target, levels: &[crate::hdr::Level]) -> Result<Ve
             for face in &level.faces {
                 for texel in face {
                     for c in texel {
-                        bytes.extend_from_slice(&half::f16::from_f32(*c).to_le_bytes());
+                        // Beyond the half-float range: its largest finite value.
+                        let c = c.clamp(-65504.0, 65504.0);
+                        bytes.extend_from_slice(&imgio::half::from_f32(c).to_le_bytes());
                     }
                 }
             }
@@ -902,7 +904,7 @@ mod tests {
         let reader = chunks::Reader::parse(&file, FORMAT).unwrap();
         let block = &reader.chunk("DATA").unwrap()[..16];
         let decoded = imgio::decode_to_buffer(imgio::Format::Bc6hUfloat, block, 4, 4).unwrap();
-        let red = half::f16::from_le_bytes([decoded[0], decoded[1]]).to_f32();
+        let red = imgio::half::to_f32(u16::from_le_bytes([decoded[0], decoded[1]]));
         assert!((red - 2.5).abs() < 0.1, "{red}");
     }
 

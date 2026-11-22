@@ -430,7 +430,7 @@ fn source_texture(
     let rgb = color.has_color();
     out.channels = [rgb, rgb, rgb, color.has_alpha()];
     let (width, height) = image.dimensions();
-    let mut image = to_image(image);
+    let mut image = image;
     let asset_path = strip_extension(rel);
     out.rows
         .push(("Dimensions", format!("{width} × {height} px")));
@@ -547,7 +547,7 @@ fn source_mips(
     let full = texture::level_count(base.width, base.height);
     let (levels, problem) = match custom {
         Some(chain) => crate::mipmap::levels(base, color, chain, |rel| {
-            decode(&input.join(rel)).map(|(image, _)| to_image(image))
+            decode(&input.join(rel)).map(|(image, _)| image)
         }),
         None => {
             let images = if mipmaps {
@@ -611,9 +611,7 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
 
     match info.level0 {
         Some(level) => {
-            let image = image::RgbaImage::from_raw(level.width, level.height, level.pixels)
-                .ok_or("level 0 has the wrong size")?;
-            out.preview = Some(to_image(image));
+            out.preview = Some(level);
             out.mips = info.mips;
             out.channels = [true; 4];
         }
@@ -870,10 +868,7 @@ fn compiled_font(
         Some((path, level)) => {
             let row = format!("{} × {} px ({path})", level.width, level.height);
             rows.insert(at, ("Atlas", row));
-            out.preview = Some(to_image(
-                image::RgbaImage::from_raw(level.width, level.height, level.pixels)
-                    .ok_or("atlas level 0 has the wrong size")?,
-            ));
+            out.preview = Some(level);
             out.channels = [true; 4];
             out.specimen = true;
         }
@@ -1137,7 +1132,7 @@ fn atlas_folder(project: &Project, dir: &Path, out: &mut Inspection) {
         .map(|f| (f.name.clone(), [f.x, f.y, f.width, f.height]))
         .collect();
     out.channels = [true; 4];
-    out.preview = Some(to_image(packed.image));
+    out.preview = Some(packed.image);
 }
 
 fn folder(location: Location, dir: &Path, out: &mut Inspection) {
@@ -1208,7 +1203,7 @@ fn environment_map(location: Location, dir: &Path, out: &mut Inspection) -> Resu
     let mut faces = Vec::with_capacity(6);
     for (stem, file) in CUBE_FACES.iter().zip(files.into_iter().flatten()) {
         let face = match location {
-            Location::Input => decode(&file).map(|(image, _)| to_image(image)),
+            Location::Input => decode(&file).map(|(image, _)| image),
             Location::Output => fs::read(&file)
                 .map_err(|e| e.to_string())
                 .and_then(|bytes| atex::read(&bytes))
@@ -1709,14 +1704,6 @@ fn asset_rows(asset_path: &str, out: &mut Inspection) {
     ));
 }
 
-fn to_image(image: image::RgbaImage) -> Image {
-    Image {
-        width: image.width(),
-        height: image.height(),
-        pixels: image.into_raw(),
-    }
-}
-
 /// Downscales `image` (aspect kept) so neither side exceeds `max_side`, e.g. the GPU limit.
 pub fn fit_within(image: Image, max_side: u32) -> Image {
     let (w, h) = (image.width, image.height);
@@ -1728,13 +1715,7 @@ pub fn fit_within(image: Image, max_side: u32) -> Image {
         ((w as f64 * scale).round() as u32).clamp(1, max_side),
         ((h as f64 * scale).round() as u32).clamp(1, max_side),
     );
-    let source = image::RgbaImage::from_raw(w, h, image.pixels).expect("RGBA8 image");
-    to_image(image::imageops::resize(
-        &source,
-        nw,
-        nh,
-        image::imageops::FilterType::Triangle,
-    ))
+    crate::imagefile::resize(&image, nw, nh, crate::imagefile::Resample::Bilinear)
 }
 
 pub fn format_size(bytes: u64) -> String {
@@ -1768,9 +1749,7 @@ mod tests {
 
     fn png(path: &Path, w: u32, h: u32) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        image::RgbaImage::from_pixel(w, h, image::Rgba([1, 2, 3, 255]))
-            .save(path)
-            .unwrap();
+        crate::imagefile::tests::png(path, &crate::imagefile::Image::filled(w, h, [1, 2, 3, 255]));
     }
 
     #[test]
@@ -1929,11 +1908,9 @@ mod tests {
         let project = project(dir.path(), Default::default());
         fs::create_dir_all(dir.path().join("assets")).unwrap();
         let file = |name: &str| dir.path().join("assets").join(name);
-        image::RgbImage::new(2, 2).save(file("rgb.jpg")).unwrap();
-        image::GrayImage::new(2, 2).save(file("gray.png")).unwrap();
-        image::GrayAlphaImage::new(2, 2)
-            .save(file("gray_alpha.png"))
-            .unwrap();
+        fs::write(file("rgb.jpg"), crate::imagefile::tests::JPEG).unwrap();
+        crate::imagefile::tests::gray_png(&file("gray.png"), 2, 2, 0, false);
+        crate::imagefile::tests::gray_png(&file("gray_alpha.png"), 2, 2, 0, true);
         let channels = |name| inspect(&project, Location::Input, &file(name)).channels;
         assert_eq!(channels("rgb.jpg"), [true, true, true, false]);
         assert_eq!(channels("gray.png"), [false; 4]);

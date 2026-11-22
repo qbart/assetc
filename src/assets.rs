@@ -80,7 +80,7 @@ mod tests {
 
     fn png(path: &Path) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        image::RgbaImage::new(1, 1).save(path).unwrap();
+        crate::imagefile::tests::png(path, &crate::imagefile::Image::new(1, 1));
     }
 
     fn built(dir: &Path) -> Project {

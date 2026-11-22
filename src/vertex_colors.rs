@@ -45,11 +45,11 @@ pub fn uvs(set: &ColorSet, positions: &[Vec3]) -> Vec<[f32; 2]> {
 }
 
 /// The texture of a set exported as Texture + UV buffer: its gradient, 256 × 1, sRGB.
-pub fn texture(set: &ColorSet) -> image::RgbaImage {
+pub fn texture(set: &ColorSet) -> crate::imagefile::Image {
     const WIDTH: u32 = 256;
-    image::RgbaImage::from_fn(WIDTH, 1, |x, _| {
+    crate::imagefile::Image::from_fn(WIDTH, 1, |x, _| {
         let at = (f64::from(x) + 0.5) / f64::from(WIDTH);
-        image::Rgba(gradient::color_at(&set.stops, at))
+        gradient::color_at(&set.stops, at)
     })
 }
 
@@ -333,8 +333,8 @@ mod tests {
         assert_eq!(uv, [[0.5, 0.5], [1.0, 0.5]]);
         let texture = texture(&set);
         assert_eq!(texture.dimensions(), (256, 1));
-        assert_eq!(texture.get_pixel(0, 0).0, [0, 0, 0, 255]);
-        assert_eq!(texture.get_pixel(255, 0).0, [255; 4]);
+        assert_eq!(texture.pixel(0, 0), [0, 0, 0, 255]);
+        assert_eq!(texture.pixel(255, 0), [255; 4]);
         assert!(textured(&set) && !colored(&set));
         set.export = ColorExport::Both;
         assert!(textured(&set) && colored(&set) && check(std::slice::from_ref(&set)).is_ok());

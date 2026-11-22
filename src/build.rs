@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::atex::{Target, Usage};
 use crate::config;
 use crate::gradient::{Gradients, is_gradient};
+use crate::imagefile::{Channels, Image};
 use crate::manifest::{self, Kind};
 use crate::material;
 use crate::noise::Noise;
@@ -621,71 +622,42 @@ pub fn strip_extension(rel: &str) -> &str {
     }
 }
 
-fn decode(source: &Path) -> Result<image::RgbaImage, String> {
+fn decode(source: &Path) -> Result<Image, String> {
     load_source(source).map(|(image, _)| image)
 }
 
 /// Decodes a texture source, or generates it for an `.anoise` file; also returns the
-/// source's color type (noise is grayscale).
-pub fn load_source(source: &Path) -> Result<(image::RgbaImage, image::ColorType), String> {
+/// source's channels (noise is grayscale).
+pub fn load_source(source: &Path) -> Result<(Image, Channels), String> {
+    let opaque = |alpha: bool| if alpha { Channels::Rgba } else { Channels::Rgb };
     if is_noise(source) {
         let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
         let noise = Noise::parse(&text)?;
         let color = if noise.has_color() {
-            image::ColorType::Rgb8
+            Channels::Rgb
         } else {
-            image::ColorType::L8
+            Channels::Gray
         };
-        let generated = noise.generate();
-        let image = image::RgbaImage::from_raw(generated.width, generated.height, generated.pixels)
-            .expect("noise image size");
-        return Ok((image, color));
+        return Ok((noise.generate(), color));
     }
     if crate::palette::is_palette(source) {
         let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
         let palette = crate::palette::Palette::parse(&text)?;
-        let color = if palette.has_alpha() {
-            image::ColorType::Rgba8
-        } else {
-            image::ColorType::Rgb8
-        };
-        let rendered = palette.render()?;
-        let image = image::RgbaImage::from_raw(rendered.width, rendered.height, rendered.pixels)
-            .expect("palette image size");
-        return Ok((image, color));
+        return Ok((palette.render()?, opaque(palette.has_alpha())));
     }
     if is_gradient(source) {
         let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
         let gradients = Gradients::parse(&text)?;
-        let color = if gradients.has_alpha() {
-            image::ColorType::Rgba8
-        } else {
-            image::ColorType::Rgb8
-        };
-        let rendered = gradients.render()?;
-        let image = image::RgbaImage::from_raw(rendered.width, rendered.height, rendered.pixels)
-            .expect("gradient image size");
-        return Ok((image, color));
+        return Ok((gradients.render()?, opaque(gradients.has_alpha())));
     }
-    let decoded = image::ImageReader::open(source)
-        .map_err(|e| e.to_string())?
-        .with_guessed_format()
-        .map_err(|e| e.to_string())?
-        .decode()
-        .map_err(|e| e.to_string())?;
-    let color = decoded.color();
-    let mut image = decoded.to_rgba8();
+    let (mut image, color) = crate::imagefile::read(source)?;
     let color = apply_sidecar(source, &mut image, color)?;
     Ok((image, color))
 }
 
-/// Runs the image's `.amod` modifiers on it, returning its color type after them; see
+/// Runs the image's `.amod` modifiers on it, returning its channels after them; see
 /// docs/features/textures.md#modifiers.
-fn apply_sidecar(
-    source: &Path,
-    image: &mut image::RgbaImage,
-    color: image::ColorType,
-) -> Result<image::ColorType, String> {
+fn apply_sidecar(source: &Path, image: &mut Image, color: Channels) -> Result<Channels, String> {
     let Some(amod) = crate::amod::read(source)? else {
         return Ok(color);
     };
@@ -693,13 +665,14 @@ fn apply_sidecar(
     if !modifiers.iter().any(|m| m.enabled) {
         return Ok(color);
     }
-    let (width, height) = (image.width() as usize, image.height() as usize);
+    let (width, height) = (image.width as usize, image.height as usize);
     let mut pixels: Vec<[f64; 3]> = image
-        .pixels()
+        .texels()
+        .iter()
         .map(|p| [0, 1, 2].map(|c| f64::from(p[c]) / 255.0))
         .collect();
     crate::noise::apply_modifiers(modifiers, &mut pixels, width, height);
-    for (p, rgb) in image.pixels_mut().zip(pixels) {
+    for (p, rgb) in image.texels_mut().iter_mut().zip(pixels) {
         for c in 0..3 {
             p[c] = (rgb[c].clamp(0.0, 1.0) * 255.0).round() as u8;
         }
@@ -709,8 +682,8 @@ fn apply_sidecar(
         .iter()
         .any(|m| m.enabled && m.kind == crate::noise::ModifierKind::Colorize);
     Ok(match (color.has_color(), colorized, color.has_alpha()) {
-        (false, true, true) => image::ColorType::Rgba8,
-        (false, true, false) => image::ColorType::Rgb8,
+        (false, true, true) => Channels::Rgba,
+        (false, true, false) => Channels::Rgb,
         _ => color,
     })
 }
@@ -997,10 +970,8 @@ fn compile_font(
     let font = crate::font::compile(&data, crate::hash::fnv1a64(p.as_bytes()))?;
     write(&output.join(format!("{p}.afont.bin")), &font.afont)?;
     let (width, height) = (font.atlas.width, font.atlas.height);
-    let atlas = image::RgbaImage::from_raw(width, height, font.atlas.pixels)
-        .ok_or("atlas size mismatch")?;
     write_texture(
-        atlas,
+        font.atlas,
         &output.join(format!("{p}.atex.bin")),
         (format, ColorSpace::Linear, Usage::Font),
         false,
@@ -1060,10 +1031,10 @@ fn compile_texture(
     flip_green: bool,
     custom: Option<&crate::mipmap::Chain>,
 ) -> Result<(usize, usize), String> {
-    let load = |rel: &str| -> Result<image::RgbaImage, String> {
+    let load = |rel: &str| -> Result<Image, String> {
         let mut image = decode(&input.join(rel))?;
         if flip_green {
-            for pixel in image.pixels_mut() {
+            for pixel in image.texels_mut().iter_mut() {
                 pixel[1] = 255 - pixel[1];
             }
         }
@@ -1073,14 +1044,8 @@ fn compile_texture(
     let Some(chain) = custom else {
         return write_texture(image, dest, color, mipmaps).map(|levels| (levels, 0));
     };
-    let as_level = |image: image::RgbaImage| texture::Image {
-        width: image.width(),
-        height: image.height(),
-        pixels: image.into_raw(),
-    };
     let (format, space, usage) = color;
-    let (levels, custom) =
-        crate::mipmap::build(as_level(image), space, chain, |rel| load(rel).map(as_level))?;
+    let (levels, custom) = crate::mipmap::build(image, space, chain, load)?;
     write(
         dest,
         &crate::atex::encode_rgba8(format, space, usage, &levels)?,
@@ -1097,7 +1062,7 @@ fn compile_orm(
     format: Target,
 ) -> Result<usize, String> {
     let mut size = None;
-    let mut channels: Vec<(usize, image::RgbaImage)> = Vec::new();
+    let mut channels: Vec<(usize, Image)> = Vec::new();
     for (channel, source) in sources.iter().enumerate() {
         let Some(source) = source else {
             continue;
@@ -1119,9 +1084,9 @@ fn compile_orm(
     let Some((_, (width, height))) = size else {
         return Err("no ORM inputs".into());
     };
-    let mut packed = image::RgbaImage::from_pixel(width, height, image::Rgba([255; 4]));
+    let mut packed = Image::filled(width, height, [255; 4]);
     for (channel, image) in &channels {
-        for (out, src) in packed.pixels_mut().zip(image.pixels()) {
+        for (out, src) in packed.texels_mut().iter_mut().zip(image.texels()) {
             out[*channel] = src[0];
         }
     }
@@ -1138,7 +1103,7 @@ fn compile_pack(
     (format, mipmaps): (Target, bool),
 ) -> Result<usize, String> {
     let mut size: Option<(&str, (u32, u32))> = None;
-    let mut images: HashMap<&str, image::RgbaImage> = HashMap::new();
+    let mut images: HashMap<&str, Image> = HashMap::new();
     for (source, _) in sources.iter().flatten() {
         if images.contains_key(source.as_str()) {
             continue;
@@ -1160,12 +1125,16 @@ fn compile_pack(
     let Some((_, (width, height))) = size else {
         return Err("no pack inputs".into());
     };
-    let mut packed = image::RgbaImage::from_pixel(width, height, image::Rgba(fill));
+    let mut packed = Image::filled(width, height, fill);
     for (channel, source) in sources.iter().enumerate() {
         let Some((source, from)) = source else {
             continue;
         };
-        for (out, src) in packed.pixels_mut().zip(images[source.as_str()].pixels()) {
+        for (out, src) in packed
+            .texels_mut()
+            .iter_mut()
+            .zip(images[source.as_str()].texels())
+        {
             out[channel] = src[*from as usize];
         }
     }
@@ -1269,20 +1238,15 @@ fn compile_custom_material(
 }
 
 fn write_texture(
-    image: image::RgbaImage,
+    image: Image,
     dest: &Path,
     (format, color, usage): (Target, ColorSpace, Usage),
     mipmaps: bool,
 ) -> Result<usize, String> {
-    let base = texture::Image {
-        width: image.width(),
-        height: image.height(),
-        pixels: image.into_raw(),
-    };
     let levels = if mipmaps {
-        texture::mip_chain(base, color)
+        texture::mip_chain(image, color)
     } else {
-        vec![base]
+        vec![image]
     };
     write(
         dest,
@@ -1307,8 +1271,7 @@ mod tests {
     fn hdr_maps_become_half_float_cubemaps() {
         let dir = tempfile::tempdir().unwrap();
         let (source, dest) = (dir.path().join("sky.exr"), dir.path().join("sky.atex.bin"));
-        exr::prelude::write_rgb_file(&source, 64, 32, |_, y| (4.0f32, y as f32 / 32.0, 0.5f32))
-            .unwrap();
+        crate::hdr::tests::write_exr(&source, 64, 32, |_, y| [4.0, y as f32 / 32.0, 0.5]);
         let detail = compile_cubemap(&source, &dest, Target::default()).unwrap();
         assert_eq!(detail, "cubemap 16², bc6h, 5 levels");
         let info = crate::atex::read(&fs::read(&dest).unwrap()).unwrap();
@@ -1325,7 +1288,7 @@ mod tests {
         // Level 0 is six 16 × 16 faces of 8-byte texels; red stays 4.0.
         let (_, level0) = level0(&dest);
         assert_eq!(level0.len(), 6 * 16 * 16 * 8);
-        let red = half::f16::from_le_bytes([level0[0], level0[1]]).to_f32();
+        let red = imgio::half::to_f32(u16::from_le_bytes([level0[0], level0[1]]));
         assert_eq!(red, 4.0);
     }
 
@@ -1473,9 +1436,10 @@ mod tests {
 
     fn png(path: &Path, w: u32, h: u32) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        image::RgbaImage::from_fn(w, h, |x, y| image::Rgba([x as u8, y as u8, 7, 255]))
-            .save(path)
-            .unwrap();
+        crate::imagefile::tests::png(
+            path,
+            &Image::from_fn(w, h, |x, y| [x as u8, y as u8, 7, 255]),
+        );
     }
 
     #[test]
@@ -1703,9 +1667,10 @@ mod tests {
         )
         .unwrap();
         let png = |name: &str, rgba: [u8; 4]| {
-            image::RgbaImage::from_pixel(4, 4, image::Rgba(rgba))
-                .save(input.join("water").join(name))
-                .unwrap();
+            crate::imagefile::tests::png(
+                &input.join("water").join(name),
+                &Image::filled(4, 4, rgba),
+            );
         };
         png("lake.png", [10, 20, 30, 255]);
         png("lake.foam.png", [200, 0, 0, 255]);
@@ -1776,9 +1741,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         fs::create_dir_all(&input).unwrap();
-        image::RgbImage::from_pixel(4, 4, image::Rgb([200, 100, 50]))
-            .save(input.join("brick.n.JPEG"))
-            .unwrap();
+        fs::write(input.join("brick.n.JPEG"), crate::imagefile::tests::JPEG).unwrap();
 
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
@@ -1838,12 +1801,12 @@ mod tests {
             }))
             .unwrap();
             assert!(color.has_color() && !color.has_alpha());
-            assert_eq!(image.get_pixel(0, 0).0, [0, 255, 0, 255], "{name}");
-            assert_eq!(image.get_pixel(0, 1).0, [255, 0, 0, 255], "{name}");
+            assert_eq!(image.pixel(0, 0), [0, 255, 0, 255], "{name}");
+            assert_eq!(image.pixel(0, 1), [255, 0, 0, 255], "{name}");
             assert!(output.join(format!("{name}.atex.bin")).is_file());
         }
         let (image, _) = load_source(&input.join("rle.tga")).unwrap();
-        assert_eq!(image.as_raw()[..], [0, 0, 255, 255, 0, 0, 255, 255]);
+        assert_eq!(image.pixels[..], [0, 0, 255, 255, 0, 0, 255, 255]);
     }
 
     #[test]
@@ -1851,9 +1814,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         png(&input.join("a.png"), 1, 1);
-        image::RgbImage::new(1, 1)
-            .save(input.join("a.jpg"))
-            .unwrap();
+        fs::write(input.join("a.jpg"), crate::imagefile::tests::JPEG).unwrap();
 
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert_eq!(outcome.failures.len(), 2);
@@ -2327,7 +2288,7 @@ mod tests {
         // Colorize turns the dark gray image dark red.
         let (image, color) = load_source(&input.join("g.png")).unwrap();
         assert!(color.has_color());
-        assert_eq!(image.get_pixel(0, 0).0, [128, 0, 0, 255]);
+        assert_eq!(image.pixel(0, 0), [128, 0, 0, 255]);
 
         // A broken sidecar fails its image.
         fs::write(
@@ -2346,9 +2307,7 @@ mod tests {
 
     fn gray(path: &Path, w: u32, h: u32, value: u8) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        image::GrayImage::from_pixel(w, h, image::Luma([value]))
-            .save(path)
-            .unwrap();
+        crate::imagefile::tests::gray_png(path, w, h, value, false);
     }
 
     /// A built texture's format name and level 0's data as stored.
@@ -2450,12 +2409,10 @@ mod tests {
     fn toml_overrides_slots_and_flips_dx_normals() {
         let dir = tempfile::tempdir().unwrap();
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
-        image::RgbaImage::from_pixel(1, 1, image::Rgba([128, 40, 255, 255]))
-            .save({
-                fs::create_dir_all(input.join("wall")).unwrap();
-                input.join("wall/wall.n.png")
-            })
-            .unwrap();
+        crate::imagefile::tests::png(
+            &input.join("wall/wall.n.png"),
+            &Image::filled(1, 1, [128, 40, 255, 255]),
+        );
         gray(&input.join("wall/wall.ao.png"), 1, 1, 10);
         gray(&input.join("shared/ao.png"), 1, 1, 90);
         fs::write(

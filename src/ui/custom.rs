@@ -904,25 +904,16 @@ fn preview_images(
     output: Option<&Path>,
 ) -> Vec<Option<crate::texture::Image>> {
     let dir = edit.dir().to_path_buf();
-    let decode = |path: &str, flip: bool| -> Option<image::RgbaImage> {
-        let mut image = image::open(dir.join(path)).ok()?.to_rgba8();
+    let decode = |path: &str, flip: bool| -> Option<crate::imagefile::Image> {
+        let (mut image, _) = crate::imagefile::read(&dir.join(path)).ok()?;
         if flip {
-            for p in image.pixels_mut() {
+            for p in image.texels_mut().iter_mut() {
                 p[1] = 255 - p[1];
             }
         }
         Some(image)
     };
-    let fit = |image: image::RgbaImage| {
-        crate::inspect::fit_within(
-            crate::texture::Image {
-                width: image.width(),
-                height: image.height(),
-                pixels: image.into_raw(),
-            },
-            MAX_SIDE,
-        )
-    };
+    let fit = |image: crate::imagefile::Image| crate::inspect::fit_within(image, MAX_SIDE);
     shader
         .textures
         .iter()
@@ -965,10 +956,10 @@ fn preview_images(
                     sources.push(source);
                 }
                 let (w, h) = size?;
-                let mut packed = image::RgbaImage::from_pixel(w, h, image::Rgba(t.fill()));
+                let mut packed = crate::imagefile::Image::filled(w, h, t.fill());
                 for (channel, source) in sources.iter().enumerate() {
                     if let Some((image, from)) = source {
-                        for (out, src) in packed.pixels_mut().zip(image.pixels()) {
+                        for (out, src) in packed.texels_mut().iter_mut().zip(image.texels()) {
                             out[channel] = src[*from as usize];
                         }
                     }

@@ -507,12 +507,12 @@ pub struct Compiled {
     /// By name: `<P>/<name>.amat.bin`.
     pub materials: Vec<(String, Material)>,
     /// By name: `<P>/<name>.atex.bin`.
-    pub images: Vec<(String, image::RgbaImage, ColorSpace)>,
+    pub images: Vec<(String, crate::imagefile::Image, ColorSpace)>,
     /// By material name: `<P>/<name>.orm.atex.bin`, linear.
-    pub orm: Vec<(String, image::RgbaImage)>,
+    pub orm: Vec<(String, crate::imagefile::Image)>,
     /// Color sets exported as Texture + UV buffer, by name: `<P>/<name>.colors.atex.bin`, sRGB,
     /// without mipmaps.
-    pub color_textures: Vec<(String, image::RgbaImage)>,
+    pub color_textures: Vec<(String, crate::imagefile::Image)>,
     /// Texture paints, by name: `<P>/<name>.paint.atex.bin`, their mip chains and how to write
     /// them.
     pub paint_textures: Vec<(
@@ -983,7 +983,7 @@ pub fn compile(
             (sets[i].name.clone(), id)
         })
         .collect();
-    let color_textures: Vec<(String, image::RgbaImage)> = textured
+    let color_textures: Vec<(String, crate::imagefile::Image)> = textured
         .iter()
         .map(|&i| (sets[i].name.clone(), vertex_colors::texture(&sets[i])))
         .collect();
@@ -1046,8 +1046,8 @@ pub fn compile(
     };
 
     // Images, decoded once.
-    let mut decoded: HashMap<usize, image::RgbaImage> = HashMap::new();
-    let mut decode = |index: usize| -> Result<image::RgbaImage, String> {
+    let mut decoded: HashMap<usize, crate::imagefile::Image> = HashMap::new();
+    let mut decode = |index: usize| -> Result<crate::imagefile::Image, String> {
         if let Some(image) = decoded.get(&index) {
             return Ok(image.clone());
         }
@@ -1062,9 +1062,8 @@ pub fn compile(
             }
             gltf::image::Source::Uri { uri, .. } => load_uri(uri, dir)?,
         };
-        let rgba = image::load_from_memory(&bytes)
-            .map_err(|e| format!("image {index}: {e}"))?
-            .to_rgba8();
+        let (rgba, _) =
+            crate::imagefile::decode(&bytes, "").map_err(|e| format!("image {index}: {e}"))?;
         decoded.insert(index, rgba.clone());
         Ok(rgba)
     };
@@ -1174,10 +1173,10 @@ pub fn compile(
 
 /// R from the occlusion image, G and B from the metallic-roughness image (255 without one).
 fn pack_orm(
-    occlusion: Option<image::RgbaImage>,
-    metal_rough: Option<image::RgbaImage>,
+    occlusion: Option<crate::imagefile::Image>,
+    metal_rough: Option<crate::imagefile::Image>,
     material: &str,
-) -> Result<image::RgbaImage, String> {
+) -> Result<crate::imagefile::Image, String> {
     let size = match (&occlusion, &metal_rough) {
         (Some(o), Some(m)) if o.dimensions() != m.dimensions() => {
             return Err(format!(
@@ -1190,13 +1189,13 @@ fn pack_orm(
         (_, Some(m)) => m.dimensions(),
         (None, None) => (1, 1),
     };
-    Ok(image::RgbaImage::from_fn(size.0, size.1, |x, y| {
-        let r = occlusion.as_ref().map_or(255, |o| o.get_pixel(x, y)[0]);
+    Ok(crate::imagefile::Image::from_fn(size.0, size.1, |x, y| {
+        let r = occlusion.as_ref().map_or(255, |o| o.pixel(x, y)[0]);
         let [g, b] = metal_rough.as_ref().map_or([255, 255], |m| {
-            let p = m.get_pixel(x, y);
+            let p = m.pixel(x, y);
             [p[1], p[2]]
         });
-        image::Rgba([r, g, b, 255])
+        [r, g, b, 255]
     }))
 }
 

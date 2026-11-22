@@ -415,14 +415,7 @@ pub fn fill(texture: &Path, levels: &[(u32, Image)]) -> Result<usize, String> {
         if *level == 0 || named.contains(level) || path.exists() {
             continue;
         }
-        image::save_buffer(
-            &path,
-            &image.pixels,
-            image.width,
-            image.height,
-            image::ExtendedColorType::Rgba8,
-        )
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+        crate::imagefile::write_png(&path, image)?;
         written += 1;
     }
     Ok(written)
@@ -446,11 +439,9 @@ mod tests {
             (3, flat(1, 1, 30)),
         ];
         assert_eq!(fill(&texture, &levels), Ok(1));
-        let written = image::open(dir.path().join("rock.mip1.png"))
-            .unwrap()
-            .to_rgba8();
+        let (written, _) = crate::imagefile::read(&dir.path().join("rock.mip1.png")).unwrap();
         assert_eq!(written.dimensions(), (4, 4));
-        assert_eq!(written.get_pixel(0, 0).0, [10; 4]);
+        assert_eq!(written.pixel(0, 0), [10; 4]);
         // Level 0 and the levels that have a file are left alone.
         assert!(!dir.path().join("rock.mip0.png").exists());
         assert!(!dir.path().join("rock.mip2.png").exists());

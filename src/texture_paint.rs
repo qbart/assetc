@@ -438,25 +438,18 @@ pub fn read(path: &Path) -> Result<Option<Image>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e.to_string()),
     };
-    let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
-        .map_err(|e| e.to_string())?
-        .to_rgba8();
-    Ok(Some(Image {
-        width: image.width(),
-        height: image.height(),
-        pixels: image.into_raw(),
-    }))
+    let (image, _) = crate::imagefile::decode(&bytes, "png")?;
+    Ok(Some(image))
 }
 
 /// Writes square RGBA8 `pixels` of `size` as an `.apaint` file; see docs/spec/apaint.md.
 pub fn write_file(path: &Path, size: u32, pixels: &[u8]) -> Result<(), String> {
-    use image::ImageEncoder;
-    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
-    let mut bytes = Vec::new();
-    PngEncoder::new_with_quality(&mut bytes, CompressionType::Fast, FilterType::Adaptive)
-        .write_image(pixels, size, size, image::ExtendedColorType::Rgba8)
-        .map_err(|e| e.to_string())?;
-    std::fs::write(path, bytes).map_err(|e| e.to_string())
+    let image = Image {
+        width: size,
+        height: size,
+        pixels: pixels.to_vec(),
+    };
+    std::fs::write(path, crate::imagefile::encode_png(&image)?).map_err(|e| e.to_string())
 }
 
 /// Square texels of `size` for the editor: the file's, resampled when its size differs;
@@ -476,11 +469,10 @@ pub fn blank(size: u32) -> Vec<u8> {
 
 /// `image` resampled to `size` × `size`, bilinear per channel.
 pub fn resample(image: &Image, size: u32) -> Vec<u8> {
-    let Some(buffer) = image::RgbaImage::from_raw(image.width, image.height, image.pixels.clone())
-    else {
+    if image.pixels.len() != image.width as usize * image.height as usize * 4 || image.width == 0 {
         return blank(size);
-    };
-    image::imageops::resize(&buffer, size, size, image::imageops::FilterType::Triangle).into_raw()
+    }
+    crate::imagefile::resize(image, size, size, crate::imagefile::Resample::Bilinear).pixels
 }
 
 /// How a paint's texture is written; see docs/features/texture-paint.md#build.

@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use image::RgbaImage;
+use crate::imagefile::{Image, Resample};
 
 use crate::amesh::Strings;
 use crate::chunks::{Bytes, Writer};
@@ -195,21 +195,22 @@ pub struct Frame {
 
 /// A frame ready to pack: its name, pixels (trimmed or whole), where those start in the
 /// source, and the source's size.
-type Part = (String, RgbaImage, (u32, u32), (u32, u32));
+type Part = (String, Image, (u32, u32), (u32, u32));
 
 /// A packed atlas: its image and frames (in name order), and the grid's shape.
 pub struct Packed {
-    pub image: RgbaImage,
+    pub image: Image,
     pub frames: Vec<Frame>,
     pub columns: u32,
     pub cell: (u32, u32),
 }
 
 /// The bounds of the pixels with alpha above 0, or the whole image when there are none.
-fn opaque_bounds(image: &RgbaImage) -> (u32, u32, u32, u32) {
+fn opaque_bounds(image: &Image) -> (u32, u32, u32, u32) {
     let (w, h) = image.dimensions();
     let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
-    for (x, y, p) in image.enumerate_pixels() {
+    for (i, p) in image.texels().iter().enumerate() {
+        let (x, y) = (i as u32 % w, i as u32 / w);
         if p[3] > 0 {
             (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x + 1), y1.max(y + 1));
         }
@@ -222,7 +223,7 @@ fn opaque_bounds(image: &RgbaImage) -> (u32, u32, u32, u32) {
 }
 
 /// Places `image` at `(x, y)` in `atlas`, its edge repeated `extrude` px outward.
-fn place(atlas: &mut RgbaImage, image: &RgbaImage, x: u32, y: u32, extrude: u32) {
+fn place(atlas: &mut Image, image: &Image, x: u32, y: u32, extrude: u32) {
     let (w, h) = image.dimensions();
     if w == 0 || h == 0 {
         return;
@@ -236,13 +237,13 @@ fn place(atlas: &mut RgbaImage, image: &RgbaImage, x: u32, y: u32, extrude: u32)
             }
             let sx = (tx - x as i64).clamp(0, w as i64 - 1) as u32;
             let sy = (ty - y as i64).clamp(0, h as i64 - 1) as u32;
-            atlas.put_pixel(tx as u32, ty as u32, *image.get_pixel(sx, sy));
+            atlas.set_pixel(tx as u32, ty as u32, image.pixel(sx, sy));
         }
     }
 }
 
 /// Packs named images (in name order) by `config`; see docs/features/atlases.md#settings.
-pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Packed, String> {
+pub fn pack(config: &AtlasConfig, images: Vec<(String, Image)>) -> Result<Packed, String> {
     if images.is_empty() {
         return Err("no frames (png, jpg, jpeg or tga images in the folder)".into());
     }
@@ -251,12 +252,12 @@ pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Pa
     let (atlas, columns, cell) = match config.packing {
         Packing::Grid => {
             let cw = match config.cell_width {
-                0 => images.iter().map(|(_, i)| i.width()).max().unwrap_or(1),
+                0 => images.iter().map(|(_, i)| i.width).max().unwrap_or(1),
                 w => w,
             }
             .max(1);
             let ch = match config.cell_height {
-                0 => images.iter().map(|(_, i)| i.height()).max().unwrap_or(1),
+                0 => images.iter().map(|(_, i)| i.height).max().unwrap_or(1),
                 h => h,
             }
             .max(1);
@@ -269,7 +270,7 @@ pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Pa
             let rows = n.div_ceil(columns);
             let (width, height) = (pad + columns * (cw + pad), pad + rows * (ch + pad));
             let (width, height) = rounded(config, width, height)?;
-            let mut atlas = RgbaImage::new(width, height);
+            let mut atlas = Image::new(width, height);
             for (i, (name, image)) in images.into_iter().enumerate() {
                 let (sw, sh) = image.dimensions();
                 let scale = (cw as f64 / sw as f64).min(ch as f64 / sh as f64).min(1.0);
@@ -278,7 +279,7 @@ pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Pa
                         ((sw as f64 * scale).round() as u32).max(1),
                         ((sh as f64 * scale).round() as u32).max(1),
                     );
-                    image::imageops::resize(&image, w, h, image::imageops::FilterType::Lanczos3)
+                    crate::imagefile::resize(&image, w, h, Resample::Lanczos3)
                 } else {
                     image
                 };
@@ -309,7 +310,7 @@ pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Pa
                     let size = image.dimensions();
                     if config.trim {
                         let (x, y, w, h) = opaque_bounds(&image);
-                        let crop = image::imageops::crop_imm(&image, x, y, w, h).to_image();
+                        let crop = image.crop(x, y, w, h);
                         (name, crop, (x, y), size)
                     } else {
                         (name, image, (0, 0), size)
@@ -319,12 +320,12 @@ pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Pa
             let mut order: Vec<usize> = (0..parts.len()).collect();
             order.sort_by(|&a, &b| {
                 let (pa, pb) = (&parts[a].1, &parts[b].1);
-                pb.height()
-                    .cmp(&pa.height())
-                    .then(pb.width().cmp(&pa.width()))
+                pb.height
+                    .cmp(&pa.height)
+                    .then(pb.width.cmp(&pa.width))
                     .then(parts[a].0.cmp(&parts[b].0))
             });
-            let widest = parts.iter().map(|p| p.1.width()).max().unwrap_or(1);
+            let widest = parts.iter().map(|p| p.1.width).max().unwrap_or(1);
             let shelves = |width: u32| {
                 let (mut x, mut y, mut shelf) = (pad, pad, 0);
                 let mut spots = vec![(0, 0); parts.len()];
@@ -348,7 +349,7 @@ pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Pa
                 (spots, height) = shelves(width);
             }
             let (aw, ah) = rounded(config, width.max(widest + 2 * pad), height)?;
-            let mut atlas = RgbaImage::new(aw, ah);
+            let mut atlas = Image::new(aw, ah);
             for (i, (name, image, (ox, oy), (sw, sh))) in parts.into_iter().enumerate() {
                 let (x, y) = spots[i];
                 place(&mut atlas, &image, x, y, config.extrude);
@@ -356,8 +357,8 @@ pub fn pack(config: &AtlasConfig, images: Vec<(String, RgbaImage)>) -> Result<Pa
                     name,
                     x,
                     y,
-                    width: image.width(),
-                    height: image.height(),
+                    width: image.width,
+                    height: image.height,
                     source_width: sw,
                     source_height: sh,
                     offset_x: ox,
@@ -405,8 +406,8 @@ pub fn build(dir: &Path) -> Result<(AtlasConfig, Packed), String> {
                 .file_name()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            image::open(&path)
-                .map(|i| (name, i.to_rgba8()))
+            crate::imagefile::read(&path)
+                .map(|(image, _)| (name, image))
                 .map_err(|e| format!("{file}: {e}"))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -474,8 +475,8 @@ pub fn encode(config: &AtlasConfig, packed: &Packed, texture: u64) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    fn square(size: u32, color: [u8; 4]) -> RgbaImage {
-        RgbaImage::from_pixel(size, size, image::Rgba(color))
+    fn square(size: u32, color: [u8; 4]) -> Image {
+        Image::filled(size, size, color)
     }
 
     #[test]
@@ -489,9 +490,9 @@ mod tests {
         assert_eq!(packed.image.dimensions(), (2 + 3 * 10, 2 + 2 * 10));
         assert_eq!(packed.frames[4].name, "f4");
         assert_eq!((packed.frames[4].x, packed.frames[4].y), (12, 12));
-        assert_eq!(packed.image.get_pixel(12, 12).0, [160, 0, 0, 255]);
+        assert_eq!(packed.image.pixel(12, 12), [160, 0, 0, 255]);
         // Padding stays transparent.
-        assert_eq!(packed.image.get_pixel(0, 0).0, [0; 4]);
+        assert_eq!(packed.image.pixel(0, 0), [0; 4]);
         assert_eq!(packing_summary(&config, &packed), "grid 3 × 2");
     }
 
@@ -505,10 +506,10 @@ mod tests {
             ..AtlasConfig::default()
         };
         // A 16 px image with an opaque 4 × 4 square at (6, 2).
-        let mut sprite = RgbaImage::new(16, 16);
+        let mut sprite = Image::new(16, 16);
         for y in 2..6 {
             for x in 6..10 {
-                sprite.put_pixel(x, y, image::Rgba([0, 255, 0, 255]));
+                sprite.set_pixel(x, y, [0, 255, 0, 255]);
             }
         }
         let images = vec![
@@ -523,7 +524,7 @@ mod tests {
         assert!(w.is_power_of_two() && h.is_power_of_two());
         // Extruded: the pixel left of `b` repeats its edge.
         let b = &packed.frames[1];
-        assert_eq!(packed.image.get_pixel(b.x - 1, b.y).0, [0, 0, 255, 255]);
+        assert_eq!(packed.image.pixel(b.x - 1, b.y), [0, 0, 255, 255]);
         let bytes = encode(&config, &packed, 7);
         let reader = crate::chunks::Reader::parse(&bytes, FORMAT).unwrap();
         assert_eq!(reader.require("FRAMES").unwrap().len(), 2 * 64);

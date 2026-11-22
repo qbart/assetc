@@ -28,6 +28,7 @@ mod hash;
 mod hdr;
 mod hull;
 mod icons;
+mod imagefile;
 mod inspect;
 mod licenses;
 mod logo;
