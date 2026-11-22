@@ -115,7 +115,7 @@ Each `[[textures]]` entry is one texture the shader samples:
 | Key | Meaning |
 |-----|---------|
 | `name` | Identifier (`[a-z][a-z0-9_]*`), unique in the shader. The `.acmat`'s key for it and, unpacked, its by-name suffix. |
-| `usage` | What it holds; sets the default color space and which files can fill it (below). Written to the KTX2 [usage key](../spec/ktx2.md). |
+| `usage` | What it holds; sets the default color space and which files can fill it (below). Written as the texture's [usage](../spec/atex.bin.md#usage). |
 | `dimension` | `2d` (default), `3d`, `cube`. A file that compiles to another dimension fails the material. |
 | `color_space` | `srgb` or `linear`; the default comes from `usage`. Only for image files: other assets keep their own. |
 | `default` | What the game binds when a material leaves it empty: `white` (default), `black`, `gray`, `normal` (`0.5, 0.5, 1`), `transparent`. |
@@ -332,8 +332,8 @@ has an error.
 
 ```
 shaders/water.ashader -> shaders/water.ashader.bin (shader: 64-byte params, 4 textures, fragment)
-water/lake.png -> water/lake.ktx2 (bc7, srgb, 11 levels)
-water/lake.foam.png, water/lake.depth.png -> water/lake.mask.ktx2 (bc7, linear, 11 levels)
+water/lake.png -> water/lake.atex.bin (bc7, srgb, 11 levels)
+water/lake.foam.png, water/lake.depth.png -> water/lake.mask.atex.bin (bc7, linear, 11 levels)
 water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
 ```
 
@@ -418,7 +418,7 @@ water/lake.acmat -> water/lake.acmat.bin (custom material: water, 3 textures)
     shape's transform. `time` runs while the canvas is shown.
   - Textures: images as the build would make them (packs packed, DirectX
     normal maps flipped), scaled to at most 2048 px; noise, gradients,
-    palettes, atlases and 2D LUTs from their built `.ktx2` in `output` (their
+    palettes, atlases and 2D LUTs from their built `.atex.bin` in `output` (their
     default until built); `cube` and `3d` textures always show their
     default. At most 10 2D, 3 cube and 3 3D textures are shown.
   - The state applies (blend, cull, depth), but not shadows.

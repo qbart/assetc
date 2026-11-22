@@ -56,7 +56,7 @@ Both modes show the same messages when there is no image to show.
 |-----------------------------------|-------------------------------------------|
 | nothing                           | "Select a file to preview"                |
 | source texture (Input `*.png`, `*.jpg`, `*.jpeg`, `*.tga`) | the decoded image |
-| compiled texture (Output `*.ktx2`)| level 0 (a 3D texture's slices side by side, left to right), decoded to 8-bit RGBA, if it is a 2D or 3D texture (not a cubemap or array) in an 8-bit format of the [texture formats](textures.md#format): `R8G8B8A8`, `R8G8B8`, `R8`, `R8G8` (R as gray, RG as red and green), `BC7`, `BC4` (as gray), `BC5` (red and green), ASTC 4 × 4 LDR or UASTC LDR (transcoded), shown as stored; otherwise "No preview for this format" |
+| compiled texture (Output `*.atex.bin`)| level 0 (a 3D texture's slices side by side, left to right), decoded to 8-bit RGBA, if it is a 2D or 3D texture (not a cubemap or array) in an 8-bit format of the [texture formats](textures.md#format): `R8G8B8A8`, `R8G8B8`, `R8`, `R8G8` (R as gray, RG as red and green), `BC7`, `BC4` (as gray), `BC5` (red and green), ASTC 4 × 4 LDR, shown as stored (an RG texture in ASTC as R R R G); otherwise "No preview for this format" |
 | a file that fails to decode       | "No preview" (the Inspector shows the error) |
 | an environment map folder (`*.env`) | the cubemap, in 3D, see [Environment maps](#environment-maps) |
 | a font (Input `*.ttf`, `*.otf`)   | its specimen sheet, without the toolbar, see [`fonts.md`](fonts.md#specimen) |
@@ -179,7 +179,7 @@ The buttons depend on the shown file's channels:
 
 | Source                               | Channels group                    |
 |--------------------------------------|-----------------------------------|
-| RGBA, and every compiled `.ktx2`     | RGB, R, G, B, A                   |
+| RGBA, and every compiled `.atex.bin`     | RGB, R, G, B, A                   |
 | RGB (e.g. JPEG, RGB PNG)             | RGB, R, G, B, A (A disabled)      |
 | grayscale                            | Gray                              |
 | grayscale + alpha                    | Gray, A                           |
@@ -394,7 +394,7 @@ A folder named `*.env` (any case) is a cubemap given as six face images:
 | `nz.*` | −Z  | 5          |
 
 - Faces are direct children with those names (case-sensitive) and a texture
-  source extension (`png`, `jpg`, `jpeg`, `tga`) in the Input tree, or `.ktx2`
+  source extension (`png`, `jpg`, `jpeg`, `tga`) in the Input tree, or `.atex.bin`
   (assetc's subset, level 0) in the Output tree.
 - All six must exist, decode, be square, have the same size, and that size
   must be a power of two; otherwise the canvas shows the problem as its

@@ -1,7 +1,7 @@
 # Color LUTs
 
 Preview of 3D color lookup tables in the Adobe / Resolve `.cube` format, e.g.
-`samples/blue-and-pink.lut.cube`, and their compilation to a KTX2 texture
+`samples/blue-and-pink.lut.cube`, and their compilation to a texture
 (see [Build](#build)).
 
 ## Format
@@ -50,11 +50,11 @@ volume_luts = ["grades/**"]   # these become 3D textures; the rest strips
 | **Strip** (default) | the file matches no `volume_luts` glob | 2D, `N² × N` pixels: `N` slices of `N × N` side by side, one per **blue** entry (left to right); within a slice **red** grows left to right and **green** top to bottom. Pixel `(b × N + r, g)` holds entry `(r, g, b)`. The layout game engines commonly use; works where 3D textures do not. |
 | **Volume** | the file matches a `volume_luts` glob | 3D, `N × N × N` (`pixelDepth` `N`): **red** along x, **green** along y (top to bottom), **blue** along z (slice). Sampled directly with hardware trilinear filtering. |
 
-Layout details in [`ktx2.md`](../spec/ktx2.md#color-luts). Both:
+Layout details in [`atex.bin.md`](../spec/atex.bin.md#color-luts). Both:
 
 - Asset path: the input-relative path without `.cube`, e.g.
   `grades/blue-and-pink.lut.cube` → `grades/blue-and-pink.lut`, output
-  `<asset path>.ktx2`, a `texture` in the manifest.
+  `<asset path>.atex.bin`, a `texture` in the manifest.
 - Each entry is stored as is: `round(clamp(v, 0, 1) × 255)` per channel,
   alpha 255, `R8G8B8A8_UNORM` (the values are already display encoded, so the
   GPU must not convert them), one mip level (mip levels would blend unrelated

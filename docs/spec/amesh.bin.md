@@ -382,7 +382,7 @@ sets' order.
 
 The model's [texture paints](../features/texture-paint.md), one record per
 paint in the sidecar's order. The paint's texels are not in the mesh: each
-is the texture `texture` names (`P/<name>.paint.ktx2`, `P` the model's
+is the texture `texture` names (`P/<name>.paint.atex.bin`, `P` the model's
 input path without its extension), sampled with the mesh's `uv`. Find a
 paint by `name_hash`.
 

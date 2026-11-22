@@ -3,7 +3,7 @@
 Procedural textures stored as parameters in `.anoise` files (format and exact
 algorithms: [`docs/spec/anoise.md`](../spec/anoise.md)): a generator with its
 own parameters, followed by a list of modifiers. They behave like any other
-texture source: the build turns them into `.ktx2`, the canvas previews them,
+texture source: the build turns them into `.atex.bin`, the canvas previews them,
 and they can fill material slots (`rock.h.anoise` is the height map of
 material `rock`).
 
@@ -108,7 +108,7 @@ parse, both tabs show the error instead.
 ## Build
 
 - `*.anoise` (any case) files in `input` are texture sources; their asset path
-  drops `.anoise`, e.g. `textures/clouds.anoise` → `textures/clouds.ktx2`.
+  drops `.anoise`, e.g. `textures/clouds.anoise` → `textures/clouds.atex.bin`.
 - Generated noise is **linear** (data) unless it fills an sRGB material slot
   (base color, emissive); the `[textures] linear` globs do not apply to it.
   `no_mipmaps` applies as usual.

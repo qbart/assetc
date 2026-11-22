@@ -128,7 +128,7 @@ How a written set reaches the game:
   mesh's `COLORS` (see [`amesh.bin.md`](../spec/amesh.bin.md#color-sets)).
 - **Texture + UV buffer**: for an authored Linear or Radial set that does
   not blend with another. Instead of colors:
-  - a **texture** `P/<set>.colors.ktx2` (asset path `P/<set>.colors`, `P`
+  - a **texture** `P/<set>.colors.atex.bin` (asset path `P/<set>.colors`, `P`
     the model's input-relative path without the extension): the set's
     gradient as a 256 × 1 `R8G8B8A8_SRGB` image, texel `x` the gradient's
     color at `(x + 0.5) / 256` as an `.agradient` without dithering computes

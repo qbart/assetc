@@ -50,13 +50,13 @@ All integers are little-endian.
 A record is `28 + path_len` bytes.
 
 - **`id`**: the ID the [manifest](aman.bin.md) gives the file (a texture's ID
-  hashes its asset path, without `.ktx2`); for a file it does not list,
+  hashes its asset path, without `.atex.bin`); for a file it does not list,
   `FNV-1a 64` of `path`.
 - **`kind`**:
 
   | Value | Kind | Files |
   |------:|------|-------|
-  | 0–9 | as in the [manifest](aman.bin.md): texture, material, mesh, animation, font, schema, data, graph, tree, atlas | `*.ktx2`, `*.amat.bin`, `*.amesh.bin`, `*.aanim.bin`, `*.afont.bin`, `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin`, `*.aatlas.bin` |
+  | 0–9 | as in the [manifest](aman.bin.md): texture, material, mesh, animation, font, schema, data, graph, tree, atlas | `*.atex.bin`, `*.amat.bin`, `*.amesh.bin`, `*.aanim.bin`, `*.afont.bin`, `*.aschema.bin`, `*.adata.bin`, `*.agraph.bin`, `*.atree.bin`, `*.aatlas.bin` |
   | 10 | manifest | `assetc.aman.bin` at the root |
   | 11, 12 | as in the manifest: gradient, palette | `*.agradient.bin`, `*.apalette.bin` |
   | 13–15 | as in the manifest: shader, custom material, collider | `*.ashader.bin`, `*.acmat.bin`, `*.acollider.bin` |
@@ -77,6 +77,6 @@ entry's bytes (with no entries, after the contents). An empty file has
    `offset + size` must lie within the file.
 3. Find an entry by path (binary search) or by `id` (a map built once), then
    read or memory-map `size` bytes at `offset`. Each is the very file the
-   build wrote, in its own format (a `.ktx2`, an `.amesh.bin`, …).
+   build wrote, in its own format (a `.atex.bin`, an `.amesh.bin`, …).
 
 Packing the same files with the same `alignment` gives the same bytes.

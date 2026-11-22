@@ -60,7 +60,7 @@ has none.
 
 ## Atlas
 
-The companion texture (asset ID `atlas`) is a [KTX2](ktx2.md) in
+The companion texture (asset ID `atlas`) is a [texture](atex.bin.md) in
 `R8G8B8A8_UNORM`, one mip level, holding the distance in R, G and B (alpha
 255); a renderer reads R. A texel value `v` means a distance of
 `(v / 255 − edge_value) × distance_range` texels from the outline, positive

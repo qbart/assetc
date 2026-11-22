@@ -92,7 +92,7 @@ The kind is decided by tab and file name, the same way the build decides it
 | Input  | `*.ttf`, `*.otf` (any case) | Font, see [`fonts.md`](fonts.md#inspector) |
 | Input  | `*.gltf`, `*.glb` (any case) | Model, see [`models.md`](models.md#inspector) |
 | Input  | anything else              | Ignored            |
-| Output | `*.ktx2` (any case)        | Compiled texture   |
+| Output | `*.atex.bin` (any case)        | Compiled texture   |
 | Output | `*.amat.bin`                   | Compiled material  |
 | Output | `*.amesh.bin`                  | Compiled mesh, see [`models.md`](models.md#inspector) |
 | Output | `*.aanim.bin`                  | Compiled animation, see [`models.md`](models.md#inspector) |
@@ -120,7 +120,7 @@ decimal, e.g. `12.3 KiB`; plain bytes below 1 KiB, e.g. `512 B`).
 | Color      | `sRGB` or `linear`, from [`[textures]`](textures.md#settings)       |
 | Mip levels | levels the build will write (`1` if `no_mipmaps` matches; what its [`.amipmap`](mipmaps.md) says when it has one) |
 | Custom mipmaps | only with an `.amipmap`: `<n> of <levels> levels from files`    |
-| Output     | output-relative path, e.g. `textures/Grass.ktx2`; `(not built)` appended when that file does not exist |
+| Output     | output-relative path, e.g. `textures/Grass.atex.bin`; `(not built)` appended when that file does not exist |
 
 If `[textures]` has an invalid pattern, Color and Mip levels show the error
 instead.
@@ -129,13 +129,14 @@ instead.
 
 | Row        | Value                                                               |
 |------------|---------------------------------------------------------------------|
-| Type       | what the container holds, from its header: `2D`, `Cubemap` (6 faces), `3D` (`pixelDepth` > 0), or `2D array` / `Cubemap array` (`layerCount` > 0, with ` of <n>` layers) |
-| Usage      | what the texture is for, the [`assetc.usage`](../spec/ktx2.md#keyvalue-data) key: `color`, `data`, `normal`, `orm`, `height`, `noise`, `gradient`, `palette`, `atlas`, `font`, `lut`, `environment`; `—` without the key (another writer, or an older build) |
+| Type       | what the file holds, from its `DESC`: `2D`, `Cubemap` (6 faces), `3D` (`depth` > 1), or `2D array` / `Cubemap array` (`layers` > 1, with ` of <n>` layers) |
+| Usage      | what the texture is for, its [usage](../spec/atex.bin.md#usage): `color`, `data`, `normal`, `orm`, `height`, `noise`, `gradient`, `palette`, `atlas`, `font`, `lut`, `environment`; `usage <n>` for a value it does not know |
 | Dimensions | `W × H` px (level 0), or `W × H × D` px for a 3D texture (shown as its slices side by side) |
-| Format     | the `vkFormat` name without `VK_FORMAT_` (`BC7_SRGB_BLOCK`, `ASTC_4x4_UNORM_BLOCK`, `R8G8B8A8_SRGB`, …), `UASTC (zstd)` or `UASTC HDR 4x4 (zstd)` for a UASTC texture; `vkFormat <n>` for a value ktx-rs does not name |
-| Color space | the data format descriptor's transfer function: `sRGB` or `linear` |
-| Mip levels | `levelCount`                                                        |
-| Writer     | the `KTXwriter` value (`assetc 0.2.2 / libktx v4.4.2-2`), when there is one |
+| Format     | the `VkFormat` name without `VK_FORMAT_` (`BC7_SRGB_BLOCK`, `ASTC_4x4_UNORM_BLOCK`, `R8G8B8A8_SRGB`, …) |
+| Color space | its `SRGB` flag: `sRGB` or `linear` |
+| Mip levels | `level_count`                                                       |
+| Channels   | the texture's channels and where a shader reads them, from its [swizzle](../spec/atex.bin.md#swizzle): `RGBA`, `RGB`, `R`, `RG`, or `RG (from R, A)` for an RG texture in ASTC |
+| Size       | bytes of every level together, and the compression against 8-bit RGBA: `1.3 MB (4:1)` |
 | Asset path | output-relative path without extension                              |
 | Asset ID   | as above                                                            |
 
@@ -205,7 +206,7 @@ square, the same size, and a power of two.
 
 ### Errors
 
-If the file cannot be read or decoded (corrupt PNG, not a KTX2 file, bad
+If the file cannot be read or decoded (corrupt PNG, not an `ATEX` file, bad
 manifest), the details show the rows that are still known (Kind, Size) and an
 **Error** row with the message. The canvas shows no image.
 
@@ -234,7 +235,7 @@ and also offers **Chunks** in the view bar.
 
 ## Mipmaps tab
 
-Shown for a compiled texture (`.ktx2` in the Output tree) the canvas can
+Shown for a compiled texture (`.atex.bin` in the Output tree) the canvas can
 [preview](canvas.md) with more than one mip level. It
 switches which level the [canvas](canvas.md) shows.
 
@@ -261,7 +262,7 @@ many levels, and the file of each level.
 Lists the assets a file contains, as recorded in `<output>/assetc.aman.bin`
 (see [`docs/spec/aman.bin.md`](../spec/aman.bin.md)).
 
-- Enabled only for compiled files (`.ktx2`, `.amat.bin`, `.amesh.bin`, `.aanim.bin` or `.afont.bin` selected in the Output
+- Enabled only for compiled files (`.atex.bin`, `.amat.bin`, `.amesh.bin`, `.aanim.bin` or `.afont.bin` selected in the Output
   tree) for now. Each holds exactly one asset; later container formats
   (e.g. meshes with embedded materials) will list several.
 - The manifest is read when the app opens and on every rescan (rescan button,

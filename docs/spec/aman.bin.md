@@ -53,7 +53,7 @@ back.
 
 | Value | Kind    | File format                  |
 |------:|---------|------------------------------|
-|     0 | texture | [`ktx2.md`](ktx2.md)         |
+|     0 | texture | [`atex.bin.md`](atex.bin.md)         |
 |     1 | material | [`amat.bin.md`](amat.bin.md)         |
 |     2 | mesh     | [`amesh.bin.md`](amesh.bin.md)       |
 |     3 | animation | [`aanim.bin.md`](aanim.bin.md)      |
@@ -81,10 +81,10 @@ when `16 + 16 * count + strings_size` differs from the file size, or when any
 
 ## Example
 
-One texture `textures/dirt` (ID `0x…`) at `textures/dirt.ktx2`:
+One texture `textures/dirt` (ID `0x…`) at `textures/dirt.atex.bin`:
 
 ```
 41 4D 41 4E  01 00 00 00  01 00 00 00  12 00 00 00   header: AMAN, v1, 1 entry, 18 bytes of strings
 <id u64 LE>  00 00 00 00  12 00  00  00              entry: offset 0, len 18, texture
-74 65 78 74 75 72 65 73 2F 64 69 72 74 2E 6B 74 78 32   "textures/dirt.ktx2"
+74 65 78 74 75 72 65 73 2F 64 69 72 74 2E 6B 74 78 32   "textures/dirt.atex.bin"
 ```

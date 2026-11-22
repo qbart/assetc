@@ -105,10 +105,9 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | gltf                 | reading models         | MIT or Apache-2.0           | github.com/gltf-rs/gltf |
 | meshoptimizer        | meshlets, levels of detail | MIT                     | meshoptimizer.org |
 | meshopt-pure         | meshoptimizer in Rust  | MIT                         | github.com/qbart/meshopt-pure |
-| KTX-Software         | KTX2 textures          | Apache-2.0                  | github.com/KhronosGroup/KTX-Software |
-| Basis Universal      | UASTC, BC from UASTC   | Apache-2.0                  | github.com/BinomialLLC/basis_universal |
+| Basis Universal      | BC encoders and decoders | Apache-2.0                | github.com/BinomialLLC/basis_universal |
 | astc-encoder         | ASTC                   | Apache-2.0                  | github.com/ARM-software/astc-encoder |
-| ktx-rs               | KTX-Software in Rust   | Apache-2.0 and BSD-3-Clause and MIT and Zlib | github.com/qbart/ktx-rs |
+| imgio                | texture encoding and decoding | Apache-2.0           | github.com/qbart/imgio |
 | matma                | path curves            | MIT                         | github.com/qbart/matma |
 | image                | reading images         | MIT or Apache-2.0           | github.com/image-rs/image |
 | exr                  | reading HDR images     | BSD-3-Clause                | github.com/johannesvollmer/exrs |
@@ -216,7 +215,7 @@ The icon follows the entry's type, by extension (any case):
 |-----------------------------------------------|---------------------------|
 | environment map folder (`*.env`), HDR environment map (`exr`) | `sun-medium` |
 | other folder                                  | `folder` / `folder-open`  |
-| image: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `tga`, `webp`, `tif`, `tiff`, `hdr`, `dds`, `ktx2` | `image` |
+| image: `png`, `jpg`, `jpeg`, `gif`, `bmp`, `tga`, `webp`, `tif`, `tiff`, `hdr`, `dds`, `atex.bin` | `image` |
 | font: `ttf`, `otf`, `woff`, `woff2`, `afont.bin` | `type`                 |
 | color LUT: `cube`                             | `aperture`                |
 | noise / pattern: `anoise`                     | `image-play`              |

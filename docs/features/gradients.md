@@ -4,7 +4,7 @@ Color gradients stored as stops in `.agradient` files (format and exact
 rendering: [`docs/spec/agradient.md`](../spec/agradient.md)). One file holds
 several gradients, each drawn as a vertical gradient (first stop at the
 bottom) in one **cell** of a grid in one image (a gradient lookup atlas). Like `.anoise` files they are texture sources: the
-build turns them into `.ktx2`, the canvas previews them (2D and 3D), and they
+build turns them into `.atex.bin`, the canvas previews them (2D and 3D), and they
 can fill material slots.
 
 ## Creating
@@ -142,7 +142,7 @@ and no image.
 ## Build
 
 - `*.agradient` (any case) files in `input` are texture sources; their asset
-  path drops `.agradient`, e.g. `luts/sky.agradient` → `luts/sky.ktx2`.
+  path drops `.agradient`, e.g. `luts/sky.agradient` → `luts/sky.atex.bin`.
 - Gradients are colors: **sRGB** unless a `[textures] linear` glob matches
   (or a linear material slot uses the file).
 - They are **never mipmapped** (1 level): smaller levels would blend
@@ -156,5 +156,5 @@ and no image.
   the image, and its [attached structs](structs.md); see
   [`agradient.bin.md`](../spec/agradient.bin.md). The image and the data are
   two assets: the CLI prints `<source> -> <asset path>.agradient.bin (<n>
-  gradients)` and `<source> -> <asset path>.ktx2 (rgba8, srgb, 1 level)`, and the
+  gradients)` and `<source> -> <asset path>.atex.bin (rgba8, srgb, 1 level)`, and the
   summary counts both.

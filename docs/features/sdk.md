@@ -68,17 +68,18 @@ directory, so a game can ship a pack and develop against loose files.
 formats](textures.md#format): `Rgba8Srgb`, `Rgba8Unorm`, `Rgb8Srgb`,
 `Rgb8Unorm`, `R8Unorm`, `Rg8Unorm`, `Rgba16Float`, `Rgb16Float`,
 `Bc7Srgb`, `Bc7Unorm`, `Bc4Unorm`, `Bc5Unorm`, `Bc6hUfloat`, `Astc4x4Srgb`,
-`Astc4x4Unorm`, `Astc4x4Float`, `Uastc` and `UastcHdr`. `Format::block()`
-gives the block size in texels and bytes (`(1, 4)` for `Rgba8*`, `(4, 16)`
-for `Bc7*`), `is_block()` whether it is a block format. `Texture::srgb`
-(`is_srgb()`) is the descriptor's sRGB transfer function, `Texture::zstd`
-whether the levels are zstd-compressed. A `Uastc` or `UastcHdr` texture's
-levels are zstd-compressed UASTC as the file stores them; the SDK does not inflate or transcode them (it depends on
-nothing but `std`), so a game hands the file to a KTX2 transcoder such as
-[ktx-rs](https://crates.io/crates/ktx-rs) (`Texture2::create_from_memory`,
-`transcode_basis`).
+`Astc4x4Unorm` and `Astc4x4Float`. `Format::vk_format()` is its `VkFormat`
+value (the file's `format`), `Format::block()` the block size in texels and
+bytes (`(1, 4)` for `Rgba8*`, `(4, 16)` for `Bc7*`), `is_block()` whether
+it is a block format. `Texture::srgb` (`is_srgb()`) is the file's `SRGB`
+flag, `Texture::usage` a `texture::Usage` (`Color`, `Data`, `Normal`,
+`Orm`, `Height`, `Noise`, `Gradient`, `Palette`, `Atlas`, `Font`, `Lut`,
+`Environment`; `key()` its name) and `Texture::swizzle` where each channel
+is sampled from (`Texture::channels()` counts them). Every level's bytes are
+what the GPU takes for that format, so a game uploads them as they are; the
+SDK depends on nothing but `std` and needs no KTX or Basis library.
 
-A texture's ID is the hash of its asset path without `.ktx2`, as in the
+A texture's ID is the hash of its asset path without `.atex.bin`, as in the
 [manifest](../spec/aman.bin.md); materials, meshes, fonts and atlases refer
 to textures and materials by these IDs, so `assets.load::<Texture>(id)`
 resolves any reference found in another asset.
@@ -100,7 +101,7 @@ into string tables are resolved to `String`s, hashes are kept as `u64`.
 | `pack` | `Pack`, `PackEntry` | `*.pak` | [`pak.md`](../spec/pak.md) |
 | `manifest` | `Manifest`, `ManifestEntry` | `assetc.aman.bin` | [`aman.bin.md`](../spec/aman.bin.md) |
 | `chunks` | `ChunkFile` | any chunked file: format name, version, chunks by name | [`chunks.md`](../spec/chunks.md) |
-| `texture` | `Texture` | `*.ktx2`: format (see below), size, depth, faces, layers, every mip level's bytes as stored (blocks for BC and ASTC, ready to upload), and its `usage` (`assetc.usage`, `None` without it) | [`ktx2.md`](../spec/ktx2.md#formats) |
+| `texture` | `Texture` | `*.atex.bin`: format (see below), size, depth, faces, layers, every mip level's bytes as stored (blocks for BC and ASTC, ready to upload), its usage and swizzle | [`atex.bin.md`](../spec/atex.bin.md) |
 | `material` | `Material` | `*.amat.bin` (version 1 or 2), with its struct data | [`amat.bin.md`](../spec/amat.bin.md) |
 | `mesh` | `Mesh` | `*.amesh.bin`: vertices (normals and tangents unpacked to `f32`), indices, submeshes, material IDs, meshlets, levels of detail, skin, skeleton, locators, color and UV sets, texture paints (`Mesh::paints`; `Paint::distance` turns a distance map's value back into a distance), properties, shapes, regions, paths | [`amesh.bin.md`](../spec/amesh.bin.md) |
 | `anim` | `Animation` | `*.aanim.bin`: clips, channels with their keys, events; plus sampling a channel at a time | [`aanim.bin.md`](../spec/aanim.bin.md) |
@@ -147,7 +148,7 @@ material.
 | `block_size` | the GPU block's size in bytes (multiple of 16; `0` without a block) |
 | `state` | `State { blend, cull, depth_write, depth_test, alpha_cutoff }`: `Blend::{Opaque, Mask, Blend, Add, Multiply}`, `Cull::{Back, Front, None}`, `DepthTest::{Less, LessEqual, Equal, Always}`; `State::bits()` gives the [state bits](../spec/ashader.bin.md#state-bits) back |
 | `fields` / `field(path)` | the block's values in offset order: `Field { path_hash, path, offset, ty, source }`, nested fields by their joined path (`foam.amount`); `ty` is `FieldType::{U32, I32, F32, Vec3, Vec4}` (`size()` in bytes), `source` the schema type it came from, `FieldSource::{Bool, Integer, Float, Enum, Rgb, Rgba}` |
-| `textures` / `texture(name)` / `texture_index(name)` | `ShaderTexture { name_hash, name, usage, dimension, default, srgb, required, bare, mipmaps, pack }`, in the shader's (and the material's `textures`) order; `usage` is `Usage::{Color, Data, …}` (`key()` is the KTX2 [usage key](../spec/ktx2.md)), `dimension` `Dimension::{D2, D3, Cube}`, `default` `Fallback::{White, Black, Gray, Normal, Transparent}`, `pack` `Some(Pack { inputs, fill })` when packed: four `Option<PackInput { name, channel }>` for R, G, B and A (`None` where no input fills it, `channel` `0`–`3` for r–a) and the fill bytes |
+| `textures` / `texture(name)` / `texture_index(name)` | `ShaderTexture { name_hash, name, usage, dimension, default, srgb, required, bare, mipmaps, pack }`, in the shader's (and the material's `textures`) order; `usage` is `Usage::{Color, Data, …}` (`key()` is the texture's [usage](../spec/atex.bin.md#usage) name), `dimension` `Dimension::{D2, D3, Cube}`, `default` `Fallback::{White, Black, Gray, Normal, Transparent}`, `pack` `Some(Pack { inputs, fill })` when packed: four `Option<PackInput { name, channel }>` for R, G, B and A (`None` where no input fills it, `channel` `0`–`3` for r–a) and the fill bytes |
 | `bindings` / `binding(name)` / `binding_for(kind, texture)` | the resources the stages declare: `Binding { kind, texture, set, binding, stages, size, name }`, `kind` `BindingKind::{Params, Frame, Object, Texture, Sampler}`, `texture` the index into `textures` (kinds `Texture`, `Sampler`), `stages` bits (`STAGE_VERTEX` 1, `STAGE_FRAGMENT` 2; `in_vertex()`, `in_fragment()`), `size` the uniform block's declared size; `binding_for(BindingKind::Params, 0)` finds the params block whatever its name |
 | `vertex`, `fragment` | `Option<Vec<u32>>`: each stage's SPIR-V words, ready for `wgpu::ShaderSource::SpirV` or `vkCreateShaderModule`; `None` without the stage |
 | `vertex_entry`, `fragment_entry` | the stages' entry points (`""` without the stage) |

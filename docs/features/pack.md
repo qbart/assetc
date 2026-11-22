@@ -26,11 +26,11 @@ Each entry gets:
 
 - **Path**: relative to `output`, `/`-separated.
 - **Kind**: from the file's name: the [manifest kind](../spec/aman.bin.md)
-  of its extension (texture `.ktx2`, material `.amat.bin`, mesh, animation,
+  of its extension (texture `.atex.bin`, material `.amat.bin`, mesh, animation,
   font, schema, data, graph, tree, atlas), **manifest** for
   `assetc.aman.bin`, **other** for anything else.
 - **Asset ID**: the manifest's ID for the file when the manifest lists it
-  (a texture's ID hashes its asset path without `.ktx2`), otherwise the
+  (a texture's ID hashes its asset path without `.atex.bin`), otherwise the
   [FNV-1a hash](build.md#asset-ids) of its path. A game can look an asset up
   by ID without reading the manifest.
 

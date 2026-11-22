@@ -32,7 +32,7 @@ all of them hold the new one, in one pushed commit:
 
 | Place | What |
 |-------|------|
-| `Cargo.toml` | `version` of `assetc-core`: the one the tag is checked against, and what the program reports (`assetc --version`, the status bar, a texture's `KTXwriter`) |
+| `Cargo.toml` | `version` of `assetc-core`: the one the tag is checked against, and what the program reports (`assetc --version`, the status bar) |
 | `sdk/Cargo.toml` | `version` of the `assetc` crate (the SDK), kept the same |
 | `colors/Cargo.toml` | `version` of the [`assetc-colors`](colors.md) crate, kept the same |
 | `demo/Cargo.toml` | `version` of `assetc-demo`, kept the same |

@@ -4,7 +4,7 @@ An **HDR environment map** is an OpenEXR image (`*.exr`, any case) in the
 input directory holding a whole surrounding in **latitude-longitude**
 (equirectangular) layout, as HDRI sites publish them: the full 360° around
 from left to right, straight up at the top row, straight down at the bottom.
-The build compiles it into a [KTX2 cubemap](../spec/ktx2.md#cubemaps) with
+The build compiles it into a [cubemap texture](../spec/atex.bin.md#cubemaps) with
 half-float colors, for skyboxes and image-based lighting. It is read with the
 pure-Rust [`exr`](https://crates.io/crates/exr) crate.
 
@@ -22,7 +22,7 @@ pure-Rust [`exr`](https://crates.io/crates/exr) crate.
 
 - **Face size**: the largest power of two not above `height / 2` (a 2048 ×
   1024 image gives 512), at least 1.
-- **Faces**, in KTX2 order: +X, −X, +Y, −Y, +Z, −Z. Texel `(x, y)` of a face,
+- **Faces**, in the texture's order: +X, −X, +Y, −Y, +Z, −Z. Texel `(x, y)` of a face,
   with `u = 2 (x + 0.5) / size − 1` and `v = 2 (y + 0.5) / size − 1`, looks
   along (Vulkan's cube face directions):
 
@@ -45,14 +45,14 @@ pure-Rust [`exr`](https://crates.io/crates/exr) crate.
   half-float range become its largest finite value. The levels are then
   written in the build's [texture format](textures.md#format): `BC6H`
   (unsigned: negative values become 0) for `bc`, ASTC 4 × 4 HDR for
-  `astc`, UASTC HDR 4 × 4 for `uastc`, `R16G16B16A16_SFLOAT` for `rgba`,
+  `astc`, `R16G16B16A16_SFLOAT` for `rgba`,
   `R16G16B16_SFLOAT` for `rgb`.
 
 ## Build
 
 | Source | Asset kind | Output |
 |--------|------------|--------|
-| `*.exr` (any case) | texture (cubemap) | `<asset path>.ktx2`, asset path the input-relative path without the extension |
+| `*.exr` (any case) | texture (cubemap) | `<asset path>.atex.bin`, asset path the input-relative path without the extension |
 
 The CLI line reads `<source> -> <output> (cubemap 512², bc6h, 10 levels)`.
 
@@ -67,7 +67,7 @@ The CLI line reads `<source> -> <output> (cubemap 512², bc6h, 10 levels)`.
 - **Info**: Kind `HDR environment map`, Size, **Dimensions** (`W × H px`),
   **Face size** (`512 px`), **Mip levels**, **Asset path**, **Asset ID**,
   **Output** (as for textures, `(not built)` appended when missing).
-- A compiled cubemap (`.ktx2` with six faces) in the Output tree shows
+- A compiled cubemap (`.atex.bin` with six faces) in the Output tree shows
   Dimensions, Format (`BC6H_UFLOAT_BLOCK`, …), **Faces** `6` and Mip levels; it
   has no 2D preview.
 

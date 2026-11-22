@@ -48,7 +48,7 @@ matched against the atlas' folder path with its extension
 
 | Output | Asset kind | Asset path |
 |--------|------------|------------|
-| `P.ktx2` | texture | `P` |
+| `P.atex.bin` | texture | `P` |
 | `P.aatlas.bin` | atlas | `P.aatlas.bin` |
 
 An atlas folder without frames, frames that fail to decode, or an atlas

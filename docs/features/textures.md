@@ -1,8 +1,9 @@
 # Textures
 
-How a texture source is turned into a `.ktx2` file
+How a texture source is turned into a `.atex.bin` file: the texels in the
+GPU's own format, every mip level, ready to upload
 (see [`build.md`](build.md) for which sources are textures, and
-[`docs/spec/ktx2.md`](../spec/ktx2.md) for the output format).
+[`docs/spec/atex.bin.md`](../spec/atex.bin.md) for the output format).
 
 ## Settings
 
@@ -26,23 +27,16 @@ no_mipmaps = ["ui/**"]
 | `no_mipmaps` | base level only                              | full mip chain             |
 | `volume_luts` | color LUT (`*.cube`) as a 3D texture, see [`lut.md`](lut.md#build) | 2D strip |
 
-One more key is not a glob list: `format` (see [Format](#format)).
-
-Glob syntax:
-
-- `*` matches any run of characters except `/`.
-- `**` matches any number of whole path segments, including none
-  (`**/*.png` matches `a.png` and `a/b/c.png`).
-- `?` matches one character except `/`; `[abc]`, `[a-z]`, `[!a]` match a
-  character class; `{a,b}` matches either alternative.
-- Matching is case-sensitive.
-- An invalid pattern fails the whole build before any source is compiled.
+Two more keys are not glob lists: `format` (see [Format](#format)) and
+`quality` (see [Quality](#quality)).
 
 ## Format
 
 `[textures] format` picks the GPU format every texture of the build is
 written in, one per [target](../spec/assetc.toml.md#targets): a desktop
-target takes `bc`, a mobile one `astc`, and so on.
+target takes `bc`, a mobile one `astc`. A build makes the textures of one
+target, so they hold only what that GPU reads natively; a game never
+transcodes them.
 
 ```toml
 [textures]
@@ -56,15 +50,17 @@ textures = { format = "astc" }
 |----------|------------|------------|-------------------|--------------------|-------------|
 | `bc` (default) | BCn blocks, for desktop GPUs | `BC7` | `BC4` | `BC5` | `BC6H` (unsigned) |
 | `astc`   | ASTC 4 × 4 blocks, for mobile GPUs | ASTC 4 × 4 LDR | ASTC 4 × 4, R in R, G, B; alpha 1 | ASTC 4 × 4, R in R, G, B; G in alpha | ASTC 4 × 4 HDR |
-| `uastc`  | Basis Universal UASTC 4 × 4, zstd supercompressed; a game transcodes it to what the GPU takes when loading | UASTC LDR | UASTC LDR, R in R, G, B; alpha 1 | UASTC LDR, R in R, G, B; G in alpha | UASTC HDR 4 × 4 |
 | `rgba`   | uncompressed | `R8G8B8A8` | `R8` | `R8G8` | `R16G16B16A16_SFLOAT` |
 | `rgb`    | uncompressed, alpha dropped | `R8G8B8` | `R8` | `R8G8` | `R16G16B16_SFLOAT` |
 
 - The [color space](#color-space) still applies: sRGB textures get the
   `_SRGB` variant of the format (`BC7_SRGB_BLOCK`, `ASTC_4x4_SRGB_BLOCK`,
-  `R8G8B8_SRGB`, UASTC with the sRGB transfer function), linear ones the
-  `_UNORM` variant. R and RG textures are always linear. Mip levels are
-  made from the 8-bit images as below, then each level is encoded.
+  `R8G8B8_SRGB`), linear ones the `_UNORM` variant. R and RG textures are
+  always linear. Mip levels are made from the 8-bit images as below, then
+  each level is encoded on its own.
+- Each texture records where its channels are (its
+  [swizzle](../spec/atex.bin.md#swizzle)): an RG texture is read from R and
+  G in BC5 and `R8G8`, from R and alpha in ASTC.
 - Normal maps are encoded like any other linear RGBA texture (`BC7`, not
   `BC5`), so a shader reads X, Y, Z from R, G, B whatever the format.
 - **Lookup textures stay `rgba`** whatever `format` says, since block
@@ -72,22 +68,46 @@ textures = { format = "astc" }
   [gradients](gradients.md), [palettes](palettes.md),
   [color LUTs](lut.md) and a model's
   [vertex color textures](vertex-colors.md#export).
-- Encoding uses the [ktx-rs](https://crates.io/crates/ktx-rs) crate (a Rust
-  port of KTX-Software, libktx):
-  - `bc`: each level is encoded to UASTC 4 × 4 (Basis Universal encoder,
-    default level) and transcoded to the BC format. An RG texture is
-    encoded with R in R, G, B and G in alpha so that BC5 gets R and G.
-  - `astc`: astcenc, 4 × 4 blocks, LDR, medium quality; HDR goes through
-    UASTC HDR 4 × 4 transcoded to ASTC 4 × 4 HDR, as the ASTC HDR encoder
-    is not available.
-  - `uastc`: the UASTC LDR 4 × 4 encoder (default level) or the UASTC HDR
-    4 × 4 encoder, then zstd level 18 supercompression.
+- Encoding uses [imgio](https://crates.io/crates/imgio) (pure Rust ports of
+  the Basis Universal and ARM astcenc encoders), straight to the target
+  format, at the build's [quality](#quality):
+  - `bc`: BC7 with basisu's `bc7f` (`bc7e` at `high` and `best`), BC4 and
+    BC5 with basisu's BC4 encoder, BC6H with basisu's BC6H encoder.
+  - `astc`: astcenc, 4 × 4 blocks, LDR (sRGB or linear) or HDR.
+  - `rgba`, `rgb`: the texels as they are (HDR as IEEE half floats).
 - An unknown value is an error when `assetc.toml` is read: `textures.format:
-  unknown variant ...`.
+  unknown variant ...`. `uastc`, which older builds took, is one: Basis
+  Universal textures need transcoding when a game loads them.
 - Changing `format` rebuilds every texture.
 
-See [`docs/spec/ktx2.md`](../spec/ktx2.md#formats) for what each format
-writes.
+## Quality
+
+`[textures] quality` trades build time for how close the blocks come to the
+image; it only changes `bc` and `astc` textures.
+
+```toml
+[textures]
+quality = "default"      # fastest, fast, default, high or best
+```
+
+| `quality` | BC7 | BC6H (basisu search) | ASTC (astcenc preset) |
+|-----------|-----|-----------------------|-----------------------|
+| `fastest` | `bc7f`, fastest | least | `fastest` |
+| `fast`    | `bc7f`, fast | less | `fast` |
+| `default` | `bc7f`, partly analytical | some | `medium` |
+| `high`    | `bc7e`, slow (perceptual for sRGB) | more | `thorough` |
+| `best`    | `bc7e`, slowest (perceptual for sRGB) | most | `exhaustive` |
+
+BC4 and BC5 have one quality.
+
+A 1024 × 1024 image takes about 0.01 s in BC7 and 0.1 s in ASTC at
+`default`; `high` takes about 20 times longer in BC7 and twice as long in
+ASTC, `best` longer still. Changing `quality`
+rebuilds every texture; an unknown value is an error when `assetc.toml` is
+read.
+
+See [`docs/spec/atex.bin.md`](../spec/atex.bin.md#formats) for what each
+format writes.
 
 ## Color space
 
@@ -150,13 +170,13 @@ in the Inspector's Modifiers tab.
 CLI lines show the settings used, for example:
 
 ```
-textures/Grass.png -> textures/Grass.ktx2 (bc7, srgb, 10 levels)
-textures/rock_n.png -> textures/rock_n.ktx2 (bc7, linear, 10 levels)
-ui/button.png -> ui/button.ktx2 (bc7, srgb, 1 level)
-textures/rock.png -> textures/rock.ktx2 (bc7, srgb, 9 levels, 2 custom)
+textures/Grass.png -> textures/Grass.atex.bin (bc7, srgb, 10 levels)
+textures/rock_n.png -> textures/rock_n.atex.bin (bc7, linear, 10 levels)
+ui/button.png -> ui/button.atex.bin (bc7, srgb, 1 level)
+textures/rock.png -> textures/rock.atex.bin (bc7, srgb, 9 levels, 2 custom)
 ```
 
 The first word is the format written: `bc7`, `bc4`, `bc5`, `bc6h`,
-`astc 4x4`, `astc 4x4 hdr`, `uastc`, `uastc hdr`, `rgba8`, `rgb8`, `r8`,
+`astc 4x4`, `astc 4x4 hdr`, `rgba8`, `rgb8`, `r8`,
 `rg8`, `rgba16f` or `rgb16f`. The last one has an
 [`.amipmap`](mipmaps.md#build): two of its levels come from files.

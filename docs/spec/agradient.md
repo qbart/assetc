@@ -2,7 +2,7 @@
 
 An `.agradient` file describes one image holding several color gradients, one
 per **cell** of a grid, each running vertically (first stop at the bottom). It is a texture source: the
-build compiles the image to KTX2 (see
+build compiles the image to a texture (see
 [`docs/features/gradients.md`](../features/gradients.md#build)). The file is
 TOML, UTF-8.
 

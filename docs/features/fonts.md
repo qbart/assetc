@@ -80,7 +80,7 @@ into two assets. With `P` the input-relative path without the extension
 | Output (in `output`) | Asset kind | Asset path | Holds |
 |----------------------|------------|------------|-------|
 | `P.afont.bin`            | font       | `P.afont.bin`  | glyph metrics, atlas rectangles, kerning ([spec](../spec/afont.bin.md)) |
-| `P.ktx2`             | texture    | `P`        | the SDF atlas, see [spec](../spec/afont.bin.md#atlas) |
+| `P.atex.bin`             | texture    | `P`        | the SDF atlas, see [spec](../spec/afont.bin.md#atlas) |
 
 The build prints e.g. `ui/inter.ttf -> ui/inter.afont.bin (191 glyphs, 0
 kerning pairs, 512 × 160 atlas)`.

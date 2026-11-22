@@ -96,7 +96,7 @@ build fails on it with `materials are <name>.amat files now: rename
 ### ORM packing
 
 If a material has any of `occlusion`, `roughness` or `metallic`, they are
-packed into one linear texture `<dir>/<name>.orm` (`<name>.orm.ktx2`), with
+packed into one linear texture `<dir>/<name>.orm` (`<name>.orm.atex.bin`), with
 a full mip chain:
 
 | Channel | Content                                   | When the slot has no file |
@@ -163,9 +163,9 @@ The material fails, and with it the build (no manifest is written), when:
 ## CLI
 
 ```
-brick/brick.jpg -> brick/brick.ktx2 (bc7, srgb, 11 levels)
-brick/brick.n.jpg -> brick/brick.n.ktx2 (bc7, linear, 11 levels)
-brick/brick.ao.jpg, brick/brick.r.jpg -> brick/brick.orm.ktx2 (bc7, linear, 11 levels)
+brick/brick.jpg -> brick/brick.atex.bin (bc7, srgb, 11 levels)
+brick/brick.n.jpg -> brick/brick.n.atex.bin (bc7, linear, 11 levels)
+brick/brick.ao.jpg, brick/brick.r.jpg -> brick/brick.orm.atex.bin (bc7, linear, 11 levels)
 brick/brick.* -> brick/brick.amat.bin (material: base_color, normal, orm, height)
 Built 4 textures, 1 material (3 skipped)
 ```
@@ -202,7 +202,7 @@ them to the convention.
 - **Source texture** that belongs to a material gets a **Material** row,
   e.g. `brick/brick.amat.bin (roughness)`. Its **Color** row is the slot's color space;
   for ORM inputs, **Output** shows the ORM texture, e.g.
-  `brick/brick.orm.ktx2 (channel G)`.
+  `brick/brick.orm.atex.bin (channel G)`.
 - **Compiled material** (Output `*.amat.bin`): every value from the `.amat.bin` file,
   one row each (Base color, Metallic, Roughness, Occlusion, Normal scale,
   Emissive, Height mode, Height scale, Height midlevel, Alpha, Double-sided),

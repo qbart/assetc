@@ -4,7 +4,7 @@
 way a game would: it opens the pack `assetc pack` writes and turns each asset
 into Bevy resources through the [SDK](sdk.md) only. It does not use assetc's
 own code, the source files in `samples/` or any loader crate (no `image`,
-`gltf` or KTX2 crate); if the demo can show it, a game can load it.
+`gltf` or KTX crate); if the demo can show it, a game can load it.
 
 ## Running
 
@@ -19,7 +19,7 @@ $ cargo run --release -p assetc-demo -- [path]
   `Run: cargo run -- pack` instead of the scenes.
 - The SDK reads a pack and an output directory the same way, so the demo
   shows the same scenes from either: `tmp/build/assetc.pak` or the loose
-  `*.bin` and `*.ktx2` files of `tmp/build`.
+  `*.bin` and `*.atex.bin` files of `tmp/build`.
 - `make demo` does both steps: packs the samples (`cargo run --release --
   pack`), then runs the demo on that pack. `make demo ASSETS=tmp/build`
   runs it on the output directory instead.
@@ -50,12 +50,12 @@ GPU as they are stored: BC and ASTC blocks as Bevy's `Bc7RgbaUnorm[Srgb]`,
 `Bc4RUnorm`, `Bc5RgUnorm`, `Bc6hRgbUfloat` and `Astc { 4x4 }` formats,
 `R8G8B8` and `R16G16B16_SFLOAT` widened to RGBA on the CPU (the GPU has no
 three-channel formats; alpha 255 / 1.0). A texture the GPU cannot sample
-(BC or ASTC without the device feature) or that needs transcoding (`uastc`)
+(BC or ASTC without the device feature)
 shows as a gray tile with its format named, and materials use their
 fallback for it. The demo asks for the BC and ASTC features the adapter
 has.
 
-The **sky** is the pack's cubemap textures (`*.ktx2` with 6 faces, the
+The **sky** is the pack's cubemap textures (`*.atex.bin` with 6 faces, the
 first by path): it is the 3D scenes' skybox and environment light. Without
 one, the 3D scenes use a plain background and a directional light.
 

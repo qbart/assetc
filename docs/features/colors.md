@@ -12,7 +12,7 @@ byte.
   (`use assetc_colors::gradient;`). It lives in `colors/`, a member of the
   Cargo workspace, and is published to
   [crates.io](https://crates.io/crates/assetc-colors).
-- **No dependencies** but `std`: no file formats (TOML, PNG, KTX2), no UI,
+- **No dependencies** but `std`: no file formats (TOML, PNG, textures), no UI,
   no engine. It works on plain values: colors as `[u8; 4]` or floats,
   images as RGBA8 bytes.
 - The version is the workspace's, set in `colors/Cargo.toml` with

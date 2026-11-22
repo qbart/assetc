@@ -2,7 +2,7 @@
 
 An `.apalette` file describes one image holding a set of named colors, one per
 **cell** of a grid, each cell filled with its color. It is a texture source:
-the build compiles the image to KTX2 (see
+the build compiles the image to a texture (see
 [`docs/features/palettes.md`](../features/palettes.md#build)). The file is
 TOML, UTF-8.
 

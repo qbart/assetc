@@ -32,18 +32,18 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 
 | Source             | Asset kind | Output                                        |
 |--------------------|------------|-----------------------------------------------|
-| `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | texture | `<asset path>.ktx2`, see [`ktx2.md`](../spec/ktx2.md) |
-| `*.anoise` (any case) | texture, generated | `<asset path>.ktx2`, see [`noise.md`](noise.md#build) |
-| `*.agradient` (any case) | texture, generated, and gradient | `<asset path>.ktx2` and `<asset path>.agradient.bin`, see [`gradients.md`](gradients.md#build) |
-| `*.apalette` (any case) | texture, generated, and palette | `<asset path>.ktx2` and `<asset path>.apalette.bin`, see [`palettes.md`](palettes.md#build) |
-| folder `*.atlas` (any case) | texture and atlas | `<asset path>.ktx2` and `<asset path>.aatlas.bin`, see [`atlases.md`](atlases.md#build) |
-| `*.exr` (any case) | texture, cubemap | `<asset path>.ktx2`, see [`hdr.md`](hdr.md#build) |
-| `*.cube` (any case) | texture, LUT strip | `<asset path>.ktx2`, see [`lut.md`](lut.md#build) |
+| `*.png`, `*.jpg`, `*.jpeg`, `*.tga` (any case) | texture | `<asset path>.atex.bin`, see [`atex.bin.md`](../spec/atex.bin.md) |
+| `*.anoise` (any case) | texture, generated | `<asset path>.atex.bin`, see [`noise.md`](noise.md#build) |
+| `*.agradient` (any case) | texture, generated, and gradient | `<asset path>.atex.bin` and `<asset path>.agradient.bin`, see [`gradients.md`](gradients.md#build) |
+| `*.apalette` (any case) | texture, generated, and palette | `<asset path>.atex.bin` and `<asset path>.apalette.bin`, see [`palettes.md`](palettes.md#build) |
+| folder `*.atlas` (any case) | texture and atlas | `<asset path>.atex.bin` and `<asset path>.aatlas.bin`, see [`atlases.md`](atlases.md#build) |
+| `*.exr` (any case) | texture, cubemap | `<asset path>.atex.bin`, see [`hdr.md`](hdr.md#build) |
+| `*.cube` (any case) | texture, LUT strip | `<asset path>.atex.bin`, see [`lut.md`](lut.md#build) |
 | `*.amat`, plus suffixed texture groups | material | `<dir>/<name>.amat.bin`, see [`materials.md`](materials.md) |
 | `*.ashader` | shader | `<asset path>.ashader.bin`, see [`custom-materials.md`](custom-materials.md#build) |
 | `*.acmat`, plus its textures by name | custom material | `<dir>/<name>.acmat.bin`, see [`custom-materials.md`](custom-materials.md#build) |
 | `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations, and its collider with an `.acollider` sidecar | `<asset path>.amesh.bin` and more, see [`models.md`](models.md#build) and [`colliders.md`](colliders.md#build) |
-| `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont.bin` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
+| `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont.bin` and `<asset path>.atex.bin`, see [`fonts.md`](fonts.md#build) |
 | `*.aschema` (any case) | schema | `<asset path>.aschema.bin`, see [`schemas.md`](schemas.md#build) |
 | `*.adata` (any case) | data | `<asset path>.adata.bin`, resolved, see [`instances.md`](instances.md#build) |
 | `*.agraph` (any case) | graph | `<asset path>.agraph.bin`, see [`graphs.md`](graphs.md#build) |
@@ -62,7 +62,7 @@ converted; JPEGs, having no alpha, get alpha 255; baseline and progressive
 JPEGs are supported; TGAs may be uncompressed or RLE-compressed, true-color,
 grayscale or color-mapped, with either origin). Color space and mipmaps follow the `[textures]` settings, see
 [`textures.md`](textures.md); so does the GPU format they are written in
-(`bc` by default, or `astc`, `uastc`, `rgba`, `rgb`, see
+(`bc` by default, or `astc`, `rgba`, `rgb`, see
 [`textures.md`](textures.md#format)).
 
 ## Outputs
@@ -70,13 +70,13 @@ grayscale or color-mapped, with either origin). Color space and mipmaps follow t
 ```
 <output>/
   assetc.aman.bin            see docs/spec/aman.bin.md
-  <asset path>.ktx2          one per texture (incl. <name>.orm.ktx2), same directory structure as input
+  <asset path>.atex.bin          one per texture (incl. <name>.orm.atex.bin), same directory structure as input
   <dir>/<name>.amat.bin      one per material
   <dir>/<name>.acmat.bin     one per custom material, <path>.ashader.bin one per shader
   <model>.amesh.bin          one per glTF model, with <model>/… for its materials and textures
   <model>.aanim.bin          one per skinned, animated glTF model
   <model>.acollider.bin      one per glTF model with an .acollider sidecar
-  <font>.afont.bin           one per font, beside its atlas <font>.ktx2
+  <font>.afont.bin           one per font, beside its atlas <font>.atex.bin
   <path>.aschema.bin         one per schema, data file, graph, tree, atlas, gradient file
   (.adata.bin, .agraph.bin,  and palette, beside their textures where they have one
   .atree.bin, .aatlas.bin,
@@ -87,7 +87,8 @@ grayscale or color-mapped, with either origin). Color space and mipmaps follow t
   the extension of the format: `<name>.<format>.bin`. Where a source and its
   output share a format name, the output is the source's name plus `.bin`
   (`forest.atree` → `forest.atree.bin`). A bare `.a<name>` file is always a
-  source, a `.bin` one always compiled. Textures stay `.ktx2`.
+  source, a `.bin` one always compiled. Textures, which have no source format
+  of their own, are `.atex.bin` (assetc texture).
 - Output directories are created as needed; existing files are overwritten.
 - `output` must not be the input directory or contain it (e.g. `output = "."`
   with `input = "assets"`); the build refuses to start, since cleaning could
@@ -104,7 +105,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
 
   | Asset kind | Output pattern |
   |------------|----------------|
-  | texture    | `*.ktx2`       |
+  | texture    | `*.atex.bin`   |
   | material   | `*.amat.bin`   |
   | mesh       | `*.amesh.bin`  |
   | animation  | `*.aanim.bin`  |
@@ -125,7 +126,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   `assets.manifest`, `assets.aman` or `assets.aman.bin` (its names before) at the output root is
   removed, as are files with the extensions outputs had before `.bin`
   (`*.amesh`, `*.amat`, `*.aanim`, `*.afont`, `*.atype`, `*.arec`, `*.agph`,
-  `*.atre`, `*.aatlas`). Entries
+  `*.atre`, `*.aatlas`) and textures before `.atex.bin` (`*.ktx2`). Entries
   starting with `.` and the contents of symlinked directories are not looked
   at, as in the file browser.
 - A candidate is kept if its `output`-relative path matches an output of this
@@ -145,7 +146,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
 - Every source is attempted; failures are collected and reported together.
 - If any source fails, or an ID collision is found, the build fails and
   `assetc.aman.bin` is **not** written, so a manifest never refers to a broken
-  set of outputs. Individual `.ktx2` files that did succeed are still written.
+  set of outputs. Individual `.atex.bin` files that did succeed are still written.
 - Building without a project (`assetc.toml` not found) is an error.
 - An invalid glob pattern in `[textures]` is an error; nothing is compiled.
 - `output` equal to or containing `input` is an error; nothing is compiled.
@@ -156,9 +157,9 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
 
 ```
 $ assetc build
-textures/Grass.png -> textures/Grass.ktx2 (bc7, srgb, 10 levels)
-textures/dirt.png -> textures/dirt.ktx2 (bc7, srgb, 9 levels)
-removed textures/old.ktx2
+textures/Grass.png -> textures/Grass.atex.bin (bc7, srgb, 10 levels)
+textures/dirt.png -> textures/dirt.atex.bin (bc7, srgb, 9 levels)
+removed textures/old.atex.bin
 Built 2 textures (1 skipped, 1 removed) into /path/to/project/build
 ```
 
@@ -185,7 +186,7 @@ to date, then `, <K> removed` when stale outputs were removed, then `, <W>
 warnings` (`1 warning`) when there were warnings:
 
 - `<counts>`: each kind of asset built at least once, in this order, as
-  `<n> <noun>` joined by `, `: textures (`.ktx2`), materials (`.amat.bin`),
+  `<n> <noun>` joined by `, `: textures (`.atex.bin`), materials (`.amat.bin`),
   meshes (`.amesh.bin`), animations (`.aanim.bin`), fonts (`.afont.bin`), schemas
   (`.aschema.bin`), data files (`.adata.bin`), graphs (`.agraph.bin`), trees (`.atree.bin`),
   atlases (`.aatlas.bin`), gradients (`.agradient.bin`), palettes

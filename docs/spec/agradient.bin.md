@@ -1,7 +1,7 @@
 # `.agradient.bin` gradients
 
 The gradients of an [`.agradient`](agradient.md) file as data, beside the
-image the build bakes from them (its `.ktx2`), so a game can sample a
+image the build bakes from them (its `.atex.bin`), so a game can sample a
 gradient itself, look one up by name, or read the
 [structs](../features/structs.md) attached to it. A
 [chunked file](chunks.md) with format `AGRAD`, version `1`; see
@@ -37,7 +37,7 @@ u32 and `len` u32 (bytes) into `STRINGS`.
 |     28 |    4 | `rows`           | u32 |
 |     32 |    4 | `layout`         | u32: `0` rows, `1` columns |
 |     36 |    4 | `reserved`       | u32, `0` |
-|     40 |    8 | `texture`        | u64, asset ID of the image (the file's `.ktx2`) |
+|     40 |    8 | `texture`        | u64, asset ID of the image (the file's `.atex.bin`) |
 
 ## Gradient (48 bytes)
 

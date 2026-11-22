@@ -33,9 +33,10 @@ for glob syntax and what each setting does.
 | `linear`     | array of strings | `[]`    | Globs of textures holding linear data, not sRGB color. |
 | `no_mipmaps` | array of strings | `[]`    | Globs of textures written without mipmaps.        |
 | `volume_luts` | array of strings | `[]`   | Globs of color LUTs (`*.cube`) compiled as 3D textures instead of 2D strips, see [`lut.md`](../features/lut.md#build). |
-| `format`     | string           | `"bc"`  | GPU format of every texture: `"bc"`, `"astc"`, `"uastc"`, `"rgba"` or `"rgb"`, see [`textures.md`](../features/textures.md#format). Usually set per [target](#targets). |
+| `format`     | string           | `"bc"`  | GPU format of every texture: `"bc"`, `"astc"`, `"rgba"` or `"rgb"`, see [`textures.md`](../features/textures.md#format). Usually set per [target](#targets). |
+| `quality`    | string           | `"default"` | How hard `bc` and `astc` encoders try: `"fastest"`, `"fast"`, `"default"`, `"high"` or `"best"`, see [`textures.md`](../features/textures.md#quality). |
 
-Patterns (every key but `format`) are matched against the source path
+Patterns (every key but `format` and `quality`) are matched against the source path
 relative to `input`, with its extension (`textures/rock_n.png`).
 
 ### `[meshes]`
@@ -132,7 +133,7 @@ How [`assetc pack`](../features/pack.md) bundles the output into one
 ```toml
 [pack]
 alignment = 4096
-exclude = ["**/*.orm.ktx2"]
+exclude = ["**/*.orm.atex.bin"]
 ```
 
 A bad value or glob fails the pack (not the build) with

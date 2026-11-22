@@ -1,7 +1,7 @@
 # `.apalette.bin` palettes
 
 The colors of an [`.apalette`](apalette.md) file as data, beside the image
-the build bakes from them (its `.ktx2`), so a game can use a color by name
+the build bakes from them (its `.atex.bin`), so a game can use a color by name
 or index without sampling the image, or read the
 [structs](../features/structs.md) attached to it. A
 [chunked file](chunks.md) with format `APALETTE`, version `1`; see
@@ -36,7 +36,7 @@ u32 and `len` u32 (bytes) into `STRINGS`.
 |     28 |    4 | `rows`        | u32 |
 |     32 |    4 | `layout`      | u32: `0` rows, `1` columns |
 |     36 |    4 | `reserved`    | u32, `0` |
-|     40 |    8 | `texture`     | u64, asset ID of the image (the file's `.ktx2`) |
+|     40 |    8 | `texture`     | u64, asset ID of the image (the file's `.atex.bin`) |
 
 ## Color (32 bytes)
 

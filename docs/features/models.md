@@ -216,7 +216,7 @@ offers **3D** (the default) and **Chunks** (the file's data as tables, see
   occlusion), normal texture, emissive factor × strength and texture, alpha
   mode and cutoff, double-sided. Normal scale and occlusion strength are not
   applied (the 3D view's material has no such settings). Textures are read from their
-  `.ktx2` (level 0). A material or texture that cannot be found or read is
+  `.atex.bin` (level 0). A material or texture that cannot be found or read is
   replaced by the defaults (white, roughness 1, no texture), and a submesh
   without a material is light gray. The [color set](vertex-colors.md#compiled-meshes)
   chosen in the Vertex colors tab, if any, multiplies the base color, as in
@@ -412,10 +412,10 @@ With `P` the input-relative path without the extension (e.g. `models/Fox`):
 |-----------------------------|------------|-------------------|----------------------------------------|
 | `P.amesh.bin`                   | mesh       | `P.amesh.bin`         | always ([spec](../spec/amesh.bin.md))       |
 | `P/<material>.amat.bin`         | material   | `P/<material>.amat.bin` | per material a submesh uses ([spec](../spec/amat.bin.md)) |
-| `P/<image>.ktx2`            | texture    | `P/<image>`       | per image used as base color, normal or emissive texture |
-| `P/<material>.orm.ktx2`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
-| `P/<set>.colors.ktx2`       | texture    | `P/<set>.colors`  | per color set exported as Texture + UV buffer or Both, see [`vertex-colors.md`](vertex-colors.md#export) |
-| `P/<paint>.paint.ktx2`      | texture    | `P/<paint>.paint` | per texture paint, see [`texture-paint.md`](texture-paint.md#build) |
+| `P/<image>.atex.bin`            | texture    | `P/<image>`       | per image used as base color, normal or emissive texture |
+| `P/<material>.orm.atex.bin`     | texture    | `P/<material>.orm` | per material with an occlusion or metallic-roughness texture |
+| `P/<set>.colors.atex.bin`       | texture    | `P/<set>.colors`  | per color set exported as Texture + UV buffer or Both, see [`vertex-colors.md`](vertex-colors.md#export) |
+| `P/<paint>.paint.atex.bin`      | texture    | `P/<paint>.paint` | per texture paint, see [`texture-paint.md`](texture-paint.md#build) |
 | `P.aanim.bin`                   | animation  | `P.aanim.bin`         | when the mesh is skinned and the file has animations ([spec](../spec/aanim.bin.md)) |
 
 The `.amesh.bin` also carries the model's [properties](properties.md),
@@ -500,12 +500,12 @@ Each used glTF material becomes an `.amat.bin` with:
 | `.amat.bin` field          | From glTF                                                   |
 |------------------------|-------------------------------------------------------------|
 | `base_color`           | `baseColorFactor`                                           |
-| `base_color_texture`   | `baseColorTexture` → `P/<image>.ktx2`, sRGB                 |
+| `base_color_texture`   | `baseColorTexture` → `P/<image>.atex.bin`, sRGB                 |
 | `metallic`, `roughness` | `metallicFactor`, `roughnessFactor`                        |
-| `orm_texture`          | `P/<material>.orm.ktx2` (linear): R from `occlusionTexture`'s R (255 without one), G and B from `metallicRoughnessTexture` (255 without one); `0` when neither exists |
+| `orm_texture`          | `P/<material>.orm.atex.bin` (linear): R from `occlusionTexture`'s R (255 without one), G and B from `metallicRoughnessTexture` (255 without one); `0` when neither exists |
 | `occlusion_strength`   | `occlusionTexture.strength` (1 without one)                 |
-| `normal_texture`, `normal_scale` | `normalTexture` → `P/<image>.ktx2`, linear; its `scale` |
-| `emissive`, `emissive_texture` | `emissiveFactor`; `emissiveTexture` → `P/<image>.ktx2`, sRGB |
+| `normal_texture`, `normal_scale` | `normalTexture` → `P/<image>.atex.bin`, linear; its `scale` |
+| `emissive`, `emissive_texture` | `emissiveFactor`; `emissiveTexture` → `P/<image>.atex.bin`, sRGB |
 | `emissive_strength`    | `KHR_materials_emissive_strength` (1 without it)            |
 | `alpha_mode`, `alpha_cutoff`, double-sided | `alphaMode`, `alphaCutoff` (0.5), `doubleSided` |
 | height fields          | none: no height texture, scale 0, midlevel 0.5, parallax    |

@@ -71,7 +71,7 @@ A level file:
   pixels are sRGB);
 - has its green channel inverted when the texture's is (a
   [DirectX normal map](materials.md));
-- is part of the texture, not a texture of its own: it gets no `.ktx2`, no
+- is part of the texture, not a texture of its own: it gets no `.atex.bin`, no
   asset ID, and cannot fill a material's slot. A file may be a level of
   several textures. Files by name belong to the texture whether or not
   `levels` reaches them.
@@ -84,7 +84,7 @@ Without an `.amipmap`, a file named `rock.mip1.png` is an ordinary texture.
   from files:
 
   ```
-  textures/rock.png -> textures/rock.ktx2 (bc7, srgb, 9 levels, 2 custom)
+  textures/rock.png -> textures/rock.atex.bin (bc7, srgb, 9 levels, 2 custom)
   ```
 
 - The `.amipmap` is the texture's own setting and wins over
