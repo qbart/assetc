@@ -1,4 +1,4 @@
-//! HDR environment maps: latitude-longitude OpenEXR images compiled into KTX2 cubemaps; see
+//! HDR environment maps: latitude-longitude OpenEXR images compiled into cubemap textures; see
 //! docs/features/hdr.md.
 
 use std::path::Path;

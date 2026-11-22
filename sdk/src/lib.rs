@@ -109,7 +109,7 @@ impl Kind {
         }
         let lower = name.to_ascii_lowercase();
         [
-            (".ktx2", Self::Texture),
+            (".atex.bin", Self::Texture),
             (".amat.bin", Self::Material),
             (".amesh.bin", Self::Mesh),
             (".aanim.bin", Self::Animation),
@@ -149,6 +149,7 @@ mod tests {
         assert_eq!(Kind::of_path("water/lake.amat.bin"), Kind::Material);
         assert_eq!(Kind::of_path("ui/fire.agradient.bin"), Kind::Gradient);
         assert_eq!(Kind::of_path("ui/Base.apalette.bin"), Kind::Palette);
-        assert_eq!(Kind::of_path("ui/fire.ktx2"), Kind::Texture);
+        assert_eq!(Kind::of_path("ui/fire.atex.bin"), Kind::Texture);
+        assert_eq!(Kind::of_path("ui/fire.ktx2"), Kind::Other);
     }
 }

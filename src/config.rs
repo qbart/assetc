@@ -19,7 +19,8 @@ input = \"assets\"
 output = \"build\"
 
 # [textures]
-# format = \"bc\"   # or \"astc\", \"uastc\", \"rgba\", \"rgb\"
+# format = \"bc\"   # or \"astc\", \"rgba\", \"rgb\"
+# quality = \"default\"   # or \"fastest\", \"fast\", \"high\", \"best\"
 # linear = [\"**/*_n.png\"]
 # no_mipmaps = [\"ui/**\"]
 
@@ -105,7 +106,9 @@ pub struct Textures {
     /// Globs of color LUTs compiled as 3D textures instead of 2D strips.
     pub volume_luts: Vec<String>,
     /// The GPU format every texture is written in; see docs/features/textures.md#format.
-    pub format: crate::ktx2::Format,
+    pub format: crate::atex::Format,
+    /// How hard the block encoders try; see docs/features/textures.md#quality.
+    pub quality: crate::atex::Quality,
 }
 
 /// Mesh build settings, see docs/spec/assetc.toml.md#meshes.
@@ -459,7 +462,7 @@ mod tests {
 
     #[test]
     fn texture_format_per_target() {
-        use crate::ktx2::Format;
+        use crate::atex::{Format, Quality};
         let dir = tempfile::tempdir().unwrap();
         fs::write(
             dir.path().join(FILE_NAME),
@@ -477,7 +480,7 @@ mod tests {
             project.config.target("raw").unwrap().textures.format,
             Format::Rgb
         );
-        for (text, format) in [("uastc", Format::Uastc), ("rgba", Format::Rgba)] {
+        for (text, format) in [("astc", Format::Astc), ("rgba", Format::Rgba)] {
             fs::write(
                 dir.path().join(FILE_NAME),
                 format!("[textures]\nformat = \"{text}\"\n"),
@@ -486,6 +489,24 @@ mod tests {
             assert_eq!(load(dir.path()).unwrap().config.textures.format, format);
         }
 
+        fs::write(
+            dir.path().join(FILE_NAME),
+            "[textures]\nquality = \"best\"\n[targets.quick]\ntextures = { quality = \"fastest\" }\n",
+        )
+        .unwrap();
+        let project = load(dir.path()).unwrap();
+        assert_eq!(project.config.textures.quality, Quality::Best);
+        let quick = project.config.target("quick").unwrap();
+        assert_eq!(quick.textures.quality, Quality::Fastest);
+        assert_eq!(Config::default().textures.quality, Quality::Default);
+
+        fs::write(
+            dir.path().join(FILE_NAME),
+            "[textures]\nformat = \"uastc\"\n",
+        )
+        .unwrap();
+        let error = load(dir.path()).unwrap_err().to_string();
+        assert!(error.contains("unknown variant `uastc`"), "{error}");
         fs::write(dir.path().join(FILE_NAME), "[textures]\nformat = \"dxt\"\n").unwrap();
         let error = load(dir.path()).unwrap_err().to_string();
         assert!(error.contains("unknown variant `dxt`"), "{error}");

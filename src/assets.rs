@@ -108,7 +108,7 @@ mod tests {
         assert_eq!(paths, ["A", "c", "textures/b"]);
         assert_eq!(assets[2].id, fnv1a64(b"textures/b"));
         assert_eq!(assets[2].kind, Kind::Texture);
-        assert_eq!(assets[2].file, dir.path().join("build/textures/b.ktx2"));
+        assert_eq!(assets[2].file, dir.path().join("build/textures/b.atex.bin"));
     }
 
     #[test]
@@ -137,9 +137,9 @@ mod tests {
                 .map(|a| a.asset_path.clone())
                 .collect()
         };
-        assert_eq!(in_file("build/textures/b.ktx2"), ["textures/b"]);
+        assert_eq!(in_file("build/textures/b.atex.bin"), ["textures/b"]);
         assert!(in_file("build/assetc.aman.bin").is_empty());
         assert!(in_file("assets/textures/b.png").is_empty());
-        assert!(Assets::NotBuilt.in_file(Path::new("x.ktx2")).is_empty());
+        assert!(Assets::NotBuilt.in_file(Path::new("x.atex.bin")).is_empty());
     }
 }

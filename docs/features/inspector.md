@@ -136,7 +136,7 @@ instead.
 | Color space | its `SRGB` flag: `sRGB` or `linear` |
 | Mip levels | `level_count`                                                       |
 | Channels   | the texture's channels and where a shader reads them, from its [swizzle](../spec/atex.bin.md#swizzle): `RGBA`, `RGB`, `R`, `RG`, or `RG (from R, A)` for an RG texture in ASTC |
-| Size       | bytes of every level together, and the compression against 8-bit RGBA: `1.3 MB (4:1)` |
+| Size       | bytes of every level together, and the compression against 8-bit RGBA: `1.3 MiB (4:1)` |
 | Asset path | output-relative path without extension                              |
 | Asset ID   | as above                                                            |
 

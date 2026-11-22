@@ -897,7 +897,7 @@ pub fn prepare_custom(
 const MAX_SIDE: u32 = 2048;
 
 /// Each texture of `shader` as the build would make it, for the preview: images decoded (packs
-/// packed), generated assets from their built `.ktx2`; see docs/features/custom-materials.md#preview.
+/// packed), generated assets from their built `.atex.bin`; see docs/features/custom-materials.md#preview.
 fn preview_images(
     edit: &CustomEdit,
     shader: &Shader,
@@ -940,8 +940,9 @@ fn preview_images(
                 let output = output?;
                 let rel = crate::build::relative(&edit.input, &dir.join(&path)).ok()?;
                 let rel = crate::plan::resolve("", &rel)?;
-                let built = output.join(format!("{}.ktx2", crate::build::strip_extension(&rel)));
-                let info = crate::ktx2::read(&std::fs::read(built).ok()?).ok()?;
+                let built =
+                    output.join(format!("{}.atex.bin", crate::build::strip_extension(&rel)));
+                let info = crate::atex::read(&std::fs::read(built).ok()?).ok()?;
                 info.level0
             }
             Some(pack) => {

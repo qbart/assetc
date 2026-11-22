@@ -6,9 +6,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::atex::{Target, Usage};
 use crate::config;
 use crate::gradient::{Gradients, is_gradient};
-use crate::ktx2::{Format, Usage};
 use crate::manifest::{self, Kind};
 use crate::material;
 use crate::noise::Noise;
@@ -204,7 +204,7 @@ pub fn run_cached(
     let mut schemas = None;
     let mut parts = Vec::new();
     // See docs/features/textures.md#format.
-    let format = config.textures.format;
+    let format = Target::of(&config.textures);
     for asset in &plan.assets {
         let dest = output.join(&asset.output);
         let stamp = match &asset.job {
@@ -385,11 +385,11 @@ pub fn run_cached(
 }
 
 /// `bc7, srgb, 10 levels`; see docs/features/textures.md#format.
-fn levels_detail(format: Format, color: ColorSpace, levels: usize) -> String {
+fn levels_detail(format: Target, color: ColorSpace, levels: usize) -> String {
     let noun = if levels == 1 { "level" } else { "levels" };
     format!(
         "{}, {color}, {levels} {noun}",
-        format.token(crate::ktx2::Kind::Rgba)
+        format.token(crate::atex::Kind::Rgba)
     )
 }
 
@@ -720,7 +720,7 @@ fn compile_model(
     input: &Path,
     source: &str,
     output: &Path,
-    (options, sidecar, format): (&crate::amesh::MeshOptions, &crate::amod::Amod, Format),
+    (options, sidecar, format): (&crate::amesh::MeshOptions, &crate::amod::Amod, Target),
     warnings: &mut Vec<String>,
 ) -> Result<String, String> {
     let p = strip_extension(source);
@@ -753,28 +753,28 @@ fn compile_model(
             ColorSpace::Srgb => Usage::Color,
             ColorSpace::Linear => Usage::Normal,
         };
-        let dest = output.join(format!("{p}/{name}.ktx2"));
+        let dest = output.join(format!("{p}/{name}.atex.bin"));
         write_texture(image, &dest, (format, color, usage), true)?;
     }
     for (name, image) in model.orm {
-        let dest = output.join(format!("{p}/{name}.orm.ktx2"));
+        let dest = output.join(format!("{p}/{name}.orm.atex.bin"));
         write_texture(image, &dest, (format, ColorSpace::Linear, Usage::Orm), true)?;
     }
     // A lookup texture: always `rgba`; see docs/features/textures.md#format.
     for (name, image) in model.color_textures {
-        let dest = output.join(format!("{p}/{name}.colors.ktx2"));
-        let target = (Format::Rgba, ColorSpace::Srgb, Usage::Color);
+        let dest = output.join(format!("{p}/{name}.colors.atex.bin"));
+        let target = (Target::RGBA, ColorSpace::Srgb, Usage::Color);
         write_texture(image, &dest, target, false)?;
     }
     // Texture paints; see docs/features/texture-paint.md#build.
     for (name, levels, export) in model.paint_textures {
-        let dest = output.join(format!("{p}/{name}.paint.ktx2"));
+        let dest = output.join(format!("{p}/{name}.paint.atex.bin"));
         let bytes = match export {
             crate::texture_paint::Export::Rgba(color) => {
-                crate::ktx2::encode_rgba8(format, color, Usage::of(color), &levels)?
+                crate::atex::encode_rgba8(format, color, Usage::of(color), &levels)?
             }
             crate::texture_paint::Export::Unorm(channels) => {
-                crate::ktx2::encode_unorm(format, channels, Usage::Data, &levels)?
+                crate::atex::encode_unorm(format, channels, Usage::Data, &levels)?
             }
         };
         write(&dest, &bytes)?;
@@ -800,12 +800,12 @@ fn compile_collider(
     ))
 }
 
-/// Packs an atlas folder into `P.ktx2` and `P.aatlas.bin`; see docs/features/atlases.md#build.
+/// Packs an atlas folder into `P.atex.bin` and `P.aatlas.bin`; see docs/features/atlases.md#build.
 fn compile_atlas(
     input: &Path,
     source: &str,
     output: &Path,
-    (format, color, mipmaps): (Format, ColorSpace, bool),
+    (format, color, mipmaps): (Target, ColorSpace, bool),
     warnings: &mut Vec<String>,
 ) -> Result<String, String> {
     let p = strip_extension(source);
@@ -829,20 +829,20 @@ fn compile_atlas(
     write(&output.join(format!("{p}.aatlas.bin")), &meta)?;
     write_texture(
         packed.image,
-        &output.join(format!("{p}.ktx2")),
+        &output.join(format!("{p}.atex.bin")),
         (format, color, Usage::Atlas),
         mipmaps,
     )?;
     Ok(format!("{frames} frames, {width} × {height} px, {summary}"))
 }
 
-/// Writes an HDR environment map as a half-float KTX2 cubemap; see docs/features/hdr.md.
-fn compile_cubemap(source: &Path, dest: &Path, format: Format) -> Result<String, String> {
+/// Writes an HDR environment map as a cubemap texture; see docs/features/hdr.md.
+fn compile_cubemap(source: &Path, dest: &Path, format: Target) -> Result<String, String> {
     let hdr = crate::hdr::read(source)?;
     let size = crate::hdr::face_size(hdr.height);
     let levels = hdr.cubemap(size);
-    write(dest, &crate::ktx2::encode_cubemap(format, &levels)?)?;
-    let token = format.token(crate::ktx2::Kind::Hdr);
+    write(dest, &crate::atex::encode_cubemap(format, &levels)?)?;
+    let token = format.token(crate::atex::Kind::Hdr);
     Ok(format!("cubemap {size}², {token}, {} levels", levels.len()))
 }
 
@@ -990,7 +990,7 @@ fn compile_font(
     input: &Path,
     source: &str,
     output: &Path,
-    format: Format,
+    format: Target,
 ) -> Result<String, String> {
     let p = strip_extension(source);
     let data = fs::read(input.join(source)).map_err(|e| e.to_string())?;
@@ -1001,7 +1001,7 @@ fn compile_font(
         .ok_or("atlas size mismatch")?;
     write_texture(
         atlas,
-        &output.join(format!("{p}.ktx2")),
+        &output.join(format!("{p}.atex.bin")),
         (format, ColorSpace::Linear, Usage::Font),
         false,
     )?;
@@ -1031,10 +1031,10 @@ fn compile_lut(source: &Path, dest: &Path, volume: bool) -> Result<usize, String
     let lut = crate::lut::Lut::parse(&text)?;
     let bytes = if volume {
         let n = lut.size as u32;
-        crate::ktx2::encode_rgba8_volume(ColorSpace::Linear, Usage::Lut, [n, n, n], &lut.volume())?
+        crate::atex::encode_rgba8_volume(ColorSpace::Linear, Usage::Lut, [n, n, n], &lut.volume())?
     } else {
-        crate::ktx2::encode_rgba8(
-            Format::Rgba,
+        crate::atex::encode_rgba8(
+            Target::RGBA,
             ColorSpace::Linear,
             Usage::Lut,
             &[lut.strip()?],
@@ -1055,7 +1055,7 @@ pub fn is_noise(file: &Path) -> bool {
 fn compile_texture(
     (input, source): (&Path, &str),
     dest: &Path,
-    color: (Format, ColorSpace, Usage),
+    color: (Target, ColorSpace, Usage),
     mipmaps: bool,
     flip_green: bool,
     custom: Option<&crate::mipmap::Chain>,
@@ -1083,7 +1083,7 @@ fn compile_texture(
         crate::mipmap::build(as_level(image), space, chain, |rel| load(rel).map(as_level))?;
     write(
         dest,
-        &crate::ktx2::encode_rgba8(format, space, usage, &levels)?,
+        &crate::atex::encode_rgba8(format, space, usage, &levels)?,
     )?;
     Ok((levels.len(), custom))
 }
@@ -1094,7 +1094,7 @@ fn compile_orm(
     input: &Path,
     sources: &[Option<String>; 3],
     dest: &Path,
-    format: Format,
+    format: Target,
 ) -> Result<usize, String> {
     let mut size = None;
     let mut channels: Vec<(usize, image::RgbaImage)> = Vec::new();
@@ -1135,7 +1135,7 @@ fn compile_pack(
     sources: &[Option<(String, u8)>; 4],
     fill: [u8; 4],
     dest: &Path,
-    (format, mipmaps): (Format, bool),
+    (format, mipmaps): (Target, bool),
 ) -> Result<usize, String> {
     let mut size: Option<(&str, (u32, u32))> = None;
     let mut images: HashMap<&str, image::RgbaImage> = HashMap::new();
@@ -1271,7 +1271,7 @@ fn compile_custom_material(
 fn write_texture(
     image: image::RgbaImage,
     dest: &Path,
-    (format, color, usage): (Format, ColorSpace, Usage),
+    (format, color, usage): (Target, ColorSpace, Usage),
     mipmaps: bool,
 ) -> Result<usize, String> {
     let base = texture::Image {
@@ -1286,7 +1286,7 @@ fn write_texture(
     };
     write(
         dest,
-        &crate::ktx2::encode_rgba8(format, color, usage, &levels)?,
+        &crate::atex::encode_rgba8(format, color, usage, &levels)?,
     )?;
     Ok(levels.len())
 }
@@ -1301,29 +1301,30 @@ fn write(dest: &Path, bytes: &[u8]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::atex::Format;
 
     #[test]
     fn hdr_maps_become_half_float_cubemaps() {
         let dir = tempfile::tempdir().unwrap();
-        let (source, dest) = (dir.path().join("sky.exr"), dir.path().join("sky.ktx2"));
+        let (source, dest) = (dir.path().join("sky.exr"), dir.path().join("sky.atex.bin"));
         exr::prelude::write_rgb_file(&source, 64, 32, |_, y| (4.0f32, y as f32 / 32.0, 0.5f32))
             .unwrap();
-        let detail = compile_cubemap(&source, &dest, Format::Bc).unwrap();
+        let detail = compile_cubemap(&source, &dest, Target::default()).unwrap();
         assert_eq!(detail, "cubemap 16², bc6h, 5 levels");
-        let info = crate::ktx2::read(&fs::read(&dest).unwrap()).unwrap();
+        let info = crate::atex::read(&fs::read(&dest).unwrap()).unwrap();
         assert_eq!(info.format_name(), "BC6H_UFLOAT_BLOCK");
 
-        let detail = compile_cubemap(&source, &dest, Format::Rgba).unwrap();
+        let detail = compile_cubemap(&source, &dest, Target::RGBA).unwrap();
         assert_eq!(detail, "cubemap 16², rgba16f, 5 levels");
-        let bytes = fs::read(&dest).unwrap();
-        let info = crate::ktx2::read(&bytes).unwrap();
+        let info = crate::atex::read(&fs::read(&dest).unwrap()).unwrap();
         assert_eq!(
             (info.width, info.height, info.faces, info.levels),
             (16, 16, 6, 5)
         );
         assert_eq!(info.format_name(), "R16G16B16A16_SFLOAT");
-        // Level 0 is the last data, six 16 × 16 faces of 8-byte texels; red stays 4.0.
-        let level0 = &bytes[bytes.len() - 6 * 16 * 16 * 8..];
+        // Level 0 is six 16 × 16 faces of 8-byte texels; red stays 4.0.
+        let (_, level0) = level0(&dest);
+        assert_eq!(level0.len(), 6 * 16 * 16 * 8);
         let red = half::f16::from_le_bytes([level0[0], level0[1]]).to_f32();
         assert_eq!(red, 4.0);
     }
@@ -1338,7 +1339,7 @@ mod tests {
         let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(outcome.built[0].detail, "bc7, srgb, 4 levels");
-        assert_eq!(level0(&output.join("grass.ktx2")).0, "BC7_SRGB_BLOCK");
+        assert_eq!(level0(&output.join("grass.atex.bin")).0, "BC7_SRGB_BLOCK");
 
         // Another format rebuilds every texture.
         let astc = config::Config {
@@ -1351,9 +1352,18 @@ mod tests {
         let outcome = run_cached(&input, &output, &astc, &mut cache).unwrap();
         assert_eq!(outcome.up_to_date, 0);
         assert_eq!(outcome.built[0].detail, "astc 4x4, srgb, 4 levels");
-        assert_eq!(level0(&output.join("grass.ktx2")).0, "ASTC_4x4_SRGB_BLOCK");
+        assert_eq!(
+            level0(&output.join("grass.atex.bin")).0,
+            "ASTC_4x4_SRGB_BLOCK"
+        );
         let again = run_cached(&input, &output, &astc, &mut cache).unwrap();
         assert_eq!(again.up_to_date, 1);
+
+        // So does another quality.
+        let mut thorough = astc.clone();
+        thorough.textures.quality = crate::atex::Quality::High;
+        let outcome = run_cached(&input, &output, &thorough, &mut cache).unwrap();
+        assert_eq!(outcome.up_to_date, 0);
     }
 
     #[test]
@@ -1490,8 +1500,8 @@ mod tests {
         assert_eq!(outcome.skipped, 1);
         assert_eq!(outcome.summary(), "Built 2 textures (1 skipped)");
 
-        let grass = output.join("textures/Grass.ktx2");
-        let info = crate::ktx2::read(&fs::read(&grass).unwrap()).unwrap();
+        let grass = output.join("textures/Grass.atex.bin");
+        let info = crate::atex::read(&fs::read(&grass).unwrap()).unwrap();
         assert_eq!((info.width, info.levels), (4, 3));
         let (format, data) = level0(&grass);
         assert_eq!(format, "R8G8B8A8_SRGB");
@@ -1501,9 +1511,9 @@ mod tests {
             manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
         entries.sort_by(|a, b| a.path.cmp(&b.path));
         assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].path, "logo.ktx2");
+        assert_eq!(entries[0].path, "logo.atex.bin");
         assert_eq!(entries[0].id, fnv1a64(b"logo"));
-        assert_eq!(entries[1].path, "textures/Grass.ktx2");
+        assert_eq!(entries[1].path, "textures/Grass.atex.bin");
         assert_eq!(entries[1].id, fnv1a64(b"textures/Grass"));
     }
 
@@ -1527,7 +1537,8 @@ mod tests {
         let afont = fs::read(output.join("ui/monogram.afont.bin")).unwrap();
         let (_, atlas) = crate::font::afont_rows(&afont).unwrap();
         assert_eq!(atlas, fnv1a64(b"ui/monogram"));
-        let info = crate::ktx2::read(&fs::read(output.join("ui/monogram.ktx2")).unwrap()).unwrap();
+        let info =
+            crate::atex::read(&fs::read(output.join("ui/monogram.atex.bin")).unwrap()).unwrap();
         assert_eq!(info.format_name(), "R8G8B8A8_UNORM");
         assert_eq!(info.levels, 1);
 
@@ -1537,7 +1548,7 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].kind, manifest::Kind::Font);
         assert_eq!(entries[0].id, fnv1a64(b"ui/monogram.afont.bin"));
-        assert_eq!(entries[1].path, "ui/monogram.ktx2");
+        assert_eq!(entries[1].path, "ui/monogram.atex.bin");
         assert_eq!(entries[1].id, atlas);
     }
 
@@ -1561,11 +1572,11 @@ mod tests {
         fs::remove_file(input.join("b.png")).unwrap();
         let changed = run_cached(&input, &output, &config, &mut cache).unwrap();
         let built: Vec<&str> = changed.built.iter().map(|b| b.output.as_str()).collect();
-        assert_eq!(built, ["a.ktx2", "c.ktx2"]);
-        assert_eq!(changed.removed, ["b.ktx2"]);
+        assert_eq!(built, ["a.atex.bin", "c.atex.bin"]);
+        assert_eq!(changed.removed, ["b.atex.bin"]);
 
         // A missing output is written again.
-        fs::remove_file(output.join("c.ktx2")).unwrap();
+        fs::remove_file(output.join("c.atex.bin")).unwrap();
         let restored = run_cached(&input, &output, &config, &mut cache).unwrap();
         assert_eq!(
             restored.summary(),
@@ -1610,7 +1621,7 @@ mod tests {
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "broken.png");
         assert!(outcome.summary().starts_with("Build failed: broken.png:"));
-        assert!(output.join("ok.ktx2").is_file());
+        assert!(output.join("ok.atex.bin").is_file());
         assert!(!output.join(manifest::FILE_NAME).exists());
     }
 
@@ -1715,7 +1726,7 @@ mod tests {
             "params: P/speed: 9 is above the maximum 5"
         );
         let mask =
-            crate::ktx2::read(&fs::read(output.join("water/lake.mask.ktx2")).unwrap()).unwrap();
+            crate::atex::read(&fs::read(output.join("water/lake.mask.atex.bin")).unwrap()).unwrap();
         let texel = &mask.level0.unwrap().pixels[..4];
         assert_eq!(
             texel,
@@ -1723,7 +1734,7 @@ mod tests {
             "foam's R, fill, depth's G, fill"
         );
         assert!(
-            !output.join("water/lake.foam.ktx2").exists(),
+            !output.join("water/lake.foam.atex.bin").exists(),
             "inputs make no textures"
         );
         let bytes = fs::read(output.join("water/lake.acmat.bin")).unwrap();
@@ -1768,8 +1779,8 @@ mod tests {
 
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
-        assert_eq!(outcome.built[0].output, "brick.n.ktx2");
-        let (_, data) = level0(&output.join("brick.n.ktx2"));
+        assert_eq!(outcome.built[0].output, "brick.n.atex.bin");
+        let (_, data) = level0(&output.join("brick.n.atex.bin"));
         let texel = &data[..4];
         // Lossy, so only roughly the source color; alpha is exact.
         assert!(
@@ -1826,7 +1837,7 @@ mod tests {
             assert!(color.has_color() && !color.has_alpha());
             assert_eq!(image.get_pixel(0, 0).0, [0, 255, 0, 255], "{name}");
             assert_eq!(image.get_pixel(0, 1).0, [255, 0, 0, 255], "{name}");
-            assert!(output.join(format!("{name}.ktx2")).is_file());
+            assert!(output.join(format!("{name}.atex.bin")).is_file());
         }
         let (image, _) = load_source(&input.join("rle.tga")).unwrap();
         assert_eq!(image.as_raw()[..], [0, 0, 255, 255, 0, 0, 255, 255]);
@@ -1861,8 +1872,8 @@ mod tests {
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "bad.cube");
-        let path = output.join("grades/warm.lut.ktx2");
-        let info = crate::ktx2::read(&fs::read(&path).unwrap()).unwrap();
+        let path = output.join("grades/warm.lut.atex.bin");
+        let info = crate::atex::read(&fs::read(&path).unwrap()).unwrap();
         assert_eq!((info.width, info.height, info.levels), (4, 2, 1));
         let (format, pixels) = level0(&path);
         assert_eq!(format, "R8G8B8A8_UNORM");
@@ -1891,11 +1902,11 @@ mod tests {
         let outcome = run(&input, &output, &with_textures(&textures)).unwrap();
         assert!(outcome.failures.is_empty());
         let size = |name: &str| {
-            let info = crate::ktx2::read(&fs::read(output.join(name)).unwrap()).unwrap();
+            let info = crate::atex::read(&fs::read(output.join(name)).unwrap()).unwrap();
             (info.width, info.height, info.depth)
         };
-        assert_eq!(size("warm.ktx2"), (2, 2, 2));
-        assert_eq!(size("cold.ktx2"), (4, 2, 0));
+        assert_eq!(size("warm.atex.bin"), (2, 2, 2));
+        assert_eq!(size("cold.atex.bin"), (4, 2, 0));
         let detail = |name: &str| {
             let built = outcome.built.iter().find(|b| b.source == name).unwrap();
             built.detail.clone()
@@ -1903,7 +1914,10 @@ mod tests {
         assert_eq!(detail("warm.cube"), "2³ LUT volume, linear, 1 level");
         assert_eq!(detail("cold.cube"), "2³ LUT strip, linear, 1 level");
         // Table order: texel 1 is red.
-        assert_eq!(level0(&output.join("warm.ktx2")).1[4..8], [255, 0, 0, 255]);
+        assert_eq!(
+            level0(&output.join("warm.atex.bin")).1[4..8],
+            [255, 0, 0, 255]
+        );
     }
 
     #[test]
@@ -1995,7 +2009,7 @@ mod tests {
             material::decode(&fs::read(output.join("models/Fox/fox_material.amat.bin")).unwrap())
                 .unwrap();
         assert_eq!(m.textures.base_color, fnv1a64(b"models/Fox/image_0"));
-        assert!(output.join("models/Fox/image_0.ktx2").is_file());
+        assert!(output.join("models/Fox/image_0.atex.bin").is_file());
 
         // Every output is in the manifest with its kind; the mesh lists the material's ID.
         let entries =
@@ -2007,7 +2021,7 @@ mod tests {
             kind("models/Fox/fox_material.amat.bin"),
             Some(Kind::Material)
         );
-        assert_eq!(kind("models/Fox/image_0.ktx2"), Some(Kind::Texture));
+        assert_eq!(kind("models/Fox/image_0.atex.bin"), Some(Kind::Texture));
         let reader = crate::chunks::Reader::parse(&mesh, "AMESH").unwrap();
         assert_eq!(
             reader.require("MATERIAL").unwrap(),
@@ -2079,12 +2093,12 @@ mod tests {
         assert_eq!(outcome.failures.len(), 1);
         assert_eq!(outcome.failures[0].source, "bad.anoise");
         assert!(outcome.failures[0].message.contains("size must be"));
-        let (format, pixels) = level0(&output.join("clouds.ktx2"));
+        let (format, pixels) = level0(&output.join("clouds.atex.bin"));
         assert_eq!(format, "R8G8B8A8_UNORM");
         assert_eq!(pixels.len(), 16 * 16 * 4);
         assert_eq!(pixels[..4], [pixels[0], pixels[0], pixels[0], 255]);
         // In a material slot: compiled under its slot.
-        assert!(output.join("rock/rock.h.ktx2").is_file());
+        assert!(output.join("rock/rock.h.atex.bin").is_file());
         assert!(output.join("rock/rock.amat.bin").is_file());
     }
 
@@ -2131,12 +2145,12 @@ mod tests {
                 ("ui/button.png", "rgba8, srgb, 1 level")
             ]
         );
-        assert_eq!(level0(&output.join("rock_n.ktx2")).0, "R8G8B8A8_UNORM");
+        assert_eq!(level0(&output.join("rock_n.atex.bin")).0, "R8G8B8A8_UNORM");
     }
 
     /// Every level of a built texture: (width, red of its first texel).
     fn levels_of(path: &Path) -> Vec<(u32, u8)> {
-        let info = crate::ktx2::read(&fs::read(path).unwrap()).unwrap();
+        let info = crate::atex::read(&fs::read(path).unwrap()).unwrap();
         std::iter::once(info.level0.unwrap())
             .chain(info.mips)
             .map(|level| (level.width, level.pixels[0]))
@@ -2176,17 +2190,20 @@ mod tests {
         assert_eq!(
             built,
             [
-                ("t/rock.ktx2", "rgba8, linear, 4 levels, 2 custom"),
-                ("ui/icon.ktx2", "rgba8, linear, 2 levels")
+                ("t/rock.atex.bin", "rgba8, linear, 4 levels, 2 custom"),
+                ("ui/icon.atex.bin", "rgba8, linear, 2 levels")
             ]
         );
         assert_eq!(outcome.skipped, 2);
         // Level 1 by name, level 2 generated from it, level 3 chosen.
         assert_eq!(
-            levels_of(&output.join("t/rock.ktx2")),
+            levels_of(&output.join("t/rock.atex.bin")),
             [(8, 10), (4, 200), (2, 200), (1, 50)]
         );
-        assert_eq!(levels_of(&output.join("ui/icon.ktx2")), [(4, 90), (2, 90)]);
+        assert_eq!(
+            levels_of(&output.join("ui/icon.atex.bin")),
+            [(4, 90), (2, 90)]
+        );
         let again = run_cached(&input, &output, &config, &mut cache).unwrap();
         assert_eq!(again.summary(), "Built nothing (2 skipped, 2 up to date)");
 
@@ -2197,7 +2214,7 @@ mod tests {
             changed.summary(),
             "Built 1 texture (2 skipped, 1 up to date)"
         );
-        assert_eq!(levels_of(&output.join("t/rock.ktx2"))[1], (4, 0));
+        assert_eq!(levels_of(&output.join("t/rock.atex.bin"))[1], (4, 0));
         fs::write(
             input.join("t/rock.mip1.png.amod"),
             "[[modifiers]]\ntype = \"invert\"\n",
@@ -2208,7 +2225,7 @@ mod tests {
             changed.summary(),
             "Built 1 texture (3 skipped, 1 up to date)"
         );
-        assert_eq!(levels_of(&output.join("t/rock.ktx2"))[1], (4, 255));
+        assert_eq!(levels_of(&output.join("t/rock.atex.bin"))[1], (4, 255));
         fs::write(input.join("t/rock.png.amipmap"), "levels = 2\n").unwrap();
         let changed = run_cached(&input, &output, &config, &mut cache).unwrap();
         let built: Vec<_> = changed
@@ -2220,11 +2237,11 @@ mod tests {
         assert_eq!(
             built,
             [
-                ("shared/far.ktx2", "rgba8, linear, 1 level"),
-                ("t/rock.ktx2", "rgba8, linear, 2 levels, 1 custom")
+                ("shared/far.atex.bin", "rgba8, linear, 1 level"),
+                ("t/rock.atex.bin", "rgba8, linear, 2 levels, 1 custom")
             ]
         );
-        assert_eq!(levels_of(&output.join("t/rock.ktx2")).len(), 2);
+        assert_eq!(levels_of(&output.join("t/rock.atex.bin")).len(), 2);
 
         // A level of the wrong size fails its texture; a bad `.amipmap` is reported for it.
         gray(&input.join("t/rock.mip1.png"), 3, 3, 0);
@@ -2249,9 +2266,9 @@ mod tests {
         fs::remove_file(input.join("ui/icon.png.amipmap")).unwrap();
         let outcome = run(&input, &output, &config).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
-        assert!(output.join("t/rock.mip1.ktx2").is_file());
-        assert_eq!(levels_of(&output.join("t/rock.ktx2")).len(), 4);
-        assert_eq!(levels_of(&output.join("ui/icon.ktx2")).len(), 1);
+        assert!(output.join("t/rock.mip1.atex.bin").is_file());
+        assert_eq!(levels_of(&output.join("t/rock.atex.bin")).len(), 4);
+        assert_eq!(levels_of(&output.join("ui/icon.atex.bin")).len(), 1);
     }
 
     #[test]
@@ -2277,7 +2294,7 @@ mod tests {
             )]
         );
         // A material's own texture keeps its chain.
-        assert_eq!(levels_of(&output.join("brick.ktx2")).len(), 2);
+        assert_eq!(levels_of(&output.join("brick.atex.bin")).len(), 2);
     }
 
     #[test]
@@ -2300,9 +2317,9 @@ mod tests {
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         // Sidecars are not sources of their own.
-        assert!(!output.join("a.png.ktx2").exists());
+        assert!(!output.join("a.png.atex.bin").exists());
         // Inverted (x = 0, y = 0, b = 7), alpha kept.
-        let (_, pixels) = level0(&output.join("a.ktx2"));
+        let (_, pixels) = level0(&output.join("a.atex.bin"));
         assert_eq!(pixels[..4], [255, 255, 248, 255]);
         // Colorize turns the dark gray image dark red.
         let (image, color) = load_source(&input.join("g.png")).unwrap();
@@ -2333,15 +2350,15 @@ mod tests {
 
     /// A built texture's format name and level 0's data as stored.
     fn level0(path: &Path) -> (String, Vec<u8>) {
-        use ktx::texture::KtxTexture;
         let bytes = fs::read(path).unwrap();
-        let texture =
-            ktx::Texture2::create_from_memory(&bytes, ktx::KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT)
-                .unwrap();
-        let offset = texture.get_image_offset(0, 0, 0).unwrap();
-        let length = texture.get_level_size(0);
-        let data = texture.get_data().unwrap()[offset..offset + length].to_vec();
-        (crate::ktx2::read(&bytes).unwrap().format_name(), data)
+        let reader = crate::chunks::Reader::parse(&bytes, crate::atex::FORMAT).unwrap();
+        let levels = reader.chunk("LEVELS").unwrap();
+        let at = |o| crate::chunks::u32_at(levels, 0, 32, o).unwrap() as usize;
+        let data = reader.chunk("DATA").unwrap()[at(0)..at(0) + at(8)].to_vec();
+        (
+            crate::atex::read(&bytes).unwrap().format_name().to_owned(),
+            data,
+        )
     }
 
     #[test]
@@ -2371,11 +2388,11 @@ mod tests {
         assert_eq!(
             lines,
             [
-                "brick/a.b.png -> brick/a.b.ktx2 (rgba8, srgb, 2 levels)",
-                "brick/brick.n.png -> brick/brick.n.ktx2 (rgba8, linear, 3 levels)",
-                "brick/brick.png -> brick/brick.ktx2 (rgba8, srgb, 3 levels)",
-                "brick/grass.png -> brick/grass.ktx2 (rgba8, srgb, 2 levels)",
-                "brick/brick.ao.png, brick/brick.r.png -> brick/brick.orm.ktx2 (rgba8, linear, 3 levels)",
+                "brick/a.b.png -> brick/a.b.atex.bin (rgba8, srgb, 2 levels)",
+                "brick/brick.n.png -> brick/brick.n.atex.bin (rgba8, linear, 3 levels)",
+                "brick/brick.png -> brick/brick.atex.bin (rgba8, srgb, 3 levels)",
+                "brick/grass.png -> brick/grass.atex.bin (rgba8, srgb, 2 levels)",
+                "brick/brick.ao.png, brick/brick.r.png -> brick/brick.orm.atex.bin (rgba8, linear, 3 levels)",
                 "brick/brick.* -> brick/brick.amat.bin (material: base_color, normal, orm)",
             ]
         );
@@ -2383,13 +2400,16 @@ mod tests {
             outcome.summary(),
             "Built 5 textures, 1 material (0 skipped)"
         );
-        assert!(!output.join("brick/brick.r.ktx2").exists());
-        assert!(!output.join("brick/brick.ao.ktx2").exists());
+        assert!(!output.join("brick/brick.r.atex.bin").exists());
+        assert!(!output.join("brick/brick.ao.atex.bin").exists());
 
-        let (format, orm) = level0(&output.join("brick/brick.orm.ktx2"));
+        let (format, orm) = level0(&output.join("brick/brick.orm.atex.bin"));
         assert_eq!(format, "R8G8B8A8_UNORM");
         assert_eq!(orm[..4], [50, 100, 255, 255]);
-        assert_eq!(level0(&output.join("brick/brick.ktx2")).0, "R8G8B8A8_SRGB");
+        assert_eq!(
+            level0(&output.join("brick/brick.atex.bin")).0,
+            "R8G8B8A8_SRGB"
+        );
 
         let m = material::decode(&fs::read(output.join("brick/brick.amat.bin")).unwrap()).unwrap();
         assert_eq!(m.textures.base_color, fnv1a64(b"brick/brick"));
@@ -2444,13 +2464,13 @@ mod tests {
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
         assert_eq!(
-            level0(&output.join("wall/wall.n.ktx2")).1,
+            level0(&output.join("wall/wall.n.atex.bin")).1,
             [128, 215, 255, 255]
         );
-        assert_eq!(level0(&output.join("wall/wall.orm.ktx2")).1[0], 90);
+        assert_eq!(level0(&output.join("wall/wall.orm.atex.bin")).1[0], 90);
         // The replaced convention file is a plain texture again.
-        assert!(output.join("wall/wall.ao.ktx2").is_file());
-        assert!(!output.join("shared/ao.ktx2").exists());
+        assert!(output.join("wall/wall.ao.atex.bin").is_file());
+        assert!(!output.join("shared/ao.atex.bin").exists());
     }
 
     #[test]
@@ -2567,20 +2587,20 @@ mod tests {
         fs::remove_dir_all(input.join("old")).unwrap();
         fs::remove_file(input.join("shared/gone.png")).unwrap();
         fs::write(output.join("notes.txt"), "mine").unwrap();
-        fs::write(output.join(".hidden.ktx2"), "mine").unwrap();
+        fs::write(output.join(".hidden.atex.bin"), "mine").unwrap();
         fs::create_dir_all(output.join("empty")).unwrap();
 
         let outcome = run(&input, &output, &with_textures(&textures)).unwrap();
         let mut removed = outcome.removed.clone();
         removed.sort();
-        assert_eq!(removed, ["old/deep/gone.ktx2", "shared/gone.ktx2"]);
+        assert_eq!(removed, ["old/deep/gone.atex.bin", "shared/gone.atex.bin"]);
         assert_eq!(outcome.summary(), "Built 2 textures (0 skipped, 2 removed)");
 
         assert!(!output.join("old").exists());
-        assert!(output.join("shared/stays.ktx2").is_file());
-        assert!(output.join("keep.ktx2").is_file());
+        assert!(output.join("shared/stays.atex.bin").is_file());
+        assert!(output.join("keep.atex.bin").is_file());
         assert!(output.join("notes.txt").is_file());
-        assert!(output.join(".hidden.ktx2").is_file());
+        assert!(output.join(".hidden.atex.bin").is_file());
         assert!(output.join("empty").is_dir());
 
         let again = run(&input, &output, &with_textures(&textures)).unwrap();
@@ -2594,11 +2614,11 @@ mod tests {
         let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
         png(&input.join("Grass.png"), 1, 1);
         fs::create_dir_all(&output).unwrap();
-        fs::write(output.join("grass.KTX2"), "older build").unwrap();
+        fs::write(output.join("grass.ATEX.BIN"), "older build").unwrap();
 
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert!(outcome.removed.is_empty());
-        assert!(output.join("grass.KTX2").is_file());
+        assert!(output.join("grass.ATEX.BIN").is_file());
     }
 
     #[test]
@@ -2608,12 +2628,12 @@ mod tests {
         fs::create_dir_all(&input).unwrap();
         fs::write(input.join("broken.png"), "not a png").unwrap();
         fs::create_dir_all(&output).unwrap();
-        fs::write(output.join("stale.ktx2"), "x").unwrap();
+        fs::write(output.join("stale.atex.bin"), "x").unwrap();
 
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert_eq!(outcome.failures.len(), 1);
         assert!(outcome.removed.is_empty());
-        assert!(output.join("stale.ktx2").is_file());
+        assert!(output.join("stale.atex.bin").is_file());
     }
 
     #[test]
@@ -2632,8 +2652,8 @@ mod tests {
                 output.display()
             );
         }
-        assert!(!dir.path().join("a.ktx2").exists());
-        assert!(!input.join("a.ktx2").exists());
+        assert!(!dir.path().join("a.atex.bin").exists());
+        assert!(!input.join("a.atex.bin").exists());
     }
 
     #[test]

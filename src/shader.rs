@@ -185,13 +185,13 @@ impl Usage {
         }
     }
 
-    /// The KTX2 usage key of an image compiled for it.
-    pub fn ktx(self) -> crate::ktx2::Usage {
+    /// The usage of an image compiled for it.
+    pub fn texture_usage(self) -> crate::atex::Usage {
         match self {
-            Self::Color => crate::ktx2::Usage::Color,
-            Self::Normal => crate::ktx2::Usage::Normal,
-            Self::Height => crate::ktx2::Usage::Height,
-            _ => crate::ktx2::Usage::Data,
+            Self::Color => crate::atex::Usage::Color,
+            Self::Normal => crate::atex::Usage::Normal,
+            Self::Height => crate::atex::Usage::Height,
+            _ => crate::atex::Usage::Data,
         }
     }
 }

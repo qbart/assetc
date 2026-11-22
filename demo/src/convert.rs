@@ -60,7 +60,6 @@ pub fn image(t: &sdk::Texture, support: CompressedImageFormats) -> Result<Image,
             need(CompressedImageFormats::ASTC_HDR, "ASTC HDR")?;
             (astc(AstcChannel::Hdr), &[])
         }
-        F::Uastc | F::UastcHdr => return Err("UASTC: needs a transcoder".into()),
     };
     let (dimension, layers) = if t.is_volume() {
         (TextureDimension::D3, t.depth)
@@ -77,7 +76,7 @@ pub fn image(t: &sdk::Texture, support: CompressedImageFormats) -> Result<Image,
         format,
         RenderAssetUsages::RENDER_WORLD,
     );
-    // KTX2 keeps each level's faces together: mip-major.
+    // Each level keeps its faces together: mip-major.
     let texel = t.format.bytes_per_texel();
     image.data = Some(
         t.levels

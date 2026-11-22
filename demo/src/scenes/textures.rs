@@ -54,7 +54,7 @@ pub fn spawn(s: &mut Spawn) {
             sprite,
             Transform::from_translation(center.extend(0.0)),
         ));
-        let name = entry.path.trim_end_matches(".ktx2");
+        let name = entry.path.trim_end_matches(".atex.bin");
         let mut caption = format!("{name}\n{} x {}", texture.width, texture.height);
         if let Err(why) = &image {
             caption += &format!("\n{why}");

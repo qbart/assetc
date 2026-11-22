@@ -1,6 +1,6 @@
 # Asset Compiler
 
-`assetc` compiles source assets (textures, meshes, shaders, materials, fonts) into runtime-friendly binary formats for video games. Supports octahedral-packed normals/tangents and meshletized geometry; mesh files reference materials by stable 64-bit hashes so the engine can share resources across assets. Mesh additionally emits a companion material table plus one content-addressed .ktx2 per referenced image. Embedded textures are written to a shared flat store keyed by content, so the same texture used by two different models is encoded once and shares one runtime handle.
+`assetc` compiles source assets (textures, meshes, shaders, materials, fonts) into runtime-friendly binary formats for video games. Supports octahedral-packed normals/tangents and meshletized geometry; mesh files reference materials by stable 64-bit hashes so the engine can share resources across assets. Mesh additionally emits a companion material table plus one content-addressed .atex.bin per referenced image. Embedded textures are written to a shared flat store keyed by content, so the same texture used by two different models is encoded once and shares one runtime handle.
 
 Texture refs are stored as 64-bit hashes, not paths. A single global manifest maps each hash back to the file on disk. Load it once into a hash → path map and you can resolve any asset by a stable id - textures (baseColorTex etc.), but also meshes, materials, animations, fonts, shaders, and embeds - through one uniform lookup.
 
@@ -70,7 +70,7 @@ lod_ratios = [0.5, 0.25]   # levels of detail, as fractions of the triangles
 
 [pack]
 alignment = 4096           # page-aligned files, for memory mapping
-exclude = ["**/*.orm.ktx2"]
+exclude = ["**/*.orm.atex.bin"]
 
 [targets.mobile]           # assetc build --target mobile -> tmp/build-mobile
 textures = { no_mipmaps = [] }
@@ -87,18 +87,18 @@ Per-file settings live next to the file in an [`.amod`](docs/spec/amod.md) sidec
 
 | Source | Asset | Output |
 |--------|-------|--------|
-| `*.png`, `*.jpg`, `*.jpeg`, `*.tga` | texture | `.ktx2` ([textures](docs/features/textures.md)) |
-| `*.anoise` | generated texture: noise and patterns | `.ktx2` ([noise](docs/features/noise.md)) |
-| `*.agradient` | generated texture and gradients | `.ktx2` + `.agradient.bin` ([gradients](docs/features/gradients.md)) |
-| `*.apalette` | generated texture and named colors | `.ktx2` + `.apalette.bin` ([palettes](docs/features/palettes.md)) |
-| folder `*.atlas` | packed texture and frames | `.ktx2` + `.aatlas.bin` ([atlases](docs/features/atlases.md)) |
-| `*.exr` | HDR environment cubemap | `.ktx2` ([HDR](docs/features/hdr.md)) |
-| `*.cube` | color LUT, as a strip or 3D texture | `.ktx2` ([LUT](docs/features/lut.md)) |
-| `*.amat` and textures by name (`brick.jpg`, `brick.n.jpg`, `brick.r.jpg`, …) | PBR material, ORM packed | `.amat.bin` + `.ktx2` ([materials](docs/features/materials.md)) |
+| `*.png`, `*.jpg`, `*.jpeg`, `*.tga` | texture | `.atex.bin` ([textures](docs/features/textures.md)) |
+| `*.anoise` | generated texture: noise and patterns | `.atex.bin` ([noise](docs/features/noise.md)) |
+| `*.agradient` | generated texture and gradients | `.atex.bin` + `.agradient.bin` ([gradients](docs/features/gradients.md)) |
+| `*.apalette` | generated texture and named colors | `.atex.bin` + `.apalette.bin` ([palettes](docs/features/palettes.md)) |
+| folder `*.atlas` | packed texture and frames | `.atex.bin` + `.aatlas.bin` ([atlases](docs/features/atlases.md)) |
+| `*.exr` | HDR environment cubemap | `.atex.bin` ([HDR](docs/features/hdr.md)) |
+| `*.cube` | color LUT, as a strip or 3D texture | `.atex.bin` ([LUT](docs/features/lut.md)) |
+| `*.amat` and textures by name (`brick.jpg`, `brick.n.jpg`, `brick.r.jpg`, …) | PBR material, ORM packed | `.amat.bin` + `.atex.bin` ([materials](docs/features/materials.md)) |
 | `*.ashader` + SPIR-V stages | shader interface | `.ashader.bin` ([custom materials](docs/features/custom-materials.md)) |
 | `*.acmat` and textures by name | custom material | `.acmat.bin` ([custom materials](docs/features/custom-materials.md)) |
 | `*.gltf`, `*.glb` | mesh with meshlets and LODs, materials, textures, skin, animations | `.amesh.bin`, `.aanim.bin`, `<model>/…` ([models](docs/features/models.md)) |
-| `*.ttf`, `*.otf` | SDF font | `.afont.bin` + `.ktx2` atlas ([fonts](docs/features/fonts.md)) |
+| `*.ttf`, `*.otf` | SDF font | `.afont.bin` + `.atex.bin` atlas ([fonts](docs/features/fonts.md)) |
 | `*.aschema` | types for data | `.aschema.bin` ([schemas](docs/features/schemas.md)) |
 | `*.adata` | instances of a schema, resolved | `.adata.bin` ([instances](docs/features/instances.md)) |
 | `*.agraph` | directed graph | `.agraph.bin` ([graphs](docs/features/graphs.md)) |
@@ -109,7 +109,7 @@ Anything else is skipped. For `samples/Fox.glb` the build writes:
 ```
 build/Fox.amesh.bin        geometry, meshlets, levels of detail, skin, locators
 build/Fox.aanim.bin        animation clips, with events
-build/Fox/…                the model's materials (.amat.bin) and textures (.ktx2)
+build/Fox/…                the model's materials (.amat.bin) and textures (.atex.bin)
 build/assetc.aman.bin      every asset ID -> output file (all assets, written once)
 ```
 
@@ -121,7 +121,7 @@ Every binary format is little-endian. Most are [chunked files](docs/spec/chunks.
 
 | Format | Spec | Holds |
 |--------|------|-------|
-| `.ktx2` | [ktx2.md](docs/spec/ktx2.md) | Textures: 2D, cubemaps, volume LUTs, with mipmaps and their usage |
+| `.atex.bin` | [atex.bin.md](docs/spec/atex.bin.md) | Textures in the target's GPU format (BC, ASTC or plain): 2D, cubemaps, volume LUTs, with mipmaps, their usage and swizzle |
 | `.amesh.bin` | [amesh.bin.md](docs/spec/amesh.bin.md) | Mesh: vertices with octahedral normals and tangents, meshlets, LODs, skin, skeleton, locators, shapes, regions, paths |
 | `.aanim.bin` | [aanim.bin.md](docs/spec/aanim.bin.md) | Animation clips of a skinned mesh, with events |
 | `.amat.bin` | [amat.bin.md](docs/spec/amat.bin.md) | PBR material: factors and texture IDs |
@@ -170,7 +170,7 @@ for entry in assets.of_kind(Kind::Mesh) {
     let mesh: Mesh = assets.load(entry.id)?;          // by asset ID
     println!("{}: {} vertices", entry.path, mesh.vertices.len());
 }
-let texture: Texture = assets.load_path("ui/fire.ktx2")?;
+let texture: Texture = assets.load_path("ui/fire.atex.bin")?;
 ```
 
 The compiler itself is the unpublished `assetc-core` package at the repository root (its binary is `assetc`). See [docs/features/sdk.md](docs/features/sdk.md) and [sdk/README.md](sdk/README.md).

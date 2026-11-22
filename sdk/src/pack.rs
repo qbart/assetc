@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn reads_entries() {
-        let bytes = pack(&[("a.ktx2", 7, 0, b"abc"), ("b/c.amat.bin", 9, 1, b"xy")]);
+        let bytes = pack(&[("a.atex.bin", 7, 0, b"abc"), ("b/c.amat.bin", 9, 1, b"xy")]);
         let p = Pack::decode(bytes).unwrap();
         assert_eq!(p.entries.len(), 2);
         let e = p.find("b/c.amat.bin").unwrap();

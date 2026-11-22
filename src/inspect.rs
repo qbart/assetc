@@ -13,7 +13,7 @@ use crate::noise::Noise;
 use crate::palette::{Palette, is_palette};
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
-use crate::{aanim, amesh, font, ktx2, manifest, model};
+use crate::{aanim, amesh, atex, font, manifest, model};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Location {
@@ -586,29 +586,28 @@ fn source_mips(
 
 fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), String> {
     let bytes = fs::read(file).map_err(|e| e.to_string())?;
-    let info = ktx2::read(&bytes)?;
-    let usage = info.usage.clone().unwrap_or_else(|| "—".into());
+    let info = atex::read(&bytes)?;
+    let usage = info.usage.clone();
     out.texture_type = Some(format!("{}, {usage}", info.type_name()));
     out.rows.push(("Type", info.type_name()));
     out.rows.push(("Usage", usage));
     out.rows.push((
         "Dimensions",
-        if info.depth > 0 {
+        if info.depth > 1 {
             format!("{} × {} × {} px", info.width, info.height, info.depth)
         } else {
             format!("{} × {} px", info.width, info.height)
         },
     ));
-    out.rows.push(("Format", info.format_name()));
+    out.rows.push(("Format", info.format_name().to_owned()));
     out.rows.push((
         "Color space",
         if info.srgb { "sRGB" } else { "linear" }.into(),
     ));
     out.rows.push(("Mip levels", info.levels.to_string()));
-    if let Some(writer) = &info.writer {
-        out.rows.push(("Writer", writer.clone()));
-    }
-    asset_rows(strip_extension(rel), out);
+    out.rows.push(("Channels", info.channels()));
+    out.rows.push(("Size", info.size_text()));
+    asset_rows(manifest::Kind::Texture.asset_path(rel), out);
 
     match info.level0 {
         Some(level) => {
@@ -696,7 +695,7 @@ fn hdr_rows(project: &Project, file: &Path, rel: &str, out: &mut Inspection) -> 
         .push(("Mip levels", (size.trailing_zeros() + 1).to_string()));
     let asset_path = strip_extension(rel);
     asset_rows(asset_path, out);
-    output_row(project, &format!("{asset_path}.ktx2"), "", out);
+    output_row(project, &format!("{asset_path}.atex.bin"), "", out);
     out.cubemap = Some(preview_faces(&hdr));
     Ok(())
 }
@@ -858,7 +857,7 @@ fn compiled_font(
     let entry = project.output_dir().and_then(|output| {
         let entries = manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).ok()?).ok()?;
         let entry = entries.into_iter().find(|e| e.id == atlas)?;
-        let level = ktx2::read(&fs::read(output.join(&entry.path)).ok()?)
+        let level = atex::read(&fs::read(output.join(&entry.path)).ok()?)
             .ok()?
             .level0?;
         Some((entry.path, level))
@@ -1031,7 +1030,7 @@ fn compiled_materials(project: &Project, ids: &[u64]) -> Vec<Option<MaterialPrev
         fs::read(output.join(&entry.path)).ok()
     };
     let texture = |id: u64| {
-        let level = ktx2::read(&file(id)?).ok()?.level0?;
+        let level = atex::read(&file(id)?).ok()?.level0?;
         Some(level)
     };
     ids.iter()
@@ -1131,7 +1130,7 @@ fn atlas_folder(project: &Project, dir: &Path, out: &mut Inspection) {
         };
         out.rows.push(("Mip levels", levels.to_string()));
     }
-    output_row(project, &format!("{asset_path}.ktx2"), "", out);
+    output_row(project, &format!("{asset_path}.atex.bin"), "", out);
     out.atlas_frames = packed
         .frames
         .iter()
@@ -1169,12 +1168,20 @@ fn environment_map(location: Location, dir: &Path, out: &mut Inspection) -> Resu
         let entries = fs::read_dir(dir).ok()?;
         entries.flatten().map(|e| e.path()).find(|path| {
             path.is_file()
-                && path.file_stem().is_some_and(|s| s == stem)
                 && match location {
-                    Location::Input => is_texture_source(path),
-                    Location::Output => path
-                        .extension()
-                        .is_some_and(|e| e.eq_ignore_ascii_case("ktx2")),
+                    Location::Input => {
+                        path.file_stem().is_some_and(|s| s == stem) && is_texture_source(path)
+                    }
+                    // `<stem>.atex.bin`, the extension in any case.
+                    Location::Output => {
+                        path.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                            let ext = manifest::Kind::Texture.extension();
+                            n.len() == stem.len() + 1 + ext.len()
+                                && n.get(..stem.len()) == Some(stem)
+                                && n.get(stem.len()..)
+                                    .is_some_and(|e| e.eq_ignore_ascii_case(&format!(".{ext}")))
+                        })
+                    }
                 }
         })
     };
@@ -1204,8 +1211,11 @@ fn environment_map(location: Location, dir: &Path, out: &mut Inspection) -> Resu
             Location::Input => decode(&file).map(|(image, _)| to_image(image)),
             Location::Output => fs::read(&file)
                 .map_err(|e| e.to_string())
-                .and_then(|bytes| ktx2::read(&bytes))
-                .and_then(|info| info.level0.ok_or_else(|| "unsupported KTX2 format".into())),
+                .and_then(|bytes| atex::read(&bytes))
+                .and_then(|info| {
+                    info.level0
+                        .ok_or_else(|| "no preview for this format".into())
+                }),
         }
         .map_err(|e| format!("Face {stem}: {e}"))?;
         faces.push(face);
@@ -1861,7 +1871,7 @@ mod tests {
         );
         assert_eq!(row(&i, "Color"), "linear");
         assert_eq!(row(&i, "Mip levels"), "4");
-        assert_eq!(row(&i, "Output"), "textures/rock_n.ktx2 (not built)");
+        assert_eq!(row(&i, "Output"), "textures/rock_n.atex.bin (not built)");
         assert_eq!(
             i.preview.as_ref().map(|p| (p.width, p.height)),
             Some((8, 4))
@@ -1872,12 +1882,12 @@ mod tests {
         let output = project.output_dir().unwrap();
         build::run(&input, &output, &project.config).unwrap();
         let i = inspect(&project, Location::Input, &file);
-        assert_eq!(row(&i, "Output"), "textures/rock_n.ktx2");
+        assert_eq!(row(&i, "Output"), "textures/rock_n.atex.bin");
 
         let compiled = inspect(
             &project,
             Location::Output,
-            &output.join("textures/rock_n.ktx2"),
+            &output.join("textures/rock_n.atex.bin"),
         );
         assert_eq!(row(&compiled, "Kind"), "Compiled texture");
         assert_eq!(row(&compiled, "Format"), "BC7_UNORM_BLOCK");
@@ -2034,7 +2044,7 @@ name = \"x\"\n",
         assert_eq!(row(&i, "LUT size"), "2 × 2 × 2");
         assert_eq!(row(&i, "Domain"), "0, 0, 0 – 1, 1, 1");
         assert_eq!(row(&i, "Asset path"), "grade.lut");
-        assert_eq!(row(&i, "Output"), "grade.lut.ktx2 (not built)");
+        assert_eq!(row(&i, "Output"), "grade.lut.atex.bin (not built)");
         assert!(i.lut.is_some());
 
         fs::write(&file, "LUT_3D_SIZE 2\n").unwrap();
@@ -2126,7 +2136,7 @@ name = \"x\"\n",
         assert_eq!(row(&r, "Color"), "linear");
         assert_eq!(
             row(&r, "Output"),
-            "brick/brick.orm.ktx2 (channel G) (not built)"
+            "brick/brick.orm.atex.bin (channel G) (not built)"
         );
         let base = inspect(&project, Location::Input, &file("assets/brick/brick.png"));
         assert_eq!(row(&base, "Material"), "brick/brick.amat.bin (base_color)");
@@ -2140,7 +2150,7 @@ name = \"x\"\n",
         let output = project.output_dir().unwrap();
         build::run(&input, &output, &project.config).unwrap();
         let r = inspect(&project, Location::Input, &file("assets/brick/brick.r.png"));
-        assert_eq!(row(&r, "Output"), "brick/brick.orm.ktx2 (channel G)");
+        assert_eq!(row(&r, "Output"), "brick/brick.orm.atex.bin (channel G)");
 
         let mat = inspect(
             &project,
@@ -2172,7 +2182,7 @@ name = \"x\"\n",
         assert_eq!(
             field("orm_texture").cells[2],
             format!(
-                "{:#018x}  brick/brick.orm.ktx2",
+                "{:#018x}  brick/brick.orm.atex.bin",
                 fnv1a64(b"brick/brick.orm")
             )
         );
@@ -2258,10 +2268,10 @@ name = \"x\"\n",
         assert!(i.preview.is_none());
         assert!(!row(&i, "Error").is_empty());
 
-        let fake = dir.path().join("build/fake.ktx2");
+        let fake = dir.path().join("build/fake.atex.bin");
         fs::write(&fake, "nope").unwrap();
         let i = inspect(&project, Location::Output, &fake);
-        assert_eq!(row(&i, "Error"), "not a KTX2 file");
+        assert_eq!(row(&i, "Error"), "not an ATEX file");
 
         let nested_manifest = dir.path().join("build/sub/assetc.aman.bin");
         fs::create_dir_all(nested_manifest.parent().unwrap()).unwrap();

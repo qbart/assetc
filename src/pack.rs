@@ -378,7 +378,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path();
         fs::create_dir_all(out.join("models")).unwrap();
-        fs::write(out.join("b.ktx2"), b"texture").unwrap();
+        fs::write(out.join("b.atex.bin"), b"texture").unwrap();
         fs::write(out.join("models/Fox.amesh.bin"), b"mesh bytes").unwrap();
         fs::write(out.join("notes.txt"), b"").unwrap();
         fs::write(out.join("old.pak"), b"skip me").unwrap();
@@ -386,7 +386,7 @@ mod tests {
         let entries = vec![manifest::Entry {
             id: 42,
             kind: Kind::Texture,
-            path: "b.ktx2".into(),
+            path: "b.atex.bin".into(),
         }];
         fs::write(out.join(manifest::FILE_NAME), manifest::encode(&entries)).unwrap();
 
@@ -397,7 +397,7 @@ mod tests {
             paths,
             [
                 "assetc.aman.bin",
-                "b.ktx2",
+                "b.atex.bin",
                 "models/Fox.amesh.bin",
                 "notes.txt"
             ]
@@ -426,14 +426,14 @@ mod tests {
     fn include_exclude_and_alignment() {
         let dir = tempfile::tempdir().unwrap();
         let out = dir.path();
-        fs::write(out.join("a.ktx2"), b"a").unwrap();
-        fs::write(out.join("a.orm.ktx2"), b"orm").unwrap();
+        fs::write(out.join("a.atex.bin"), b"a").unwrap();
+        fs::write(out.join("a.orm.atex.bin"), b"orm").unwrap();
         fs::write(out.join("b.amat.bin"), b"m").unwrap();
         let pack = config::Pack {
             file: "packs/game.pak".into(),
             alignment: 4096,
-            include: vec!["**/*.ktx2".into()],
-            exclude: vec!["**/*.orm.ktx2".into()],
+            include: vec!["**/*.atex.bin".into()],
+            exclude: vec!["**/*.orm.atex.bin".into()],
         };
         let (file, contents) = write(out, &settings(pack)).unwrap();
         assert_eq!(file, out.join("packs/game.pak"));

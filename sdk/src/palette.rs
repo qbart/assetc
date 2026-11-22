@@ -36,7 +36,7 @@ pub struct Palette {
     pub columns: u32,
     pub rows: u32,
     pub layout: Layout,
-    /// Asset ID of the image (the file's `.ktx2`).
+    /// Asset ID of the image (the file's `.atex.bin`).
     pub texture: u64,
     /// In the file's (cell) order.
     pub colors: Vec<Color>,

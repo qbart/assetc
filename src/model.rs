@@ -506,14 +506,14 @@ pub struct Compiled {
     pub animation: Option<Vec<u8>>,
     /// By name: `<P>/<name>.amat.bin`.
     pub materials: Vec<(String, Material)>,
-    /// By name: `<P>/<name>.ktx2`.
+    /// By name: `<P>/<name>.atex.bin`.
     pub images: Vec<(String, image::RgbaImage, ColorSpace)>,
-    /// By material name: `<P>/<name>.orm.ktx2`, linear.
+    /// By material name: `<P>/<name>.orm.atex.bin`, linear.
     pub orm: Vec<(String, image::RgbaImage)>,
-    /// Color sets exported as Texture + UV buffer, by name: `<P>/<name>.colors.ktx2`, sRGB,
+    /// Color sets exported as Texture + UV buffer, by name: `<P>/<name>.colors.atex.bin`, sRGB,
     /// without mipmaps.
     pub color_textures: Vec<(String, image::RgbaImage)>,
-    /// Texture paints, by name: `<P>/<name>.paint.ktx2`, their mip chains and how to write
+    /// Texture paints, by name: `<P>/<name>.paint.atex.bin`, their mip chains and how to write
     /// them.
     pub paint_textures: Vec<(
         String,

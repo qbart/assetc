@@ -8,8 +8,8 @@ pub const FILE_NAME: &str = "assetc.aman.bin";
 pub const LEGACY_FILE_NAMES: [&str; 3] = ["assets.manifest", "assets.aman", "assets.aman.bin"];
 /// Extensions of outputs before they ended in `.bin`, removed by builds; see
 /// docs/features/build.md#removing-stale-outputs.
-pub const LEGACY_EXTENSIONS: [&str; 9] = [
-    "amesh", "amat", "aanim", "afont", "atype", "arec", "agph", "atre", "aatlas",
+pub const LEGACY_EXTENSIONS: [&str; 10] = [
+    "amesh", "amat", "aanim", "afont", "atype", "arec", "agph", "atre", "aatlas", "ktx2",
 ];
 pub const MAGIC: [u8; 4] = *b"AMAN";
 pub const VERSION: u32 = 1;
@@ -56,10 +56,10 @@ impl Kind {
     ];
 
     /// Extension of the files assets of this kind are written to, without the leading `.`;
-    /// every kind but textures ends in `.bin`, see docs/features/build.md#outputs.
+    /// every kind ends in `.bin`, see docs/features/build.md#outputs.
     pub fn extension(self) -> &'static str {
         match self {
-            Self::Texture => "ktx2",
+            Self::Texture => "atex.bin",
             Self::Material => "amat.bin",
             Self::Mesh => "amesh.bin",
             Self::Animation => "aanim.bin",
@@ -117,7 +117,7 @@ impl Kind {
     /// Inverse of [`Self::output_path`].
     pub fn asset_path(self, output: &str) -> &str {
         match self {
-            Self::Texture => output.strip_suffix(".ktx2").unwrap_or(output),
+            Self::Texture => output.strip_suffix(".atex.bin").unwrap_or(output),
             _ => output,
         }
     }
@@ -233,20 +233,23 @@ mod tests {
 
     #[test]
     fn round_trip_sorted_by_id() {
-        let entries = [entry(9, "b.ktx2"), entry(3, "dir/a.ktx2")];
+        let entries = [entry(9, "b.atex.bin"), entry(3, "dir/a.atex.bin")];
         let decoded = decode(&encode(&entries)).unwrap();
-        assert_eq!(decoded, [entry(3, "dir/a.ktx2"), entry(9, "b.ktx2")]);
+        assert_eq!(
+            decoded,
+            [entry(3, "dir/a.atex.bin"), entry(9, "b.atex.bin")]
+        );
     }
 
     #[test]
     fn matches_spec_example_layout() {
-        let bytes = encode(&[entry(0x0102_0304_0506_0708, "textures/dirt.ktx2")]);
+        let bytes = encode(&[entry(0x0102_0304_0506_0708, "textures/dirt.atex.bin")]);
         let mut expected = Vec::new();
         expected.extend_from_slice(b"AMAN");
         expected.extend_from_slice(&[1, 0, 0, 0, 1, 0, 0, 0, 18, 0, 0, 0]);
         expected.extend_from_slice(&[8, 7, 6, 5, 4, 3, 2, 1]);
         expected.extend_from_slice(&[0, 0, 0, 0, 18, 0, 0, 0]);
-        expected.extend_from_slice(b"textures/dirt.ktx2");
+        expected.extend_from_slice(b"textures/dirt.atex.bin");
         assert_eq!(bytes, expected);
     }
 
@@ -259,7 +262,7 @@ mod tests {
 
     #[test]
     fn rejects_corruption() {
-        let bytes = encode(&[entry(1, "a.ktx2")]);
+        let bytes = encode(&[entry(1, "a.atex.bin")]);
         assert_eq!(
             decode(&bytes[..bytes.len() - 1]),
             Err(DecodeError("size mismatch"))
@@ -274,8 +277,8 @@ mod tests {
 
     #[test]
     fn skips_unknown_kinds() {
-        let mut bytes = encode(&[entry(1, "a.ktx2"), entry(2, "b.bin")]);
+        let mut bytes = encode(&[entry(1, "a.atex.bin"), entry(2, "b.bin")]);
         bytes[HEADER_SIZE + ENTRY_SIZE + 14] = 200;
-        assert_eq!(decode(&bytes).unwrap(), [entry(1, "a.ktx2")]);
+        assert_eq!(decode(&bytes).unwrap(), [entry(1, "a.atex.bin")]);
     }
 }

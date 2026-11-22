@@ -47,8 +47,8 @@ pub enum Job {
         /// Relative to `input`.
         source: String,
         color: ColorSpace,
-        /// What it is for; see docs/spec/ktx2.md#keyvalue-data.
-        usage: crate::ktx2::Usage,
+        /// What it is for; see docs/spec/atex.bin.md#usage.
+        usage: crate::atex::Usage,
         mipmaps: bool,
         /// DirectX normal map: invert green.
         flip_green: bool,
@@ -323,7 +323,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             }
         };
         listing.insert(rel.clone());
-        // `P.aatlas.bin` writes `P.ktx2` too; see docs/features/atlases.md#build.
+        // `P.aatlas.bin` writes `P.atex.bin` too; see docs/features/atlases.md#build.
         let p = strip_extension(&rel).to_owned();
         for (kind, asset_path, job) in [
             (
@@ -504,7 +504,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
     let known: HashSet<&str> = sources.iter().map(String::as_str).collect();
     let mut claims: HashMap<String, Claim> = HashMap::new();
     // Textures a material uses as a normal or height map, for their usage.
-    let mut maps: HashMap<String, crate::ktx2::Usage> = HashMap::new();
+    let mut maps: HashMap<String, crate::atex::Usage> = HashMap::new();
     let mut orm_inputs = HashSet::new();
     let mut materials = Vec::new();
     // Custom materials' packed textures and materials, written after the textures.
@@ -658,7 +658,7 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                                 t.usage,
                                 crate::shader::Usage::Normal | crate::shader::Usage::Height
                             ) {
-                                maps.insert(r.clone(), t.usage.ktx());
+                                maps.insert(r.clone(), t.usage.texture_usage());
                             }
                         }
                     }
@@ -809,8 +809,8 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 _ => {
                     claims.insert(rel.clone(), claim);
                     let usage = match slot {
-                        Slot::Normal => Some(crate::ktx2::Usage::Normal),
-                        Slot::Height => Some(crate::ktx2::Usage::Height),
+                        Slot::Normal => Some(crate::atex::Usage::Normal),
+                        Slot::Height => Some(crate::atex::Usage::Height),
                         _ => None,
                     };
                     if let Some(usage) = usage {
@@ -864,15 +864,15 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
             None if is_noise(Path::new(rel)) => (ColorSpace::Linear, false, true),
             None => (settings.color_space(rel), false, true),
         };
-        // See docs/spec/ktx2.md#keyvalue-data.
+        // See docs/spec/atex.bin.md#usage.
         let usage = match kind {
-            Some(Kind::Gradient) => crate::ktx2::Usage::Gradient,
-            Some(_) => crate::ktx2::Usage::Palette,
-            None if is_noise(Path::new(rel)) => crate::ktx2::Usage::Noise,
+            Some(Kind::Gradient) => crate::atex::Usage::Gradient,
+            Some(_) => crate::atex::Usage::Palette,
+            None if is_noise(Path::new(rel)) => crate::atex::Usage::Noise,
             None => maps
                 .get(rel)
                 .copied()
-                .unwrap_or(crate::ktx2::Usage::of(color)),
+                .unwrap_or(crate::atex::Usage::of(color)),
         };
         let asset_path = strip_extension(rel).to_owned();
         plan.assets.push(Asset {

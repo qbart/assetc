@@ -22,7 +22,7 @@ const fn project(
     }
 }
 
-pub const PROJECTS: [Project; 29] = [
+pub const PROJECTS: [Project; 28] = [
     project("Lucide", "icons", "ISC", "lucide.dev"),
     project(
         "Ubuntu",
@@ -97,14 +97,8 @@ pub const PROJECTS: [Project; 29] = [
         "github.com/qbart/meshopt-pure",
     ),
     project(
-        "KTX-Software",
-        "KTX2 textures",
-        "Apache-2.0",
-        "github.com/KhronosGroup/KTX-Software",
-    ),
-    project(
         "Basis Universal",
-        "UASTC, BC from UASTC",
+        "BC encoders and decoders",
         "Apache-2.0",
         "github.com/BinomialLLC/basis_universal",
     ),
@@ -115,10 +109,10 @@ pub const PROJECTS: [Project; 29] = [
         "github.com/ARM-software/astc-encoder",
     ),
     project(
-        "ktx-rs",
-        "KTX-Software in Rust",
-        "Apache-2.0 and BSD-3-Clause and MIT and Zlib",
-        "github.com/qbart/ktx-rs",
+        "imgio",
+        "texture encoding and decoding",
+        "Apache-2.0",
+        "github.com/qbart/imgio",
     ),
     project("matma", "path curves", "MIT", "github.com/qbart/matma"),
     project(

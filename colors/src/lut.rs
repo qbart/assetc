@@ -131,7 +131,7 @@ pub const MAX_STRIP_SIZE: usize = 128;
 
 impl Lut {
     /// The `size² × size` strip the build writes: blue slices left to right, red across and
-    /// green down each slice; see docs/spec/ktx2.md#color-lut-strips.
+    /// green down each slice; see docs/spec/atex.bin.md#strip.
     pub fn strip(&self) -> Result<Image, String> {
         let n = self.size;
         if n > MAX_STRIP_SIZE {
@@ -158,7 +158,7 @@ impl Lut {
     }
 
     /// RGBA8 texels of the `size³` 3D texture, in table order (red fastest, then green, then
-    /// blue), as KTX2 stores a 3D level; see docs/spec/ktx2.md#volume.
+    /// blue), as a 3D texture level is stored; see docs/spec/atex.bin.md#volume.
     pub fn volume(&self) -> Vec<u8> {
         self.table
             .iter()

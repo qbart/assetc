@@ -162,7 +162,7 @@ pub struct Field {
     pub source: FieldSource,
 }
 
-/// What a texture holds; [`Usage::key`] is its KTX2 `assetc.usage` value.
+/// What a texture slot holds; [`Usage::key`] is the name of its texture's usage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Usage {
     Color,

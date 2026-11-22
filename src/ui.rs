@@ -3001,7 +3001,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
     let ext = name.rsplit_once('.').map_or("", |(_, ext)| ext);
     match ext {
         "png" | "jpg" | "jpeg" | "gif" | "bmp" | "tga" | "webp" | "tif" | "tiff" | "hdr"
-        | "dds" | "ktx2" => Icon::Image,
+        | "dds" | "ktx2" | "atex" => Icon::Image,
         "ttf" | "otf" | "woff" | "woff2" => Icon::Type,
         "cube" => Icon::Aperture,
         "anoise" => Icon::ImagePlay,
