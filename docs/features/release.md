@@ -38,7 +38,7 @@ all of them hold the new one, in one pushed commit:
 | `demo/Cargo.toml` | `version` of `assetc-demo`, kept the same |
 | `Cargo.toml` `[dependencies]` | the `version` of the `assetc-colors` path dependency |
 | `Cargo.lock` | the four packages' entries; `cargo update --workspace` writes them. The release builds with `--locked`, so a stale lock file fails it |
-| `docs/features/gui.md`, `docs/features/inspector.md` | the `assetc <version>` shown in the status bar's and the Writer row's examples |
+| `docs/features/gui.md` | the `assetc <version>` shown in the status bar's example |
 
 To check, before tagging (`0.2.0` being the old version; hits in
 `Cargo.lock` for other crates and the example tags in this file do not
