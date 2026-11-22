@@ -24,6 +24,12 @@ output = \"build\"
 # linear = [\"**/*_n.png\"]
 # no_mipmaps = [\"ui/**\"]
 
+# [environments]
+# specular_size = 256
+# irradiance_size = 32
+# samples = 1024
+# lighting = true
+
 # [meshes]
 # meshlet_max_vertices = 64
 # meshlet_max_triangles = 124
@@ -43,6 +49,7 @@ pub struct Config {
     pub output: PathBuf,
     pub textures: Textures,
     pub meshes: Meshes,
+    pub environments: Environments,
     pub locators: Locators,
     pub pack: Pack,
     /// Named build targets, as written; see docs/spec/assetc.toml.md#targets.
@@ -111,6 +118,53 @@ pub struct Textures {
     pub quality: crate::atex::Quality,
 }
 
+/// How HDR environment maps are turned into lighting maps, see
+/// docs/spec/assetc.toml.md#environments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Environments {
+    /// Largest face size of the specular map.
+    pub specular_size: u32,
+    /// Face size of the irradiance map.
+    pub irradiance_size: u32,
+    /// GGX samples per specular texel.
+    pub samples: u32,
+    /// Whether the lighting maps are written at all.
+    pub lighting: bool,
+}
+
+impl Default for Environments {
+    fn default() -> Self {
+        Self {
+            specular_size: 256,
+            irradiance_size: 32,
+            samples: 1024,
+            lighting: true,
+        }
+    }
+}
+
+impl Environments {
+    /// The first value out of range, as `assetc.toml [environments]: <problem>` reports it.
+    pub fn validate(&self) -> Result<(), String> {
+        let power = |key: &str, value: u32, min: u32| {
+            if value.is_power_of_two() && (min..=4096).contains(&value) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{key} must be a power of two, {min}–4096, not {value}"
+                ))
+            }
+        };
+        power("specular_size", self.specular_size, 8)?;
+        power("irradiance_size", self.irradiance_size, 1)?;
+        if !(1..=65536).contains(&self.samples) {
+            return Err(format!("samples must be 1–65536, not {}", self.samples));
+        }
+        Ok(())
+    }
+}
+
 /// Mesh build settings, see docs/spec/assetc.toml.md#meshes.
 #[derive(Debug, Default, Clone, PartialEq, Deserialize)]
 #[serde(try_from = "toml::Table")]
@@ -171,6 +225,7 @@ impl Default for Config {
             output: "build".into(),
             textures: Textures::default(),
             meshes: Meshes::default(),
+            environments: Environments::default(),
             locators: Locators::default(),
             pack: Pack::default(),
             targets: Default::default(),
@@ -457,6 +512,50 @@ mod tests {
         assert_eq!(
             template.meshes.overrides[0].patch.meshlet_max_vertices,
             Some(128)
+        );
+    }
+
+    #[test]
+    fn environment_settings_per_target() {
+        let config = parse(
+            "[environments]\nspecular_size = 128\nlighting = false\n\
+             [targets.mobile]\nenvironments = { specular_size = 64, samples = 256 }\n",
+        )
+        .unwrap();
+        assert_eq!(Config::default().environments, Environments::default());
+        assert_eq!(config.environments.specular_size, 128);
+        assert!(!config.environments.lighting);
+        let mobile = config.target("mobile").unwrap().environments;
+        assert_eq!(
+            (
+                mobile.specular_size,
+                mobile.samples,
+                mobile.irradiance_size,
+                mobile.lighting
+            ),
+            (64, 256, 32, false)
+        );
+        assert!(toml::from_str::<Config>("[environments]\nsize = 1\n").is_err());
+        let bad = |e: Environments| e.validate().unwrap_err();
+        let base = Environments::default();
+        assert!(base.validate().is_ok());
+        assert_eq!(
+            bad(Environments {
+                specular_size: 100,
+                ..base
+            }),
+            "specular_size must be a power of two, 8–4096, not 100"
+        );
+        assert_eq!(
+            bad(Environments {
+                irradiance_size: 8192,
+                ..base
+            }),
+            "irradiance_size must be a power of two, 1–4096, not 8192"
+        );
+        assert_eq!(
+            bad(Environments { samples: 0, ..base }),
+            "samples must be 1–65536, not 0"
         );
     }
 

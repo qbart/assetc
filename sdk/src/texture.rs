@@ -145,13 +145,19 @@ pub enum Usage {
     Font,
     /// A color LUT, strip or volume.
     Lut,
-    /// An HDR environment map (cubemap).
+    /// An HDR environment map's skybox cubemap.
     Environment,
+    /// An HDR environment map's specular map: level `i` of `n` prefiltered for roughness
+    /// `i / (n − 1)`, see [`Texture::specular_lod`].
+    EnvironmentSpecular,
+    /// An HDR environment map's irradiance map (irradiance divided by π), see
+    /// [`Texture::sh9`].
+    EnvironmentIrradiance,
 }
 
 impl Usage {
     /// In the order of their values.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Color,
         Self::Data,
         Self::Normal,
@@ -164,6 +170,8 @@ impl Usage {
         Self::Font,
         Self::Lut,
         Self::Environment,
+        Self::EnvironmentSpecular,
+        Self::EnvironmentIrradiance,
     ];
 
     /// Its value in the file, or [`Usage::Data`] for one this version does not know.
@@ -185,6 +193,8 @@ impl Usage {
             Self::Font => "font",
             Self::Lut => "lut",
             Self::Environment => "environment",
+            Self::EnvironmentSpecular => "environment_specular",
+            Self::EnvironmentIrradiance => "environment_irradiance",
         }
     }
 }
@@ -202,7 +212,7 @@ pub struct Level {
     pub data: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Texture {
     pub format: Format,
     pub width: u32,
@@ -223,6 +233,10 @@ pub struct Texture {
     /// (`0`–`3` for R–A), [`NO_CHANNEL`] past its channels; see
     /// docs/spec/atex.bin.md#swizzle.
     pub swizzle: [u8; 4],
+    /// An irradiance map's 9 spherical harmonics coefficients, each `[r, g, b]`, in the order
+    /// `(l, m)` = `(0, 0)`, `(1, −1)`, `(1, 0)`, `(1, 1)`, `(2, −2)` … `(2, 2)`; `None` in
+    /// other textures. See docs/spec/atex.bin.md#sh9 and [`Texture::irradiance`].
+    pub sh9: Option<[[f32; 3]; 9]>,
 }
 
 impl Texture {
@@ -244,6 +258,20 @@ impl Texture {
         let usage = Usage::from_value(desc.u32(28)?);
         let srgb = desc.u32(32)? & 1 == 1;
         let swizzle = desc.array::<4>(36)?;
+        let sh9 = match file.chunk("SH9") {
+            None => None,
+            Some(chunk) if chunk.len() == 27 * 4 => {
+                let floats = Bytes::new(chunk, FILE).f32s::<27>(0)?;
+                Some(std::array::from_fn(|i| {
+                    [floats[3 * i], floats[3 * i + 1], floats[3 * i + 2]]
+                }))
+            }
+            Some(chunk) => {
+                return Err(
+                    Bytes::new(chunk, FILE).err(format!("SH9 has {} bytes, not 108", chunk.len()))
+                );
+            }
+        };
         let data = require("DATA")?;
         let levels = require("LEVELS")?
             .records_n(32, level_count as usize)?
@@ -285,7 +313,35 @@ impl Texture {
             usage,
             srgb,
             swizzle,
+            sh9,
         })
+    }
+
+    /// The level of a specular map ([`Usage::EnvironmentSpecular`]) holding perceptual
+    /// `roughness` (0–1): `roughness × (levels − 1)`, to sample at.
+    pub fn specular_lod(&self, roughness: f32) -> f32 {
+        roughness.clamp(0.0, 1.0) * (self.levels.len() - 1) as f32
+    }
+
+    /// An irradiance map's light along unit `direction` (`+Y` up), from its [`Texture::sh9`]:
+    /// the irradiance divided by π, so diffuse ambient light is `albedo × irradiance`.
+    pub fn irradiance(&self, direction: [f32; 3]) -> Option<[f32; 3]> {
+        let sh = self.sh9.as_ref()?;
+        let [x, y, z] = direction;
+        let basis = [
+            0.282_095,
+            0.488_603 * y,
+            0.488_603 * z,
+            0.488_603 * x,
+            1.092_548 * x * y,
+            1.092_548 * y * z,
+            0.315_392 * (3.0 * z * z - 1.0),
+            1.092_548 * x * z,
+            0.546_274 * (x * x - y * y),
+        ];
+        Some(std::array::from_fn(|c| {
+            (0..9).map(|i| sh[i][c] * basis[i]).sum()
+        }))
     }
 
     pub fn is_cubemap(&self) -> bool {
@@ -329,6 +385,17 @@ mod tests {
 
     /// A texture of one or two levels: `levels` are each level's (w, h, bytes).
     fn atex(format: u32, swizzle: [u8; 4], usage: u32, levels: &[(u32, u32, &[u8])]) -> Vec<u8> {
+        atex_with(format, swizzle, usage, levels, &[])
+    }
+
+    /// [`atex`] with more chunks after `DATA`.
+    fn atex_with(
+        format: u32,
+        swizzle: [u8; 4],
+        usage: u32,
+        levels: &[(u32, u32, &[u8])],
+        extra: &[(&str, &[u8])],
+    ) -> Vec<u8> {
         let (w, h) = (levels[0].0, levels[0].1);
         let mut desc = Vec::new();
         for v in [format, w, h, 1, 1, 1, levels.len() as u32, usage, 1] {
@@ -348,11 +415,9 @@ mod tests {
             data.extend_from_slice(bytes);
             data.resize(data.len().next_multiple_of(16), 0);
         }
-        file(
-            "ATEX",
-            1,
-            &[("DESC", &desc), ("LEVELS", &table), ("DATA", &data)],
-        )
+        let mut chunks = vec![("DESC", &desc[..]), ("LEVELS", &table), ("DATA", &data)];
+        chunks.extend_from_slice(extra);
+        file("ATEX", 1, &chunks)
     }
 
     #[test]
@@ -404,8 +469,58 @@ mod tests {
         }
         assert_eq!(Format::from_vk_format(0), None);
         assert_eq!(Usage::from_value(11), Usage::Environment);
+        assert_eq!(Usage::from_value(12), Usage::EnvironmentSpecular);
+        assert_eq!(Usage::from_value(13), Usage::EnvironmentIrradiance);
+        assert_eq!(Usage::EnvironmentIrradiance.key(), "environment_irradiance");
+        assert_eq!(Usage::from_value(14), Usage::Data);
         assert_eq!(Usage::from_value(99), Usage::Data);
         assert_eq!(Usage::Orm.key(), "orm");
+    }
+
+    #[test]
+    fn lighting_maps() {
+        // A constant irradiance of (0.5, 1, 2): only the first coefficient.
+        let mut floats = [0.0f32; 27];
+        floats[..3].copy_from_slice(&[0.5, 1.0, 2.0].map(|c| c / 0.282_095));
+        let sh: Vec<u8> = floats.iter().flat_map(|f| f.to_le_bytes()).collect();
+        let block = [0u8; 16];
+        let t = Texture::decode(&atex_with(
+            143,
+            [0, 1, 2, 255],
+            13,
+            &[(4, 4, &block)],
+            &[("SH9", &sh)],
+        ))
+        .unwrap();
+        assert_eq!(t.usage, Usage::EnvironmentIrradiance);
+        let e = t.irradiance([0.0, 1.0, 0.0]).unwrap();
+        assert!(
+            (e[0] - 0.5).abs() < 1e-6 && (e[2] - 2.0).abs() < 1e-6,
+            "{e:?}"
+        );
+        let bad = atex_with(
+            143,
+            [0, 1, 2, 255],
+            13,
+            &[(4, 4, &block)],
+            &[("SH9", &sh[..8])],
+        );
+        assert!(Texture::decode(&bad).is_err());
+
+        let levels: [(u32, u32, &[u8]); 3] =
+            [(16, 16, &[0; 256]), (8, 8, &[0; 64]), (4, 4, &block)];
+        let t = Texture::decode(&atex(143, [0, 1, 2, 255], 12, &levels)).unwrap();
+        assert_eq!(t.usage, Usage::EnvironmentSpecular);
+        assert_eq!(t.sh9, None);
+        assert_eq!(t.irradiance([0.0, 1.0, 0.0]), None);
+        assert_eq!(
+            (
+                t.specular_lod(0.0),
+                t.specular_lod(0.5),
+                t.specular_lod(1.0)
+            ),
+            (0.0, 1.0, 2.0)
+        );
     }
 
     #[test]

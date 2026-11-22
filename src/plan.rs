@@ -41,6 +41,17 @@ pub struct Asset {
     pub job: Job,
 }
 
+/// Which of an HDR environment map's cubemaps a job writes; see docs/features/hdr.md#build.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Environment {
+    /// The skybox, with box-filtered mips.
+    Skybox,
+    /// Levels prefiltered by roughness, faces of at most `size`.
+    Specular { size: u32, samples: u32 },
+    /// The cosine-weighted average around each direction.
+    Irradiance { size: u32 },
+}
+
 #[derive(Debug)]
 pub enum Job {
     Texture {
@@ -89,9 +100,9 @@ pub enum Job {
     },
     /// The texture of an atlas, written by its [`Job::Atlas`].
     AtlasPart { source: String },
-    /// An HDR environment map (relative to `input`) as a half-float cubemap; see
+    /// One of the cubemaps of an HDR environment map (relative to `input`); see
     /// docs/features/hdr.md#build.
-    Cubemap { source: String },
+    Cubemap { source: String, map: Environment },
     /// A schema, data file, graph or tree (relative to `input`), written to the same path;
     /// see docs/features/build.md#inputs.
     Data { source: String, kind: Kind },
@@ -161,7 +172,7 @@ impl Asset {
             | Job::Font { source }
             | Job::FontPart { source }
             | Job::Data { source, .. }
-            | Job::Cubemap { source }
+            | Job::Cubemap { source, .. }
             | Job::Atlas { source, .. }
             | Job::AtlasPart { source } => source.clone(),
         }
@@ -435,16 +446,36 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                 }),
             }
         } else if crate::hdr::is_hdr(file) {
-            let asset_path = strip_extension(&rel).to_owned();
-            plan.assets.push(Asset {
-                id: fnv1a64(asset_path.as_bytes()),
-                kind: Kind::Texture,
-                output: Kind::Texture.output_path(&asset_path),
-                asset_path,
-                job: Job::Cubemap {
-                    source: rel.clone(),
-                },
-            });
+            let settings = &config.environments;
+            let mut maps = vec![("", Environment::Skybox)];
+            if settings.lighting {
+                maps.push((
+                    ".specular",
+                    Environment::Specular {
+                        size: settings.specular_size,
+                        samples: settings.samples,
+                    },
+                ));
+                maps.push((
+                    ".irradiance",
+                    Environment::Irradiance {
+                        size: settings.irradiance_size,
+                    },
+                ));
+            }
+            for (suffix, map) in maps {
+                let asset_path = format!("{}{suffix}", strip_extension(&rel));
+                plan.assets.push(Asset {
+                    id: fnv1a64(asset_path.as_bytes()),
+                    kind: Kind::Texture,
+                    output: Kind::Texture.output_path(&asset_path),
+                    asset_path,
+                    job: Job::Cubemap {
+                        source: rel.clone(),
+                        map,
+                    },
+                });
+            }
         } else if let Some(kind) = data_kind(file) {
             // Compiled to a binary of its kind; see docs/features/build.md#inputs.
             let asset_path = format!("{}.{}", strip_extension(&rel), kind.extension());

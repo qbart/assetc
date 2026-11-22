@@ -129,6 +129,8 @@ pub enum Error {
     Pattern(globset::Error),
     /// Invalid `[meshes]` settings.
     Meshes(String),
+    /// Invalid `[environments]` settings.
+    Environments(String),
     Io(PathBuf, io::Error),
 }
 
@@ -145,6 +147,7 @@ impl fmt::Display for Error {
             ),
             Self::Pattern(e) => write!(f, "{} [textures]: {e}", config::FILE_NAME),
             Self::Meshes(e) => write!(f, "{} [meshes]: {e}", config::FILE_NAME),
+            Self::Environments(e) => write!(f, "{} [environments]: {e}", config::FILE_NAME),
             Self::Io(path, e) => write!(f, "{}: {e}", path.display()),
         }
     }
@@ -172,6 +175,10 @@ pub fn run_cached(
     // Checked first so bad settings are reported even without an input directory.
     texture::Settings::new(&config.textures).map_err(Error::Pattern)?;
     crate::amesh::MeshSettings::new(&config.meshes).map_err(Error::Meshes)?;
+    config
+        .environments
+        .validate()
+        .map_err(Error::Environments)?;
     if !input.is_dir() {
         return Err(Error::MissingInput(input.to_path_buf()));
     }
@@ -269,7 +276,9 @@ pub fn run_cached(
             }
             Job::Font { source } => compile_font(input, source, output, format),
             Job::Data { source, kind } => compile_data(input, source, &dest, *kind, warnings),
-            Job::Cubemap { source } => compile_cubemap(&input.join(source), &dest, format),
+            Job::Cubemap { source, map } => {
+                compile_cubemap(&input.join(source), &dest, format, *map)
+            }
             Job::Atlas {
                 source,
                 color,
@@ -448,7 +457,7 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
             reads.extend(sidecars);
             reads
         }
-        Job::Lut { source, .. } | Job::Cubemap { source } | Job::Font { source } => {
+        Job::Lut { source, .. } | Job::Cubemap { source, .. } | Job::Font { source } => {
             vec![input.join(source)]
         }
         Job::Orm { sources } => sources.iter().flatten().map(|s| input.join(s)).collect(),
@@ -809,17 +818,42 @@ fn compile_atlas(
     Ok(format!("{frames} frames, {width} × {height} px, {summary}"))
 }
 
-/// Writes an HDR environment map as a cubemap texture; see docs/features/hdr.md.
-fn compile_cubemap(source: &Path, dest: &Path, format: Target) -> Result<String, String> {
-    let hdr = crate::hdr::read(source)?;
-    let size = crate::hdr::face_size(hdr.height);
-    let levels = hdr.cubemap(size);
-    write(dest, &crate::atex::encode_cubemap(format, &levels)?)?;
+/// Writes one cubemap of an HDR environment map; see docs/features/hdr.md.
+fn compile_cubemap(
+    source: &Path,
+    dest: &Path,
+    format: Target,
+    map: plan::Environment,
+) -> Result<String, String> {
+    use crate::hdr;
+    use plan::Environment;
+    let hdr = hdr::read(source)?;
+    let (usage, levels, sh) = match map {
+        Environment::Skybox => (
+            Usage::Environment,
+            hdr.cubemap(hdr::face_size(hdr.height)),
+            None,
+        ),
+        Environment::Specular { size, samples } => (
+            Usage::EnvironmentSpecular,
+            hdr::specular(&hdr::lighting_source(&hdr), size as usize, samples),
+            None,
+        ),
+        Environment::Irradiance { size } => {
+            let (level, sh) = hdr::irradiance(&hdr::lighting_source(&hdr), size as usize);
+            (Usage::EnvironmentIrradiance, vec![level], Some(sh))
+        }
+    };
+    write(
+        dest,
+        &crate::atex::encode_cubemap(format, usage, &levels, sh.as_ref())?,
+    )?;
     let token = format.token(crate::atex::Kind::Hdr);
-    Ok(format!("cubemap {size}², {token}, {} levels", levels.len()))
+    let (size, count) = (levels[0].size, levels.len());
+    let noun = if count == 1 { "level" } else { "levels" };
+    Ok(format!("cubemap {size}², {token}, {count} {noun}"))
 }
 
-/// The first problem, and how many more there are.
 fn first_problem(problems: &[String]) -> Result<(), String> {
     match problems {
         [] => Ok(()),
@@ -1272,12 +1306,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (source, dest) = (dir.path().join("sky.exr"), dir.path().join("sky.atex.bin"));
         crate::hdr::tests::write_exr(&source, 64, 32, |_, y| [4.0, y as f32 / 32.0, 0.5]);
-        let detail = compile_cubemap(&source, &dest, Target::default()).unwrap();
+        let detail =
+            compile_cubemap(&source, &dest, Target::default(), plan::Environment::Skybox).unwrap();
         assert_eq!(detail, "cubemap 16², bc6h, 5 levels");
         let info = crate::atex::read(&fs::read(&dest).unwrap()).unwrap();
         assert_eq!(info.format_name(), "BC6H_UFLOAT_BLOCK");
 
-        let detail = compile_cubemap(&source, &dest, Target::RGBA).unwrap();
+        let detail =
+            compile_cubemap(&source, &dest, Target::RGBA, plan::Environment::Skybox).unwrap();
         assert_eq!(detail, "cubemap 16², rgba16f, 5 levels");
         let info = crate::atex::read(&fs::read(&dest).unwrap()).unwrap();
         assert_eq!(
@@ -1290,6 +1326,113 @@ mod tests {
         assert_eq!(level0.len(), 6 * 16 * 16 * 8);
         let red = imgio::half::to_f32(u16::from_le_bytes([level0[0], level0[1]]));
         assert_eq!(red, 4.0);
+    }
+
+    /// The bytes of level `i` of a `.atex.bin` file.
+    fn level_data(path: &Path, i: usize) -> Vec<u8> {
+        let bytes = fs::read(path).unwrap();
+        let reader = crate::chunks::Reader::parse(&bytes, crate::atex::FORMAT).unwrap();
+        let levels = reader.chunk("LEVELS").unwrap();
+        let at = |o| crate::chunks::u32_at(levels, i, 32, o).unwrap() as usize;
+        reader.chunk("DATA").unwrap()[at(0)..at(0) + at(8)].to_vec()
+    }
+
+    #[test]
+    fn hdr_maps_get_lighting_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(input.join("env")).unwrap();
+        crate::hdr::tests::write_exr(&input.join("env/sky.exr"), 64, 32, |x, y| {
+            [1.0 + x as f32 / 8.0, 2.0, if y < 8 { 50.0 } else { 0.5 }]
+        });
+        let config = config::Config::default();
+        let outcome = run(&input, &output, &config).unwrap();
+        let lines: Vec<String> = outcome
+            .built
+            .iter()
+            .map(|b| format!("{} -> {} ({})", b.source, b.output, b.detail))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                "env/sky.exr -> env/sky.atex.bin (cubemap 16², bc6h, 5 levels)",
+                "env/sky.exr -> env/sky.specular.atex.bin (cubemap 16², bc6h, 3 levels)",
+                "env/sky.exr -> env/sky.irradiance.atex.bin (cubemap 32², bc6h, 1 level)",
+            ]
+        );
+        let entries =
+            manifest::decode(&fs::read(output.join(manifest::FILE_NAME)).unwrap()).unwrap();
+        for path in ["env/sky", "env/sky.specular", "env/sky.irradiance"] {
+            let entry = entries
+                .iter()
+                .find(|e| e.id == crate::hash::fnv1a64(path.as_bytes()))
+                .unwrap();
+            assert_eq!(entry.path, format!("{path}.atex.bin"));
+        }
+        let usage = |name: &str| {
+            crate::atex::read(&fs::read(output.join(name)).unwrap())
+                .unwrap()
+                .usage
+        };
+        assert_eq!(usage("env/sky.specular.atex.bin"), "environment_specular");
+        assert_eq!(
+            usage("env/sky.irradiance.atex.bin"),
+            "environment_irradiance"
+        );
+        let irradiance = fs::read(output.join("env/sky.irradiance.atex.bin")).unwrap();
+        let reader = crate::chunks::Reader::parse(&irradiance, crate::atex::FORMAT).unwrap();
+        assert_eq!(reader.chunk("SH9").unwrap().len(), 27 * 4);
+
+        // Two builds of the same input are byte-identical.
+        let again = dir.path().join("again");
+        run(&input, &again, &config).unwrap();
+        for name in ["sky", "sky.specular", "sky.irradiance"] {
+            let file = format!("env/{name}.atex.bin");
+            assert_eq!(
+                fs::read(output.join(&file)).unwrap(),
+                fs::read(again.join(&file)).unwrap(),
+                "{file}"
+            );
+        }
+
+        // Specular level 0 is the skybox's level of its size.
+        let mut config = config::Config::default();
+        config.textures.format = crate::atex::Format::Rgba;
+        config.environments.specular_size = 8;
+        let mut cache = Cache::default();
+        run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(
+            level_data(&output.join("env/sky.specular.atex.bin"), 0),
+            level_data(&output.join("env/sky.atex.bin"), 1)
+        );
+        // Only the lighting maps depend on [environments].
+        config.environments.samples = 16;
+        config.environments.irradiance_size = 4;
+        let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
+        let built: Vec<&str> = outcome.built.iter().map(|b| b.output.as_str()).collect();
+        assert_eq!(
+            built,
+            ["env/sky.specular.atex.bin", "env/sky.irradiance.atex.bin"]
+        );
+        assert_eq!(outcome.up_to_date, 1);
+
+        // Without lighting, only the skybox is left.
+        config.environments.lighting = false;
+        let outcome = run(&input, &output, &config).unwrap();
+        assert_eq!(outcome.built.len(), 1);
+        let mut removed = outcome.removed.clone();
+        removed.sort();
+        assert_eq!(
+            removed,
+            ["env/sky.irradiance.atex.bin", "env/sky.specular.atex.bin"]
+        );
+
+        config.environments.specular_size = 4;
+        let e = run(&input, &output, &config).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "assetc.toml [environments]: specular_size must be a power of two, 8–4096, not 4"
+        );
     }
 
     #[test]

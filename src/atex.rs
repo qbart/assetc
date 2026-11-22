@@ -119,12 +119,17 @@ pub enum Usage {
     Atlas,
     Font,
     Lut,
+    /// An HDR environment map's skybox cubemap.
     Environment,
+    /// Its specular map: levels by roughness; see docs/spec/atex.bin.md#specular-maps.
+    EnvironmentSpecular,
+    /// Its irradiance map; see docs/spec/atex.bin.md#irradiance-maps.
+    EnvironmentIrradiance,
 }
 
 impl Usage {
     /// In the order of their values.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 14] = [
         Self::Color,
         Self::Data,
         Self::Normal,
@@ -137,6 +142,8 @@ impl Usage {
         Self::Font,
         Self::Lut,
         Self::Environment,
+        Self::EnvironmentSpecular,
+        Self::EnvironmentIrradiance,
     ];
 
     pub fn key(self) -> &'static str {
@@ -153,6 +160,8 @@ impl Usage {
             Self::Font => "font",
             Self::Lut => "lut",
             Self::Environment => "environment",
+            Self::EnvironmentSpecular => "environment_specular",
+            Self::EnvironmentIrradiance => "environment_irradiance",
         }
     }
 
@@ -338,7 +347,14 @@ pub fn encode_rgba8_volume(
 }
 
 /// Encodes an HDR cubemap's levels (largest first); see docs/spec/atex.bin.md#cubemaps.
-pub fn encode_cubemap(target: Target, levels: &[crate::hdr::Level]) -> Result<Vec<u8>, String> {
+/// An HDR cubemap of `usage`; an irradiance map's spherical harmonics go in its `SH9` chunk,
+/// see docs/spec/atex.bin.md#cubemaps.
+pub fn encode_cubemap(
+    target: Target,
+    usage: Usage,
+    levels: &[crate::hdr::Level],
+    sh: Option<&[[f32; 3]; 9]>,
+) -> Result<Vec<u8>, String> {
     let size = levels[0].size as u32;
     let data: Vec<Vec<u8>> = levels
         .iter()
@@ -357,14 +373,16 @@ pub fn encode_cubemap(target: Target, levels: &[crate::hdr::Level]) -> Result<Ve
         })
         .collect();
     let data: Vec<&[u8]> = data.iter().map(Vec::as_slice).collect();
-    let usage = Usage::Environment;
-    encode(
+    let extra = sh.map(|sh| {
+        let floats: Vec<f32> = sh.iter().flatten().copied().collect();
+        ("SH9", Bytes(Vec::new()).f32s(&floats).take())
+    });
+    encode_with(
         target,
-        Kind::Hdr,
-        ColorSpace::Linear,
-        usage,
+        (Kind::Hdr, ColorSpace::Linear, usage),
         ([size, size, 1], 6),
         &data,
+        extra,
     )
 }
 
@@ -375,8 +393,19 @@ fn encode(
     kind: Kind,
     color: ColorSpace,
     usage: Usage,
+    size: ([u32; 3], u32),
+    levels: &[&[u8]],
+) -> Result<Vec<u8>, String> {
+    encode_with(target, (kind, color, usage), size, levels, None)
+}
+
+/// [`encode`], with one more chunk after `DATA`.
+fn encode_with(
+    target: Target,
+    (kind, color, usage): (Kind, ColorSpace, Usage),
     (size, faces): ([u32; 3], u32),
     levels: &[&[u8]],
+    extra: Option<(&str, Vec<u8>)>,
 ) -> Result<Vec<u8>, String> {
     let srgb = color == ColorSpace::Srgb && matches!(kind, Kind::Rgba);
     let (vk, swizzle) = layout(target.format, kind, srgb);
@@ -477,6 +506,9 @@ fn encode(
         .chunk("DESC", desc.take())
         .chunk("LEVELS", records.take())
         .chunk("DATA", data);
+    if let Some((name, payload)) = extra {
+        writer.chunk(name, payload);
+    }
     Ok(writer.finish())
 }
 
@@ -889,7 +921,7 @@ mod tests {
             "R16G16B16A16_SFLOAT",
             "R16G16B16_SFLOAT",
         ]) {
-            let file = encode_cubemap(target(format), &levels).unwrap();
+            let file = encode_cubemap(target(format), Usage::Environment, &levels, None).unwrap();
             let info = read(&file).unwrap();
             assert_eq!(info.format_name(), name);
             assert_eq!(
@@ -900,7 +932,7 @@ mod tests {
             assert_eq!(info.level0, None);
         }
         // BC6H keeps values above 1.
-        let file = encode_cubemap(target(Format::Bc), &levels).unwrap();
+        let file = encode_cubemap(target(Format::Bc), Usage::Environment, &levels, None).unwrap();
         let reader = chunks::Reader::parse(&file, FORMAT).unwrap();
         let block = &reader.chunk("DATA").unwrap()[..16];
         let decoded = imgio::decode_to_buffer(imgio::Format::Bc6hUfloat, block, 4, 4).unwrap();
