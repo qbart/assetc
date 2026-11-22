@@ -107,11 +107,8 @@ the dialog look of [file operations](file-operations.md) (`BG_PANEL`, 1 px
 | meshopt-pure         | meshoptimizer in Rust  | MIT                         | github.com/qbart/meshopt-pure |
 | Basis Universal      | BC encoders and decoders | Apache-2.0                | github.com/BinomialLLC/basis_universal |
 | astc-encoder         | ASTC                   | Apache-2.0                  | github.com/ARM-software/astc-encoder |
-| imgio                | texture encoding and decoding | Apache-2.0           | github.com/qbart/imgio |
+| imgio                | reading images, texture encoding and decoding | Apache-2.0 | github.com/qbart/imgio |
 | matma                | path curves            | MIT                         | github.com/qbart/matma |
-| image                | reading images         | MIT or Apache-2.0           | github.com/image-rs/image |
-| exr                  | reading HDR images     | BSD-3-Clause                | github.com/johannesvollmer/exrs |
-| half                 | half floats            | MIT or Apache-2.0           | github.com/starkat99/half-rs |
 | ttf-parser           | reading fonts          | MIT or Apache-2.0           | github.com/harfbuzz/ttf-parser |
 | ab_glyph             | font atlases           | Apache-2.0                  | github.com/alexheretic/ab-glyph |
 | serde and toml       | settings and schema files | MIT or Apache-2.0        | serde.rs |

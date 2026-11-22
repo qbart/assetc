@@ -25,7 +25,7 @@ Binary metadata: [`docs/spec/aatlas.bin.md`](../spec/aatlas.bin.md); settings:
 | Setting | Default | Meaning |
 |---------|---------|---------|
 | Packing | Grid | **Grid**: every frame in a cell of one size, left to right, then top to bottom (a flipbook). **Pack**: frames at their own sizes, packed tightly. |
-| Cell width, height | 0 | Grid: the cell size in px; `0` is the largest frame's width (height). A frame larger than its cell is scaled down to fit (aspect kept, Lanczos-3), and centered in it. |
+| Cell width, height | 0 | Grid: the cell size in px; `0` is the largest frame's width (height). A frame larger than its cell is scaled down to fit (aspect kept, Lanczos-3 weighted by alpha, so transparent pixels do not bleed their color), and centered in it. |
 | Columns | 0 | Grid: cells per row; `0` is `ceil(√frames)`. |
 | Padding | 2 | Pixels around every frame (between frames and to the atlas' edge, so neighbours never bleed when sampled or mipmapped). |
 | Extrude | 0 | Pixels of each frame's edge repeated outward into its padding (at most the padding). |

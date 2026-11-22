@@ -57,10 +57,14 @@ built on their own.
 Texture sources that belong to a material are compiled as that material
 describes (slot color space, ORM packing), see [`materials.md`](materials.md).
 
-Textures are decoded to 8-bit RGBA (other bit depths and color types are
-converted; JPEGs, having no alpha, get alpha 255; baseline and progressive
-JPEGs are supported; TGAs may be uncompressed or RLE-compressed, true-color,
-grayscale or color-mapped, with either origin). Color space and mipmaps follow the `[textures]` settings, see
+Textures are decoded with [imgio](https://crates.io/crates/imgio) to 8-bit
+RGBA: gray becomes R = G = B, a missing alpha 255, 16-bit values
+`round(v / 257)`. The file's format comes from its first bytes (a TGA, which
+has no signature, from its extension). JPEGs may be baseline, progressive or
+lossless, any subsampling, CMYK or YCCK; PNGs any color type and bit depth,
+palette and interlaced included; TGAs uncompressed or RLE-compressed,
+true-color, grayscale or color-mapped, with either origin. A 16-bit RGB PNG
+counts as having alpha only when some alpha is below the maximum. Color space and mipmaps follow the `[textures]` settings, see
 [`textures.md`](textures.md); so does the GPU format they are written in
 (`bc` by default, or `astc`, `rgba`, `rgb`, see
 [`textures.md`](textures.md#format)).

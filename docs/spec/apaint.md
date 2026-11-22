@@ -32,7 +32,7 @@ Rows are top to bottom, as the texture is (row 0 is `v = 0` of
   channel.
 - Unpainted: `0, 0, 0, 0`.
 
-assetc reads any PNG the [`image`](https://docs.rs/image) crate reads
+assetc reads any PNG [imgio](https://crates.io/crates/imgio) reads
 (other color types and bit depths are converted to RGBA, 8 bits), but
 writes only the form above.
 

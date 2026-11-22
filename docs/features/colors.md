@@ -41,7 +41,7 @@ assetc-colors = "0.2"
 
 | Module | Holds |
 |--------|-------|
-| `assetc_colors` (root) | `Image`: an RGBA8 image, rows top to bottom (`width`, `height`, `pixels`). |
+| `assetc_colors` (root) | `Image`: an RGBA8 image, rows top to bottom (`width`, `height`, `pixels`); `new` (transparent black), `filled`, `from_fn`, `pixel` / `set_pixel`, `texels` / `texels_mut` (the pixels as `[u8; 4]`), `crop`. |
 | `space` | `ColorSpace` (`Srgb`, `Linear`); `srgb_to_linear` / `linear_to_srgb` (0–1 floats, the sRGB transfer functions), `srgb_byte_to_linear` (a byte through a table) and `linear_to_srgb_byte`; `rgb_to_hsv` / `hsv_to_rgb`, `hsl_to_rgb`; `luminance` (Rec. 709 weights); `parse_hex` (`#rrggbb` or `#rrggbbaa`, the `#` optional, any case) and `format_hex` (`#rrggbb`, `#rrggbbaa` when not opaque). |
 | `gradient` | `Stop` (`at`, straight RGBA `color`), `Dither` (`None`, `Crosshatch`, `Pixel`); `color_at(stops, t)`, `pixel(stops, dither, t, x, y)`, `render(stops, dither, width, height)` (a cell of a gradient image, first stop at the bottom) and `render_sideways` (first stop on the left), as [gradients](gradients.md) are drawn: blended premultiplied, dithered with 4×4 or 8×8 Bayer matrices. |
 | `grid` | `Layout` (`Rows`, `Columns`), `CellGrid`: an image split into equal cells filled in layout order (`columns`, `rows`, `cell`, `capacity`, `validate`, `render_cells`), as gradient and [palette](palettes.md) images are; `MAX_SIZE` (4096). |

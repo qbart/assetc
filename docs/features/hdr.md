@@ -5,8 +5,10 @@ input directory holding a whole surrounding in **latitude-longitude**
 (equirectangular) layout, as HDRI sites publish them: the full 360° around
 from left to right, straight up at the top row, straight down at the bottom.
 The build compiles it into a [cubemap texture](../spec/atex.bin.md#cubemaps) with
-half-float colors, for skyboxes and image-based lighting. It is read with the
-pure-Rust [`exr`](https://crates.io/crates/exr) crate.
+half-float colors, for skyboxes and image-based lighting. It is read with
+[imgio](https://crates.io/crates/imgio) (pure Rust, through the `exr`
+crate): the main layer of the first part, R, G, B and A (alpha 1 without
+one; a luminance-only image as gray).
 
 (Folders of six faces, `*.env`, stay [preview-only](canvas.md#environment-maps).)
 
