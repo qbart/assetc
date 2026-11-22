@@ -3017,6 +3017,7 @@ fn tree_icon(path: &Path, is_dir: bool, open: bool) -> Icon {
         "spv" => Icon::Binary,
         "amod" => Icon::Settings2,
         "amipmap" => Icon::Images,
+        "acollider" => Icon::Shield,
         "gltf" | "glb" | "obj" | "amesh" => Icon::Torus,
         "aanim" => Icon::Film,
         "exr" => Icon::SunMedium,

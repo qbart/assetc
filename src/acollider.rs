@@ -395,6 +395,12 @@ mod tests {
         assert!(keys_set(&cleared).is_empty());
         assert_eq!(parse(&cleared).unwrap(), Settings::default());
         assert_eq!(with_value("", 3, 96.0).unwrap(), "resolution = 96\n");
+        // The only key's comment stays.
+        let one = "# A compound collider for physics; see docs/features/colliders.md.\nmax_hulls = 16\n";
+        assert_eq!(
+            without_value(one, 0).unwrap(),
+            "# A compound collider for physics; see docs/features/colliders.md.\n"
+        );
     }
 
     #[test]

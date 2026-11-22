@@ -235,6 +235,7 @@ The icon follows the entry's type, by extension (any case):
 | animation: `aanim.bin`                        | `film`                    |
 | per-file settings: `amod`                     | `settings-2` (dimmed)     |
 | a texture's mip chain: `amipmap`              | `images` (dimmed)         |
+| collider: `acollider` (dimmed), `acollider.bin` | `shield`                |
 | an atlas's settings: `atlas.toml` inside a `*.atlas` folder | `settings-2` (dimmed) |
 | anything else                                 | `file`                    |
 
@@ -270,7 +271,7 @@ gizmo modes), `crosshair` (placing locators on the surface),
 `flip-horizontal-2` (mirroring locators), `plus`, `trash-2`, `refresh-cw`
 (adding, deleting and reverting locators), `shapes` (Inspector Shapes tab),
 `paint-bucket` (Inspector Regions tab), `paintbrush`, `eraser` (painting and erasing regions),
-`spline` (Inspector Paths tab, Show Paths), `pen-line` (drawing path
+`spline` (Inspector Paths tab, Show Paths), `shield` (Inspector Collider tab, Show Colliders, collider files), `pen-line` (drawing path
 points), `x` (removing a path point), `link-2` (blended color sets), `braces` (`.aschema` files, Inspector Types tab), `graph-star` (`.agraph` files, Inspector Graph tab), `package` (`.adata` files, Inspector Instances tab), `list-tree` (`.atree` files, Inspector Tree tab), `map` (atlases, Inspector Atlas tab), `gem` (`.amat` and `.amat.bin` files, Inspector Material tab), `rotate-ccw` (resetting an instance's field or a material's key), `bug` (schema problems), `settings` (schema field details), `play`, `pause` (animation timeline, curve editor playhead), `plus`, `trash-2`, `link-2`, `unlink-2` (curve editor points, joining and splitting slopes),
 `database` (Inspector Properties tab), `check` (menu
 toggles), `grid-3x3` (canvas tiling), `circle-small` (canvas channel icons), `box`, `globe`, `cylinder`, `torus`
