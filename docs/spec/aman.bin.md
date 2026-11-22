@@ -67,6 +67,7 @@ back.
 |    12 | palette  | [`apalette.bin.md`](apalette.bin.md) |
 |    13 | shader   | [`ashader.bin.md`](ashader.bin.md) |
 |    14 | custom material | [`acmat.bin.md`](acmat.bin.md) |
+|    15 | collider | [`acollider.bin.md`](acollider.bin.md) |
 
 `10` is not used (a [pack](pak.md#contents) uses it for the manifest).
 

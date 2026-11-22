@@ -42,7 +42,7 @@ browser: entries starting with `.` are skipped, symlinks are not followed.
 | `*.amat`, plus suffixed texture groups | material | `<dir>/<name>.amat.bin`, see [`materials.md`](materials.md) |
 | `*.ashader` | shader | `<asset path>.ashader.bin`, see [`custom-materials.md`](custom-materials.md#build) |
 | `*.acmat`, plus its textures by name | custom material | `<dir>/<name>.acmat.bin`, see [`custom-materials.md`](custom-materials.md#build) |
-| `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations | `<asset path>.amesh.bin` and more, see [`models.md`](models.md#build) |
+| `*.gltf`, `*.glb` (any case) | mesh, plus its materials, textures and animations, and its collider with an `.acollider` sidecar | `<asset path>.amesh.bin` and more, see [`models.md`](models.md#build) and [`colliders.md`](colliders.md#build) |
 | `*.ttf`, `*.otf` (any case) | font, plus its SDF atlas texture | `<asset path>.afont.bin` and `<asset path>.ktx2`, see [`fonts.md`](fonts.md#build) |
 | `*.aschema` (any case) | schema | `<asset path>.aschema.bin`, see [`schemas.md`](schemas.md#build) |
 | `*.adata` (any case) | data | `<asset path>.adata.bin`, resolved, see [`instances.md`](instances.md#build) |
@@ -75,6 +75,7 @@ grayscale or color-mapped, with either origin). Color space and mipmaps follow t
   <dir>/<name>.acmat.bin     one per custom material, <path>.ashader.bin one per shader
   <model>.amesh.bin          one per glTF model, with <model>/… for its materials and textures
   <model>.aanim.bin          one per skinned, animated glTF model
+  <model>.acollider.bin      one per glTF model with an .acollider sidecar
   <font>.afont.bin           one per font, beside its atlas <font>.ktx2
   <path>.aschema.bin         one per schema, data file, graph, tree, atlas, gradient file
   (.adata.bin, .agraph.bin,  and palette, beside their textures where they have one
@@ -117,6 +118,7 @@ produces any more, e.g. after a source was renamed or deleted, are removed:
   | palette    | `*.apalette.bin` |
   | shader     | `*.ashader.bin` |
   | custom material | `*.acmat.bin` |
+  | collider   | `*.acollider.bin` |
 
   Anything else in `output` (your own files, `.gitkeep`, notes, …) is never
   touched. `assetc.aman.bin` is rewritten, never removed; a leftover
@@ -188,7 +190,7 @@ warnings` (`1 warning`) when there were warnings:
   (`.aschema.bin`), data files (`.adata.bin`), graphs (`.agraph.bin`), trees (`.atree.bin`),
   atlases (`.aatlas.bin`), gradients (`.agradient.bin`), palettes
   (`.apalette.bin`), shaders (`.ashader.bin`), custom materials
-  (`.acmat.bin`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
+  (`.acmat.bin`), colliders (`.acollider.bin`); singular nouns for 1 (`1 mesh`, `2 meshes`, `1 data file`).
   `nothing` when nothing was built.
 - Outputs written along with a model or font count too (a model's `.aanim.bin`,
   `.amat.bin`s and textures, a font's atlas), though the CLI prints one line for

@@ -19,12 +19,13 @@ image is shown in the [canvas](canvas.md), not in the Inspector.
 
 ## Tabs
 
-Twenty-two icon tabs, top to bottom: **Info** (`info`), **Parameters**
+Twenty-three icon tabs, top to bottom: **Info** (`info`), **Parameters**
 (`sliders-vertical`) for `.anoise`, `.agradient`, `.apalette` and model files,
-**Locators** (`map-pin`), **Shapes** (`shapes`), **Regions**
+**Locators** (`map-pin`), **Shapes** (`shapes`), **Collider** (`shield`), **Regions**
 (`paint-bucket`), **Paths** (`spline`), **Vertex colors** (`swatch-book`) and
 **Properties** (`database`) for model files (see
 [`locators.md`](locators.md#locators-tab), [`shapes.md`](shapes.md#shapes-tab),
+[`colliders.md`](colliders.md#collider-tab),
 [`regions.md`](regions.md#regions-tab), [`paths.md`](paths.md#paths-tab),
 [`vertex-colors.md`](vertex-colors.md#vertex-colors-tab),
 [`properties.md`](properties.md#properties-tab)); Vertex colors is also

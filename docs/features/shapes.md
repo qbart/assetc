@@ -5,6 +5,9 @@ joints or in model space: a hitbox on the head that doubles the damage, a
 physics collider, a ragdoll part, a trigger around a door. assetc does not
 know what a shape means; its **kind** and **properties** tell the game.
 
+For a physics body that follows the whole model, made of several convex
+hulls, see [Colliders](colliders.md).
+
 Shapes are an *enrichment* like [locators](locators.md): kept in the model's
 [`.amod`](../spec/amod.md#shapes) sidecar, edited in the Inspector's
 [Shapes tab](#shapes-tab) and in the [3D view](#3d-view), and compiled into

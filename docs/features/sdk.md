@@ -85,8 +85,9 @@ resolves any reference found in another asset.
 
 `Kind` is `Texture`, `Material`, `Mesh`, `Animation`, `Font`, `Schema`,
 `Data`, `Graph`, `Tree`, `Atlas`, `Gradient`, `Palette`, `Shader`,
-`CustomMaterial`, `Manifest` or `Other`, with the values of
-[`.pak`](../spec/pak.md#contents) (`Shader` 13, `CustomMaterial` 14).
+`CustomMaterial`, `Collider`, `Manifest` or `Other`, with the values of
+[`.pak`](../spec/pak.md#contents) (`Shader` 13, `CustomMaterial` 14,
+`Collider` 15).
 
 ## Formats
 
@@ -113,6 +114,7 @@ into string tables are resolved to `String`s, hashes are kept as `u64`.
 | `palette` | `Palette` | `*.apalette.bin`: colors by name (sRGB bytes and linear floats), cells | [`apalette.bin.md`](../spec/apalette.bin.md) |
 | `shader` | `Shader` | `*.ashader.bin`: params type, GPU block fields by path, textures, state, bindings, SPIR-V words; see [Custom materials](#custom-materials) | [`ashader.bin.md`](../spec/ashader.bin.md) |
 | `custom_material` | `CustomMaterial` | `*.acmat.bin`: shader ID, state, GPU block bytes, texture IDs, params and attached structs | [`acmat.bin.md`](../spec/acmat.bin.md) |
+| `collider` | `Collider` | `*.acollider.bin`: convex hulls (points, triangles, center, volume, box), the mesh's asset ID | [`acollider.bin.md`](../spec/acollider.bin.md) |
 | `structs` | `Structs` | the [struct chunks](../spec/astruct.md) of any format above | [`astruct.md`](../spec/astruct.md) |
 | `hash` | `fnv1a64(bytes)` | the hash behind every asset ID and name hash | [`build.md`](build.md#asset-ids) |
 
