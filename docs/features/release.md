@@ -59,7 +59,7 @@ One job per platform, in parallel:
 | Platform | Runner | Target | Archive |
 |----------|--------|--------|---------|
 | Linux x64 | `ubuntu-22.04` | `x86_64-unknown-linux-gnu` | `assetc-<version>-linux-x64.tar.gz` |
-| macOS Apple silicon | `macos-14` | `aarch64-apple-darwin` | `assetc-<version>-macos-arm64.tar.gz` |
+| macOS Apple silicon | `macos-15` | `aarch64-apple-darwin` | `assetc-<version>-macos-arm64.tar.gz` |
 | Windows x64 | `windows-2022` | `x86_64-pc-windows-msvc` | `assetc-<version>-windows-x64.zip` |
 
 Each job:
