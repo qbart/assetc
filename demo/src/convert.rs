@@ -107,13 +107,10 @@ pub fn image(t: &sdk::Texture, support: CompressedImageFormats) -> Result<Image,
 /// Level 0 of a height texture as Bevy's depth map: `1 - height`, linear.
 pub fn depth(height: &sdk::Texture) -> Option<Image> {
     let level = height.levels.first()?;
-    let pixels = level
-        .data
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .flat_map(|p| {
-            let d = 255 - p[0];
+    let pixels = red(height)?
+        .into_iter()
+        .flat_map(|h| {
+            let d = 255 - h;
             [d, d, d, 255]
         })
         .collect();
@@ -136,6 +133,32 @@ pub fn depth(height: &sdk::Texture) -> Option<Image> {
         ..default()
     });
     Some(image)
+}
+
+/// Level 0's red channel, a byte per texel, block formats decoded with imgio; `None` for half
+/// floats.
+fn red(t: &sdk::Texture) -> Option<Vec<u8>> {
+    use imgio::{AstcBlock, AstcKind};
+    use sdk::texture::Format as F;
+    let level = t.levels.first()?;
+    let format = match t.format {
+        F::Bc4Unorm => imgio::Format::Bc4Unorm,
+        F::Bc5Unorm => imgio::Format::Bc5Unorm,
+        F::Bc7Unorm => imgio::Format::Bc7Unorm,
+        F::Bc7Srgb => imgio::Format::Bc7Srgb,
+        F::Astc4x4Unorm => imgio::Format::Astc(AstcBlock::B4x4, AstcKind::Unorm),
+        F::Astc4x4Srgb => imgio::Format::Astc(AstcBlock::B4x4, AstcKind::Srgb),
+        F::Bc6hUfloat | F::Astc4x4Float | F::Rgba16Float | F::Rgb16Float => return None,
+        _ => {
+            let n = t.format.bytes_per_texel();
+            return Some(level.data.iter().step_by(n).copied().collect());
+        }
+    };
+    let decoded = imgio::decode_to_buffer(format, &level.data, level.width, level.height)
+        .inspect_err(|e| warn!("{e}"))
+        .ok()?;
+    let n = format.decoded().block_bytes();
+    Some(decoded.iter().step_by(n).copied().collect())
 }
 
 /// An SDK material as Bevy's, its textures from `texture`.

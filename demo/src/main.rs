@@ -193,7 +193,7 @@ fn setup(
         };
         let skybox = assets.of_kind(sdk::Kind::Texture).find_map(|e| {
             let t = assets.load::<sdk::Texture>(e.id).ok()?;
-            (t.is_cubemap() && t.usage == sdk::texture::Usage::Environment).then(|| (e, t))
+            (t.is_cubemap() && t.usage == sdk::texture::Usage::Environment).then_some((e, t))
         });
         if let Some((entry, texture)) = skybox {
             sky = image(&texture);

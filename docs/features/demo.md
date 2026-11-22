@@ -53,7 +53,10 @@ three-channel formats; alpha 255 / 1.0). A texture the GPU cannot sample
 (BC or ASTC without the device feature)
 shows as a gray tile with its format named, and materials use their
 fallback for it. The demo asks for the BC and ASTC features the adapter
-has.
+has. A material's depth map (Bevy's parallax `depth_map`,
+`1 − height`) is made on the CPU from level 0 of its height texture: BC and
+ASTC blocks are decoded with [imgio](https://crates.io/crates/imgio) first,
+and a half-float height has no depth map.
 
 The **sky** is the pack's first skybox cubemap by path (a `*.atex.bin`
 with 6 faces and usage `environment`): it is the 3D scenes' skybox. Their
