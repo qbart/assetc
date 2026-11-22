@@ -88,6 +88,7 @@ impl Outcome {
                         Kind::Palette => ("palette", "palettes"),
                         Kind::Shader => ("shader", "shaders"),
                         Kind::CustomMaterial => ("custom material", "custom materials"),
+                        Kind::Collider => ("collider", "colliders"),
                     };
                     (n > 0).then(|| format!("{n} {}", if n == 1 { one } else { many }))
                 })
@@ -250,6 +251,7 @@ pub fn run_cached(
                 options,
                 sidecar,
             } => compile_model(input, source, output, (options, sidecar, format), warnings),
+            Job::Collider { source, settings } => compile_collider(input, source, &dest, settings),
             // Written with its model, font or atlas; counted once that is built.
             Job::ModelPart { source } | Job::FontPart { source } | Job::AtlasPart { source } => {
                 parts.push((source, asset.kind));
@@ -442,6 +444,17 @@ fn stamp(input: &Path, job: &Job, schemas: &mut Option<Vec<PathBuf>>) -> u64 {
         Job::Orm { sources } => sources.iter().flatten().map(|s| input.join(s)).collect(),
         Job::Model { source, .. } if source.to_ascii_lowercase().ends_with(".gltf") => {
             files_under(input.join(source).parent().unwrap_or(input))
+        }
+        // The model's files and its sidecar; see docs/features/colliders.md#build.
+        Job::Collider { source, .. } => {
+            let file = input.join(source);
+            let mut reads = if source.to_ascii_lowercase().ends_with(".gltf") {
+                files_under(file.parent().unwrap_or(input))
+            } else {
+                vec![file.clone()]
+            };
+            reads.push(crate::acollider::path_for(&file));
+            reads
         }
         // With its texture paints' files; see docs/features/texture-paint.md#build.
         Job::Model {
@@ -758,6 +771,24 @@ fn compile_model(
         write(&dest, &bytes)?;
     }
     Ok(model.detail)
+}
+
+/// Makes a model's `P.acollider.bin`; see docs/features/colliders.md#build.
+fn compile_collider(
+    input: &Path,
+    source: &str,
+    dest: &Path,
+    settings: &crate::decompose::Settings,
+) -> Result<String, String> {
+    let collider = crate::acollider::make(&input.join(source), settings)?;
+    let mesh = crate::hash::fnv1a64(format!("{}.amesh.bin", strip_extension(source)).as_bytes());
+    write(dest, &crate::acollider::encode(&collider, mesh))?;
+    let n = collider.hulls.len();
+    Ok(format!(
+        "{n} hull{}, {} points",
+        if n == 1 { "" } else { "s" },
+        collider.points()
+    ))
 }
 
 /// Packs an atlas folder into `P.ktx2` and `P.aatlas.bin`; see docs/features/atlases.md#build.

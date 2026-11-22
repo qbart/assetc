@@ -33,10 +33,11 @@ pub enum Kind {
     Palette = 12,
     Shader = 13,
     CustomMaterial = 14,
+    Collider = 15,
 }
 
 impl Kind {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Texture,
         Self::Material,
         Self::Mesh,
@@ -51,6 +52,7 @@ impl Kind {
         Self::Palette,
         Self::Shader,
         Self::CustomMaterial,
+        Self::Collider,
     ];
 
     /// Extension of the files assets of this kind are written to, without the leading `.`;
@@ -71,6 +73,7 @@ impl Kind {
             Self::Palette => "apalette.bin",
             Self::Shader => "ashader.bin",
             Self::CustomMaterial => "acmat.bin",
+            Self::Collider => "acollider.bin",
         }
     }
 
@@ -98,6 +101,7 @@ impl Kind {
             Self::Palette => "Palette",
             Self::Shader => "Shader",
             Self::CustomMaterial => "Custom material",
+            Self::Collider => "Collider",
         }
     }
 

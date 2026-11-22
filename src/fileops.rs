@@ -141,6 +141,11 @@ pub fn rename(
         moves.push((sidecar, crate::amod::path_for(&target)));
     }
     moves.extend(renamed_paints(path, name));
+    // A model's collider sidecar; see docs/features/colliders.md.
+    let collider = crate::acollider::path_for(path);
+    if crate::model::is_model(path) && collider.is_file() {
+        moves.push((collider, crate::acollider::path_for(&target)));
+    }
     moves.extend(moved_mips(path, &target));
     relocate_all(input, root, &moves)?;
     Ok(target)
@@ -162,6 +167,10 @@ pub fn delete(input: &Path, path: &Path) -> Result<(), String> {
         if crate::model::is_model(path) {
             for paint in crate::texture_paint::files_of(path) {
                 fs::remove_file(paint).map_err(|e| e.to_string())?;
+            }
+            let collider = crate::acollider::path_for(path);
+            if collider.is_file() {
+                fs::remove_file(collider).map_err(|e| e.to_string())?;
             }
         }
         // A texture's mip chain settings; its level files are kept.
@@ -489,8 +498,11 @@ pub fn make_material(
 /// The file whose sidecar or `.amipmap` `path` is, when that file exists.
 fn sidecar_file(path: &Path) -> Option<PathBuf> {
     let main = path.with_extension("");
-    ((crate::amod::is_sidecar(path) || crate::mipmap::is_amipmap(path)) && main.is_file())
-        .then_some(main)
+    ((crate::amod::is_sidecar(path)
+        || crate::mipmap::is_amipmap(path)
+        || crate::acollider::is_acollider(path))
+        && main.is_file())
+    .then_some(main)
 }
 
 fn is_gltf(path: &Path) -> bool {
@@ -539,6 +551,11 @@ pub fn companions(input: Option<&Path>, path: &Path) -> Vec<PathBuf> {
         // A model's texture paints; see docs/features/texture-paint.md#files.
         if crate::model::is_model(path) {
             out.extend(crate::texture_paint::files_of(path));
+            // And its collider; see docs/features/colliders.md.
+            let collider = crate::acollider::path_for(path);
+            if collider.is_file() {
+                out.push(collider);
+            }
         }
         // A texture's mip chain and its levels by name; see docs/features/mipmaps.md#files.
         let amipmap = crate::mipmap::path_for(path);
@@ -967,11 +984,13 @@ mod tests {
         fs::write(&model, "x").unwrap();
         fs::write(input.join("Fox.glb.amod"), "").unwrap();
         fs::write(input.join("Fox.glb.wear.apaint"), "").unwrap();
+        fs::write(input.join("Fox.glb.acollider"), "").unwrap();
         assert_eq!(
             companions(Some(&input), &model),
             [
                 model.clone(),
                 input.join("Fox.glb.wear.apaint"),
+                input.join("Fox.glb.acollider"),
                 input.join("Fox.glb.amod")
             ]
         );
@@ -980,9 +999,12 @@ mod tests {
         assert!(!input.join("Fox.glb.amod").exists());
         assert!(input.join("Hero.glb.wear.apaint").is_file());
         assert!(!input.join("Fox.glb.wear.apaint").exists());
+        assert!(input.join("Hero.glb.acollider").is_file());
+        assert!(!input.join("Fox.glb.acollider").exists());
         delete(&input, &hero).unwrap();
         assert!(!input.join("Hero.glb.amod").exists());
         assert!(!input.join("Hero.glb.wear.apaint").exists());
+        assert!(!input.join("Hero.glb.acollider").exists());
     }
 
     #[test]

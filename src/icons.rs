@@ -67,6 +67,7 @@ pub enum Icon {
     Settings,
     Settings2,
     Shapes,
+    Shield,
     SlidersVertical,
     Spline,
     SquaresUnite,
@@ -83,7 +84,7 @@ pub enum Icon {
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 75] = [
+const SVGS: [(&str, &str); 76] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -185,6 +186,7 @@ const SVGS: [(&str, &str); 75] = [
     ("settings", include_str!("../assets/icons/settings.svg")),
     ("settings-2", include_str!("../assets/icons/settings-2.svg")),
     ("shapes", include_str!("../assets/icons/shapes.svg")),
+    ("shield", include_str!("../assets/icons/shield.svg")),
     (
         "sliders-vertical",
         include_str!("../assets/icons/sliders-vertical.svg"),

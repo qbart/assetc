@@ -7,6 +7,7 @@ pub mod anim;
 pub mod assets;
 pub mod atlas;
 pub mod chunks;
+pub mod collider;
 pub mod custom_material;
 pub mod data;
 mod error;
@@ -30,6 +31,7 @@ pub mod tree;
 pub use anim::Animation;
 pub use assets::{Assets, Decode, Entry};
 pub use atlas::Atlas;
+pub use collider::Collider;
 pub use custom_material::CustomMaterial;
 pub use data::Data;
 pub use error::{Error, Result};
@@ -69,6 +71,8 @@ pub enum Kind {
     Shader,
     /// `.acmat.bin`.
     CustomMaterial,
+    /// `.acollider.bin`.
+    Collider,
     /// `assetc.aman.bin` (packs only).
     Manifest,
     Other,
@@ -92,6 +96,7 @@ impl Kind {
             12 => Self::Palette,
             13 => Self::Shader,
             14 => Self::CustomMaterial,
+            15 => Self::Collider,
             _ => Self::Other,
         }
     }
@@ -118,6 +123,7 @@ impl Kind {
             (".apalette.bin", Self::Palette),
             (".ashader.bin", Self::Shader),
             (".acmat.bin", Self::CustomMaterial),
+            (".acollider.bin", Self::Collider),
         ]
         .into_iter()
         .find(|(ext, _)| lower.ends_with(ext))
@@ -135,7 +141,9 @@ mod tests {
         assert_eq!(Kind::from_u8(12), Kind::Palette);
         assert_eq!(Kind::from_u8(13), Kind::Shader);
         assert_eq!(Kind::from_u8(14), Kind::CustomMaterial);
-        assert_eq!(Kind::from_u8(15), Kind::Other);
+        assert_eq!(Kind::from_u8(15), Kind::Collider);
+        assert_eq!(Kind::from_u8(16), Kind::Other);
+        assert_eq!(Kind::of_path("Fox.acollider.bin"), Kind::Collider);
         assert_eq!(Kind::of_path("shaders/water.ashader.bin"), Kind::Shader);
         assert_eq!(Kind::of_path("water/lake.acmat.bin"), Kind::CustomMaterial);
         assert_eq!(Kind::of_path("water/lake.amat.bin"), Kind::Material);

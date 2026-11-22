@@ -70,6 +70,11 @@ pub enum Job {
     },
     /// Another output of a model, written by its [`Job::Model`].
     ModelPart { source: String },
+    /// A model's collider, from its `.acollider` sidecar; see docs/features/colliders.md#build.
+    Collider {
+        source: String,
+        settings: crate::decompose::Settings,
+    },
     /// A font (relative to `input`): writes its `.afont.bin` and SDF atlas; see
     /// docs/features/fonts.md#build.
     Font { source: String },
@@ -152,6 +157,7 @@ impl Asset {
             | Job::Lut { source, .. }
             | Job::Model { source, .. }
             | Job::ModelPart { source }
+            | Job::Collider { source, .. }
             | Job::Font { source }
             | Job::FontPart { source }
             | Job::Data { source, .. }
@@ -188,7 +194,7 @@ fn model_assets(
     source: &str,
     outputs: &model::Outputs,
     options: MeshOptions,
-    sidecar: crate::amod::Amod,
+    (sidecar, collider): (crate::amod::Amod, Option<crate::decompose::Settings>),
 ) {
     let p = strip_extension(source);
     let colors = sidecar.colors.clone();
@@ -216,6 +222,17 @@ fn model_assets(
     );
     if outputs.animation {
         push(Kind::Animation, format!("{p}.aanim.bin"), part());
+    }
+    // See docs/features/colliders.md#build.
+    if let Some(settings) = collider {
+        push(
+            Kind::Collider,
+            format!("{p}.acollider.bin"),
+            Job::Collider {
+                source: source.to_owned(),
+                settings,
+            },
+        );
     }
     for (_, name) in &outputs.materials {
         push(Kind::Material, format!("{p}/{name}.amat.bin"), part());
@@ -406,10 +423,11 @@ pub fn plan(input: &Path, config: &config::Config) -> Result<Plan, Error> {
                     locators: crate::presets::merged(&inherited, &sidecar.locators),
                     ..sidecar
                 };
-                Ok((model::outputs(&data)?, options, sidecar))
+                let collider = crate::acollider::read(file)?;
+                Ok((model::outputs(&data)?, options, (sidecar, collider)))
             }) {
-                Ok((outputs, options, sidecar)) => {
-                    model_assets(&mut plan, &rel, &outputs, options, sidecar)
+                Ok((outputs, options, sidecars)) => {
+                    model_assets(&mut plan, &rel, &outputs, options, sidecars)
                 }
                 Err(message) => plan.failures.push(Failure {
                     source: rel,

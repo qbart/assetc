@@ -1,0 +1,2 @@
+# A compound collider for physics; see docs/features/colliders.md.
+max_hulls = 16

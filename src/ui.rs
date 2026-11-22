@@ -48,6 +48,7 @@ use crate::tree::{FileTrees, Listing, Node};
 use crate::vertex_colors;
 
 mod anim;
+mod collider;
 mod config_dialog;
 mod curve;
 mod custom;
@@ -220,7 +221,9 @@ struct LocatorTools {
     hidden_paths: HashMap<PathBuf, HashSet<String>>,
     /// The toolbar's Show group: locators, shapes, regions and paths drawn at all; see
     /// docs/features/models.md#show.
-    show: [bool; 5],
+    show: [bool; 6],
+    /// Colliders made for the preview; see docs/features/colliders.md#3d-view.
+    colliders: collider::Jobs,
     /// Clicks on the model add points to the chosen path; a click's ray waits for its hit.
     draw: bool,
     draw_awaiting: bool,
@@ -311,7 +314,8 @@ impl Default for LocatorTools {
             hidden_shapes: HashMap::new(),
             hidden_regions: HashMap::new(),
             hidden_paths: HashMap::new(),
-            show: [true, true, false, true, true],
+            show: [true, true, false, true, true, true],
+            colliders: HashMap::new(),
             draw: false,
             draw_awaiting: false,
             draw_last: None,
@@ -409,6 +413,8 @@ struct Inspected {
     data: Option<Result<DataEdit, (String, String)>>,
     /// A model's `.amod` mesh settings being edited, or why they can't be read.
     mesh: Option<Result<MeshEdit, String>>,
+    /// A model's `.acollider` sidecar being edited; see docs/features/colliders.md.
+    collider: Option<collider::ColliderEdit>,
     /// An `.amat` being edited, or why it can't be read; and whether the 3D view has its
     /// textures.
     material: Option<Result<MaterialEdit, String>>,
@@ -736,6 +742,7 @@ enum InspectorTab {
     Parameters,
     Locators,
     Shapes,
+    Collider,
     Regions,
     Paths,
     VertexColors,
@@ -759,11 +766,12 @@ enum InspectorTab {
 }
 
 impl InspectorTab {
-    const ALL: [Self; 24] = [
+    const ALL: [Self; 25] = [
         Self::Info,
         Self::Parameters,
         Self::Locators,
         Self::Shapes,
+        Self::Collider,
         Self::Regions,
         Self::Paths,
         Self::VertexColors,
@@ -792,6 +800,7 @@ impl InspectorTab {
             Self::Parameters => Icon::SlidersVertical,
             Self::Locators => Icon::MapPin,
             Self::Shapes => Icon::Shapes,
+            Self::Collider => Icon::Shield,
             Self::Regions => Icon::PaintBucket,
             Self::Paths => Icon::Spline,
             Self::VertexColors => Icon::SwatchBook,
@@ -820,6 +829,7 @@ impl InspectorTab {
             Self::Parameters => "Parameters",
             Self::Locators => "Locators",
             Self::Shapes => "Shapes",
+            Self::Collider => "Collider",
             Self::Regions => "Regions",
             Self::Paths => "Paths",
             Self::VertexColors => "Vertex colors",
@@ -870,6 +880,7 @@ impl InspectorTab {
             }
             Self::Locators
             | Self::Shapes
+            | Self::Collider
             | Self::Regions
             | Self::Paths
             | Self::VertexColors
@@ -1985,6 +1996,9 @@ fn inspected(
         schema,
         graph,
         data,
+        collider: mesh
+            .is_some()
+            .then(|| collider::ColliderEdit::read(&selection.path)),
         mesh,
         sidecar,
         material,
@@ -3046,6 +3060,7 @@ fn tree_entry(ui: &mut Ui, node: &Node, depth: usize, chevron: Option<Icon>, cx:
     let dim = !is_dir
         && (amod::is_sidecar(&node.path)
             || crate::texture_paint::is_apaint(&node.path)
+            || crate::acollider::is_acollider(&node.path)
             || crate::mipmap::is_amipmap(&node.path)
             || is_atlas_config(&node.path));
     let primary = cx
@@ -3690,6 +3705,38 @@ fn right_sidebar(
                             }
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }
+                    }
+                }
+                (InspectorTab::Collider, Some(inspected), Some(_)) => {
+                    let name = inspected.inspection.name.clone();
+                    let job = state.locators.colliders.get(&inspected.path);
+                    let change = match &mut inspected.collider {
+                        Some(edit) => collider::tab(ui, edit, job, &name),
+                        None => {
+                            placeholder(ui, "No collider");
+                            None
+                        }
+                    };
+                    let sidecar = crate::acollider::path_for(&inspected.path);
+                    let made = match change {
+                        Some(collider::Change::Write(text)) => {
+                            // Making one shows it; see docs/features/colliders.md#3d-view.
+                            if !sidecar.exists() {
+                                state.locators.show[4] = true;
+                            }
+                            Some(std::fs::write(&sidecar, text))
+                        }
+                        Some(collider::Change::Remove) => Some(std::fs::remove_file(&sidecar)),
+                        None => None,
+                    };
+                    match made {
+                        Some(Ok(())) => {
+                            state.reinspect = true;
+                            state.rescan = true;
+                            state.keep_model = true;
+                        }
+                        Some(Err(e)) => state.notice = Some(format!("Saving failed: {e}")),
+                        None => {}
                     }
                 }
                 (InspectorTab::VertexColors, Some(inspected), Some(_))
@@ -5955,6 +6002,7 @@ fn assets_tab(ui: &mut Ui, assets: &Assets, file: &std::path::Path, texture: Opt
                             Kind::Palette => Icon::Palette,
                             Kind::Shader => Icon::Sparkles,
                             Kind::CustomMaterial => Icon::Gem,
+                            Kind::Collider => Icon::Shield,
                         };
                         ui.add(icon.image(16.0, TEXT_WEAK));
                         ui.vertical(|ui| {
@@ -7176,9 +7224,15 @@ fn canvas_model(
         show_shapes,
         show_regions,
         show_paths,
+        show_colliders,
         show_grid,
     ] = tools.show;
     preview.grid = show_grid;
+    // The collider, made in the background; see docs/features/colliders.md#3d-view.
+    let collider_settings = inspected.collider.as_ref().and_then(|c| c.settings());
+    if let Some(settings) = collider_settings {
+        collider::poll(&mut tools.colliders, &inspected.path, settings, ui.ctx());
+    }
     let hidden = tools.hidden.get(&inspected.path).unwrap_or(&empty).clone();
     let hidden_shapes = tools
         .hidden_shapes
@@ -7950,6 +8004,28 @@ fn canvas_model(
         }
     }
 
+    // The collider's hulls; see docs/features/colliders.md#3d-view.
+    if show_colliders
+        && collider_settings.is_some()
+        && let Some(parent) = frames.as_ref().and_then(|f| f.parent(None))
+        && let Some(made) = tools
+            .colliders
+            .get(&inspected.path)
+            .and_then(|j| j.collider())
+    {
+        for (i, edges) in collider::segments(made) {
+            let stroke = Stroke::new(1.0, collider::color(i));
+            for [a, b] in edges {
+                if let (Some(a), Some(b)) = (
+                    camera.project(parent.transform_point3(a)),
+                    camera.project(parent.transform_point3(b)),
+                ) {
+                    painter.line_segment([a, b], stroke);
+                }
+            }
+        }
+    }
+
     // Paths: curves and points; see docs/features/paths.md#3d-view.
     if let Some(edit) = &edit {
         for (p, path) in edit.edit.paths.iter().enumerate() {
@@ -8156,12 +8232,14 @@ fn canvas_model(
     }
 
     // The grid is always there to show.
-    let counts = edit.as_ref().map_or([0, 0, 0, 0, 1], |e| {
+    let colliders = usize::from(collider_settings.is_some());
+    let counts = edit.as_ref().map_or([0, 0, 0, 0, colliders, 1], |e| {
         [
             e.edit.locators.len(),
             e.edit.shapes.len(),
             e.edit.regions.len(),
             e.edit.paths.len(),
+            colliders,
             1,
         ]
     });
@@ -8170,6 +8248,7 @@ fn canvas_model(
         (Icon::Shapes, "Shapes"),
         (Icon::PaintBucket, "Regions"),
         (Icon::Spline, "Paths"),
+        (Icon::Shield, "Colliders"),
         (Icon::Grid3x3, "Grid"),
     ]
     .into_iter()
@@ -9425,7 +9504,7 @@ fn path_fields(
     animating: bool,
     draw: &mut bool,
     armed: &mut bool,
-    show: &mut [bool; 5],
+    show: &mut [bool; 6],
 ) -> Option<gizmo::Mode> {
     let saved = edit.saved.paths.get(i).map(|p| p.name.clone());
     let others: Vec<String> = edit

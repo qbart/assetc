@@ -1,6 +1,6 @@
 //! 3D convex hulls (quickhull) for convex hull shapes; see docs/features/shapes.md#shape.
 
-use bevy::math::Vec3;
+use bevy::math::{DVec3, Vec3};
 
 /// A convex hull: its corner points and its triangles, as indices into `points`, wound
 /// counter-clockwise seen from outside.
@@ -27,19 +27,22 @@ impl Hull {
 
 struct Face {
     v: [usize; 3],
-    normal: Vec3,
-    offset: f32,
+    /// The face across each edge `v[k]`–`v[k + 1]`.
+    next: [usize; 3],
+    normal: DVec3,
+    offset: f64,
     /// Points above the face, not yet on the hull.
     outside: Vec<usize>,
     alive: bool,
 }
 
 impl Face {
-    fn new(points: &[Vec3], v: [usize; 3]) -> Self {
+    fn new(points: &[DVec3], v: [usize; 3]) -> Self {
         let [a, b, c] = v.map(|i| points[i]);
         let normal = (b - a).cross(c - a).normalize_or_zero();
         Self {
             v,
+            next: [usize::MAX; 3],
             normal,
             offset: normal.dot(a),
             outside: Vec::new(),
@@ -47,16 +50,23 @@ impl Face {
         }
     }
 
-    fn distance(&self, p: Vec3) -> f32 {
+    fn distance(&self, p: DVec3) -> f64 {
         self.normal.dot(p) - self.offset
+    }
+
+    /// Which edge of the face goes from `a` to `b`.
+    fn edge(&self, a: usize, b: usize) -> Option<usize> {
+        (0..3).find(|&k| self.v[k] == a && self.v[(k + 1) % 3] == b)
     }
 }
 
 /// The convex hull of `points`; `None` when they do not span a volume (fewer than four
 /// points, or all on one plane).
 pub fn hull(points: &[Vec3]) -> Option<Hull> {
-    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
-    for &p in points {
+    let input = points;
+    let points: Vec<DVec3> = points.iter().map(|p| p.as_dvec3()).collect();
+    let (mut min, mut max) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
+    for &p in &points {
         (min, max) = (min.min(p), max.max(p));
     }
     let size = (max - min).max_element();
@@ -80,7 +90,7 @@ pub fn hull(points: &[Vec3]) -> Option<Hull> {
     if off_line(c) <= eps {
         return None;
     }
-    let base = Face::new(points, [a, b, c]);
+    let base = Face::new(&points, [a, b, c]);
     let d = (0..points.len()).max_by(|&i, &j| {
         base.distance(points[i])
             .abs()
@@ -89,31 +99,32 @@ pub fn hull(points: &[Vec3]) -> Option<Hull> {
     if base.distance(points[d]).abs() <= eps {
         return None;
     }
-    let mut faces: Vec<Face> = if base.distance(points[d]) > 0.0 {
-        // `d` is above `a b c`: wind the base the other way so every face faces out.
-        vec![
-            Face::new(points, [a, c, b]),
-            Face::new(points, [a, b, d]),
-            Face::new(points, [b, c, d]),
-            Face::new(points, [c, a, d]),
-        ]
+    // `d` above `a b c`: wind the base the other way so every face faces out.
+    let (b, c) = if base.distance(points[d]) > 0.0 {
+        (c, b)
     } else {
-        vec![
-            Face::new(points, [a, b, c]),
-            Face::new(points, [a, d, b]),
-            Face::new(points, [b, d, c]),
-            Face::new(points, [c, d, a]),
-        ]
+        (b, c)
     };
+    let mut faces: Vec<Face> = [[a, b, c], [a, d, b], [b, d, c], [c, d, a]]
+        .into_iter()
+        .map(|v| Face::new(&points, v))
+        .collect();
+    link(&mut faces, &[0, 1, 2, 3]);
     assign(
-        points,
+        &points,
         &mut faces,
+        &[0, 1, 2, 3],
         (0..points.len()).filter(|i| ![a, b, c, d].contains(i)),
         eps,
     );
 
     // Grow the hull to the farthest outside point of a face, until none is left.
-    while let Some(f) = faces.iter().position(|f| f.alive && !f.outside.is_empty()) {
+    let mut pending: Vec<usize> = (0..4).collect();
+    let mut visible_mark = vec![false; 4];
+    while let Some(f) = pending.pop() {
+        if !faces[f].alive || faces[f].outside.is_empty() {
+            continue;
+        }
         let face = &faces[f];
         let p = *face
             .outside
@@ -123,33 +134,84 @@ pub fn hull(points: &[Vec3]) -> Option<Hull> {
                     .total_cmp(&face.distance(points[j]))
             })
             .expect("an outside point");
-        let visible: Vec<usize> = (0..faces.len())
-            .filter(|&i| faces[i].alive && faces[i].distance(points[p]) > eps)
-            .collect();
-        // Edges of visible faces whose other side is not visible: the horizon.
-        let edges: Vec<[usize; 2]> = visible
-            .iter()
-            .flat_map(|&i| {
-                let [x, y, z] = faces[i].v;
-                [[x, y], [y, z], [z, x]]
-            })
-            .collect();
-        let horizon: Vec<[usize; 2]> = edges
-            .iter()
-            .filter(|[x, y]| !edges.contains(&[*y, *x]))
-            .copied()
-            .collect();
+        let eye = points[p];
+        // The faces `p` sees, from `f` across neighbours.
+        let mut visible = vec![f];
+        visible_mark.resize(faces.len(), false);
+        visible_mark[f] = true;
+        let mut next = 0;
+        while next < visible.len() {
+            let g = visible[next];
+            next += 1;
+            for k in 0..3 {
+                let h = faces[g].next[k];
+                if !visible_mark[h] && faces[h].distance(eye) > eps {
+                    visible_mark[h] = true;
+                    visible.push(h);
+                }
+            }
+        }
+        // Edges of visible faces whose other side is not visible: the horizon, each with the
+        // face beyond it.
+        let mut horizon = Vec::new();
+        for &g in &visible {
+            for k in 0..3 {
+                let h = faces[g].next[k];
+                if !visible_mark[h] {
+                    horizon.push(([faces[g].v[k], faces[g].v[(k + 1) % 3]], h));
+                }
+            }
+        }
+        // Rounding can leave a horizon that is not one loop: then `p` is taken as on the hull
+        // already and dropped.
+        let starts: Vec<usize> = horizon.iter().map(|(e, _)| e[0]).collect();
+        let loop_ok = horizon.iter().all(|&([x, y], beyond)| {
+            starts.iter().filter(|&&s| s == y).count() == 1
+                && starts.iter().filter(|&&s| s == x).count() == 1
+                && beyond != usize::MAX
+                && faces[beyond].edge(y, x).is_some()
+        });
+        if !loop_ok {
+            for &g in &visible {
+                visible_mark[g] = false;
+            }
+            faces[f].outside.retain(|&i| i != p);
+            pending.push(f);
+            continue;
+        }
         let mut orphans = Vec::new();
-        for &i in &visible {
-            faces[i].alive = false;
-            orphans.append(&mut faces[i].outside);
+        for &g in &visible {
+            faces[g].alive = false;
+            visible_mark[g] = false;
+            orphans.append(&mut faces[g].outside);
         }
         let first = faces.len();
-        for [x, y] in horizon {
-            faces.push(Face::new(points, [x, y, p]));
+        for &([x, y], beyond) in &horizon {
+            let new = faces.len();
+            let mut face = Face::new(&points, [x, y, p]);
+            face.next[0] = beyond;
+            if let Some(k) = faces[beyond].edge(y, x) {
+                faces[beyond].next[k] = new;
+            }
+            faces.push(face);
+        }
+        let created: Vec<usize> = (first..faces.len()).collect();
+        // New faces meet each other along their edges to `p`.
+        for &i in &created {
+            let y = faces[i].v[1];
+            if let Some(&j) = created.iter().find(|&&j| faces[j].v[0] == y) {
+                faces[i].next[1] = j;
+                faces[j].next[2] = i;
+            }
         }
         orphans.retain(|&i| i != p);
-        assign(points, &mut faces[first..], orphans.into_iter(), eps);
+        assign(&points, &mut faces, &created, orphans.into_iter(), eps);
+        pending.extend(
+            created
+                .iter()
+                .copied()
+                .filter(|&i| !faces[i].outside.is_empty()),
+        );
     }
 
     // Keep the points the faces use, renumbered.
@@ -159,7 +221,7 @@ pub fn hull(points: &[Vec3]) -> Option<Hull> {
         out.faces.push(face.v.map(|i| {
             if index[i] == usize::MAX {
                 index[i] = out.points.len();
-                out.points.push(points[i]);
+                out.points.push(input[i]);
             }
             index[i]
         }));
@@ -167,14 +229,34 @@ pub fn hull(points: &[Vec3]) -> Option<Hull> {
     Some(out)
 }
 
-/// Puts each of `candidates` in the outside set of the first face it is above.
-fn assign(points: &[Vec3], faces: &mut [Face], candidates: impl Iterator<Item = usize>, eps: f32) {
+/// Links the faces `ids` to each other across the edges they share.
+fn link(faces: &mut [Face], ids: &[usize]) {
+    for &i in ids {
+        for k in 0..3 {
+            let (a, b) = (faces[i].v[k], faces[i].v[(k + 1) % 3]);
+            if let Some(&j) = ids.iter().find(|&&j| faces[j].edge(b, a).is_some()) {
+                faces[i].next[k] = j;
+            }
+        }
+    }
+}
+
+/// Puts each of `candidates` in the outside set of the face of `ids` it is farthest above.
+fn assign(
+    points: &[DVec3],
+    faces: &mut [Face],
+    ids: &[usize],
+    candidates: impl Iterator<Item = usize>,
+    eps: f64,
+) {
     for i in candidates {
-        if let Some(face) = faces
-            .iter_mut()
-            .find(|f| f.alive && f.distance(points[i]) > eps)
-        {
-            face.outside.push(i);
+        let best = ids
+            .iter()
+            .map(|&f| (f, faces[f].distance(points[i])))
+            .filter(|&(_, d)| d > eps)
+            .max_by(|x, y| x.1.total_cmp(&y.1));
+        if let Some((f, _)) = best {
+            faces[f].outside.push(i);
         }
     }
 }

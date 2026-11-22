@@ -163,6 +163,7 @@ enum Kind {
     CompiledPalette,
     CompiledShader,
     CompiledCustomMaterial,
+    CompiledCollider,
     Manifest,
     Pack,
     Ignored,
@@ -202,6 +203,7 @@ impl Kind {
             Self::CompiledPalette => "Compiled palette",
             Self::CompiledShader => "Compiled shader",
             Self::CompiledCustomMaterial => "Compiled custom material",
+            Self::CompiledCollider => "Compiled collider",
             Self::Manifest => "Manifest",
             Self::Pack => "Pack",
             Self::Ignored => "Ignored",
@@ -294,6 +296,7 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         Location::Output if has_ext(manifest::Kind::CustomMaterial.extension()) => {
             Kind::CompiledCustomMaterial
         }
+        Location::Output if has_ext(manifest::Kind::Collider.extension()) => Kind::CompiledCollider,
         Location::Output if rel == manifest::FILE_NAME => Kind::Manifest,
         Location::Output if crate::pack::is_pack(file) => Kind::Pack,
         Location::Output => Kind::File,
@@ -386,7 +389,8 @@ pub fn inspect(project: &Project, location: Location, file: &Path) -> Inspection
         | Kind::CompiledGradient
         | Kind::CompiledPalette
         | Kind::CompiledShader
-        | Kind::CompiledCustomMaterial => fs::read(file)
+        | Kind::CompiledCustomMaterial
+        | Kind::CompiledCollider => fs::read(file)
             .map_err(|e| e.to_string())
             .and_then(|bytes| Ok((crate::compiled::rows(&bytes)?, bytes)))
             .map(|(rows, bytes)| {
@@ -980,6 +984,17 @@ fn model_rows(
         let count = |n: usize| if n > 0 { n.to_string() } else { "none".into() };
         out.rows.push(("Properties", count(amod.properties.len())));
         out.rows.push(("Shapes", count(amod.shapes.len())));
+        // See docs/features/colliders.md#inspector-info.
+        out.rows.push((
+            "Collider",
+            match crate::acollider::read(file) {
+                Ok(None) => "none".into(),
+                Ok(Some(s)) => {
+                    format!("{} hulls at most, resolution {}", s.max_hulls, s.resolution)
+                }
+                Err(e) => e,
+            },
+        ));
         out.rows.push(("Regions", count(amod.regions.len())));
         out.rows.push(("Paths", count(amod.paths.len())));
         out.rows.push(("Paints", count(amod.paints.len())));

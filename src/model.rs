@@ -826,6 +826,33 @@ pub fn geometry(file: &Path) -> Result<ModelGeometry, String> {
     Ok(ModelGeometry::new(&gltf.document, &read, &parts))
 }
 
+/// Every triangle of the model's default scene, each instance, in model space (mesh space
+/// for skinned ones, at the bind pose); see docs/features/colliders.md#how-it-is-made.
+pub fn triangles(file: &Path) -> Result<(Vec<Vec3>, Vec<[u32; 3]>), String> {
+    let (gltf, buffers) = load(file)?;
+    let read = |buffer: gltf::Buffer<'_>| buffers.get(buffer.index()).map(Vec::as_slice);
+    let (parts, _) = read_parts(&gltf.document, &read, &HashMap::new())?;
+    let (mut positions, mut triangles) = (Vec::new(), Vec::new());
+    for part in &parts {
+        let base = positions.len() as u32;
+        positions.extend(
+            part.primitive
+                .vertices
+                .iter()
+                .map(|v| Vec3::from(v.position)),
+        );
+        triangles.extend(
+            part.primitive
+                .indices
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|t| [base + t[0], base + t[1], base + t[2]]),
+        );
+    }
+    Ok((positions, triangles))
+}
+
 /// Compiles the model in `file`, whose asset path is `asset_path` (`P`), with the
 /// enrichments of its sidecar (its locators already merged with inherited ones).
 pub fn compile(

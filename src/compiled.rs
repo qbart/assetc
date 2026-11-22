@@ -695,6 +695,7 @@ pub fn format_of(bytes: &[u8]) -> Option<&'static str> {
         APALETTE,
         crate::shader::FORMAT,
         crate::acmat::FORMAT,
+        crate::acollider::FORMAT,
     ]
     .into_iter()
     .find(|f| chunks::Reader::parse(bytes, f).is_ok())
@@ -706,6 +707,10 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
     let reader = chunks::Reader::parse(bytes, format)?;
     let desc = reader.require("DESC")?;
     let field = |at| chunks::u32_at(desc, 0, 16, at).unwrap_or(0).to_string();
+    // See docs/features/colliders.md#inspector-info.
+    if format == crate::acollider::FORMAT {
+        return crate::acollider::rows(bytes);
+    }
     if format == crate::atlas::FORMAT {
         let u = |at| chunks::u32_at(desc, 0, 48, at).unwrap_or(0);
         let packing = match u(12) {
@@ -1164,6 +1169,42 @@ fn layout(format: &str, chunk: &str) -> Option<(usize, Vec<(&'static str, Col)>)
             ],
         ),
         (crate::acmat::FORMAT, "TEXTURES") => (8, vec![("Asset ID", Hex(0))]),
+        (crate::acollider::FORMAT, "DESC") => (
+            64,
+            vec![
+                ("hull_count", U32(0)),
+                ("point_count", U32(4)),
+                ("face_count", U32(8)),
+                ("aabb_min.x", F32(16)),
+                ("aabb_min.y", F32(20)),
+                ("aabb_min.z", F32(24)),
+                ("aabb_max.x", F32(28)),
+                ("aabb_max.y", F32(32)),
+                ("aabb_max.z", F32(36)),
+                ("volume", F32(40)),
+                ("model_volume", F32(44)),
+                ("mesh", Hex(48)),
+            ],
+        ),
+        (crate::acollider::FORMAT, "HULLS") => (
+            64,
+            vec![
+                ("First point", U32(0)),
+                ("Points", U32(4)),
+                ("First face", U32(8)),
+                ("Faces", U32(12)),
+                ("Center X", F32(16)),
+                ("Center Y", F32(20)),
+                ("Center Z", F32(24)),
+                ("Volume", F32(28)),
+            ],
+        ),
+        (crate::acollider::FORMAT, "POINTS") => {
+            (12, vec![("X", F32(0)), ("Y", F32(4)), ("Z", F32(8))])
+        }
+        (crate::acollider::FORMAT, "FACES") => {
+            (12, vec![("A", U32(0)), ("B", U32(4)), ("C", U32(8))])
+        }
         (AGRAD | APALETTE, "RGBA8") => (4, vec![("Color", Color(0))]),
         (AGRAD | APALETTE, "RGBAF") => (
             16,
@@ -1194,6 +1235,9 @@ pub fn describe(name: &str) -> &'static str {
         "EVPROPS" => "Event properties",
         "EVTEXT" => "Event text",
         "FRAMES" => "Frames",
+        "HULLS" => "Hulls",
+        "POINTS" => "Points",
+        "FACES" => "Faces",
         "STRUCTS" => "Attached structs",
         "SVALUES" => "Struct values",
         "SREFS" => "Struct references",

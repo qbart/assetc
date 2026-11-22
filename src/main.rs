@@ -1,5 +1,6 @@
 mod aanim;
 mod acmat;
+mod acollider;
 mod adata;
 mod agraph;
 mod amesh;
@@ -14,6 +15,7 @@ mod chunks;
 mod color_picker;
 mod compiled;
 mod config;
+mod decompose;
 mod distance_map;
 mod enrich;
 mod fileops;

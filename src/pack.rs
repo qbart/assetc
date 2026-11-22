@@ -513,6 +513,7 @@ mod sdk_conformance {
             Kind::Palette => assets.load::<sdk::Palette>(entry.id).map(drop),
             Kind::Shader => assets.load::<sdk::Shader>(entry.id).map(drop),
             Kind::CustomMaterial => assets.load::<sdk::CustomMaterial>(entry.id).map(drop),
+            Kind::Collider => assets.load::<sdk::Collider>(entry.id).map(drop),
             Kind::Manifest => assets.load::<sdk::Manifest>(entry.id).map(drop),
             Kind::Other => Ok(()),
         }
@@ -553,6 +554,7 @@ mod sdk_conformance {
             Kind::Palette,
             Kind::Shader,
             Kind::CustomMaterial,
+            Kind::Collider,
         ] {
             assert!(packed.of_kind(kind).next().is_some(), "{kind:?}");
         }
