@@ -13,7 +13,7 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::system::SystemParam;
 use bevy::image::{CompressedImageFormatSupport, CompressedImageFormats};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
-use bevy::light::GeneratedEnvironmentMapLight;
+use bevy::light::{EnvironmentMapLight, GeneratedEnvironmentMapLight};
 use bevy::prelude::*;
 
 use scenes::Scene;
@@ -181,19 +181,34 @@ fn setup(
     support: Option<Res<CompressedImageFormatSupport>>,
 ) {
     textures.support = support.map_or(CompressedImageFormats::NONE, |s| s.0);
-    // The sky: the pack's first cubemap, by path.
+    // The sky: the pack's first skybox cubemap, by path, with its lighting maps; see
+    // docs/features/demo.md.
+    let (mut sky, mut lighting) = (None, None);
     if let Some(assets) = &demo.assets {
-        let cubemap = assets
-            .of_kind(sdk::Kind::Texture)
-            .filter_map(|e| assets.load::<sdk::Texture>(e.id).ok())
-            .find(sdk::Texture::is_cubemap);
-        demo.sky = cubemap
-            .and_then(|t| {
-                convert::image(&t, textures.support)
-                    .inspect_err(|e| warn!("{e}"))
-                    .ok()
-            })
-            .map(|image| images.add(image));
+        let mut image = |t: &sdk::Texture| {
+            convert::image(t, textures.support)
+                .inspect_err(|e| warn!("{e}"))
+                .ok()
+                .map(|image| images.add(image))
+        };
+        let skybox = assets.of_kind(sdk::Kind::Texture).find_map(|e| {
+            let t = assets.load::<sdk::Texture>(e.id).ok()?;
+            (t.is_cubemap() && t.usage == sdk::texture::Usage::Environment).then(|| (e, t))
+        });
+        if let Some((entry, texture)) = skybox {
+            sky = image(&texture);
+            let stem = entry.path.trim_end_matches(".atex.bin");
+            let map = |name: &str| {
+                let entry = assets.find(&format!("{stem}.{name}.atex.bin"))?;
+                assets.load::<sdk::Texture>(entry.id).ok()
+            };
+            if let (Some(specular), Some(irradiance)) = (map("specular"), map("irradiance")) {
+                lighting = image(&specular).zip(image(&irradiance));
+            }
+        }
+    }
+    if sky.is_some() {
+        demo.sky = sky;
     }
     let mut camera3d = commands.spawn((
         Camera3dMarker,
@@ -207,18 +222,24 @@ fn setup(
         Transform::default(),
     ));
     if let Some(sky) = &demo.sky {
-        camera3d.insert((
-            Skybox {
-                image: Some(sky.clone()),
-                brightness: SKY_BRIGHTNESS,
+        camera3d.insert((Skybox {
+            image: Some(sky.clone()),
+            brightness: SKY_BRIGHTNESS,
+            ..default()
+        },));
+        match lighting {
+            Some((specular_map, diffuse_map)) => camera3d.insert(EnvironmentMapLight {
+                diffuse_map,
+                specular_map,
+                intensity: SKY_BRIGHTNESS,
                 ..default()
-            },
-            GeneratedEnvironmentMapLight {
+            }),
+            None => camera3d.insert(GeneratedEnvironmentMapLight {
                 environment_map: sky.clone(),
                 intensity: SKY_BRIGHTNESS,
                 ..default()
-            },
-        ));
+            }),
+        };
     } else {
         commands.spawn((
             DirectionalLight {
