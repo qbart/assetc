@@ -159,7 +159,7 @@ Keybindings: [KEYS.md](KEYS.md). Layout and look: [docs/features/gui.md](docs/fe
 
 ```toml
 [dependencies]
-assetc = "0.2"
+assetc = "0.3"
 ```
 
 ```rust
@@ -181,7 +181,7 @@ The compiler itself is the unpublished `assetc-core` package at the repository r
 
 ```toml
 [dependencies]
-assetc-colors = "0.2"
+assetc-colors = "0.3"
 ```
 
 See [docs/features/colors.md](docs/features/colors.md) and [colors/README.md](colors/README.md).

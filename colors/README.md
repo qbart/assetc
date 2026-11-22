@@ -19,7 +19,7 @@ It depends on nothing but `std`: colors are `[u8; 4]` or floats, images are RGBA
 
 ```toml
 [dependencies]
-assetc-colors = "0.2"
+assetc-colors = "0.3"
 ```
 
 ```rust

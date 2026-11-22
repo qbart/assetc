@@ -39,6 +39,7 @@ all of them hold the new one, in one pushed commit:
 | `Cargo.toml` `[dependencies]` | the `version` of the `assetc-colors` path dependency |
 | `Cargo.lock` | the four packages' entries; `cargo update --workspace` writes them. The release builds with `--locked`, so a stale lock file fails it |
 | `docs/features/gui.md` | the `assetc <version>` shown in the status bar's example |
+| `README.md`, `sdk/README.md`, `colors/README.md`, `docs/features/sdk.md`, `docs/features/colors.md` | the `assetc = "<major>.<minor>"` and `assetc-colors = "<major>.<minor>"` dependency lines, when the minor (or major) version changes |
 
 To check, before tagging (`0.2.0` being the old version; hits in
 `Cargo.lock` for other crates and the example tags in this file do not
@@ -47,6 +48,7 @@ count):
 ```
 $ cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | "\(.name) \(.version)"'
 $ git grep -n '0\.2\.0' -- . ':!docs/features/release.md'
+$ git grep -n '= "0\.2"' -- .
 $ cargo build --locked
 ```
 
