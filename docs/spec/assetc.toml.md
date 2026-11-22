@@ -19,6 +19,7 @@ a valid config and uses the defaults below.
 | `output` | string | `"build"`  | Directory compiled assets are written to.       |
 | `textures` | table | empty     | Per-texture settings, see below.                |
 | `meshes` | table   | see below  | Mesh build settings, see below.                 |
+| `environments` | table | see below | HDR environment map lighting, see [`[environments]`](#environments). |
 | `locators` | table | empty     | Shared locators, see [`[locators]`](#locators). |
 | `pack`   | table   | see below  | Pack settings, see [`[pack]`](#pack).            |
 | `targets` | table  | empty      | Named build targets, see [`[targets]`](#targets). |
@@ -95,6 +96,30 @@ The meshlet limits must suit the mesh shaders that draw the meshlets: one
 meshlet is one workgroup's output, so they are a per-GPU tuning choice. A
 value outside its range (in the defaults or any override) or a bad glob fails
 the build before anything is compiled, with `assetc.toml [meshes]: <problem>`.
+
+### `[environments]`
+
+How [HDR environment maps](../features/hdr.md#lighting-maps) (`*.exr`) are
+turned into lighting maps.
+
+| Key               | Type    | Default | Meaning |
+|-------------------|---------|---------|---------|
+| `specular_size`   | integer | `256`   | Largest face size of the specular map (`<name>.specular.atex.bin`), capped at the skybox's; a power of two, 8–4096 |
+| `irradiance_size` | integer | `32`    | Face size of the irradiance map (`<name>.irradiance.atex.bin`); a power of two, 1–4096 |
+| `samples`         | integer | `1024`  | GGX samples per specular texel, 1–65536: more is smoother and slower |
+| `lighting`        | boolean | `true`  | `false` writes only the skybox cubemap |
+
+```toml
+[environments]
+specular_size = 128
+samples = 512
+
+[targets.mobile.environments]
+specular_size = 64
+```
+
+A value out of range fails the build before anything is compiled, with
+`assetc.toml [environments]: <problem>`.
 
 ### `[locators]`
 

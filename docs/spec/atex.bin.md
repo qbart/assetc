@@ -22,6 +22,7 @@ In this order:
 | `DESC`   | yes      | [`Desc`](#desc-64-bytes), one record |
 | `LEVELS` | yes      | [`Level`](#level-32-bytes)`[]`, `level_count` records, level 0 (largest) first |
 | `DATA`   | yes      | the level images, see [Data](#data) |
+| `SH9`    | no       | `f32 × 27`, only in an irradiance map, see [SH9](#sh9) |
 
 Readers ignore other chunks.
 
@@ -161,7 +162,9 @@ used as a normal map is `noise`.
 |  8 | `atlas` | an atlas's texture |
 |  9 | `font` | a font's signed distance field atlas |
 | 10 | `lut` | a color LUT, strip or volume |
-| 11 | `environment` | an HDR environment map (cubemap) |
+| 11 | `environment` | an HDR environment map's skybox cubemap |
+| 12 | `environment_specular` | an HDR environment map's [specular map](#specular-maps) |
+| 13 | `environment_irradiance` | an HDR environment map's [irradiance map](#irradiance-maps) |
 |  0 | `color` | any other sRGB texture (images, base color, emissive) |
 |  1 | `data` | any other linear texture |
 
@@ -169,11 +172,64 @@ Readers treat a value they do not know as `data`.
 
 ## Cubemaps
 
-An [HDR environment map](../features/hdr.md) has `faces` `6`, square faces
-(`width` = `height`, a power of two), `depth` `1` and a full chain of
-`log2(width) + 1` levels, in the HDR column of [Formats](#formats). Each
-level image holds the six faces back to back in the order +X, −X, +Y, −Y,
-+Z, −Z.
+An [HDR environment map](../features/hdr.md) gives up to three cubemaps,
+each with `faces` `6`, square faces (`width` = `height`, a power of two),
+`depth` `1`, in the HDR column of [Formats](#formats). Each level image
+holds the six faces back to back in the order +X, −X, +Y, −Y, +Z, −Z. The
+direction each texel looks along is in
+[hdr.md](../features/hdr.md#cubemap).
+
+| Usage | Levels |
+|-------|--------|
+| `environment` (the skybox) | a full chain of `log2(width) + 1` levels, box-filtered |
+| `environment_specular` | `log2(width) − 1` levels, down to 4 × 4 faces (`width` ≥ 8), see below |
+| `environment_irradiance` | one level |
+
+### Specular maps
+
+Unlike other textures, the chain stops at 4 × 4 faces: smaller levels would
+be below one compressed block. Level `i` of `level_count` = `n` holds the
+environment prefiltered (GGX, split-sum) for **perceptual roughness**
+
+```
+roughness = i / (n − 1)        lod = roughness × (n − 1)
+```
+
+so level 0 is roughness 0 (the environment resampled, unfiltered) and the
+last level roughness 1. An engine samples the map at that `lod`. How the
+levels are made is in [hdr.md](../features/hdr.md#specular).
+
+### Irradiance maps
+
+Each texel holds, for its direction `n`, the cosine-weighted average of the
+environment over the hemisphere around `n`, that is the **irradiance
+divided by π**:
+
+```
+E(n) = (1/π) ∫ L(ω) max(0, n·ω) dω
+```
+
+so diffuse ambient light is `albedo × E(n)`, with no further factor.
+
+### SH9
+
+An irradiance map also has an `SH9` chunk: `E` as 9 real spherical
+harmonics coefficients, 27 `f32`, coefficient by coefficient, each as
+`R G B`, in the order `(l, m)` = `(0, 0)`, `(1, −1)`, `(1, 0)`, `(1, 1)`,
+`(2, −2)`, `(2, −1)`, `(2, 0)`, `(2, 1)`, `(2, 2)`. For a unit direction
+`(x, y, z)` in the cubemap's frame (`+Y` up):
+
+```
+E(x, y, z) = c0 × 0.282095
+           + c1 × 0.488603 y + c2 × 0.488603 z + c3 × 0.488603 x
+           + c4 × 1.092548 xy + c5 × 1.092548 yz
+           + c6 × 0.315392 (3z² − 1)
+           + c7 × 1.092548 xz + c8 × 0.546274 (x² − y²)
+```
+
+The coefficients already include the cosine lobe and the division by π
+(the radiance's band `l` coefficients times `1`, `2/3`, `1/4`), so this is
+the same value as the map's texel, smoothed to 9 coefficients.
 
 ## Color LUTs
 

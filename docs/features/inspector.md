@@ -130,7 +130,7 @@ instead.
 | Row        | Value                                                               |
 |------------|---------------------------------------------------------------------|
 | Type       | what the file holds, from its `DESC`: `2D`, `Cubemap` (6 faces), `3D` (`depth` > 1), or `2D array` / `Cubemap array` (`layers` > 1, with ` of <n>` layers) |
-| Usage      | what the texture is for, its [usage](../spec/atex.bin.md#usage): `color`, `data`, `normal`, `orm`, `height`, `noise`, `gradient`, `palette`, `atlas`, `font`, `lut`, `environment`; `usage <n>` for a value it does not know |
+| Usage      | what the texture is for, its [usage](../spec/atex.bin.md#usage): `color`, `data`, `normal`, `orm`, `height`, `noise`, `gradient`, `palette`, `atlas`, `font`, `lut`, `environment`, `environment_specular`, `environment_irradiance`; `usage <n>` for a value it does not know |
 | Dimensions | `W × H` px (level 0), or `W × H × D` px for a 3D texture (shown as its slices side by side) |
 | Format     | the `VkFormat` name without `VK_FORMAT_` (`BC7_SRGB_BLOCK`, `ASTC_4x4_UNORM_BLOCK`, `R8G8B8A8_SRGB`, …) |
 | Color space | its `SRGB` flag: `sRGB` or `linear` |

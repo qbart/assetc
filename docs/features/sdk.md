@@ -74,8 +74,18 @@ bytes (`(1, 4)` for `Rgba8*`, `(4, 16)` for `Bc7*`), `is_block()` whether
 it is a block format. `Texture::srgb` (`is_srgb()`) is the file's `SRGB`
 flag, `Texture::usage` a `texture::Usage` (`Color`, `Data`, `Normal`,
 `Orm`, `Height`, `Noise`, `Gradient`, `Palette`, `Atlas`, `Font`, `Lut`,
-`Environment`; `key()` its name) and `Texture::swizzle` where each channel
-is sampled from (`Texture::channels()` counts them). Every level's bytes are
+`Environment`, `EnvironmentSpecular`, `EnvironmentIrradiance`; `key()` its
+name; a value it does not know reads as `Data`) and `Texture::swizzle` where
+each channel is sampled from (`Texture::channels()` counts them).
+
+For an [HDR environment map](hdr.md#lighting-maps) `sky`, the specular and
+irradiance maps are the textures `sky.specular` and `sky.irradiance`
+(`assets.find("sky.specular.atex.bin")`, or the ID of the asset path).
+`Texture::specular_lod(roughness)` is the level to sample a specular map at,
+`roughness × (levels − 1)`; `Texture::sh9` holds an irradiance map's 9
+[spherical harmonics](../spec/atex.bin.md#sh9) coefficients (`[[f32; 3]; 9]`,
+`None` in other textures) and `Texture::irradiance(direction)` evaluates
+them, the irradiance divided by π along a unit direction. Every level's bytes are
 what the GPU takes for that format, so a game uploads them as they are; the
 SDK depends on nothing but `std` and needs no KTX or Basis library.
 
