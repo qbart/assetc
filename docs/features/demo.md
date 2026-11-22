@@ -55,9 +55,15 @@ shows as a gray tile with its format named, and materials use their
 fallback for it. The demo asks for the BC and ASTC features the adapter
 has.
 
-The **sky** is the pack's cubemap textures (`*.atex.bin` with 6 faces, the
-first by path): it is the 3D scenes' skybox and environment light. Without
-one, the 3D scenes use a plain background and a directional light.
+The **sky** is the pack's first skybox cubemap by path (a `*.atex.bin`
+with 6 faces and usage `environment`): it is the 3D scenes' skybox. Their
+environment light is its [lighting maps](hdr.md#lighting-maps)
+(`<sky>.specular.atex.bin` and `<sky>.irradiance.atex.bin`, as Bevy's
+`EnvironmentMapLight`, whose conventions they follow: specular level by
+`roughness × (levels − 1)`, irradiance divided by π); a pack built without
+them has Bevy prefilter the skybox instead (`GeneratedEnvironmentMapLight`).
+Without a sky, the 3D scenes use a plain background and a directional
+light.
 
 ## Scrolling
 

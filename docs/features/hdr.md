@@ -94,12 +94,15 @@ Engine 4").
   `N·L` (divided by the sum of the `N·L`).
 - **No sun dots**: each sample reads the source at the mip matching its
   solid angle, trilinearly:
-  `lod = 0.5 × log2(Ω_s / Ω_p)` (at least 0), where
+  `lod = 0.5 × log2(Ω_s / Ω_p) + 1` (at least 0), where
   `Ω_s = 1 / (samples × pdf)` is the sample's solid angle, with
   `pdf = D(H) / 4` (`D` the GGX distribution:
   `α² / (π ((N·H)² (α² − 1) + 1)²)`), and `Ω_p = 4π / (6 F²)` a source
-  texel's. Bilinear reads near a face edge take their texels across it, on
-  the neighbouring face.
+  texel's. The `+ 1` (as in Colbert and Křivánek, "GPU-Based Importance
+  Sampling") reads one level blurrier than the sample's own footprint:
+  without it neighbouring texels, whose samples land differently, still
+  catch a sun unevenly and show dots. Bilinear reads near a face edge take
+  their texels across it, on the neighbouring face.
 - The tangent frame around `N` is built from `+Z` (from `+X` when `N` is
   within 2.6° of ±Z).
 
