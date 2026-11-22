@@ -190,7 +190,12 @@ pub fn run_cached(
 
     // Every output of a source, parts included, must exist for it to be up to date.
     let mut outputs: HashMap<String, Vec<&str>> = HashMap::new();
-    for asset in &plan.assets {
+    // A collider is a job of its own; see docs/features/colliders.md#build.
+    for asset in plan
+        .assets
+        .iter()
+        .filter(|a| !matches!(a.job, Job::Collider { .. }))
+    {
         outputs
             .entry(asset.source())
             .or_default()
@@ -209,11 +214,15 @@ pub fn run_cached(
                     ^ crate::hash::fnv1a64(format!("{format:?}").as_bytes()),
             ),
         };
+        let complete = match &asset.job {
+            Job::Collider { .. } => dest.is_file(),
+            _ => outputs[&asset.source()]
+                .iter()
+                .all(|out| output.join(out).is_file()),
+        };
         if let Some(stamp) = stamp
             && cache.0.get(&asset.output) == Some(&stamp)
-            && outputs[&asset.source()]
-                .iter()
-                .all(|out| output.join(out).is_file())
+            && complete
         {
             outcome.up_to_date += 1;
             continue;
@@ -1345,6 +1354,70 @@ mod tests {
         assert_eq!(level0(&output.join("grass.ktx2")).0, "ASTC_4x4_SRGB_BLOCK");
         let again = run_cached(&input, &output, &astc, &mut cache).unwrap();
         assert_eq!(again.up_to_date, 1);
+    }
+
+    #[test]
+    fn colliders_build_from_their_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let (input, output) = (dir.path().join("assets"), dir.path().join("build"));
+        fs::create_dir_all(&input).unwrap();
+        let fox = input.join("Fox.glb");
+        fs::copy(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/samples/Fox.glb"),
+            &fox,
+        )
+        .unwrap();
+        let config = config::Config::default();
+        let mut cache = Cache::default();
+        // No sidecar, no collider.
+        run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert!(!output.join("Fox.acollider.bin").exists());
+
+        let sidecar = crate::acollider::path_for(&fox);
+        fs::write(&sidecar, "max_hulls = 4\n").unwrap();
+        let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        let built: Vec<_> = outcome.built.iter().map(|b| b.output.as_str()).collect();
+        assert_eq!(built, ["Fox.acollider.bin"]);
+        assert!(
+            outcome.built[0].detail.starts_with("4 hulls, "),
+            "{}",
+            outcome.built[0].detail
+        );
+        let bytes = fs::read(output.join("Fox.acollider.bin")).unwrap();
+        let collider = assetc::Collider::decode(&bytes).unwrap();
+        assert_eq!(collider.hulls.len(), 4);
+        assert_eq!(collider.mesh, crate::hash::fnv1a64(b"Fox.amesh.bin"));
+        let manifest = fs::read(output.join(crate::manifest::FILE_NAME)).unwrap();
+        let manifest = assetc::Manifest::decode(&manifest).unwrap();
+        assert!(
+            manifest
+                .entries
+                .iter()
+                .any(|e| e.path == "Fox.acollider.bin" && e.kind == assetc::Kind::Collider)
+        );
+
+        // A new setting rebuilds the collider only.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(&sidecar, "max_hulls = 2\n").unwrap();
+        let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
+        let built: Vec<_> = outcome.built.iter().map(|b| b.output.as_str()).collect();
+        assert_eq!(built, ["Fox.acollider.bin"]);
+
+        // A bad sidecar fails the model.
+        fs::write(&sidecar, "max_hulls = 0\n").unwrap();
+        let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert_eq!(outcome.failures.len(), 1);
+        assert_eq!(
+            outcome.failures[0].message,
+            "Fox.glb.acollider: `max_hulls` must be 1 to 256, not 0"
+        );
+
+        // Without its sidecar, the collider is a stale output.
+        fs::remove_file(&sidecar).unwrap();
+        let outcome = run_cached(&input, &output, &config, &mut cache).unwrap();
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert!(!output.join("Fox.acollider.bin").exists());
     }
 
     #[test]
