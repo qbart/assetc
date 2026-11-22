@@ -402,21 +402,27 @@ fn encode(
             let texels = match kind {
                 Kind::R => {
                     arranged = texels
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .flat_map(|t| [t[0], t[0], t[0], 255])
                         .collect();
                     &arranged
                 }
                 Kind::Rg if target.format == Format::Astc => {
                     arranged = texels
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .flat_map(|t| [t[0], t[0], t[0], t[1]])
                         .collect();
                     &arranged
                 }
                 Kind::Rg => {
                     arranged = texels
-                        .chunks_exact(4)
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
                         .flat_map(|t| [t[0], t[1], 0, 255])
                         .collect();
                     &arranged
@@ -533,8 +539,8 @@ impl Info {
         format!("{name} (from {})", from.join(", "))
     }
 
-    /// Bytes against 8-bit RGBA of every level: `1.3 MiB (4:1)`.
-    pub fn size_text(&self) -> String {
+    /// Every level's 8-bit RGBA size against its bytes: `4:1`.
+    pub fn compression(&self) -> String {
         let rgba: u64 = (0..self.levels)
             .map(|i| {
                 let dim = |s: u32| u64::from((s >> i).max(1));
@@ -543,12 +549,11 @@ impl Info {
             .sum::<u64>()
             * u64::from(self.faces * self.layers.max(1));
         let ratio = rgba as f64 / self.bytes.max(1) as f64;
-        let ratio = if (ratio - ratio.round()).abs() < 0.05 {
+        if (ratio - ratio.round()).abs() < 0.05 {
             format!("{}:1", ratio.round())
         } else {
             format!("{ratio:.1}:1")
-        };
-        format!("{} ({ratio})", crate::inspect::format_size(self.bytes))
+        }
     }
 }
 
@@ -633,7 +638,7 @@ fn preview(
             return None;
         }
         let decoded = imgio::decode_to_buffer(format.imgio, level, w, h).ok()?;
-        let n = format.imgio.decoded().block_bytes() as usize;
+        let n = format.imgio.decoded().block_bytes();
         (decoded.to_vec(), n)
     } else if format.bytes <= 4 {
         (level.to_vec(), format.bytes as usize)
@@ -719,7 +724,7 @@ mod tests {
         assert_eq!(info.mips, levels[1..]);
         assert_eq!(info.usage, "normal");
         assert_eq!(info.bytes, 3 * 2 * 4 + 4);
-        assert_eq!(info.size_text(), "28 B (1:1)");
+        assert_eq!(info.compression(), "1:1");
 
         let info = read(
             &encode_rgba8(Target::RGBA, ColorSpace::Linear, Usage::Color, &[sample()]).unwrap(),
@@ -794,7 +799,7 @@ mod tests {
             &encode_rgba8(target(Format::Bc), ColorSpace::Srgb, Usage::Color, &levels).unwrap(),
         )
         .unwrap();
-        assert!(info.size_text().ends_with("(4:1)") || info.size_text().contains(":1"));
+        assert_eq!(info.compression(), "4:1");
         assert_eq!(info.bytes, (256 + 64 + 16 + 4 + 1 + 1 + 1) * 16);
     }
 
@@ -811,7 +816,7 @@ mod tests {
         assert_eq!(reader.chunk("DATA").unwrap()[..6], [0, 1, 2, 4, 5, 6]);
         let info = read(&file).unwrap();
         assert_eq!(
-            info.level0.unwrap().pixels[..8],
+            info.level0.as_ref().unwrap().pixels[..8],
             [0, 1, 2, 255, 4, 5, 6, 255]
         );
         assert_eq!(info.channels(), "RGB");

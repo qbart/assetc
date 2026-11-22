@@ -1594,10 +1594,13 @@ mod tests {
             fs::write(output.join(name), "old").unwrap();
         }
         fs::write(output.join("old.atre"), "old").unwrap();
+        // A texture from before `.atex.bin`.
+        fs::write(output.join("a.ktx2"), "old").unwrap();
         let outcome = run(&input, &output, &rgba()).unwrap();
         assert_eq!(
             outcome.removed,
             [
+                "a.ktx2",
                 "old.atre",
                 "assets.manifest",
                 "assets.aman",
@@ -1906,7 +1909,7 @@ mod tests {
             (info.width, info.height, info.depth)
         };
         assert_eq!(size("warm.atex.bin"), (2, 2, 2));
-        assert_eq!(size("cold.atex.bin"), (4, 2, 0));
+        assert_eq!(size("cold.atex.bin"), (4, 2, 1));
         let detail = |name: &str| {
             let built = outcome.built.iter().find(|b| b.source == name).unwrap();
             built.detail.clone()

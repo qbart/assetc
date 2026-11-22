@@ -246,9 +246,9 @@ mod tests {
         let bytes = encode(&[entry(0x0102_0304_0506_0708, "textures/dirt.atex.bin")]);
         let mut expected = Vec::new();
         expected.extend_from_slice(b"AMAN");
-        expected.extend_from_slice(&[1, 0, 0, 0, 1, 0, 0, 0, 18, 0, 0, 0]);
+        expected.extend_from_slice(&[1, 0, 0, 0, 1, 0, 0, 0, 22, 0, 0, 0]);
         expected.extend_from_slice(&[8, 7, 6, 5, 4, 3, 2, 1]);
-        expected.extend_from_slice(&[0, 0, 0, 0, 18, 0, 0, 0]);
+        expected.extend_from_slice(&[0, 0, 0, 0, 22, 0, 0, 0]);
         expected.extend_from_slice(b"textures/dirt.atex.bin");
         assert_eq!(bytes, expected);
     }

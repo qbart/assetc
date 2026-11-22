@@ -606,7 +606,7 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
     ));
     out.rows.push(("Mip levels", info.levels.to_string()));
     out.rows.push(("Channels", info.channels()));
-    out.rows.push(("Size", info.size_text()));
+    out.rows.push(("Compression", info.compression()));
     asset_rows(manifest::Kind::Texture.asset_path(rel), out);
 
     match info.level0 {

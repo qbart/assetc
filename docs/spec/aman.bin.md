@@ -84,7 +84,7 @@ when `16 + 16 * count + strings_size` differs from the file size, or when any
 One texture `textures/dirt` (ID `0x…`) at `textures/dirt.atex.bin`:
 
 ```
-41 4D 41 4E  01 00 00 00  01 00 00 00  12 00 00 00   header: AMAN, v1, 1 entry, 18 bytes of strings
-<id u64 LE>  00 00 00 00  12 00  00  00              entry: offset 0, len 18, texture
-74 65 78 74 75 72 65 73 2F 64 69 72 74 2E 6B 74 78 32   "textures/dirt.atex.bin"
+41 4D 41 4E  01 00 00 00  01 00 00 00  16 00 00 00   header: AMAN, v1, 1 entry, 22 bytes of strings
+<id u64 LE>  00 00 00 00  16 00  00  00              entry: offset 0, len 22, texture
+74 65 78 74 75 72 65 73 2F 64 69 72 74 2E 61 74 65 78 2E 62 69 6E   "textures/dirt.atex.bin"
 ```
