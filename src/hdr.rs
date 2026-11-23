@@ -204,7 +204,7 @@ fn texel_solid_angle(x: usize, y: usize, size: usize) -> f32 {
 }
 
 /// The smallest face size the lighting maps read from.
-const MIN_SOURCE: usize = 8;
+pub const MIN_SOURCE: usize = 8;
 
 /// Face size of the irradiance map's source level, at most.
 const IRRADIANCE_SOURCE: usize = 32;

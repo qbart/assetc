@@ -18,6 +18,8 @@ output = "build"
 linear = []
 no_mipmaps = []
 volume_luts = []
+format = "bc"
+quality = "default"
 
 [meshes]
 meshlet_max_vertices = 64
@@ -35,6 +37,12 @@ lod_lock_border = false
 lod_regularize = false
 lod_prune = false
 
+[environments]
+specular_size = 256
+irradiance_size = 32
+samples = 1024
+lighting = true
+
 [pack]
 file = "assetc.pak"
 alignment = 16
@@ -47,15 +55,17 @@ enum Section {
     General,
     Textures,
     Meshes,
+    Environments,
     Locators,
     Pack,
 }
 
 impl Section {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::General,
         Self::Textures,
         Self::Meshes,
+        Self::Environments,
         Self::Locators,
         Self::Pack,
     ];
@@ -65,6 +75,7 @@ impl Section {
             Self::General => "General",
             Self::Textures => "Textures",
             Self::Meshes => "Meshes",
+            Self::Environments => "Environments",
             Self::Locators => "Locators",
             Self::Pack => "Pack",
         }
@@ -88,6 +99,11 @@ impl Section {
                  The defaults suit most models; overrides below, or a model's .amod sidecar, \
                  change them for some models."
             }
+            Self::Environments => {
+                "How HDR environment maps (.exr) are turned into lighting: besides the skybox, \
+                 each gets a specular map for reflections (sharp to rough, one level per \
+                 roughness) and an irradiance map for diffuse light, written next to it."
+            }
             Self::Locators => {
                 "A preset shares the locators of one model (placed in its .amod sidecar) with \
                  other models whose skeleton has the same joints, so they are placed once."
@@ -106,11 +122,24 @@ impl Section {
 enum Edit {
     Text,
     Globs,
-    Int { min: i64, max: i64, step: i64 },
-    Float { min: f64, max: f64 },
+    Int {
+        min: i64,
+        max: i64,
+        step: i64,
+    },
+    Float {
+        min: f64,
+        max: f64,
+    },
     Bool,
     Floats,
     Alignment,
+    /// One of these strings.
+    Choice(&'static [&'static str]),
+    /// A power of two from `min` px to 4096 px.
+    Size {
+        min: i64,
+    },
 }
 
 /// One setting: its table (`None` at the top level), key, editor, name, help
@@ -164,7 +193,27 @@ const GENERAL: [Field; 2] = [
     ),
 ];
 
-const TEXTURES: [Field; 3] = [
+const TEXTURES: [Field; 5] = [
+    field(
+        Some("textures"),
+        "format",
+        Edit::Choice(&["bc", "astc", "rgba", "rgb"]),
+        [
+            "Format",
+            "GPU format every texture is written in: bc for desktop GPUs, astc for mobile ones, rgba or rgb uncompressed. Usually set per target.",
+            "",
+        ],
+    ),
+    field(
+        Some("textures"),
+        "quality",
+        Edit::Choice(&["fastest", "fast", "default", "high", "best"]),
+        [
+            "Quality",
+            "How hard the bc and astc encoders try: fastest, fast, default, high or best. Higher comes closer to the image and builds slower; changing it rebuilds every texture.",
+            "",
+        ],
+    ),
     field(
         Some("textures"),
         "linear",
@@ -358,6 +407,53 @@ const MESHES: [Field; 14] = [
     ),
 ];
 
+const ENVIRONMENTS: [Field; 4] = [
+    field(
+        Some("environments"),
+        "lighting",
+        Edit::Bool,
+        [
+            "Lighting maps",
+            "Write the specular and irradiance maps. Off: only the skybox.",
+            "",
+        ],
+    ),
+    field(
+        Some("environments"),
+        "specular_size",
+        Edit::Size { min: 8 },
+        [
+            "Specular size",
+            "Largest face size of the specular map (<name>.specular.atex.bin), 8–4096 (default 256), never larger than the skybox's. Each level halves it, down to 4 px.",
+            "",
+        ],
+    ),
+    field(
+        Some("environments"),
+        "irradiance_size",
+        Edit::Size { min: 1 },
+        [
+            "Irradiance size",
+            "Face size of the irradiance map (<name>.irradiance.atex.bin), 1–4096 (default 32). Diffuse light changes slowly, so small faces are enough.",
+            "",
+        ],
+    ),
+    field(
+        Some("environments"),
+        "samples",
+        Edit::Int {
+            min: 1,
+            max: 65536,
+            step: 1,
+        },
+        [
+            "Samples",
+            "Samples per specular texel, 1–65536 (default 1024). More is smoother and slower.",
+            "",
+        ],
+    ),
+];
+
 const PACK: [Field; 4] = [
     field(
         Some("pack"),
@@ -485,6 +581,9 @@ fn check(text: &str) -> Result<project_config::Config, String> {
             .map_err(|e| format!("{at}{FILE_NAME} [textures]: {e}"))?;
         crate::amesh::MeshSettings::new(&c.meshes)
             .map_err(|e| format!("{at}{FILE_NAME} [meshes]: {e}"))?;
+        c.environments
+            .validate()
+            .map_err(|e| format!("{at}{FILE_NAME} [environments]: {e}"))?;
         crate::pack::Settings::new(&c.pack).map_err(|e| format!("{at}{e}"))?;
     }
     Ok(config)
@@ -729,6 +828,9 @@ pub(super) fn config_dialog(ctx: &egui::Context, dialog: &mut ConfigDialog) -> D
                                     fields(ui, doc, defaults, target, &MESHES, &mut changed);
                                     ui.add_space(12.0);
                                     overrides(ui, doc, defaults, target, &mut changed);
+                                }
+                                Section::Environments => {
+                                    fields(ui, doc, defaults, target, &ENVIRONMENTS, &mut changed)
                                 }
                                 Section::Locators => {
                                     presets(ui, doc, target, &dialog.models, &mut changed)
@@ -1075,6 +1177,33 @@ fn editor(ui: &mut Ui, f: &Field, item: Option<&Item>, color: Color32) -> Option
                 });
             (n != before).then(|| toml_edit::value(n))
         }
+        Edit::Choice(values) => {
+            let mut value = item.and_then(Item::as_str).unwrap_or_default().to_owned();
+            let before = value.clone();
+            egui::ComboBox::from_id_salt(id)
+                .width(120.0)
+                .selected_text(RichText::new(value.as_str()).color(color))
+                .show_ui(ui, |ui| {
+                    for v in values {
+                        ui.selectable_value(&mut value, (*v).to_owned(), *v);
+                    }
+                });
+            (value != before).then(|| toml_edit::value(value))
+        }
+        Edit::Size { min } => {
+            let mut n = number(item) as i64;
+            let before = n;
+            egui::ComboBox::from_id_salt(id)
+                .width(120.0)
+                .selected_text(RichText::new(format!("{n} px")).color(color))
+                .show_ui(ui, |ui| {
+                    for shift in min.trailing_zeros()..=12 {
+                        let v = 1i64 << shift;
+                        ui.selectable_value(&mut n, v, format!("{v} px"));
+                    }
+                });
+            (n != before).then(|| toml_edit::value(n))
+        }
     }
 }
 
@@ -1383,6 +1512,7 @@ mod tests {
         assert_eq!(config.output, default.output);
         assert_eq!(config.textures, default.textures);
         assert_eq!(config.meshes, default.meshes);
+        assert_eq!(config.environments, default.environments);
         assert_eq!(config.pack, default.pack);
     }
 
@@ -1449,5 +1579,11 @@ mod tests {
                 .unwrap_err()
                 .starts_with("targets.m: ")
         );
+        assert_eq!(
+            check("[targets.m.environments]\nspecular_size = 100\n").unwrap_err(),
+            "targets.m: assetc.toml [environments]: specular_size must be a power of two, \
+             8–4096, not 100"
+        );
+        assert!(check("[textures]\nquality = \"great\"\n").is_err());
     }
 }

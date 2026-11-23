@@ -694,6 +694,28 @@ fn hdr_rows(project: &Project, file: &Path, rel: &str, out: &mut Inspection) -> 
     let asset_path = strip_extension(rel);
     asset_rows(asset_path, out);
     output_row(project, &format!("{asset_path}.atex.bin"), "", out);
+    // The lighting maps, sized as hdr::specular and hdr::irradiance make them.
+    let settings = &project.config.environments;
+    if settings.lighting {
+        let specular = size
+            .max(crate::hdr::MIN_SOURCE)
+            .min(settings.specular_size as usize);
+        let levels = specular.trailing_zeros() - 1;
+        path_row(
+            project,
+            "Specular map",
+            &format!("{asset_path}.specular.atex.bin"),
+            &format!(" ({specular} px, {levels} levels)"),
+            out,
+        );
+        path_row(
+            project,
+            "Irradiance map",
+            &format!("{asset_path}.irradiance.atex.bin"),
+            &format!(" ({} px)", settings.irradiance_size),
+            out,
+        );
+    }
     out.cubemap = Some(preview_faces(&hdr));
     Ok(())
 }
@@ -1231,12 +1253,23 @@ fn environment_map(location: Location, dir: &Path, out: &mut Inspection) -> Resu
 
 /// `Output` row: the output-relative path, `note`, and `(not built)` when missing.
 fn output_row(project: &Project, output_rel: &str, note: &str, out: &mut Inspection) {
+    path_row(project, "Output", output_rel, note, out);
+}
+
+/// A row named `name` holding an output path, as `output_row` writes it.
+fn path_row(
+    project: &Project,
+    name: &'static str,
+    output_rel: &str,
+    note: &str,
+    out: &mut Inspection,
+) {
     let built = project
         .output_dir()
         .is_some_and(|dir| dir.join(output_rel).is_file());
     let missing = if built { "" } else { " (not built)" };
     out.rows
-        .push(("Output", format!("{output_rel}{note}{missing}")));
+        .push((name, format!("{output_rel}{note}{missing}")));
 }
 
 fn material_source(
@@ -1750,6 +1783,44 @@ mod tests {
     fn png(path: &Path, w: u32, h: u32) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         crate::imagefile::tests::png(path, &crate::imagefile::Image::filled(w, h, [1, 2, 3, 255]));
+    }
+
+    #[test]
+    fn hdr_maps_list_their_lighting_maps() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut project = project(dir.path(), config::Textures::default());
+        let input = project.input_dir().unwrap();
+        let file = input.join("env/sky.exr");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        crate::hdr::tests::write_exr(&file, 64, 32, |_, _| [1.0, 1.0, 1.0]);
+
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(row(&i, "Face size"), "16 px");
+        assert_eq!(row(&i, "Output"), "env/sky.atex.bin (not built)");
+        assert_eq!(
+            row(&i, "Specular map"),
+            "env/sky.specular.atex.bin (16 px, 3 levels) (not built)"
+        );
+        assert_eq!(
+            row(&i, "Irradiance map"),
+            "env/sky.irradiance.atex.bin (32 px) (not built)"
+        );
+
+        let output = project.output_dir().unwrap();
+        build::run(&input, &output, &project.config).unwrap();
+        let i = inspect(&project, Location::Input, &file);
+        assert_eq!(
+            row(&i, "Specular map"),
+            "env/sky.specular.atex.bin (16 px, 3 levels)"
+        );
+        assert_eq!(
+            row(&i, "Irradiance map"),
+            "env/sky.irradiance.atex.bin (32 px)"
+        );
+
+        project.config.environments.lighting = false;
+        let i = inspect(&project, Location::Input, &file);
+        assert!(i.rows.iter().all(|(label, _)| !label.ends_with(" map")));
     }
 
     #[test]
