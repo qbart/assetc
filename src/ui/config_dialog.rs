@@ -1547,7 +1547,7 @@ mod tests {
         let (item, set_here) = effective(&doc, &defaults, Some("mobile"), output);
         assert_eq!(item.unwrap().as_str(), Some("build-mobile"));
         assert!(!set_here);
-        let (item, set_here) = effective(&doc, &defaults, Some("mobile"), &TEXTURES[1]);
+        let (item, set_here) = effective(&doc, &defaults, Some("mobile"), &TEXTURES[3]);
         assert!(set_here);
         assert_eq!(strings(item.as_ref()), ["ui/**"]);
 
