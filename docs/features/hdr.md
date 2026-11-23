@@ -176,7 +176,11 @@ sky.exr -> sky.irradiance.atex.bin (cubemap 32², bc6h, 1 level)
   build).
 - **Info**: Kind `HDR environment map`, Size, **Dimensions** (`W × H px`),
   **Face size** (`512 px`), **Mip levels**, **Asset path**, **Asset ID**,
-  **Output** (as for textures, `(not built)` appended when missing).
+  **Output** (as for textures, `(not built)` appended when missing), and
+  while [`lighting`](#settings) is on **Specular map**
+  (`sky.specular.atex.bin (256 px, 7 levels)`) and **Irradiance map**
+  (`sky.irradiance.atex.bin (32 px)`), each with `(not built)` appended when
+  missing.
 - A compiled cubemap (`.atex.bin` with six faces) in the Output tree shows
   Dimensions, Format (`BC6H_UFLOAT_BLOCK`, …), **Faces** `6` and Mip levels; it
   has no 2D preview.

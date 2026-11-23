@@ -17,6 +17,7 @@ Target [ Default      v ]  [+ Target]  [trash]
 | General   | Input        [ samples              ]             |
 | Textures  | Output       [ tmp/build            ]        [↺]  |
 | Meshes    |                                                   |
+| Environm… |                                                   |
 | Locators  |                                                   |
 | Pack      |                                                   |
 +-----------+---------------------------------------------------+
@@ -31,7 +32,7 @@ error line                                     [Cancel] [Save]
   removes the selected target with its settings, after a confirmation
   (`Remove target "mobile"?`, Remove / Cancel).
 - **Sections** on the left (selectable rows, 140 px): General, Textures,
-  Meshes, Locators, Pack. The chosen section's settings fill the right side,
+  Meshes, Environments, Locators, Pack. The chosen section's settings fill the right side,
   scrolling when long.
 - Bottom: the first problem of the edited file (red) or nothing;
   **Cancel** and **Save** (accent) on the right.
@@ -67,12 +68,17 @@ Editors:
 |---------|---------|--------|
 | General | `input` | text (default target only; for a named target shown disabled, "Shared by every target") |
 | General | `output` | text |
+| Textures | `format`, `quality` | dropdown of the values the spec allows |
 | Textures | `linear`, `no_mipmaps`, `volume_luts` | glob list |
 | Meshes | `meshlet_max_vertices`, `meshlet_max_triangles`, `lod_attempts` | integer drag field within the spec's range (`meshlet_max_triangles` in steps of 4) |
 | Meshes | `meshlet_cone_weight`, `lod_error`, `lod_error_step`, `lod_uv_weight`, `lod_normal_weight` | number drag field within the spec's range |
 | Meshes | `lod_sloppy_fallback`, `lod_permissive`, `lod_lock_border`, `lod_regularize`, `lod_prune` | checkbox |
 | Meshes | `lod_ratios` | number list (each 0–1) |
 | Meshes | `overrides` | list of overrides, see below |
+| Environments | `lighting` | checkbox |
+| Environments | `specular_size` | dropdown of powers of two, 8 px to 4096 px |
+| Environments | `irradiance_size` | dropdown of powers of two, 1 px to 4096 px |
+| Environments | `samples` | integer drag field, 1–65536 |
 | Locators | `presets` | list of presets, see below |
 | Pack | `file` | text |
 | Pack | `alignment` | dropdown of powers of two, 16 B to 64 KiB |
@@ -110,6 +116,7 @@ Section intros:
 | General | Where assetc reads your source assets and writes the build. Paths are relative to the folder holding assetc.toml. |
 | Textures | Each list holds glob patterns, one per row, matched against a texture's path inside the input folder (ui/button.png). `*` matches within one folder or file name, `**` any number of folders, `?` one character, `{a,b}` either. A texture matching any pattern gets the setting; an empty list matches nothing. |
 | Meshes | How glTF models are split into meshlets and simplified into levels of detail. The defaults suit most models; overrides below, or a model's .amod sidecar, change them for some models. |
+| Environments | How HDR environment maps (.exr) are turned into lighting: besides the skybox, each gets a specular map for reflections (sharp to rough, one level per roughness) and an irradiance map for diffuse light, written next to it. |
 | Locators | A preset shares the locators of one model (placed in its .amod sidecar) with other models whose skeleton has the same joints, so they are placed once. |
 | Pack | assetc pack bundles the build into one file. Patterns here match paths inside the output folder (models/Fox.amesh.bin), with the syntax of the Textures section. |
 
@@ -119,6 +126,8 @@ Settings (name, key, help, example):
 |------|-----|------|---------|
 | Input folder | `input` | Folder with your source assets, relative to assetc.toml's folder. Shared by every target. | `assets` |
 | Output folder | `output` | Folder the build writes to, relative to assetc.toml's folder. A named target writes to `<output>-<name>` unless it sets its own. | `build` |
+| Format | `format` | GPU format every texture is written in: bc for desktop GPUs, astc for mobile ones, rgba or rgb uncompressed. Usually set per target. | |
+| Quality | `quality` | How hard the bc and astc encoders try: fastest, fast, default, high or best. Higher comes closer to the image and builds slower; changing it rebuilds every texture. | |
 | Linear data | `linear` | Textures holding data rather than color (normal maps, masks) are stored linear instead of sRGB. Textures used by a material take this from their slot. | `**/*_n.png` |
 | Without mipmaps | `no_mipmaps` | Textures built with no mipmaps: only the full-size image, no smaller copies. For UI and pixel art drawn at their own size; every other texture gets a full mip chain. | `ui/**` |
 | 3D LUTs | `volume_luts` | Color grading LUTs (.cube) built as 3D textures; the others become 2D strips. | `grades/**` |
@@ -138,6 +147,10 @@ Settings (name, key, help, example):
 | Prune islands | `lod_prune` | Remove small disconnected parts while simplifying. | |
 | Overrides | `overrides` | Other values for some models: each override lists patterns of model paths and the settings it changes. When several match, the last one that sets a value wins. | |
 | Models | `match` (override) | Patterns of model paths inside the input folder this override applies to. | `characters/**` |
+| Lighting maps | `lighting` | Write the specular and irradiance maps. Off: only the skybox. | |
+| Specular size | `specular_size` | Largest face size of the specular map (<name>.specular.atex.bin), 8–4096 (default 256), never larger than the skybox's. Each level halves it, down to 4 px. | |
+| Irradiance size | `irradiance_size` | Face size of the irradiance map (<name>.irradiance.atex.bin), 1–4096 (default 32). Diffuse light changes slowly, so small faces are enough. | |
+| Samples | `samples` | Samples per specular texel, 1–65536 (default 1024). More is smoother and slower. | |
 | From model | `from` | The model whose locators are shared. | |
 | Applies to | `match` (preset) | Patterns of the models that get them. No rows: every model with the joints they use. | `animals/**` |
 | Pack file | `file` | Name of the pack inside the output folder, ending in .pak. | `assetc.pak` |
@@ -150,8 +163,8 @@ Settings (name, key, help, example):
 - The dialog edits a copy of the file; nothing is written until **Save**.
 - After every edit the copy is checked as loading the file checks it (types,
   unknown keys, every target resolving), plus what a build checks before it
-  starts (`[textures]` and `[pack]` globs, `[meshes]` ranges, `[pack]`
-  values). The first problem shows at the bottom and Save is disabled while
+  starts (`[textures]` and `[pack]` globs, `[meshes]` and
+  `[environments]` ranges, `[pack]` values). The first problem shows at the bottom and Save is disabled while
   there is one.
 - **Save** (or `Ctrl+S`) writes `assetc.toml` and closes the dialog. Only the
   edited keys change: comments, key order, formatting and settings the
