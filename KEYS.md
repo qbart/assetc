@@ -157,10 +157,17 @@ On a directed graph (see [`docs/features/graphs.md`](docs/features/graphs.md#can
 | Scroll wheel                           | Zoom around the pointer                      |
 | Right or middle drag                   | Pan                                          |
 | Right double-click                     | Fit the graph                                |
-| Left press / drag on a node's body     | Choose it / move it                          |
+| Left press / drag on a node's body     | Choose it / move it (with the other selected nodes) |
+| `Ctrl` + left press on a node (`Cmd` on macOS) | Add it to the selection or take it out (see [`docs/features/graph-layout.md`](docs/features/graph-layout.md#selection)) |
+| Left drag on empty grid                | Select the nodes in a box (`Ctrl`: add them) |
+| `Ctrl+A` (`Cmd+A`)                     | Select every node                            |
+| `Escape`                               | Select only the chosen node                  |
 | `Shift` while moving or adding a node  | Snap its center to 0.25                      |
 | Left drag from a node's rim onto a node | Add an edge (onto the same node: a loop)    |
-| `Delete` / `X`                         | Remove the chosen node (with its edges) or edge |
+| `Delete` / `X`                         | Remove the selected nodes (with their edges) or the chosen edge |
+| `Ctrl+Z` (`Cmd+Z`)                     | Undo (see [`docs/features/graph-layout.md`](docs/features/graph-layout.md#undo)) |
+| `Ctrl+Shift+Z`, `Ctrl+Y` (`Cmd+Shift+Z`) | Redo                                       |
+| `Escape` with the Layout panel open    | Close it                                     |
 | Double-click on a node                 | Edit its label in place                      |
 | Double-click on an edge                | Edit its label in place                      |
 | `Enter` / `Escape` while editing a label | Keep / drop the new label                  |
@@ -176,7 +183,7 @@ On a tree (see [`docs/features/trees.md`](docs/features/trees.md#canvas)), as on
 | Left drag from a node's rim onto empty grid | Add a child there                       |
 | Left drag from a node's rim onto a node | Move that node (and what is under it) under this one |
 | Double-click on empty grid             | Add a child of the chosen node (or the root) |
-| `Delete` / `X`                         | Remove the chosen node and what is under it  |
+| `Delete` / `X`                         | Remove the selected nodes and what is under them |
 
 On a compiled animation's timeline (see [`docs/features/models.md`](docs/features/models.md#compiled-animation-preview)):
 

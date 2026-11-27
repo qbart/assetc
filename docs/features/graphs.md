@@ -6,7 +6,9 @@ tree's skills and unlocks, a dialogue's lines and choices, a state machine's
 states and transitions. assetc edits them on a grid in the canvas, so a
 game gets both the logic (nodes, edges, data) and the layout (positions).
 
-File format: [`docs/spec/agraph.md`](../spec/agraph.md).
+File format: [`docs/spec/agraph.md`](../spec/agraph.md). Choosing several
+nodes, aligning them, automatic layouts and undo:
+[`graph-layout.md`](graph-layout.md).
 
 ## Node and edge
 
@@ -90,13 +92,18 @@ choices), on `BG_CENTER`:
   8 px, hidden under 6 px), on a `BG_CENTER` backdrop.
 - A weak hint in the bottom-left corner: `Double-click to add a node ·
   double-click a node or edge to rename · drag a node's rim onto a node to connect ·
-  Delete or X removes · Shift snaps to 0.25`.
+  drag on the grid or Ctrl+click to select · Delete or X removes · Shift snaps to 0.25`.
+- The [toolbar](graph-layout.md#toolbar) in the top-right corner: undo,
+  redo, align, distribute, snap and layout.
 
 Interactions (left button unless said):
 
 - **Press a node's body** chooses it; **dragging** it moves it
-  (positions keep 3 decimals). Holding **`Shift`** snaps its center to
-  multiples of 0.25.
+  (positions keep 3 decimals), with every other
+  [selected](graph-layout.md#selection) node. Holding **`Shift`** snaps its
+  center to multiples of 0.25. **`Ctrl` + press** adds a node to the
+  selection or takes it out, and dragging on empty grid selects with a box
+  (see [Selection](graph-layout.md#selection)).
 - **Press a node's rim** and **drag** onto a node (its body or rim): a new
   edge from the first node to that one, chosen. While dragging:
   - the start node keeps its rim ring;
@@ -121,7 +128,8 @@ Interactions (left button unless said):
   in the file, are kept; onto its other end's node it becomes a loop);
   released on empty grid, the edge is **removed**.
 - **Click an edge** (within 7 px of its curve) chooses it.
-- **Click empty grid** chooses nothing.
+- **Click empty grid** chooses nothing; **drag on empty grid** selects the
+  nodes in a box.
 - **Double-click empty grid** adds a node `node` (`node_2`, …, label empty)
   there (snapped to 0.25 with `Shift`), chosen.
 - **Double-click a node** chooses it and edits its label in place: a text
@@ -131,7 +139,7 @@ Interactions (left button unless said):
 - **Double-click an edge** (within 7 px of its curve) chooses it and edits
   its label the same way: a 120 px text field centered on the middle of
   its curve.
-- **`Delete`** or **`X`** removes the chosen node (with its edges) or edge,
+- **`Delete`** or **`X`** removes the selected nodes (with their edges) or the chosen edge,
   while the canvas has the keys (the last mouse press landed in it, see
   [file operations](file-operations.md#keybindings)) and no text field is
   focused. **Delete** in the Inspector does the same.
@@ -149,6 +157,7 @@ an unreadable file has an **Error** row instead.
 The Inspector's **Graph** tab (`graph-star`) edits what is chosen in the
 canvas, in the [property editor](gui.md#property-editor) look:
 
+- Several nodes selected: see [Selection](graph-layout.md#selection).
 - Nothing chosen: the node list (one row per node: id and label, weak;
   clicking one chooses it and centers the view on it) and **Add node**
   (`plus` and text, a node at the view's center).
@@ -192,4 +201,4 @@ more)`). The CLI line reads `<source> -> <output> (<n> nodes, <m> edges)`.
 
 ## Not yet
 
-- Moving several nodes at once, and undo.
+- Copying and pasting nodes.

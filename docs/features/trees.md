@@ -6,7 +6,9 @@ depth: a skill tree, a dialogue's branches, a menu, an outline. There are
 no edges: a node's place in the tree is its parent. assetc edits trees
 exactly as it edits [directed graphs](graphs.md), with the tree's rules.
 
-File format: [`docs/spec/atree.md`](../spec/atree.md).
+File format: [`docs/spec/atree.md`](../spec/atree.md). Choosing several
+nodes, aligning them, automatic layouts (tidy tree, radial, force, grid)
+and undo: [`graph-layout.md`](graph-layout.md).
 
 ## Node
 
@@ -51,11 +53,12 @@ fit), nodes as circles with a body and a rim, colors, hovering, moving
     graphs (tinted, ringed, the link drawn as it will be).
 - **Double-click empty grid**: adds a child of the chosen node (of the root
   when no node is chosen) there, chosen.
-- **`Delete` / `X`**, and Delete in the Inspector, remove the chosen node
-  with everything under it; the root cannot be removed.
+- **`Delete` / `X`**, and Delete in the Inspector, remove the selected
+  nodes with everything under them; the root cannot be removed.
 - The hint reads `Double-click to add a child · double-click a node to
   rename · drag a node's rim to add a child or onto a node to move it under
-  · Delete or X removes · Shift snaps to 0.25`.
+  · drag on the grid or Ctrl+click to select · Delete or X removes · Shift
+  snaps to 0.25`.
 
 ## Inspector
 

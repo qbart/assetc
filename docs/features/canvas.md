@@ -134,7 +134,8 @@ in 2D while an image is previewed:
 
 A vertical column of button groups in the canvas' top-right corner, 8 px
 from the top and right edges, groups stacked top to bottom with an 8 px gap,
-shown only while an image is previewed:
+shown while an image is previewed (and on graph and tree canvases, with
+their own groups, see [`graph-layout.md`](graph-layout.md#toolbar)):
 
 ```
 [ ▦ ]
