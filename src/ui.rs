@@ -5524,6 +5524,7 @@ fn image_modifiers_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<Amod> {
 /// docs/features/atlases.md#inspector.
 fn atlas_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<crate::atlas::AtlasConfig> {
     use crate::atlas::Packing;
+    use assetc_atlas::{MAX_CELL, MAX_COLUMNS, MAX_PADDING, MAX_SIZE};
     let (edit, saved) = match &mut inspected.atlas {
         Some(Ok(pair)) => (&mut pair.0, &mut pair.1),
         Some(Err(e)) => {
@@ -5537,6 +5538,7 @@ fn atlas_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<crate::atlas::Atl
         .show(ui, |ui| {
             Frame::new().inner_margin(Margin::same(8)).show(ui, |ui| {
                 property_style(ui);
+                let edit = &mut edit.settings;
                 prop_row(ui, "Packing", |ui, width| {
                     egui::ComboBox::from_id_salt("atlas_packing")
                         .width(width - 8.0)
@@ -5554,11 +5556,11 @@ fn atlas_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<crate::atlas::Atl
                     });
                 };
                 if edit.packing == Packing::Grid {
-                    number(ui, "Cell width", &mut edit.cell_width, 4096);
-                    number(ui, "Cell height", &mut edit.cell_height, 4096);
-                    number(ui, "Columns", &mut edit.columns, 1024);
+                    number(ui, "Cell width", &mut edit.cell_width, MAX_CELL);
+                    number(ui, "Cell height", &mut edit.cell_height, MAX_CELL);
+                    number(ui, "Columns", &mut edit.columns, MAX_COLUMNS);
                 }
-                number(ui, "Padding", &mut edit.padding, 64);
+                number(ui, "Padding", &mut edit.padding, MAX_PADDING);
                 let padding = edit.padding;
                 number(ui, "Extrude", &mut edit.extrude, padding);
                 edit.extrude = edit.extrude.min(edit.padding);
@@ -5572,7 +5574,7 @@ fn atlas_tab(ui: &mut Ui, inspected: &mut Inspected) -> Option<crate::atlas::Atl
                 });
                 prop_row(ui, "Max size", |ui, width| {
                     let field = egui::DragValue::new(&mut edit.max_size)
-                        .range(1..=16384)
+                        .range(1..=MAX_SIZE)
                         .speed(4.0);
                     ui.add_sized(vec2(width, 22.0), field);
                 });

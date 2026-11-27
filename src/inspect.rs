@@ -1119,7 +1119,7 @@ fn atlas_folder(project: &Project, dir: &Path, out: &mut Inspection) {
         .and_then(|input| dir.strip_prefix(input).ok().map(Path::to_path_buf))
         .map(|p| p.to_string_lossy().replace('\\', "/"))
         .unwrap_or_default();
-    let (config, packed) = match crate::atlas::build(dir) {
+    let (_, packed) = match crate::atlas::build(dir) {
         Ok(built) => built,
         Err(message) => {
             out.rows.push(("Error", message.clone()));
@@ -1130,8 +1130,7 @@ fn atlas_folder(project: &Project, dir: &Path, out: &mut Inspection) {
     let (width, height) = packed.image.dimensions();
     out.rows.push(("Frames", packed.frames.len().to_string()));
     out.rows.push(("Size", format!("{width} × {height} px")));
-    out.rows
-        .push(("Packing", crate::atlas::packing_summary(&config, &packed)));
+    out.rows.push(("Packing", packed.summary()));
     let asset_path = strip_extension(&rel).to_owned();
     asset_rows(&asset_path, out);
     if let Ok(settings) = crate::texture::Settings::new(&project.config.textures) {

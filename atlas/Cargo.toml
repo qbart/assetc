@@ -1,0 +1,18 @@
+[package]
+name = "assetc-atlas"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Bartłomiej Wójtowicz"]
+description = "The atlas packing of assetc: named images into one texture in grid cells or tight shelves, with trimming, padding, edge extrusion and frame rectangles"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/qbart/assetc"
+homepage = "https://github.com/qbart/assetc"
+readme = "README.md"
+keywords = ["gamedev", "atlas", "sprite", "texture-packing", "spritesheet"]
+categories = ["game-development", "graphics", "rendering"]
+
+[dependencies]
+assetc-colors = { path = "../colors", version = "0.4.0" }
+# Frames scaled into grid cells: Lanczos-3, weighted by alpha. No file formats.
+imgio = { version = "0.1.0", default-features = false }

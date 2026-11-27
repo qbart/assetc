@@ -792,10 +792,14 @@ fn compile_atlas(
 ) -> Result<String, String> {
     let p = strip_extension(source);
     let (config, packed) = crate::atlas::build(&input.join(source))?;
-    let summary = crate::atlas::packing_summary(&config, &packed);
+    let summary = packed.summary();
     let (width, height) = packed.image.dimensions();
     let frames = packed.frames.len();
-    let meta = crate::atlas::encode(&config, &packed, crate::hash::fnv1a64(p.as_bytes()));
+    let meta = crate::atlas::encode(
+        &packed,
+        config.settings.padding,
+        crate::hash::fnv1a64(p.as_bytes()),
+    );
     // Attached structs, kept in its atlas.toml; see docs/features/structs.md#build.
     let scopes = [crate::structs::Scope {
         scope: crate::structs::ASSET,

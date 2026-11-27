@@ -323,6 +323,14 @@ name = "assetc"
 version = "0.4.0"
 
 [[package]]
+name = "assetc-atlas"
+version = "0.4.0"
+dependencies = [
+ "assetc-colors",
+ "imgio",
+]
+
+[[package]]
 name = "assetc-colors"
 version = "0.4.0"
 
@@ -332,6 +340,7 @@ version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "assetc",
+ "assetc-atlas",
  "assetc-colors",
  "base64 0.23.1",
  "bevy",
