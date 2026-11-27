@@ -5,7 +5,9 @@ tells a game where each image (a **frame**) is: sprite sheets, flipbook
 animations, icon sets. assetc builds one from a folder.
 
 Binary metadata: [`docs/spec/aatlas.bin.md`](../spec/aatlas.bin.md); settings:
-[`docs/spec/atlas.toml.md`](../spec/atlas.toml.md).
+[`docs/spec/atlas.toml.md`](../spec/atlas.toml.md). The packing itself is the
+[`assetc-atlas`](atlas-crate.md) crate, so other programs can pack atlases
+the same way.
 
 ## Source
 

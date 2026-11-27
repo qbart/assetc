@@ -8,8 +8,8 @@ itself. The idea follows the SDK of
 
 ## Crate
 
-- Published to [crates.io](https://crates.io/crates/assetc), as is
-  [`assetc-colors`](colors.md): the package and the library are both
+- Published to [crates.io](https://crates.io/crates/assetc), as are
+  [`assetc-colors`](colors.md) and [`assetc-atlas`](atlas-crate.md): the package and the library are both
   `assetc` (`use assetc::Assets;`). It lives in `sdk/`, a member of the
   Cargo workspace.
 - Lightweight: it depends on **nothing but `std`**. No Bevy, no glTF,
@@ -46,8 +46,8 @@ back.
 builds alone from its packaged files, then uploads it. It needs a crates.io
 token (`cargo login`) and a version in `sdk/Cargo.toml` not published yet.
 `make publish-check-sdk` (`cargo publish -p assetc --dry-run`) does
-everything but the upload. `make publish` publishes [`assetc-colors`](colors.md#publishing)
-and then the SDK.
+everything but the upload. `make publish` publishes [`assetc-colors`](colors.md#publishing),
+[`assetc-atlas`](atlas-crate.md) and then the SDK.
 
 ## Opening assets
 

@@ -186,6 +186,17 @@ assetc-colors = "0.4"
 
 See [docs/features/colors.md](docs/features/colors.md) and [colors/README.md](colors/README.md).
 
+## Atlases: the `assetc-atlas` crate
+
+[`atlas/`](atlas/) is assetc's atlas packing as a crate of its own: named images in, one atlas image and each frame's rectangle out, laid out as assetc lays out `*.atlas` folders (grid cells or tight shelves, trimming, padding, edge extrusion, power-of-two sizes). It depends only on `assetc-colors` and `imgio`, with no file formats.
+
+```toml
+[dependencies]
+assetc-atlas = "0.4"
+```
+
+See [docs/features/atlas-crate.md](docs/features/atlas-crate.md) and [atlas/README.md](atlas/README.md).
+
 ## Sample assets
 
 [`samples/`](samples/) is a project with an input of every kind, used by the tests, the screenshots and the demo. Most of it was made for assetc; the third-party assets (the Khronos Fox model, the monogram font, …) and their licenses are listed in [NOTICE.md](NOTICE.md).
