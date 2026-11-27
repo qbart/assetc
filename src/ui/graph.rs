@@ -1619,3 +1619,86 @@ fn edge_fields(ui: &mut Ui, edit: &mut GraphEdit, k: usize) {
     ui.label(RichText::new("Data").size(13.0).color(TEXT_WEAK));
     properties_editor(ui, &mut edge.data);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn graph(ids: &[&str]) -> Graph {
+        let mut g = Graph::new();
+        g.nodes = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| Node::new((*id).to_owned(), i as f64, 0.0))
+            .collect();
+        g
+    }
+
+    /// Writes `edit` as the editor does once nothing is dragged or typed.
+    fn commit(edit: &mut GraphEdit, history: &mut History) {
+        if edit.edit != edit.saved {
+            if !std::mem::take(&mut edit.replay) {
+                history.undo.push(edit.saved.clone());
+                history.redo.clear();
+            }
+            edit.saved = edit.edit.clone();
+        }
+    }
+
+    #[test]
+    fn undo_and_redo_follow_nodes_by_id() {
+        let g = graph(&["a", "b", "c"]);
+        let mut edit = GraphEdit::new(g, false, GraphEdit::default());
+        let mut history = History::default();
+        edit.chosen = Some(Chosen::Node(2));
+        edit.selected = vec![1, 2];
+        graph_layout::align(&mut edit.edit, &[1, 2], AlignNodes::Left);
+        commit(&mut edit, &mut history);
+        assert_eq!(edit.edit.nodes[2].x, 1.0);
+        // Removing a selection is one more step.
+        edit.remove_chosen();
+        commit(&mut edit, &mut history);
+        assert_eq!(edit.edit.nodes.len(), 1);
+        assert_eq!(history.undo.len(), 2);
+
+        history.step(&mut edit, true);
+        assert!(edit.replay);
+        commit(&mut edit, &mut history);
+        assert_eq!(edit.edit.nodes.len(), 3);
+        assert_eq!(history.undo.len(), 1, "an undo is not a step");
+        history.step(&mut edit, true);
+        commit(&mut edit, &mut history);
+        assert_eq!(edit.edit.nodes[2].x, 2.0);
+        history.step(&mut edit, false);
+        commit(&mut edit, &mut history);
+        assert_eq!(edit.edit.nodes[2].x, 1.0);
+        // A new step clears what could be redone.
+        edit.edit.nodes[0].y = 5.0;
+        commit(&mut edit, &mut history);
+        assert!(history.redo.is_empty());
+    }
+
+    #[test]
+    fn selections_hold_the_chosen_node_and_trees_keep_their_root() {
+        let mut t = atree::new();
+        let a = atree::add_child(&mut t, 0, 0.0, 1.0);
+        let a1 = atree::add_child(&mut t, a, 0.0, 2.0);
+        let b = atree::add_child(&mut t, 0, 1.0, 1.0);
+        let (root_id, b_id) = (t.nodes[0].id.clone(), t.nodes[b].id.clone());
+        let mut edit = GraphEdit::new(t, true, GraphEdit::default());
+        edit.chosen = Some(Chosen::Node(a1));
+        edit.normalize();
+        assert_eq!(edit.selected, [a1]);
+        edit.selected = vec![0, a, a1];
+        edit.chosen = Some(Chosen::Node(a));
+        edit.normalize();
+        edit.remove_chosen();
+        // The root stays (chosen, as it was selected); a and what is under it go.
+        let ids: Vec<&str> = edit.edit.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, [root_id.as_str(), b_id.as_str()]);
+        assert_eq!(edit.chosen, Some(Chosen::Node(0)));
+        edit.chosen = Some(Chosen::Edge(0));
+        edit.normalize();
+        assert!(edit.selected.is_empty());
+    }
+}
