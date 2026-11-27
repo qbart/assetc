@@ -3,6 +3,7 @@
 
 use crate::agraph::{Edge, Node};
 use crate::atree;
+use crate::graph_layout::{self, Algorithm, Align as AlignNodes, Direction};
 use crate::theme::{BG_HOVER, CHANNEL_R};
 
 use super::schema::commit_field;
@@ -28,6 +29,10 @@ const SPREAD_MAX: f32 = 0.4;
 const ARROW: f32 = 10.0;
 /// How near the pointer must be to an edge's start or tip to grab it, in points.
 const END: f32 = 8.0;
+/// Undo steps kept per file.
+const HISTORY: usize = 100;
+/// The Layout panel's width, in points.
+const PANEL: f32 = 260.0;
 
 /// What is chosen in a graph.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -43,7 +48,12 @@ pub(super) struct GraphEdit {
     /// As last written; `edit` is saved when it differs and nothing is being dragged or typed.
     pub(super) saved: Graph,
     chosen: Option<Chosen>,
+    /// The selected nodes, in file order; the chosen node is one of them. See
+    /// docs/features/graph-layout.md#selection.
+    selected: Vec<usize>,
     drag: Option<GraphDrag>,
+    /// `edit` is an undone or redone version, not a new step.
+    replay: bool,
     /// A node's or edge's label being edited on the canvas, and whether its field still
     /// needs focus.
     label: Option<(Chosen, String, bool)>,
@@ -64,29 +74,145 @@ impl GraphEdit {
     /// `graph` as read (a tree when `tree`), keeping `previous`'s choice.
     pub(super) fn new(graph: Graph, tree: bool, previous: GraphEdit) -> Self {
         // The chosen node by id: a tree is read back depth first, so its places change.
-        let chosen = match previous.chosen {
-            Some(Chosen::Node(i)) => previous
-                .edit
-                .nodes
-                .get(i)
-                .and_then(|n| graph.node_index(&n.id))
-                .map(Chosen::Node),
-            other => other,
-        };
+        let (chosen, selected) = follow(&previous, &graph);
         Self {
             edit: graph.clone(),
             saved: graph,
             tree,
             chosen,
+            selected,
             ..previous
         }
     }
+
+    /// The selection holds the chosen node, and nothing when no node is chosen.
+    fn normalize(&mut self) {
+        let n = self.edit.nodes.len();
+        self.selected.retain(|&i| i < n);
+        self.selected.sort_unstable();
+        self.selected.dedup();
+        match self.chosen() {
+            Some(Chosen::Node(i)) if !self.selected.contains(&i) => self.selected = vec![i],
+            Some(Chosen::Node(_)) => {}
+            _ => self.selected.clear(),
+        }
+    }
+
+    /// Chooses and selects only node `i`.
+    fn choose_only(&mut self, i: usize) {
+        self.chosen = Some(Chosen::Node(i));
+        self.selected = vec![i];
+    }
+
+    /// What the toolbar's Snap and the Layout panel move: the selection when it has 2+
+    /// nodes, else every node (empty).
+    fn targets(&self) -> Vec<usize> {
+        if self.selected.len() >= 2 {
+            self.selected.clone()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Removes the selected nodes (a tree's with what is under them, never its root), else
+    /// the chosen edge.
+    fn remove_chosen(&mut self) {
+        let chosen = self.chosen();
+        let graph = &mut self.edit;
+        match chosen {
+            Some(Chosen::Node(_)) => {
+                let ids: Vec<String> = self
+                    .selected
+                    .iter()
+                    .map(|&i| graph.nodes[i].id.clone())
+                    .collect();
+                for id in ids {
+                    match graph.node_index(&id) {
+                        Some(0) if self.tree => {}
+                        Some(i) if self.tree => atree::remove(graph, i),
+                        Some(i) => graph.remove_node(i),
+                        None => {}
+                    }
+                }
+                // A tree keeps its root, chosen when it was.
+                self.chosen = (self.tree && self.selected.contains(&0)).then_some(Chosen::Node(0));
+            }
+            Some(Chosen::Edge(k)) => {
+                graph.edges.remove(k);
+                self.chosen = None;
+            }
+            None => {}
+        }
+        self.selected.clear();
+        self.label = None;
+        self.drag = None;
+    }
+}
+
+/// `previous`'s choice and selection in `graph`, nodes followed by id.
+fn follow(previous: &GraphEdit, graph: &Graph) -> (Option<Chosen>, Vec<usize>) {
+    let find = |i: usize| {
+        previous
+            .edit
+            .nodes
+            .get(i)
+            .and_then(|n| graph.node_index(&n.id))
+    };
+    let chosen = match previous.chosen {
+        Some(Chosen::Node(i)) => find(i).map(Chosen::Node),
+        Some(Chosen::Edge(k)) => (k < graph.edges.len()).then_some(Chosen::Edge(k)),
+        None => None,
+    };
+    let mut selected: Vec<usize> = previous.selected.iter().filter_map(|&i| find(i)).collect();
+    selected.sort_unstable();
+    (chosen, selected)
+}
+
+/// Undo and redo, per file for the session; see docs/features/graph-layout.md#undo.
+#[derive(Default)]
+pub(super) struct History {
+    undo: Vec<Graph>,
+    redo: Vec<Graph>,
+}
+
+impl History {
+    /// Puts the graph back as it was before the last step (`back`), or after the next.
+    fn step(&mut self, edit: &mut GraphEdit, back: bool) {
+        let (from, to) = if back {
+            (&mut self.undo, &mut self.redo)
+        } else {
+            (&mut self.redo, &mut self.undo)
+        };
+        let Some(graph) = from.pop() else { return };
+        to.push(edit.edit.clone());
+        let (chosen, selected) = follow(edit, &graph);
+        edit.edit = graph;
+        edit.chosen = chosen;
+        edit.selected = selected;
+        edit.label = None;
+        edit.drag = None;
+        edit.replay = edit.edit != edit.saved;
+        edit.normalize();
+    }
+}
+
+/// A graph file's state for the session: its view, undo history and layout options.
+#[derive(Default)]
+pub(super) struct GraphSession {
+    pub(super) view: GraphView,
+    pub(super) history: History,
+    layout: graph_layout::Options,
+    /// The Layout panel is open.
+    panel: bool,
 }
 
 #[derive(Clone, Copy)]
 enum GraphDrag {
-    /// A node, held this far (in units) from its center.
-    Move(usize, (f64, f64)),
+    /// A node (and the others selected), held this far (in units) from its center, and
+    /// whether it has moved.
+    Move(usize, (f64, f64), bool),
+    /// A selection box from this point (in units), adding to the selection or not.
+    Select((f64, f64), bool),
     /// A rubber edge from a node's rim, and whether the pointer has left that node.
     Connect(usize, bool),
     /// An edge's end detached: its tip (true) or its start.
@@ -109,10 +235,18 @@ impl Default for GraphView {
     }
 }
 
-/// The text to write once nothing is being dragged or typed into.
-pub(super) fn graph_commit(ui: &Ui, edit: &mut GraphEdit) -> Option<String> {
+/// The text to write once nothing is being dragged or typed into; each write is an undo
+/// step, unless it is an undone or redone version.
+pub(super) fn graph_commit(ui: &Ui, edit: &mut GraphEdit, history: &mut History) -> Option<String> {
     let busy = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
     (!busy && edit.edit != edit.saved).then(|| {
+        if !std::mem::take(&mut edit.replay) {
+            history.undo.push(edit.saved.clone());
+            if history.undo.len() > HISTORY {
+                history.undo.remove(0);
+            }
+            history.redo.clear();
+        }
         edit.saved = edit.edit.clone();
         if edit.tree {
             atree::to_json(&edit.edit)
@@ -245,10 +379,10 @@ pub(super) fn canvas_graph(
     ui: &mut Ui,
     rect: Rect,
     inspected: &mut Inspected,
-    views: &mut HashMap<PathBuf, GraphView>,
+    sessions: &mut HashMap<PathBuf, GraphSession>,
     keys: bool,
 ) -> Option<String> {
-    let view = views.entry(inspected.path.clone()).or_default();
+    let session = sessions.entry(inspected.path.clone()).or_default();
     let edit = match &mut inspected.graph {
         Some(Ok(edit)) => edit,
         Some(Err(e)) => {
@@ -263,6 +397,8 @@ pub(super) fn canvas_graph(
         }
         None => return None,
     };
+    edit.normalize();
+    let view = &mut session.view;
     let response = ui.interact(rect, ui.id().with("graph_canvas"), Sense::click_and_drag());
     let pointer = ui.input(|i| i.pointer.interact_pos().or(i.pointer.hover_pos()));
     let shift = ui.input(|i| i.modifiers.shift);
@@ -461,33 +597,113 @@ pub(super) fn canvas_graph(
         && response.hovered()
         && let Some(p) = pointer
     {
-        if let Some((k, tip)) = end_at(&shapes(graph), p).filter(|_| !tree) {
+        let add = ui.input(|i| i.modifiers.command);
+        let under = node_at(&graph.nodes, p);
+        if add {
+            // Ctrl: a node in or out of the selection, or a box adding to it.
+            edit.drag = match under {
+                Some((i, _)) => {
+                    if let Some(at) = edit.selected.iter().position(|&j| j == i) {
+                        edit.selected.remove(at);
+                        if edit.chosen == Some(Chosen::Node(i)) {
+                            edit.chosen = edit.selected.first().copied().map(Chosen::Node);
+                        }
+                    } else {
+                        if !matches!(edit.chosen, Some(Chosen::Node(_))) {
+                            edit.selected.clear();
+                        }
+                        edit.selected.push(i);
+                        edit.selected.sort_unstable();
+                        edit.chosen = Some(Chosen::Node(i));
+                    }
+                    None
+                }
+                None => Some(GraphDrag::Select(to_units(p), true)),
+            };
+        } else if let Some((k, tip)) = end_at(&shapes(graph), p).filter(|_| !tree) {
             edit.drag = Some(GraphDrag::Detach(k, tip));
             edit.chosen = Some(Chosen::Edge(k));
-        } else if let Some((i, d)) = node_at(&graph.nodes, p) {
-            edit.drag = Some(if d >= BODY * r {
-                GraphDrag::Connect(i, false)
+        } else if let Some((i, d)) = under {
+            if d >= BODY * r {
+                edit.drag = Some(GraphDrag::Connect(i, false));
+                edit.chosen = Some(Chosen::Node(i));
+                edit.selected = vec![i];
             } else {
                 let (x, y) = to_units(p);
                 let n = &graph.nodes[i];
-                GraphDrag::Move(i, (x - n.x, y - n.y))
-            });
-            edit.chosen = Some(Chosen::Node(i));
-        } else {
-            edit.chosen = edge_at(&shapes(graph), p)
-                .filter(|_| !tree)
-                .map(Chosen::Edge);
+                edit.drag = Some(GraphDrag::Move(i, (x - n.x, y - n.y), false));
+                // Pressing a selected node keeps the selection, to move it all.
+                if !edit.selected.contains(&i) {
+                    edit.selected = vec![i];
+                }
+                edit.chosen = Some(Chosen::Node(i));
+            }
+        } else if let Some(k) = edge_at(&shapes(graph), p).filter(|_| !tree) {
+            edit.chosen = Some(Chosen::Edge(k));
             edit.drag = None;
+        } else {
+            edit.drag = Some(GraphDrag::Select(to_units(p), false));
         }
     }
+    edit.normalize();
+    let graph = &mut edit.edit;
     let down = ui.input(|i| i.pointer.primary_down());
     // The node a rubber edge would end on: any node, its start once the pointer has left it.
     let mut target = None;
     match (edit.drag, pointer) {
-        (Some(GraphDrag::Move(i, (ox, oy))), Some(p)) if down && i < graph.nodes.len() => {
+        (Some(GraphDrag::Move(i, (ox, oy), moved)), Some(p)) if down && i < graph.nodes.len() => {
+            // The other selected nodes keep their offsets from this one.
             let (x, y) = to_units(p);
-            graph.nodes[i].x = place(x - ox, shift);
-            graph.nodes[i].y = place(y - oy, shift);
+            let (nx, ny) = (place(x - ox, shift), place(y - oy, shift));
+            let (dx, dy) = (nx - graph.nodes[i].x, ny - graph.nodes[i].y);
+            if dx != 0.0 || dy != 0.0 {
+                for &j in edit.selected.iter().filter(|&&j| j != i) {
+                    let n = &mut graph.nodes[j];
+                    n.x = place(n.x + dx, false);
+                    n.y = place(n.y + dy, false);
+                }
+                graph.nodes[i].x = nx;
+                graph.nodes[i].y = ny;
+            }
+            edit.drag = Some(GraphDrag::Move(
+                i,
+                (ox, oy),
+                moved || dx != 0.0 || dy != 0.0,
+            ));
+        }
+        (Some(GraphDrag::Move(i, _, moved)), _) if !down => {
+            // A press on a selected node without moving selects only it.
+            if !moved && i < graph.nodes.len() {
+                edit.choose_only(i);
+            }
+            edit.drag = None;
+        }
+        (Some(GraphDrag::Select(from, add)), Some(p)) if !down => {
+            let start = to_screen(from.0, from.1);
+            if (p - start).length() < 4.0 {
+                // A click: nothing chosen, unless adding.
+                if !add {
+                    edit.chosen = None;
+                }
+            } else {
+                let area = Rect::from_two_pos(start, p);
+                let inside: Vec<usize> = (0..graph.nodes.len())
+                    .filter(|&i| area.contains(center(&graph.nodes[i])))
+                    .collect();
+                if !add {
+                    edit.selected.clear();
+                }
+                edit.selected.extend(inside);
+                edit.selected.sort_unstable();
+                edit.selected.dedup();
+                let kept =
+                    matches!(edit.chosen, Some(Chosen::Node(i)) if edit.selected.contains(&i));
+                if !kept {
+                    edit.chosen = edit.selected.first().copied().map(Chosen::Node);
+                }
+            }
+            edit.drag = None;
+            edit.normalize();
         }
         (Some(GraphDrag::Connect(i, left)), Some(p)) if i < graph.nodes.len() => {
             let under = node_at(&graph.nodes, p).map(|(j, _)| j);
@@ -553,22 +769,30 @@ pub(super) fn canvas_graph(
         ui.ctx().request_repaint();
     }
     let typing = ui.ctx().egui_wants_keyboard_input();
-    if keys
-        && !typing
-        && edit.label.is_none()
-        && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::X))
-    {
-        match edit.chosen.take() {
-            Some(Chosen::Node(0)) if tree => edit.chosen = Some(Chosen::Node(0)),
-            Some(Chosen::Node(i)) if tree && i < graph.nodes.len() => atree::remove(graph, i),
-            Some(Chosen::Node(i)) if i < graph.nodes.len() => graph.remove_node(i),
-            Some(Chosen::Edge(k)) if k < graph.edges.len() => {
-                graph.edges.remove(k);
+    if keys && !typing && edit.label.is_none() {
+        let (command, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
+        let pressed = |key| ui.input(|i| i.key_pressed(key));
+        if command && pressed(egui::Key::Z) {
+            session.history.step(edit, !shift);
+        } else if command && pressed(egui::Key::Y) {
+            session.history.step(edit, false);
+        } else if command && pressed(egui::Key::A) {
+            edit.selected = (0..edit.edit.nodes.len()).collect();
+            if !matches!(edit.chosen(), Some(Chosen::Node(_))) {
+                edit.chosen = (!edit.selected.is_empty()).then_some(Chosen::Node(0));
             }
-            _ => {}
+        } else if pressed(egui::Key::Escape) {
+            if session.panel {
+                session.panel = false;
+            } else {
+                edit.selected.clear();
+                edit.normalize();
+            }
+        } else if !command && (pressed(egui::Key::Delete) || pressed(egui::Key::X)) {
+            edit.remove_chosen();
         }
-        edit.drag = None;
     }
+    let graph = &mut edit.edit;
 
     // Grid: quarter lines while 8 px apart, unit lines, and the axes.
     let painter = ui.painter_at(rect);
@@ -696,7 +920,7 @@ pub(super) fn canvas_graph(
     }
     // The node under the pointer, or the one being moved.
     let hovered_node = match (edit.drag, pointer) {
-        (Some(GraphDrag::Move(i, _)), _) => Some(i),
+        (Some(GraphDrag::Move(i, _, _)), _) => Some(i),
         (None, Some(p)) if response.hovered() && end_dot.is_none() => {
             node_at(&graph.nodes, p).map(|(i, _)| i)
         }
@@ -720,6 +944,9 @@ pub(super) fn canvas_graph(
         }
         let stroke = match (edit.chosen == Some(Chosen::Node(i)), color) {
             (true, _) => Stroke::new(2.0, ACCENT),
+            (false, _) if edit.selected.contains(&i) => {
+                Stroke::new(2.0, ACCENT.gamma_multiply(0.55))
+            }
             // The root of a tree.
             (false, _) if tree && i == 0 => Stroke::new(2.0, TEXT_WEAK),
             (false, Some(color)) => Stroke::new(1.0, color),
@@ -790,11 +1017,12 @@ pub(super) fn canvas_graph(
         Align2::LEFT_BOTTOM,
         if tree {
             "Double-click to add a child · double-click a node to rename · drag a node's rim \
-             to add a child or onto a node to move it under · Delete or X removes · \
-             Shift snaps to 0.25"
+             to add a child or onto a node to move it under · drag on the grid or Ctrl+click to \
+             select · Delete or X removes · Shift snaps to 0.25"
         } else {
             "Double-click to add a node · double-click a node or edge to rename · \
-             drag a node's rim onto a node to connect · Delete or X removes · Shift snaps to 0.25"
+             drag a node's rim onto a node to connect · drag on the grid or Ctrl+click to \
+             select · Delete or X removes · Shift snaps to 0.25"
         },
         FontId::proportional(12.0),
         TEXT_WEAK,
@@ -834,7 +1062,184 @@ pub(super) fn canvas_graph(
             edit.label = None;
         }
     }
-    graph_commit(ui, edit)
+    // The selection box.
+    if let (Some(GraphDrag::Select(from, _)), Some(p)) = (edit.drag, pointer) {
+        let area = Rect::from_two_pos(to_screen(from.0, from.1), p);
+        painter.rect(
+            area,
+            0,
+            ACCENT.gamma_multiply(0.1),
+            Stroke::new(1.0, ACCENT),
+            egui::StrokeKind::Inside,
+        );
+    }
+    graph_toolbar(ui, rect, edit, session);
+    graph_commit(ui, edit, &mut session.history)
+}
+
+/// The toolbar's groups, in order; see docs/features/graph-layout.md#toolbar.
+const HISTORY_GROUP: usize = 0;
+const ALIGN_GROUP: usize = 1;
+const ARRANGE_GROUP: usize = 2;
+const LAYOUT_GROUP: usize = 3;
+
+/// The toolbar and the Layout panel; see docs/features/graph-layout.md#toolbar.
+fn graph_toolbar(ui: &mut Ui, rect: Rect, edit: &mut GraphEdit, session: &mut GraphSession) {
+    let selected = edit.selected.len();
+    let has_nodes = !edit.edit.nodes.is_empty();
+    let tool = |icon: Icon, name: &str, on: bool, enabled: bool| Tool {
+        glyph: Glyph::Icon(icon),
+        name: name.to_owned(),
+        on,
+        enabled,
+    };
+    let history = [
+        tool(Icon::Undo2, "Undo", false, !session.history.undo.is_empty()),
+        tool(Icon::Redo2, "Redo", false, !session.history.redo.is_empty()),
+    ];
+    let aligns = [
+        (Icon::AlignStartVertical, "Align left"),
+        (Icon::AlignCenterVertical, "Align horizontal centers"),
+        (Icon::AlignEndVertical, "Align right"),
+        (Icon::AlignStartHorizontal, "Align top"),
+        (Icon::AlignCenterHorizontal, "Align vertical centers"),
+        (Icon::AlignEndHorizontal, "Align bottom"),
+    ]
+    .map(|(icon, name)| tool(icon, name, false, selected >= 2));
+    let arrange = [
+        tool(
+            Icon::AlignHorizontalDistributeCenter,
+            "Distribute horizontally",
+            false,
+            selected >= 3,
+        ),
+        tool(
+            Icon::AlignVerticalDistributeCenter,
+            "Distribute vertically",
+            false,
+            selected >= 3,
+        ),
+        tool(Icon::Magnet, "Snap to grid", false, has_nodes),
+    ];
+    let layout = [tool(Icon::Network, "Layout", session.panel, has_nodes)];
+    let groups: [&[Tool]; 4] = [&history, &aligns, &arrange, &layout];
+    match toolbar(ui, rect, &groups) {
+        Some((HISTORY_GROUP, button)) => session.history.step(edit, button == 0),
+        Some((ALIGN_GROUP, button)) => {
+            let how = [
+                AlignNodes::Left,
+                AlignNodes::HorizontalCenters,
+                AlignNodes::Right,
+                AlignNodes::Top,
+                AlignNodes::VerticalCenters,
+                AlignNodes::Bottom,
+            ][button];
+            graph_layout::align(&mut edit.edit, &edit.selected, how);
+        }
+        Some((ARRANGE_GROUP, 2)) => {
+            let nodes = match edit.targets() {
+                all if all.is_empty() => (0..edit.edit.nodes.len()).collect(),
+                some => some,
+            };
+            graph_layout::snap(&mut edit.edit, &nodes);
+        }
+        Some((ARRANGE_GROUP, button)) => {
+            graph_layout::distribute(&mut edit.edit, &edit.selected, button == 0);
+        }
+        Some((LAYOUT_GROUP, _)) => session.panel = !session.panel,
+        _ => {}
+    }
+    if session.panel && has_nodes {
+        // Beside the Layout button: the toolbar's 8 px margin, 11 buttons and 3 gaps down.
+        let top = rect.top() + 8.0 + 11.0 * 32.0 + 3.0 * 8.0;
+        let left = rect.right() - 8.0 - 36.0 - 8.0 - PANEL;
+        layout_panel(ui, pos2(left, top), edit, &mut session.layout);
+    }
+}
+
+/// The Layout panel; see docs/features/graph-layout.md#layout.
+fn layout_panel(
+    ui: &mut Ui,
+    at: egui::Pos2,
+    edit: &mut GraphEdit,
+    options: &mut graph_layout::Options,
+) {
+    let tree = edit.tree;
+    egui::Area::new(ui.id().with("graph_layout_panel"))
+        .fixed_pos(at)
+        .order(egui::Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            Frame::new()
+                .fill(BG_PANEL)
+                .stroke(Stroke::new(1.0, STROKE))
+                .corner_radius(6)
+                .inner_margin(Margin::same(8))
+                .show(ui, |ui| {
+                    ui.set_width(PANEL - 16.0);
+                    property_style(ui);
+                    prop_row(ui, "Layout", |ui, width| {
+                        egui::ComboBox::from_id_salt("graph_layout_algorithm")
+                            .width(width - 8.0)
+                            .selected_text(options.algorithm.name(tree))
+                            .show_ui(ui, |ui| {
+                                for a in Algorithm::ALL {
+                                    ui.selectable_value(&mut options.algorithm, a, a.name(tree));
+                                }
+                            });
+                    });
+                    let algorithm = options.algorithm;
+                    if algorithm == Algorithm::Layered {
+                        prop_row(ui, "Direction", |ui, width| {
+                            egui::ComboBox::from_id_salt("graph_layout_direction")
+                                .width(width - 8.0)
+                                .selected_text(options.direction.name())
+                                .show_ui(ui, |ui| {
+                                    for d in Direction::ALL {
+                                        ui.selectable_value(&mut options.direction, d, d.name());
+                                    }
+                                });
+                        });
+                    }
+                    let spacing = |ui: &mut Ui, label: &str, value: &mut f64| {
+                        prop_row(ui, label, |ui, width| {
+                            let field = egui::DragValue::new(value)
+                                .range(0.5..=10.0)
+                                .speed(0.05)
+                                .fixed_decimals(2);
+                            ui.add_sized(vec2(width, 22.0), field);
+                        });
+                        *value = ((*value * 4.0).round() / 4.0).clamp(0.5, 10.0);
+                    };
+                    spacing(ui, "Node spacing", &mut options.node_spacing);
+                    let layered = algorithm == Algorithm::Layered;
+                    if layered || (algorithm == Algorithm::Circle && tree) {
+                        spacing(ui, "Layer spacing", &mut options.layer_spacing);
+                    }
+                    if algorithm == Algorithm::Grid {
+                        prop_row(ui, "Columns", |ui, width| {
+                            let field = egui::DragValue::new(&mut options.columns)
+                                .range(0..=100)
+                                .speed(0.1);
+                            ui.add_sized(vec2(width, 22.0), field);
+                        });
+                    }
+                    ui.add_space(6.0);
+                    let targets = edit.targets();
+                    let what = if targets.is_empty() {
+                        format!("All {} nodes", edit.edit.nodes.len())
+                    } else {
+                        format!("The {} selected nodes", targets.len())
+                    };
+                    ui.label(RichText::new(what).size(12.0).color(TEXT_WEAK));
+                    ui.add_space(4.0);
+                    let apply = egui::Button::new(RichText::new("Apply").color(BG_BAR))
+                        .fill(ACCENT)
+                        .min_size(vec2(ui.available_width(), 26.0));
+                    if ui.add(apply).clicked() {
+                        graph_layout::layout(&mut edit.edit, tree, &targets, options);
+                    }
+                });
+        });
 }
 
 /// The chosen node or edge, or the node list; returns the graph to write. See
@@ -842,7 +1247,7 @@ pub(super) fn canvas_graph(
 pub(super) fn graph_tab(
     ui: &mut Ui,
     inspected: &mut Inspected,
-    view: &mut GraphView,
+    session: &mut GraphSession,
 ) -> Option<String> {
     let edit = match &mut inspected.graph {
         Some(Ok(edit)) => edit,
@@ -855,10 +1260,9 @@ pub(super) fn graph_tab(
             return None;
         }
     };
-    edit.chosen = edit.chosen.filter(|c| match *c {
-        Chosen::Node(i) => i < edit.edit.nodes.len(),
-        Chosen::Edge(k) => k < edit.edit.edges.len(),
-    });
+    edit.chosen = edit.chosen();
+    edit.normalize();
+    let view = &mut session.view;
     egui::ScrollArea::vertical()
         .auto_shrink(false)
         .show(ui, |ui| {
@@ -871,6 +1275,10 @@ pub(super) fn graph_tab(
                     }
                 };
                 match edit.chosen {
+                    Some(Chosen::Node(_)) if edit.selected.len() >= 2 => {
+                        several_nodes(ui, edit);
+                        problems(ui);
+                    }
                     None => {
                         problems(ui);
                         if edit.tree {
@@ -890,7 +1298,59 @@ pub(super) fn graph_tab(
                 }
             });
         });
-    graph_commit(ui, edit)
+    edit.normalize();
+    graph_commit(ui, edit, &mut session.history)
+}
+
+/// Several selected nodes: Delete, one Color for all, and a row each; see
+/// docs/features/graph-layout.md#selection.
+fn several_nodes(ui: &mut Ui, edit: &mut GraphEdit) {
+    let count = edit.selected.len();
+    if pane_header(ui, &format!("{count} nodes"), "Delete nodes", true) {
+        edit.remove_chosen();
+        return;
+    }
+    let first = edit.selected[0];
+    let mut color = edit.edit.nodes[first].color.clone();
+    let before = color.clone();
+    color_row(ui, &mut color, true);
+    if color != before {
+        for &i in &edit.selected {
+            edit.edit.nodes[i].color = color.clone();
+        }
+    }
+    ui.add_space(8.0);
+    let mut only = None;
+    for &i in &edit.selected {
+        let n = &edit.edit.nodes[i];
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), 26.0), Sense::click());
+        if response.hovered() {
+            ui.painter().rect_filled(rect, 4, BG_HEADER);
+        }
+        ui.painter().text(
+            rect.left_center() + vec2(6.0, 0.0),
+            Align2::LEFT_CENTER,
+            &n.id,
+            FontId::monospace(13.0),
+            TEXT,
+        );
+        if !n.label.is_empty() {
+            ui.painter().text(
+                rect.right_center() - vec2(6.0, 0.0),
+                Align2::RIGHT_CENTER,
+                &n.label,
+                FontId::proportional(13.0),
+                TEXT_WEAK,
+            );
+        }
+        if response.clicked() {
+            only = Some(i);
+        }
+    }
+    if let Some(i) = only {
+        edit.choose_only(i);
+    }
 }
 
 /// A tree's outline, depth first and indented, to choose a node, and Add child; see
@@ -1004,13 +1464,7 @@ fn node_fields(ui: &mut Ui, edit: &mut GraphEdit, i: usize) {
     let graph = &mut edit.edit;
     // A tree's root stays; removing a node there removes what is under it.
     if pane_header(ui, "Node", "Delete node", !(tree && i == 0)) {
-        if tree {
-            atree::remove(graph, i);
-        } else {
-            graph.remove_node(i);
-        }
-        edit.chosen = None;
-        edit.label = None;
+        edit.remove_chosen();
         return;
     }
     let old = graph.nodes[i].id.clone();

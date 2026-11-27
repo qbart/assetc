@@ -23,6 +23,7 @@ mod fileops;
 mod font;
 mod gizmo;
 mod gradient;
+mod graph_layout;
 mod groups;
 mod hash;
 mod hdr;

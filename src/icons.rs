@@ -81,10 +81,22 @@ pub enum Icon {
     X,
     Sparkles,
     Binary,
+    AlignStartVertical,
+    AlignCenterVertical,
+    AlignEndVertical,
+    AlignStartHorizontal,
+    AlignCenterHorizontal,
+    AlignEndHorizontal,
+    AlignHorizontalDistributeCenter,
+    AlignVerticalDistributeCenter,
+    Magnet,
+    Network,
+    Undo2,
+    Redo2,
 }
 
 // Same order as `Icon`.
-const SVGS: [(&str, &str); 76] = [
+const SVGS: [(&str, &str); 88] = [
     ("aperture", include_str!("../assets/icons/aperture.svg")),
     ("box", include_str!("../assets/icons/box.svg")),
     (
@@ -209,6 +221,42 @@ const SVGS: [(&str, &str); 76] = [
     ("x", include_str!("../assets/icons/x.svg")),
     ("sparkles", include_str!("../assets/icons/sparkles.svg")),
     ("binary", include_str!("../assets/icons/binary.svg")),
+    (
+        "align-start-vertical",
+        include_str!("../assets/icons/align-start-vertical.svg"),
+    ),
+    (
+        "align-center-vertical",
+        include_str!("../assets/icons/align-center-vertical.svg"),
+    ),
+    (
+        "align-end-vertical",
+        include_str!("../assets/icons/align-end-vertical.svg"),
+    ),
+    (
+        "align-start-horizontal",
+        include_str!("../assets/icons/align-start-horizontal.svg"),
+    ),
+    (
+        "align-center-horizontal",
+        include_str!("../assets/icons/align-center-horizontal.svg"),
+    ),
+    (
+        "align-end-horizontal",
+        include_str!("../assets/icons/align-end-horizontal.svg"),
+    ),
+    (
+        "align-horizontal-distribute-center",
+        include_str!("../assets/icons/align-horizontal-distribute-center.svg"),
+    ),
+    (
+        "align-vertical-distribute-center",
+        include_str!("../assets/icons/align-vertical-distribute-center.svg"),
+    ),
+    ("magnet", include_str!("../assets/icons/magnet.svg")),
+    ("network", include_str!("../assets/icons/network.svg")),
+    ("undo-2", include_str!("../assets/icons/undo-2.svg")),
+    ("redo-2", include_str!("../assets/icons/redo-2.svg")),
 ];
 
 // Rendered white so `Image::tint` can color them.

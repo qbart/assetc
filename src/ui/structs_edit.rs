@@ -38,7 +38,7 @@ pub(super) enum StructsSave {
 
 /// The asset being edited, from whichever editor holds it.
 enum Host<'a> {
-    Graph(&'a mut graph::GraphEdit),
+    Graph(&'a mut graph::GraphEdit, &'a mut graph::History),
     Model(&'a mut MeshEdit),
     Material(&'a mut MaterialEdit),
     Custom(&'a mut super::custom::CustomEdit),
@@ -62,7 +62,7 @@ impl Host<'_> {
             "One value for the whole file. Choose File under Values of.",
         );
         match self {
-            Self::Graph(g) if g.tree => &[
+            Self::Graph(g, _) if g.tree => &[
                 (
                     "Tree structs",
                     "tree",
@@ -70,7 +70,7 @@ impl Host<'_> {
                 ),
                 NODE,
             ],
-            Self::Graph(_) => &[
+            Self::Graph(_, _) => &[
                 (
                     "Graph structs",
                     "graph",
@@ -111,9 +111,9 @@ impl Host<'_> {
 
     fn attachments(&mut self, scope: usize) -> &mut Vec<Attachment> {
         match (self, scope) {
-            (Self::Graph(g), 0) => &mut g.edit.structs,
-            (Self::Graph(g), 1) => &mut g.edit.node_structs,
-            (Self::Graph(g), _) => &mut g.edit.edge_structs,
+            (Self::Graph(g, _), 0) => &mut g.edit.structs,
+            (Self::Graph(g, _), 1) => &mut g.edit.node_structs,
+            (Self::Graph(g, _), _) => &mut g.edit.edge_structs,
             (Self::Model(m), _) => &mut m.edit.structs,
             (Self::Material(m), _) => &mut m.source_mut().structs,
             (Self::Custom(c), _) => &mut c.edit.structs,
@@ -128,9 +128,9 @@ impl Host<'_> {
     /// Every owner's values in `scope`.
     fn owners(&mut self, scope: usize) -> Vec<&mut Values> {
         match (self, scope) {
-            (Self::Graph(g), 0) => vec![&mut g.edit.values],
-            (Self::Graph(g), 1) => g.edit.nodes.iter_mut().map(|n| &mut n.values).collect(),
-            (Self::Graph(g), _) => g.edit.edges.iter_mut().map(|e| &mut e.values).collect(),
+            (Self::Graph(g, _), 0) => vec![&mut g.edit.values],
+            (Self::Graph(g, _), 1) => g.edit.nodes.iter_mut().map(|n| &mut n.values).collect(),
+            (Self::Graph(g, _), _) => g.edit.edges.iter_mut().map(|e| &mut e.values).collect(),
             (Self::Model(m), _) => vec![&mut m.edit.values],
             (Self::Material(m), _) => vec![&mut m.source_mut().values],
             (Self::Custom(c), _) => vec![&mut c.edit.values],
@@ -156,7 +156,7 @@ impl Host<'_> {
             }]
         };
         match self {
-            Self::Graph(g) => {
+            Self::Graph(g, _) => {
                 let places = g.tree.then(|| vec![0; g.edit.nodes.len()]);
                 let mut scopes = g.edit.scopes(places.as_deref());
                 // Tree nodes are told apart by their labels here, not by place.
@@ -182,7 +182,7 @@ impl Host<'_> {
     /// The owner whose values are edited: its scope, its place there and its label.
     fn owner(&self, view: &StructsView) -> (usize, usize, String) {
         match self {
-            Self::Graph(g) => match g.chosen() {
+            Self::Graph(g, _) => match g.chosen() {
                 None if g.tree => (0, 0, "tree".into()),
                 None => (0, 0, "graph".into()),
                 Some(Chosen::Node(i)) => (1, i, format!("node {}", g.edit.nodes[i].id)),
@@ -224,7 +224,7 @@ impl Host<'_> {
 
     fn commit(&mut self, ui: &Ui) -> Option<StructsSave> {
         match self {
-            Self::Graph(g) => graph::graph_commit(ui, g).map(StructsSave::File),
+            Self::Graph(g, history) => graph::graph_commit(ui, g, history).map(StructsSave::File),
             Self::Model(m) => mesh_commit(ui, m).map(|a| StructsSave::Sidecar(Box::new(a))),
             Self::Material(m) => {
                 material_edit::material_commit(ui, m).map(|s| StructsSave::File(s.to_toml()))
@@ -257,6 +257,7 @@ pub(super) fn structs_tab(
     inspected: &mut Inspected,
     view: &mut StructsView,
     input: Option<&Path>,
+    history: &mut graph::History,
 ) -> Option<StructsSave> {
     // An atlas keeps its structs in the folder's atlas.toml, the others next to their file.
     let dir = match &inspected.atlas {
@@ -269,7 +270,7 @@ pub(super) fn structs_tab(
     };
     let cache = &mut inspected.structs_cache;
     let mut host = if let Some(Ok(g)) = &mut inspected.graph {
-        Host::Graph(g)
+        Host::Graph(g, history)
     } else if let Some(Ok(m)) = &mut inspected.mesh {
         Host::Model(m)
     } else if let Some(Ok(m)) = &mut inspected.material {

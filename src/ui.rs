@@ -68,7 +68,7 @@ use crate::{chart, preview3d};
 use anim::{AnimPlayer, canvas_compiled_animation};
 use config_dialog::{ConfigDialog, DialogEnd, config_dialog};
 use data::{DataEdit, PreparedData, canvas_data, instances_tab};
-use graph::{GraphEdit, GraphView, canvas_graph, graph_tab};
+use graph::{GraphEdit, GraphSession, canvas_graph, graph_tab};
 use material_edit::{MaterialEdit, PreparedMaterial, canvas_material, material_tab};
 use pack_view::{PackView, pack_view};
 use schema::{SchemaEdit, canvas_schema, types_tab};
@@ -142,7 +142,7 @@ struct UiState {
     /// The Structs tab's state, by file; see docs/features/structs.md#structs-tab.
     structs_views: HashMap<PathBuf, structs_edit::StructsView>,
     /// Each graph's view, by path; see docs/features/graphs.md#canvas.
-    graph_views: HashMap<PathBuf, GraphView>,
+    graph_views: HashMap<PathBuf, GraphSession>,
     /// The animation timeline under a model; see docs/features/animation-events.md#timeline.
     timeline: Timeline,
     /// Compiled meshes in 3D (else their chunks), and the chunk shown.
@@ -3843,8 +3843,8 @@ fn right_sidebar(
                 (InspectorTab::Gradients, Some(_), Some(_)) => placeholder(ui, "No gradients"),
                 (InspectorTab::Colors, Some(_), Some(_)) => placeholder(ui, "No colors"),
                 (InspectorTab::Graph | InspectorTab::Tree, Some(inspected), Some(_)) => {
-                    let view = state.graph_views.entry(inspected.path.clone()).or_default();
-                    if let Some(graph) = graph_tab(ui, inspected, view) {
+                    let session = state.graph_views.entry(inspected.path.clone()).or_default();
+                    if let Some(graph) = graph_tab(ui, inspected, session) {
                         match std::fs::write(&inspected.path, graph) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
@@ -3889,7 +3889,13 @@ fn right_sidebar(
                         .structs_views
                         .entry(inspected.path.clone())
                         .or_default();
-                    let save = structs_edit::structs_tab(ui, inspected, view, input.as_deref());
+                    let history = &mut state
+                        .graph_views
+                        .entry(inspected.path.clone())
+                        .or_default()
+                        .history;
+                    let save =
+                        structs_edit::structs_tab(ui, inspected, view, input.as_deref(), history);
                     let written = match save {
                         None => None,
                         Some(structs_edit::StructsSave::File(text)) => {
