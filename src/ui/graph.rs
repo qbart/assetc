@@ -770,13 +770,30 @@ pub(super) fn canvas_graph(
     }
     let typing = ui.ctx().egui_wants_keyboard_input();
     if keys && !typing && edit.label.is_none() {
-        let (command, shift) = ui.input(|i| (i.modifiers.command, i.modifiers.shift));
         let pressed = |key| ui.input(|i| i.key_pressed(key));
-        if command && pressed(egui::Key::Z) {
+        // `Ctrl` (and `Shift`) held with `key`, as the key's event or the frame saw them:
+        // a quick press can come and go within one frame.
+        let shortcut = |key: egui::Key| {
+            ui.input(|i| {
+                i.events.iter().find_map(|e| match e {
+                    egui::Event::Key {
+                        key: k,
+                        pressed: true,
+                        modifiers,
+                        ..
+                    } if *k == key && (modifiers.command || i.modifiers.command) => {
+                        Some(modifiers.shift || i.modifiers.shift)
+                    }
+                    _ => None,
+                })
+            })
+        };
+        let command = ui.input(|i| i.modifiers.command);
+        if let Some(shift) = shortcut(egui::Key::Z) {
             session.history.step(edit, !shift);
-        } else if command && pressed(egui::Key::Y) {
+        } else if shortcut(egui::Key::Y).is_some() {
             session.history.step(edit, false);
-        } else if command && pressed(egui::Key::A) {
+        } else if shortcut(egui::Key::A).is_some() {
             edit.selected = (0..edit.edit.nodes.len()).collect();
             if !matches!(edit.chosen(), Some(Chosen::Node(_))) {
                 edit.chosen = (!edit.selected.is_empty()).then_some(Chosen::Node(0));
