@@ -342,6 +342,7 @@ dependencies = [
  "assetc",
  "assetc-atlas",
  "assetc-colors",
+ "assetc-noise",
  "base64 0.23.1",
  "bevy",
  "bevy_egui",
@@ -368,6 +369,13 @@ dependencies = [
  "assetc",
  "bevy",
  "imgio",
+]
+
+[[package]]
+name = "assetc-noise"
+version = "0.4.0"
+dependencies = [
+ "assetc-colors",
 ]
 
 [[package]]

@@ -1,275 +1,11 @@
-//! Procedural `.anoise` textures: generators, modifiers and the file format.
-//! See docs/spec/anoise.md; parameters are declared once per type in tables, and parsing,
-//! writing and the editor are driven by them.
+//! `.anoise` files and modifier tables: reading and writing. See docs/spec/anoise.md; the
+//! generators themselves are the assetc-noise crate (docs/features/noise-crate.md).
 
-use std::f64::consts::{FRAC_1_SQRT_2, TAU};
-
-use crate::texture::Image;
-
-// Parameters and color modifiers are assetc-colors'; see docs/features/colors.md.
-pub use assetc_colors::modifier::{
-    Modifier, ModifierKind, ParamKind, ParamSpec, Params, Value, apply_modifiers,
+// Generators, parameters and color modifiers; see docs/features/noise-crate.md.
+pub use assetc_noise::{
+    GeneratorKind, MAX_SIZE, MIN_SIZE, Modifier, ModifierKind, Noise, ParamKind, ParamSpec, Params,
+    Value, apply_modifiers,
 };
-use assetc_colors::modifier::{choice, float, int};
-
-const SEED: ParamSpec = int("seed", "Seed", 0, u32::MAX as i64, 0);
-const BASIS: ParamSpec = choice("basis", "Basis", &["value", "perlin", "simplex"], 1);
-const INTERPOLATION: ParamSpec = choice(
-    "interpolation",
-    "Interpolation",
-    &["linear", "cubic", "quintic"],
-    2,
-);
-const fn frequency_x(default: i64) -> ParamSpec {
-    int("frequency_x", "Frequency X", 1, 256, default)
-}
-const fn frequency_y(default: i64) -> ParamSpec {
-    int("frequency_y", "Frequency Y", 1, 256, default)
-}
-const TRANSLATE_X: ParamSpec = float("translate_x", "Translate X", 0.0, 1.0, 0.0);
-const TRANSLATE_Y: ParamSpec = float("translate_y", "Translate Y", 0.0, 1.0, 0.0);
-const fn octaves(default: i64) -> ParamSpec {
-    int("octaves", "Octaves", 1, 8, default)
-}
-const LACUNARITY: ParamSpec = int("lacunarity", "Lacunarity", 2, 4, 2);
-const GAIN: ParamSpec = float("gain", "Gain", 0.0, 1.0, 0.5);
-const DIMENSION: ParamSpec = float("dimension", "Dimension", 0.0, 2.0, 1.0);
-const WARP: ParamSpec = float("warp", "Warp", 0.0, 4.0, 0.0);
-
-const GENERATOR_CHECKERBOARD: &[ParamSpec] = &[
-    int("cells_x", "Cells X", 1, 256, 8),
-    int("cells_y", "Cells Y", 1, 256, 8),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    ParamSpec {
-        key: "color_a",
-        label: "Color A",
-        kind: ParamKind::Gray { default: 0.0 },
-    },
-    ParamSpec {
-        key: "color_b",
-        label: "Color B",
-        kind: ParamKind::Gray { default: 1.0 },
-    },
-];
-const GENERATOR_UNIFORM: &[ParamSpec] = &[SEED];
-const GENERATOR_VALUE: &[ParamSpec] = &[
-    SEED,
-    INTERPOLATION,
-    frequency_x(8),
-    frequency_y(8),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    octaves(1),
-    LACUNARITY,
-    GAIN,
-    WARP,
-];
-const GENERATOR_LATTICE: &[ParamSpec] = &[
-    SEED,
-    frequency_x(8),
-    frequency_y(8),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    octaves(1),
-    LACUNARITY,
-    GAIN,
-    WARP,
-];
-const GENERATOR_FBM: &[ParamSpec] = &[
-    SEED,
-    BASIS,
-    frequency_x(4),
-    frequency_y(4),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    octaves(5),
-    LACUNARITY,
-    GAIN,
-    WARP,
-];
-const GENERATOR_VORONOI: &[ParamSpec] = &[
-    SEED,
-    frequency_x(8),
-    frequency_y(8),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    float("jitter", "Jitter", 0.0, 1.0, 1.0),
-    choice(
-        "metric",
-        "Metric",
-        &["euclidean", "manhattan", "chebyshev"],
-        0,
-    ),
-    choice("output", "Output", &["f1", "f2", "edge", "cell"], 0),
-    WARP,
-];
-const GENERATOR_PERLIN_WORLEY: &[ParamSpec] = &[
-    SEED,
-    frequency_x(4),
-    frequency_y(4),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    octaves(4),
-    GAIN,
-    int("worley_octaves", "Worley octaves", 1, 4, 3),
-    WARP,
-];
-const GENERATOR_MUSGRAVE: &[ParamSpec] = &[
-    SEED,
-    BASIS,
-    frequency_x(4),
-    frequency_y(4),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    octaves(6),
-    LACUNARITY,
-    DIMENSION,
-    WARP,
-];
-const GENERATOR_RIDGED: &[ParamSpec] = &[
-    SEED,
-    BASIS,
-    frequency_x(4),
-    frequency_y(4),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    octaves(6),
-    LACUNARITY,
-    DIMENSION,
-    float("offset", "Offset", 0.0, 2.0, 1.0),
-    float("gain", "Gain", 0.0, 4.0, 2.0),
-    WARP,
-];
-const GENERATOR_CURL: &[ParamSpec] = &[
-    SEED,
-    BASIS,
-    frequency_x(4),
-    frequency_y(4),
-    TRANSLATE_X,
-    TRANSLATE_Y,
-    octaves(2),
-    LACUNARITY,
-    GAIN,
-    WARP,
-];
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum GeneratorKind {
-    Checkerboard,
-    Uniform,
-    Value,
-    #[default]
-    Perlin,
-    Simplex,
-    Fbm,
-    Voronoi,
-    PerlinWorley,
-    Musgrave,
-    Ridged,
-    Curl,
-}
-
-impl GeneratorKind {
-    pub const ALL: [Self; 11] = [
-        Self::Checkerboard,
-        Self::Uniform,
-        Self::Value,
-        Self::Perlin,
-        Self::Simplex,
-        Self::Fbm,
-        Self::Voronoi,
-        Self::PerlinWorley,
-        Self::Musgrave,
-        Self::Ridged,
-        Self::Curl,
-    ];
-
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Checkerboard => "Checkerboard",
-            Self::Uniform => "Uniform",
-            Self::Value => "Value",
-            Self::Perlin => "Perlin",
-            Self::Simplex => "Simplex",
-            Self::Fbm => "fBm",
-            Self::Voronoi => "Voronoi",
-            Self::PerlinWorley => "Perlin-Worley",
-            Self::Musgrave => "Musgrave",
-            Self::Ridged => "Ridged",
-            Self::Curl => "Curl",
-        }
-    }
-
-    /// The `type` value in the file.
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Checkerboard => "pattern/checkerboard",
-            Self::Uniform => "noise/uniform",
-            Self::Value => "noise/value",
-            Self::Perlin => "noise/perlin",
-            Self::Simplex => "noise/simplex",
-            Self::Fbm => "noise/fbm",
-            Self::Voronoi => "noise/voronoi",
-            Self::PerlinWorley => "noise/perlin-worley",
-            Self::Musgrave => "noise/musgrave",
-            Self::Ridged => "noise/ridged",
-            Self::Curl => "noise/curl",
-        }
-    }
-
-    /// File name for a new file: the last part of the type.
-    pub fn file_stem(self) -> &'static str {
-        self.key().rsplit('/').next().unwrap_or("noise")
-    }
-
-    pub fn specs(self) -> &'static [ParamSpec] {
-        match self {
-            Self::Checkerboard => GENERATOR_CHECKERBOARD,
-            Self::Uniform => GENERATOR_UNIFORM,
-            Self::Value => GENERATOR_VALUE,
-            Self::Perlin | Self::Simplex => GENERATOR_LATTICE,
-            Self::Fbm => GENERATOR_FBM,
-            Self::Voronoi => GENERATOR_VORONOI,
-            Self::PerlinWorley => GENERATOR_PERLIN_WORLEY,
-            Self::Musgrave => GENERATOR_MUSGRAVE,
-            Self::Ridged => GENERATOR_RIDGED,
-            Self::Curl => GENERATOR_CURL,
-        }
-    }
-
-    /// The table holding its parameters, e.g. `noise.perlin`; see
-    /// docs/spec/anoise.md#generator-sections.
-    pub fn section(self) -> String {
-        self.key().replace('/', ".")
-    }
-
-    fn from_key(key: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|k| k.key() == key)
-    }
-
-    fn index(self) -> usize {
-        Self::ALL.iter().position(|k| *k == self).unwrap_or(0)
-    }
-}
-
-/// An `.anoise` file.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Noise {
-    pub kind: GeneratorKind,
-    pub size: u32,
-    /// Parameters of `kind`.
-    pub params: Params,
-    /// Kept parameters of other generators, in [`GeneratorKind::ALL`] order.
-    pub kept: Vec<(GeneratorKind, Params)>,
-    pub modifiers: Vec<Modifier>,
-}
-
-impl Default for Noise {
-    fn default() -> Self {
-        Self::new(GeneratorKind::default())
-    }
-}
 
 /// Reads `specs` from `table` (removing them); missing keys get defaults.
 fn take_params(specs: &[ParamSpec], table: &mut toml::Table) -> Result<Params, String> {
@@ -337,141 +73,85 @@ fn in_range(key: &str, v: f64, min: f64, max: f64) -> Result<(), String> {
     }
 }
 
-impl Noise {
-    pub fn new(kind: GeneratorKind) -> Self {
-        Self {
-            kind,
-            size: 512,
-            params: Params::defaults(kind.specs()),
-            kept: Vec::new(),
-            modifiers: Vec::new(),
+/// Reads an `.anoise` file.
+pub fn parse(text: &str) -> Result<Noise, String> {
+    let mut table: toml::Table = text
+        .parse()
+        .map_err(|e: toml::de::Error| e.message().to_owned())?;
+    let kind = match table.remove("type") {
+        None => GeneratorKind::default(),
+        Some(v) => v
+            .as_str()
+            .and_then(GeneratorKind::from_key)
+            .ok_or_else(|| format!("unknown type {v}"))?,
+    };
+    let size = match table.remove("size") {
+        None => 512,
+        Some(v) => {
+            let v = v.as_integer().ok_or("size must be an integer")?;
+            in_range("size", v as f64, MIN_SIZE as f64, MAX_SIZE as f64)?;
+            v as u32
         }
-    }
-
-    /// Switches the generator, keeping the current parameters and restoring `kind`'s.
-    pub fn set_kind(&mut self, kind: GeneratorKind) {
-        if kind == self.kind {
-            return;
-        }
-        let params = match self.kept.iter().position(|(k, _)| *k == kind) {
-            Some(i) => self.kept.remove(i).1,
-            None => Params::defaults(kind.specs()),
+    };
+    let modifiers = match table.remove("modifiers") {
+        None => Vec::new(),
+        Some(value) => parse_modifiers(value)?,
+    };
+    let mut sections = Vec::new();
+    for (group, value) in table {
+        let toml::Value::Table(group_table) = value else {
+            return Err(format!(
+                "unknown key {group} (parameters go in [{}])",
+                kind.section()
+            ));
         };
-        let old = std::mem::replace(&mut self.params, params);
-        // All-default parameters are not written, so there is nothing to keep.
-        if old != Params::defaults(self.kind.specs()) {
-            self.kept.push((self.kind, old));
-            self.kept.sort_by_key(|(k, _)| k.index());
-        }
-        self.kind = kind;
-    }
-
-    pub fn parse(text: &str) -> Result<Self, String> {
-        let mut table: toml::Table = text
-            .parse()
-            .map_err(|e: toml::de::Error| e.message().to_owned())?;
-        let kind = match table.remove("type") {
-            None => GeneratorKind::default(),
-            Some(v) => v
-                .as_str()
-                .and_then(GeneratorKind::from_key)
-                .ok_or_else(|| format!("unknown type {v}"))?,
-        };
-        let size = match table.remove("size") {
-            None => 512,
-            Some(v) => {
-                let v = v.as_integer().ok_or("size must be an integer")?;
-                in_range("size", v as f64, 1.0, 4096.0)?;
-                v as u32
-            }
-        };
-        let modifiers = match table.remove("modifiers") {
-            None => Vec::new(),
-            Some(value) => parse_modifiers(value)?,
-        };
-        let mut sections = Vec::new();
-        for (group, value) in table {
-            let toml::Value::Table(group_table) = value else {
-                return Err(format!(
-                    "unknown key {group} (parameters go in [{}])",
-                    kind.section()
-                ));
+        for (name, value) in group_table {
+            let section = format!("{group}.{name}");
+            let generator = GeneratorKind::from_key(&format!("{group}/{name}"))
+                .ok_or_else(|| format!("unknown section [{section}]"))?;
+            let toml::Value::Table(mut values) = value else {
+                return Err(format!("[{section}] must be a table"));
             };
-            for (name, value) in group_table {
-                let section = format!("{group}.{name}");
-                let generator = GeneratorKind::from_key(&format!("{group}/{name}"))
-                    .ok_or_else(|| format!("unknown section [{section}]"))?;
-                let toml::Value::Table(mut values) = value else {
-                    return Err(format!("[{section}] must be a table"));
-                };
-                let params = take_params(generator.specs(), &mut values)
-                    .map_err(|e| format!("[{section}] {e}"))?;
-                if let Some(key) = values.keys().next() {
-                    return Err(format!("[{section}] has no parameter {key}"));
-                }
-                sections.push((generator, params));
+            let params = take_params(generator.specs(), &mut values)
+                .map_err(|e| format!("[{section}] {e}"))?;
+            if let Some(key) = values.keys().next() {
+                return Err(format!("[{section}] has no parameter {key}"));
             }
-        }
-        let params = match sections.iter().position(|(k, _)| *k == kind) {
-            Some(i) => sections.remove(i).1,
-            None => Params::defaults(kind.specs()),
-        };
-        sections.retain(|(k, p)| *p != Params::defaults(k.specs()));
-        sections.sort_by_key(|(k, _)| k.index());
-        Ok(Self {
-            kind,
-            size,
-            params,
-            kept: sections,
-            modifiers,
-        })
-    }
-
-    /// The written form, see docs/spec/anoise.md#written-form.
-    pub fn to_toml(&self) -> String {
-        let mut out = format!(
-            "type = {}\nsize = {}\n\n[{}]\n",
-            toml::Value::String(self.kind.key().into()),
-            self.size,
-            self.kind.section()
-        );
-        write_params(&self.params, self.kind.specs(), &mut out);
-        for (kind, params) in &self.kept {
-            if *params != Params::defaults(kind.specs()) {
-                out.push_str(&format!("\n[{}]\n", kind.section()));
-                write_params(params, kind.specs(), &mut out);
-            }
-        }
-        write_modifiers(&self.modifiers, &mut out);
-        out
-    }
-
-    /// Whether the generated image has color (otherwise R = G = B).
-    pub fn has_color(&self) -> bool {
-        self.kind == GeneratorKind::Curl
-            || self
-                .modifiers
-                .iter()
-                .any(|m| m.enabled && m.kind == ModifierKind::Colorize)
-    }
-
-    /// The image, see docs/spec/anoise.md#generated-image.
-    pub fn generate(&self) -> Image {
-        let size = self.size as usize;
-        let mut pixels = generate_field(self.kind, &self.params, size);
-        apply_modifiers(&self.modifiers, &mut pixels, size, size);
-        Image {
-            width: self.size,
-            height: self.size,
-            pixels: pixels
-                .iter()
-                .flat_map(|c| {
-                    let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
-                    [r, g, b, 255]
-                })
-                .collect(),
+            sections.push((generator, params));
         }
     }
+    let params = match sections.iter().position(|(k, _)| *k == kind) {
+        Some(i) => sections.remove(i).1,
+        None => Params::defaults(kind.specs()),
+    };
+    sections.retain(|(k, p)| *p != Params::defaults(k.specs()));
+    sections.sort_by_key(|(k, _)| k.index());
+    Ok(Noise {
+        kind,
+        size,
+        params,
+        kept: sections,
+        modifiers,
+    })
+}
+
+/// The written form, see docs/spec/anoise.md#written-form.
+pub fn to_toml(noise: &Noise) -> String {
+    let mut out = format!(
+        "type = {}\nsize = {}\n\n[{}]\n",
+        toml::Value::String(noise.kind.key().into()),
+        noise.size,
+        noise.kind.section()
+    );
+    write_params(&noise.params, noise.kind.specs(), &mut out);
+    for (kind, params) in &noise.kept {
+        if *params != Params::defaults(kind.specs()) {
+            out.push_str(&format!("\n[{}]\n", kind.section()));
+            write_params(params, kind.specs(), &mut out);
+        }
+    }
+    write_modifiers(&noise.modifiers, &mut out);
+    out
 }
 
 /// A `modifiers` array of tables, as in `.anoise` files and `.amod` sidecars.
@@ -541,438 +221,9 @@ fn parse_modifier(item: toml::Value) -> Result<Modifier, String> {
     })
 }
 
-// ---- Hashing --------------------------------------------------------------------------
-
-const SECOND: u32 = 0x5bd1e995;
-
-pub fn splitmix64(z: u64) -> u64 {
-    let z = z.wrapping_add(0x9E3779B97F4A7C15);
-    let z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-    let z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-    z ^ (z >> 31)
-}
-
-fn hash(x: u32, y: u32, s: u32) -> u64 {
-    splitmix64(splitmix64((s as u64) << 32 | x as u64) ^ y as u64)
-}
-
-fn hash4(i: i64, j: i64, k: i64, l: i64, s: u32) -> u64 {
-    let h = splitmix64(s as u64 ^ i as u64);
-    let h = splitmix64(h ^ j as u64);
-    let h = splitmix64(h ^ k as u64);
-    splitmix64(h ^ l as u64)
-}
-
-fn unit(h: u64) -> f64 {
-    (h >> 40) as f64 / (1u64 << 24) as f64
-}
-
-// ---- Basic noises ---------------------------------------------------------------------
-
-/// Lattice periods: cells across and down the image.
-type Periods = (u64, u64);
-
-#[derive(Clone, Copy)]
-enum Curve {
-    Linear,
-    Cubic,
-    Quintic,
-}
-
-impl Curve {
-    const ALL: [Self; 3] = [Self::Linear, Self::Cubic, Self::Quintic];
-
-    fn apply(self, t: f64) -> f64 {
-        match self {
-            Self::Linear => t,
-            Self::Cubic => t * t * (3.0 - 2.0 * t),
-            Self::Quintic => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Basis {
-    Value(Curve),
-    Perlin,
-    Simplex,
-}
-
-fn lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
-
-fn wrap(i: i64, period: u64) -> u32 {
-    i.rem_euclid(period as i64) as u32
-}
-
-fn interpolate(x: f64, y: f64, curve: Curve, corner: impl Fn(i64, i64, f64, f64) -> f64) -> f64 {
-    let (i, j) = (x.floor() as i64, y.floor() as i64);
-    let (fx, fy) = (x - i as f64, y - j as f64);
-    let at = |di: i64, dj: i64| corner(i + di, j + dj, fx - di as f64, fy - dj as f64);
-    let (tx, ty) = (curve.apply(fx), curve.apply(fy));
-    lerp(
-        lerp(at(0, 0), at(1, 0), tx),
-        lerp(at(0, 1), at(1, 1), tx),
-        ty,
-    )
-}
-
-/// Basic noise of `basis` with periods `(p, q)` at image position `(u, v)`, in 0..1.
-fn basic(basis: Basis, u: f64, v: f64, (p, q): Periods, s: u32) -> f64 {
-    let (x, y) = (u * p as f64, v * q as f64);
-    match basis {
-        Basis::Value(curve) => interpolate(x, y, curve, |i, j, _, _| {
-            unit(hash(wrap(i, p), wrap(j, q), s))
-        }),
-        Basis::Perlin => {
-            let n = interpolate(x, y, Curve::Quintic, |i, j, dx, dy| {
-                let angle = TAU * unit(hash(wrap(i, p), wrap(j, q), s));
-                angle.cos() * dx + angle.sin() * dy
-            });
-            (0.5 + n * FRAC_1_SQRT_2).clamp(0.0, 1.0)
-        }
-        Basis::Simplex => {
-            let (r, t) = (p as f64 / TAU, q as f64 / TAU);
-            let (a, b) = (TAU * u, TAU * v);
-            let n = simplex4([r * a.cos(), r * a.sin(), t * b.cos(), t * b.sin()], s);
-            (0.5 + 0.5 * n).clamp(0.0, 1.0)
-        }
-    }
-}
-
-fn worley(u: f64, v: f64, (p, q): Periods, s: u32) -> f64 {
-    let (x, y) = (u * p as f64, v * q as f64);
-    let (i, j) = (x.floor() as i64, y.floor() as i64);
-    let mut nearest = f64::MAX;
-    for dj in -1..=1 {
-        for di in -1..=1 {
-            let (ci, cj) = (i + di, j + dj);
-            let (wi, wj) = (wrap(ci, p), wrap(cj, q));
-            let fx = ci as f64 + unit(hash(wi, wj, s));
-            let fy = cj as f64 + unit(hash(wi, wj, s ^ SECOND));
-            nearest = nearest.min((fx - x).hypot(fy - y));
-        }
-    }
-    nearest.clamp(0.0, 1.0)
-}
-
-/// Gradient `index` (0..32): permutations of (0, ±1, ±1, ±1), zero position first.
-fn grad4(index: u64) -> [f64; 4] {
-    let zero = (index / 8) as usize;
-    let signs = index % 8;
-    let mut g = [0.0; 4];
-    let mut bit = 2;
-    for (axis, c) in g.iter_mut().enumerate() {
-        if axis == zero {
-            continue;
-        }
-        *c = if signs >> bit & 1 == 1 { -1.0 } else { 1.0 };
-        bit -= 1;
-    }
-    g
-}
-
-/// 4D simplex noise (Gustavson), about −1..1.
-fn simplex4(c: [f64; 4], s: u32) -> f64 {
-    let f4 = (5f64.sqrt() - 1.0) / 4.0;
-    let g4 = (5.0 - 5f64.sqrt()) / 20.0;
-    let skew = c.iter().sum::<f64>() * f4;
-    let cell = c.map(|v| (v + skew).floor() as i64);
-    let unskew = cell.iter().sum::<i64>() as f64 * g4;
-    let d0: [f64; 4] = std::array::from_fn(|a| c[a] - (cell[a] as f64 - unskew));
-    let mut rank = [0; 4];
-    for a in 0..4 {
-        for b in a + 1..4 {
-            if d0[a] > d0[b] {
-                rank[a] += 1;
-            } else {
-                rank[b] += 1;
-            }
-        }
-    }
-    let mut n = 0.0;
-    for corner in 0..5i64 {
-        let offset: [i64; 4] = match corner {
-            0 => [0; 4],
-            4 => [1; 4],
-            k => rank.map(|r| (r >= 4 - k) as i64),
-        };
-        let d: [f64; 4] = std::array::from_fn(|a| d0[a] - offset[a] as f64 + corner as f64 * g4);
-        let t = 0.6 - d.iter().map(|v| v * v).sum::<f64>();
-        if t > 0.0 {
-            let p: [i64; 4] = std::array::from_fn(|a| cell[a] + offset[a]);
-            let g = grad4(hash4(p[0], p[1], p[2], p[3], s) % 32);
-            let dot: f64 = (0..4).map(|a| g[a] * d[a]).sum();
-            n += t * t * t * t * dot;
-        }
-    }
-    27.0 * n
-}
-
-/// Weighted octave average, octave `o` at periods `periods × lacunarity^o`, seed `seed + o`;
-/// see docs/spec/anoise.md#fractal-sum.
-fn fbm(
-    noise: impl Fn(Periods, u32) -> f64,
-    (p, q): Periods,
-    octaves: u32,
-    lacunarity: u64,
-    gain: f64,
-    seed: u32,
-) -> f64 {
-    let (mut sum, mut total, mut weight) = (0.0, 0.0, 1.0);
-    for o in 0..octaves {
-        let m = lacunarity.pow(o);
-        sum += weight * noise((p * m, q * m), seed.wrapping_add(o));
-        total += weight;
-        weight *= gain;
-    }
-    sum / total
-}
-
-// ---- Generators -----------------------------------------------------------------------
-
-/// Seeds of the two warp noises, see docs/spec/anoise.md#domain.
-const WARP_U: u32 = 0x68E31DA4;
-const WARP_V: u32 = 0xB5297A4D;
-
-fn generate_field(kind: GeneratorKind, params: &Params, size: usize) -> Vec<[f64; 3]> {
-    let specs = kind.specs();
-    let int = |key| match params.get(specs, key) {
-        Value::Int(v) => *v,
-        _ => unreachable!(),
-    };
-    let float = |key| match params.get(specs, key) {
-        Value::Float(v) => *v,
-        _ => unreachable!(),
-    };
-    let choice = |key| match params.get(specs, key) {
-        Value::Choice(c) => *c,
-        _ => unreachable!(),
-    };
-    // Shared parameters a generator may not have.
-    let optional = |key| match params.find(specs, key) {
-        Some(Value::Float(v)) => *v,
-        _ => 0.0,
-    };
-    let seed = || int("seed") as u32;
-    let periods = || (int("frequency_x") as u64, int("frequency_y") as u64);
-    let octaves = || int("octaves") as u32;
-    let lacunarity = || int("lacunarity") as u64;
-    let basis = match kind {
-        GeneratorKind::Value => Basis::Value(Curve::ALL[choice("interpolation")]),
-        GeneratorKind::Simplex => Basis::Simplex,
-        _ => match params.find(specs, "basis") {
-            Some(Value::Choice(c)) => {
-                [Basis::Value(Curve::Quintic), Basis::Perlin, Basis::Simplex][*c]
-            }
-            _ => Basis::Perlin,
-        },
-    };
-
-    let (translate_x, translate_y, warp) = (
-        optional("translate_x"),
-        optional("translate_y"),
-        optional("warp"),
-    );
-    let domain = |u: f64, v: f64| {
-        let (u, v) = (u + translate_x, v + translate_y);
-        if warp == 0.0 {
-            return (u, v);
-        }
-        let (p, q) = periods();
-        let a = basic(basis, u, v, (p, q), seed() ^ WARP_U);
-        let b = basic(basis, u, v, (p, q), seed() ^ WARP_V);
-        (
-            u + warp * (2.0 * a - 1.0) / p as f64,
-            v + warp * (2.0 * b - 1.0) / q as f64,
-        )
-    };
-    let gray = |f: &dyn Fn(f64, f64, usize, usize) -> f64| -> Vec<[f64; 3]> {
-        (0..size * size)
-            .map(|i| {
-                let (px, py) = (i % size, i / size);
-                let u = (px as f64 + 0.5) / size as f64;
-                let v = (py as f64 + 0.5) / size as f64;
-                let (u, v) = domain(u, v);
-                [f(u, v, px, py); 3]
-            })
-            .collect()
-    };
-    let fractal = |u, v, gain| {
-        fbm(
-            |pq, s| basic(basis, u, v, pq, s),
-            periods(),
-            octaves(),
-            lacunarity(),
-            gain,
-            seed(),
-        )
-    };
-    // Signed basis noise of octave `o`, for the multifractals.
-    let octave = |u, v, o: u32| {
-        let ((p, q), m) = (periods(), lacunarity().pow(o));
-        2.0 * basic(basis, u, v, (p * m, q * m), seed().wrapping_add(o)) - 1.0
-    };
-    let multifractal_weight = |o: u32| (lacunarity() as f64).powf(-float("dimension") * o as f64);
-
-    match kind {
-        GeneratorKind::Checkerboard => {
-            let (cells_x, cells_y) = (int("cells_x") as f64, int("cells_y") as f64);
-            let (a, b) = (float("color_a"), float("color_b"));
-            gray(&|u, v, _, _| {
-                let parity =
-                    ((u * cells_x).floor() as i64 + (v * cells_y).floor() as i64).rem_euclid(2);
-                if parity == 0 { a } else { b }
-            })
-        }
-        GeneratorKind::Uniform => gray(&|_, _, px, py| unit(hash(px as u32, py as u32, seed()))),
-        GeneratorKind::Value
-        | GeneratorKind::Perlin
-        | GeneratorKind::Simplex
-        | GeneratorKind::Fbm => gray(&|u, v, _, _| fractal(u, v, float("gain"))),
-        GeneratorKind::Voronoi => {
-            let (jitter, metric, output) = (float("jitter"), choice("metric"), choice("output"));
-            gray(&|u, v, _, _| voronoi(u, v, periods(), seed(), jitter, metric, output))
-        }
-        GeneratorKind::PerlinWorley => gray(&|u, v, _, _| {
-            let perlin = |pq, s| basic(Basis::Perlin, u, v, pq, s);
-            let p = fbm(perlin, periods(), octaves(), 2, float("gain"), seed());
-            let w = 1.0
-                - fbm(
-                    |pq, s| worley(u, v, pq, s),
-                    periods(),
-                    int("worley_octaves") as u32,
-                    2,
-                    0.5,
-                    seed().wrapping_add(100),
-                );
-            ((p - w + 1.0) / (2.0 - w)).clamp(0.0, 1.0)
-        }),
-        GeneratorKind::Musgrave => gray(&|u, v, _, _| {
-            let (mut value, mut max) = (1.0, 1.0);
-            for o in 0..octaves() {
-                let w = multifractal_weight(o);
-                value *= 1.0 + octave(u, v, o) * w;
-                max *= 1.0 + w;
-            }
-            value / max
-        }),
-        GeneratorKind::Ridged => {
-            let (offset, gain) = (float("offset"), float("gain"));
-            gray(&|u, v, _, _| {
-                let signal = |o: u32| (offset - octave(u, v, o).abs()).powi(2);
-                let mut previous = signal(0);
-                let (mut sum, mut max) = (previous, offset * offset);
-                for o in 1..octaves() {
-                    let weight = (previous * gain).clamp(0.0, 1.0);
-                    previous = signal(o) * weight;
-                    let w = multifractal_weight(o);
-                    sum += previous * w;
-                    max += offset * offset * w;
-                }
-                if max > 0.0 {
-                    (sum / max).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                }
-            })
-        }
-        GeneratorKind::Curl => {
-            let psi: Vec<f64> = gray(&|u, v, _, _| 2.0 * fractal(u, v, float("gain")) - 1.0)
-                .iter()
-                .map(|c| c[0])
-                .collect();
-            let at = |x: usize, y: usize| psi[(y % size) * size + x % size];
-            let vectors: Vec<[f64; 2]> = (0..size * size)
-                .map(|i| {
-                    let (x, y) = (i % size, i / size);
-                    let dx = (at(x + 1, y) - at(x + size - 1, y)) / 2.0;
-                    let dy = (at(x, y + 1) - at(x, y + size - 1)) / 2.0;
-                    [dy, -dx]
-                })
-                .collect();
-            let longest = vectors.iter().map(|[x, y]| x.hypot(*y)).fold(0.0, f64::max);
-            let scale = if longest > 0.0 { 1.0 / longest } else { 1.0 };
-            vectors
-                .iter()
-                .map(|[x, y]| [0.5 + 0.5 * x * scale, 0.5 + 0.5 * y * scale, 0.0])
-                .collect()
-        }
-    }
-}
-
-fn voronoi(
-    u: f64,
-    v: f64,
-    (p, q): Periods,
-    s: u32,
-    jitter: f64,
-    metric: usize,
-    output: usize,
-) -> f64 {
-    let (x, y) = (u * p as f64, v * q as f64);
-    let (i, j) = (x.floor() as i64, y.floor() as i64);
-    let (mut f1, mut f2, mut nearest) = (f64::MAX, f64::MAX, (0, 0));
-    for dj in -2..=2 {
-        for di in -2..=2 {
-            let (ci, cj) = (i + di, j + dj);
-            let (wi, wj) = (wrap(ci, p), wrap(cj, q));
-            let fx = ci as f64 + 0.5 + jitter * (unit(hash(wi, wj, s)) - 0.5);
-            let fy = cj as f64 + 0.5 + jitter * (unit(hash(wi, wj, s ^ SECOND)) - 0.5);
-            let (dx, dy) = ((fx - x).abs(), (fy - y).abs());
-            let d = match metric {
-                0 => dx.hypot(dy),
-                1 => dx + dy,
-                _ => dx.max(dy),
-            };
-            if d < f1 {
-                (f2, f1, nearest) = (f1, d, (wi, wj));
-            } else if d < f2 {
-                f2 = d;
-            }
-        }
-    }
-    let value = match output {
-        0 => f1,
-        1 => f2,
-        2 => f2 - f1,
-        _ => unit(hash(nearest.0, nearest.1, s ^ 0x2545F491)),
-    };
-    value.clamp(0.0, 1.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn small(kind: GeneratorKind) -> Noise {
-        Noise {
-            size: 32,
-            ..Noise::new(kind)
-        }
-    }
-
-    fn gray(image: &Image, x: u32, y: u32) -> u8 {
-        image.pixels[((y * image.width + x) * 4) as usize]
-    }
-
-    #[test]
-    fn splitmix_reference() {
-        // The first output of SplitMix64 seeded with 0.
-        assert_eq!(splitmix64(0), 0xE220A8397B1DCDAF);
-        assert_ne!(hash(1, 0, 0), hash(0, 1, 0));
-        assert_ne!(hash4(1, 0, 0, 0, 0), hash4(0, 1, 0, 0, 0));
-    }
-
-    #[test]
-    fn grad4_table() {
-        assert_eq!(grad4(0), [0.0, 1.0, 1.0, 1.0]);
-        assert_eq!(grad4(1), [0.0, 1.0, 1.0, -1.0]);
-        assert_eq!(grad4(4), [0.0, -1.0, 1.0, 1.0]);
-        assert_eq!(grad4(8), [1.0, 0.0, 1.0, 1.0]);
-        assert_eq!(grad4(31), [-1.0, -1.0, -1.0, 0.0]);
-    }
 
     #[test]
     fn written_form_round_trips() {
@@ -981,7 +232,7 @@ mod tests {
         let mut off = Modifier::new(ModifierKind::Colorize);
         off.enabled = false;
         noise.modifiers.push(off);
-        let text = noise.to_toml();
+        let text = to_toml(&noise);
         assert!(text.starts_with(
             "type = \"noise/fbm\"\nsize = 512\n\n[noise.fbm]\nseed = 0\nbasis = \"perlin\"\nfrequency_x = 4\nfrequency_y = 4\ntranslate_x = 0.0\ntranslate_y = 0.0\noctaves = 5\nlacunarity = 2\ngain = 0.5\nwarp = 0.0\n\n[[modifiers]]\ntype = \"levels\"\nenabled = true\nblack = 0.0\n"
         ), "{text}");
@@ -989,8 +240,8 @@ mod tests {
             text.contains("hue = 180.0\nsaturation = 0.5\nlightness = 0.0\n"),
             "{text}"
         );
-        assert_eq!(Noise::parse(&text).unwrap(), noise);
-        assert_eq!(Noise::parse("").unwrap(), Noise::default());
+        assert_eq!(parse(&text).unwrap(), noise);
+        assert_eq!(parse("").unwrap(), Noise::default());
     }
 
     #[test]
@@ -1001,11 +252,11 @@ mod tests {
         noise.set_kind(GeneratorKind::Voronoi);
         // Checkerboard's untouched defaults are not kept.
         assert_eq!(noise.kept.len(), 1);
-        let text = noise.to_toml();
+        let text = to_toml(&noise);
         assert!(text.starts_with("type = \"noise/voronoi\"\nsize = 512\n\n[noise.voronoi]\n"));
         assert!(text.contains("\n[noise.fbm]\nseed = 7\n"), "{text}");
         assert!(!text.contains("[pattern.checkerboard]"), "{text}");
-        let mut read = Noise::parse(&text).unwrap();
+        let mut read = parse(&text).unwrap();
         assert_eq!(read, noise);
         read.set_kind(GeneratorKind::Fbm);
         assert_eq!(read.params.0[0], Value::Int(7));
@@ -1020,18 +271,17 @@ mod tests {
     #[test]
     fn parameters_belong_to_their_type() {
         assert!(
-            Noise::parse("type = \"pattern/checkerboard\"\n[pattern.checkerboard]\nseed = 1")
-                .is_err()
+            parse("type = \"pattern/checkerboard\"\n[pattern.checkerboard]\nseed = 1").is_err()
         );
-        assert!(Noise::parse("[noise.perlin]\nbasis = \"value\"").is_err());
-        assert!(Noise::parse("[noise.uniform]\nwarp = 1").is_err());
+        assert!(parse("[noise.perlin]\nbasis = \"value\"").is_err());
+        assert!(parse("[noise.uniform]\nwarp = 1").is_err());
         // Parameters must be in a section.
-        let error = Noise::parse("type = \"noise/perlin\"\nseed = 3").unwrap_err();
+        let error = parse("type = \"noise/perlin\"\nseed = 3").unwrap_err();
         assert!(error.contains("[noise.perlin]"), "{error}");
-        let ok = Noise::parse("type = \"noise/fbm\"\n[noise.fbm]\noctaves = 3\ngain = 1").unwrap();
+        let ok = parse("type = \"noise/fbm\"\n[noise.fbm]\noctaves = 3\ngain = 1").unwrap();
         assert_eq!(ok.params.display(GeneratorKind::Fbm.specs(), 6), "3");
         // Other sections are validated too.
-        assert!(Noise::parse("[noise.voronoi]\njitter = 3").is_err());
+        assert!(parse("[noise.voronoi]\njitter = 3").is_err());
         for bad in [
             "size = 0",
             "size = 5000",
@@ -1050,185 +300,7 @@ mod tests {
             "[[modifiers]]\ntype = \"blur\"\nsteps = 2",
             "[[modifiers]]\ntype = \"sharpen\"",
         ] {
-            assert!(Noise::parse(bad).is_err(), "{bad}");
+            assert!(parse(bad).is_err(), "{bad}");
         }
-    }
-
-    #[test]
-    fn every_generator_is_deterministic_and_varied() {
-        for kind in GeneratorKind::ALL {
-            let a = small(kind).generate();
-            assert_eq!(a, small(kind).generate(), "{kind:?}");
-            assert_eq!(a.pixels.len(), 32 * 32 * 4);
-            let distinct: std::collections::HashSet<_> =
-                a.pixels.as_chunks::<4>().0.iter().collect();
-            assert!(distinct.len() >= 2, "{kind:?} is flat");
-            let is_gray = a
-                .pixels
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .all(|p| p[0] == p[1] && p[1] == p[2]);
-            assert_eq!(is_gray, kind != GeneratorKind::Curl, "{kind:?}");
-            assert_eq!(small(kind).has_color(), kind == GeneratorKind::Curl);
-        }
-    }
-
-    #[test]
-    fn noises_tile_seamlessly() {
-        for kind in GeneratorKind::ALL.into_iter().filter(|k| {
-            !matches!(
-                k,
-                GeneratorKind::Checkerboard | GeneratorKind::Uniform | GeneratorKind::Curl
-            )
-        }) {
-            let image = Noise {
-                size: 128,
-                ..Noise::new(kind)
-            }
-            .generate();
-            for y in (0..128).step_by(9) {
-                let (left, right) = (gray(&image, 0, y), gray(&image, 127, y));
-                assert!(
-                    left.abs_diff(right) < 40,
-                    "{kind:?} y={y}: {left} vs {right}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn simplex_stays_in_range() {
-        let image = Noise {
-            size: 64,
-            ..Noise::new(GeneratorKind::Simplex)
-        }
-        .generate();
-        let values: Vec<u8> = image.pixels.iter().step_by(4).copied().collect();
-        let (lo, hi) = (values.iter().min().unwrap(), values.iter().max().unwrap());
-        assert!(*lo < 90 && *hi > 165, "{lo}..{hi}");
-    }
-
-    fn with(kind: GeneratorKind, size: u32, set: &[(&str, Value)]) -> Image {
-        let mut noise = Noise {
-            size,
-            ..Noise::new(kind)
-        };
-        for (key, value) in set {
-            let i = kind.specs().iter().position(|s| s.key == *key).unwrap();
-            noise.params.0[i] = value.clone();
-        }
-        noise.generate()
-    }
-
-    #[test]
-    fn every_setting_keeps_tiling() {
-        let settings: &[(GeneratorKind, &[(&str, Value)])] = &[
-            (
-                GeneratorKind::Perlin,
-                &[
-                    ("frequency_x", Value::Int(3)),
-                    ("frequency_y", Value::Int(7)),
-                ],
-            ),
-            (
-                GeneratorKind::Simplex,
-                &[
-                    ("frequency_x", Value::Int(2)),
-                    ("frequency_y", Value::Int(9)),
-                ],
-            ),
-            (
-                GeneratorKind::Value,
-                &[
-                    ("octaves", Value::Int(4)),
-                    ("translate_x", Value::Float(0.37)),
-                ],
-            ),
-            (GeneratorKind::Fbm, &[("warp", Value::Float(2.0))]),
-            (
-                GeneratorKind::Voronoi,
-                &[("frequency_y", Value::Int(3)), ("warp", Value::Float(1.0))],
-            ),
-            (
-                GeneratorKind::Ridged,
-                &[
-                    ("basis", Value::Choice(2)),
-                    ("octaves", Value::Int(3)),
-                    ("translate_y", Value::Float(0.5)),
-                ],
-            ),
-        ];
-        for (kind, set) in settings {
-            let image = with(*kind, 128, set);
-            for i in (0..128).step_by(9) {
-                let (left, right) = (gray(&image, 0, i), gray(&image, 127, i));
-                assert!(left.abs_diff(right) < 40, "{kind:?} {set:?} y={i}");
-                let (top, bottom) = (gray(&image, i, 0), gray(&image, i, 127));
-                assert!(top.abs_diff(bottom) < 40, "{kind:?} {set:?} x={i}");
-            }
-        }
-    }
-
-    #[test]
-    fn settings_change_the_image() {
-        let plain = with(GeneratorKind::Perlin, 32, &[]);
-        for set in [
-            ("frequency_x", Value::Int(3)),
-            ("translate_x", Value::Float(0.25)),
-            ("octaves", Value::Int(3)),
-            ("warp", Value::Float(1.0)),
-        ] {
-            assert_ne!(
-                with(GeneratorKind::Perlin, 32, std::slice::from_ref(&set)),
-                plain,
-                "{set:?}"
-            );
-        }
-        // Gain only matters with more than one octave.
-        let detail = [("octaves", Value::Int(3))];
-        assert_ne!(
-            with(
-                GeneratorKind::Perlin,
-                32,
-                &[detail[0].clone(), ("gain", Value::Float(0.9))]
-            ),
-            with(GeneratorKind::Perlin, 32, &detail),
-        );
-        let value = with(GeneratorKind::Value, 32, &[]);
-        assert_ne!(
-            with(
-                GeneratorKind::Value,
-                32,
-                &[("interpolation", Value::Choice(0))]
-            ),
-            value
-        );
-        // Translating by a whole image is no translation.
-        let shifted = with(
-            GeneratorKind::Value,
-            32,
-            &[("translate_x", Value::Float(1.0))],
-        );
-        for (a, b) in shifted.pixels.iter().zip(&value.pixels) {
-            assert!(a.abs_diff(*b) <= 1);
-        }
-        // Voronoi F2 is never below F1.
-        let f1 = with(GeneratorKind::Voronoi, 32, &[]);
-        let f2 = with(GeneratorKind::Voronoi, 32, &[("output", Value::Choice(1))]);
-        assert!(f1.pixels.iter().zip(&f2.pixels).all(|(a, b)| a <= b));
-        assert_ne!(f1, f2);
-    }
-
-    #[test]
-    fn disabled_modifiers_are_skipped() {
-        let mut noise = small(GeneratorKind::Value);
-        let plain = noise.generate();
-        let mut invert = Modifier::new(ModifierKind::Invert);
-        invert.enabled = false;
-        noise.modifiers.push(invert);
-        assert_eq!(noise.generate(), plain);
-        noise.modifiers[0].enabled = true;
-        assert_ne!(noise.generate(), plain);
     }
 }

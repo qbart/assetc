@@ -1,0 +1,16 @@
+[package]
+name = "assetc-noise"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Bartłomiej Wójtowicz"]
+description = "The procedural noise of assetc: tileable checkerboard, value, Perlin, simplex, fBm, Voronoi, Perlin-Worley, Musgrave, ridged and curl textures with color modifiers"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/qbart/assetc"
+homepage = "https://github.com/qbart/assetc"
+readme = "README.md"
+keywords = ["gamedev", "noise", "procedural", "perlin", "texture"]
+categories = ["game-development", "graphics", "multimedia::images"]
+
+[dependencies]
+assetc-colors = { path = "../colors", version = "0.4.0" }

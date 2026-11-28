@@ -12,7 +12,6 @@ use crate::gradient::{Gradients, is_gradient};
 use crate::imagefile::{Channels, Image};
 use crate::manifest::{self, Kind};
 use crate::material;
-use crate::noise::Noise;
 use crate::plan::{self, Job, flatten};
 use crate::texture::{self, ColorSpace};
 use crate::tree;
@@ -641,7 +640,7 @@ pub fn load_source(source: &Path) -> Result<(Image, Channels), String> {
     let opaque = |alpha: bool| if alpha { Channels::Rgba } else { Channels::Rgb };
     if is_noise(source) {
         let text = fs::read_to_string(source).map_err(|e| e.to_string())?;
-        let noise = Noise::parse(&text)?;
+        let noise = crate::noise::parse(&text)?;
         let color = if noise.has_color() {
             Channels::Rgb
         } else {

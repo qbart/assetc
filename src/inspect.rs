@@ -9,7 +9,6 @@ use crate::gradient::{CellGrid, Gradients, is_gradient};
 use crate::hash::fnv1a64;
 use crate::lut::Lut;
 use crate::material::{self, AlphaMode, HeightMode};
-use crate::noise::Noise;
 use crate::palette::{Palette, is_palette};
 use crate::plan::{self, Job, join, split_dir};
 use crate::texture::{self, ColorSpace, Image};
@@ -622,7 +621,7 @@ fn compiled_texture(file: &Path, rel: &str, out: &mut Inspection) -> Result<(), 
 
 fn noise_rows(file: &Path, out: &mut Inspection) -> Result<(), String> {
     let text = fs::read_to_string(file).map_err(|e| e.to_string())?;
-    let n = Noise::parse(&text)?;
+    let n = crate::noise::parse(&text)?;
     out.rows.push(("Type", n.kind.name().to_owned()));
     let specs = n.kind.specs();
     for (i, spec) in specs.iter().enumerate() {

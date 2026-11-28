@@ -1620,7 +1620,7 @@ fn prepare(
         (selection.location == Location::Input && build::is_noise(&selection.path)).then(|| {
             std::fs::read_to_string(&selection.path)
                 .map_err(|e| e.to_string())
-                .and_then(|text| Noise::parse(&text))
+                .and_then(|text| crate::noise::parse(&text))
         });
     // Each inspection of a model is a new generation, so the 3D view reads the file again.
     static GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -3834,7 +3834,7 @@ fn right_sidebar(
                         modifiers_tab(ui, inspected)
                     };
                     if let Some(noise) = save {
-                        match std::fs::write(&inspected.path, noise.to_toml()) {
+                        match std::fs::write(&inspected.path, crate::noise::to_toml(&noise)) {
                             Ok(()) => state.reinspect = true,
                             Err(e) => state.notice = Some(format!("Saving failed: {e}")),
                         }

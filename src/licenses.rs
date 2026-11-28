@@ -202,7 +202,7 @@ mod tests {
         }
         for name in manifest["dependencies"].as_table().unwrap().keys() {
             // assetc's own crates, not open source it uses.
-            if name == "assetc-colors" || name == "assetc-atlas" {
+            if name.starts_with("assetc-") {
                 continue;
             }
             let listed = part_of(name);

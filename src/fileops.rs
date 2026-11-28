@@ -19,7 +19,7 @@ pub fn create_folder(input: &Path, dir: &Path) -> Result<PathBuf, String> {
 pub fn create_noise(input: &Path, dir: &Path, kind: GeneratorKind) -> Result<PathBuf, String> {
     check_inside(input, dir, true)?;
     let path = unique(dir, kind.file_stem(), ".anoise");
-    fs::write(&path, Noise::new(kind).to_toml()).map_err(|e| e.to_string())?;
+    fs::write(&path, crate::noise::to_toml(&Noise::new(kind))).map_err(|e| e.to_string())?;
     Ok(path)
 }
 
@@ -751,7 +751,7 @@ mod tests {
         assert_eq!(noise, input.join("sub/perlin-worley.anoise"));
         let again = create_noise(&input, &input.join("sub"), GeneratorKind::PerlinWorley).unwrap();
         assert_eq!(again, input.join("sub/perlin-worley 2.anoise"));
-        let parsed = Noise::parse(&fs::read_to_string(&noise).unwrap()).unwrap();
+        let parsed = crate::noise::parse(&fs::read_to_string(&noise).unwrap()).unwrap();
         assert_eq!(parsed, Noise::new(GeneratorKind::PerlinWorley));
         let gradient = create_gradient(&input, &input).unwrap();
         assert_eq!(gradient, input.join("gradient.agradient"));
