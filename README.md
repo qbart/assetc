@@ -219,6 +219,17 @@ assetc-collider = "0.4"
 
 See [docs/features/collider-crate.md](docs/features/collider-crate.md) and [collider/README.md](collider/README.md).
 
+## Image-based lighting: the `assetc-ibl` crate
+
+[`ibl/`](ibl/) is assetc's image-based lighting as a crate of its own: a latitude-longitude HDR image in, the skybox cubemap with its mip chain, the GGX-prefiltered specular map (one level per roughness) and the irradiance map with its 9 spherical harmonics out, as assetc builds them from `.exr` files. Like the SDK it depends on nothing but `std`, with no file formats.
+
+```toml
+[dependencies]
+assetc-ibl = "0.4"
+```
+
+See [docs/features/ibl-crate.md](docs/features/ibl-crate.md) and [ibl/README.md](ibl/README.md).
+
 ## Sample assets
 
 [`samples/`](samples/) is a project with an input of every kind, used by the tests, the screenshots and the demo. Most of it was made for assetc; the third-party assets (the Khronos Fox model, the monogram font, …) and their licenses are listed in [NOTICE.md](NOTICE.md).

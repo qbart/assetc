@@ -6,7 +6,9 @@ input directory holding a whole surrounding in **latitude-longitude**
 from left to right, straight up at the top row, straight down at the bottom.
 The build compiles it into a [cubemap texture](../spec/atex.bin.md#cubemaps) with
 half-float colors for the skybox, and two prefiltered
-[lighting maps](#lighting-maps) for image-based lighting of PBR materials. It is read with
+[lighting maps](#lighting-maps) for image-based lighting of PBR materials; the
+cubemaps and lighting maps are the [`assetc-ibl`](ibl-crate.md) crate, so
+other programs can make the same ones. It is read with
 [imgio](https://crates.io/crates/imgio) (pure Rust, through the `exr`
 crate): the main layer of the first part, R, G, B and A (alpha 1 without
 one; a luminance-only image as gray).
