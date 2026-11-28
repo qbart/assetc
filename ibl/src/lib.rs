@@ -473,7 +473,10 @@ mod tests {
         let e = sh_irradiance(&sh, [0.6, 0.0, 0.8]);
         assert!(close([e[0], e[1], e[2], 1.0], c, 1e-3), "{e:?}");
         // No samples reads as one.
-        assert_eq!(specular(&source, 16, 0), specular(&source, 16, 1));
+        assert_eq!(
+            super::specular(&source, 16, 0),
+            super::specular(&source, 16, 1)
+        );
     }
 
     #[test]
