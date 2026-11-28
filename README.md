@@ -197,6 +197,17 @@ assetc-atlas = "0.4"
 
 See [docs/features/atlas-crate.md](docs/features/atlas-crate.md) and [atlas/README.md](atlas/README.md).
 
+## Noise: the `assetc-noise` crate
+
+[`noise/`](noise/) is assetc's procedural noise as a crate of its own: the generators of `.anoise` files (checkerboard, uniform, value, Perlin, simplex, fBm, Voronoi, Perlin-Worley, Musgrave, ridged, curl), every one tileable, with their parameters and color modifiers, giving the same pixels assetc builds. It depends only on `assetc-colors`, with no file formats.
+
+```toml
+[dependencies]
+assetc-noise = "0.4"
+```
+
+See [docs/features/noise-crate.md](docs/features/noise-crate.md) and [noise/README.md](noise/README.md).
+
 ## Sample assets
 
 [`samples/`](samples/) is a project with an input of every kind, used by the tests, the screenshots and the demo. Most of it was made for assetc; the third-party assets (the Khronos Fox model, the monogram font, …) and their licenses are listed in [NOTICE.md](NOTICE.md).

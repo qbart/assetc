@@ -5,7 +5,8 @@ algorithms: [`docs/spec/anoise.md`](../spec/anoise.md)): a generator with its
 own parameters, followed by a list of modifiers. They behave like any other
 texture source: the build turns them into `.atex.bin`, the canvas previews them,
 and they can fill material slots (`rock.h.anoise` is the height map of
-material `rock`).
+material `rock`). The generators are the [`assetc-noise`](noise-crate.md)
+crate, so other programs can generate the same textures.
 
 ## Generators
 

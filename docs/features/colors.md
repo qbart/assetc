@@ -57,21 +57,24 @@ as the files and the Inspector use them.
 ## Publishing
 
 `make publish` publishes every published crate, `assetc-colors`, then
-[`assetc-atlas`](atlas-crate.md) (which depends on it), then the SDK
-`assetc`; each also has a target of its own. A `-check` target does
-everything but the upload (`cargo publish --dry-run`); the atlas check
-needs the `assetc-colors` version it names already on crates.io, as
-packaging resolves it from there:
+[`assetc-atlas`](atlas-crate.md) and [`assetc-noise`](noise-crate.md)
+(which depend on it), then the SDK `assetc`; each also has a target of its
+own. A `-check` target does everything but the upload
+(`cargo publish --dry-run`); the atlas and noise checks need the
+`assetc-colors` version they name already on crates.io, as packaging
+resolves it from there:
 
 | Target | Runs |
 |--------|------|
-| `make publish` | `publish-colors`, `publish-atlas`, then `publish-sdk` |
+| `make publish` | `publish-colors`, `publish-atlas`, `publish-noise`, then `publish-sdk` |
 | `make publish-colors` | `cargo publish -p assetc-colors` |
 | `make publish-atlas` | `cargo publish -p assetc-atlas` |
+| `make publish-noise` | `cargo publish -p assetc-noise` |
 | `make publish-sdk` | `cargo publish -p assetc` |
-| `make publish-check` | `publish-check-colors`, `publish-check-atlas`, then `publish-check-sdk` |
+| `make publish-check` | `publish-check-colors`, `publish-check-atlas`, `publish-check-noise`, then `publish-check-sdk` |
 | `make publish-check-colors` | `cargo publish -p assetc-colors --dry-run` |
 | `make publish-check-atlas` | `cargo publish -p assetc-atlas --dry-run` |
+| `make publish-check-noise` | `cargo publish -p assetc-noise --dry-run` |
 | `make publish-check-sdk` | `cargo publish -p assetc --dry-run` |
 
 Publishing needs a crates.io token (`cargo login`) and versions not
