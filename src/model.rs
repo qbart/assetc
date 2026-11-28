@@ -297,12 +297,9 @@ fn resolve_shapes(
                 ShapeType::Hull => {
                     let points = geometry
                         .hull_points(s.joint.as_deref())
-                        .and_then(|p| crate::hull::hull(&p))
+                        .and_then(|p| assetc_collider::hull(&p))
                         .ok_or_else(|| fail("no hull".into()))?;
-                    (
-                        [0.0; 3],
-                        points.points.iter().map(|p| p.to_array()).collect(),
-                    )
+                    ([0.0; 3], points.points)
                 }
             };
             let (translation, rotation) = if s.shape == ShapeType::Hull {
@@ -799,9 +796,9 @@ impl ModelGeometry {
 
     /// The points a hull on `joint` (by name) is made of, in the joint's space at the bind
     /// pose; every point in model space. `None` for a joint the skin does not have.
-    pub fn hull_points(&self, joint: Option<&str>) -> Option<Vec<Vec3>> {
+    pub fn hull_points(&self, joint: Option<&str>) -> Option<Vec<[f32; 3]>> {
         let Some(name) = joint else {
-            return Some(self.points.iter().map(|(p, _)| *p).collect());
+            return Some(self.points.iter().map(|(p, _)| p.to_array()).collect());
         };
         let index = self
             .joints
@@ -812,7 +809,7 @@ impl ModelGeometry {
             self.points
                 .iter()
                 .filter(|(_, j)| *j == Some(index))
-                .map(|(p, _)| bind.transform_point3(*p))
+                .map(|(p, _)| bind.transform_point3(*p).to_array())
                 .collect(),
         )
     }

@@ -1,17 +1,17 @@
-//! 3D convex hulls (quickhull) for convex hull shapes; see docs/features/shapes.md#shape.
+//! 3D convex hulls (quickhull).
 
-use bevy::math::{DVec3, Vec3};
+use crate::math::{AsDouble, DVec3, Ext, Vec3};
 
 /// A convex hull: its corner points and its triangles, as indices into `points`, wound
 /// counter-clockwise seen from outside.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Hull {
-    pub points: Vec<Vec3>,
+    pub points: Vec<[f32; 3]>,
     pub faces: Vec<[usize; 3]>,
 }
 
 impl Hull {
-    /// Each edge once, as indices into `points`.
+    /// Each edge once, as indices into `points`, sorted.
     pub fn edges(&self) -> Vec<[usize; 2]> {
         let mut edges: Vec<[usize; 2]> = self
             .faces
@@ -22,6 +22,60 @@ impl Hull {
         edges.sort_unstable();
         edges.dedup();
         edges
+    }
+
+    /// The volume it encloses.
+    pub fn volume(&self) -> f32 {
+        Poly::from(self).volume()
+    }
+}
+
+/// The convex hull of `points`; `None` when they do not span a volume (fewer than four
+/// points, all on one plane, or not all finite).
+pub fn hull(points: &[[f32; 3]]) -> Option<Hull> {
+    let points: Vec<Vec3> = points.iter().map(|&p| Vec3::from(p)).collect();
+    quickhull(&points).map(|p| Hull::from(&p))
+}
+
+/// A hull in the crate's own vectors, as the decomposition works on it.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Poly {
+    pub points: Vec<Vec3>,
+    pub faces: Vec<[usize; 3]>,
+}
+
+impl Poly {
+    /// Volume enclosed.
+    pub fn volume(&self) -> f32 {
+        let Some(&o) = self.points.first() else {
+            return 0.0;
+        };
+        self.faces
+            .iter()
+            .map(|&[a, b, c]| {
+                let [a, b, c] = [a, b, c].map(|i| self.points[i] - o);
+                a.dot(b.cross(c))
+            })
+            .sum::<f32>()
+            / 6.0
+    }
+}
+
+impl From<&Poly> for Hull {
+    fn from(p: &Poly) -> Self {
+        Self {
+            points: p.points.iter().map(|v| v.to_array()).collect(),
+            faces: p.faces.clone(),
+        }
+    }
+}
+
+impl From<&Hull> for Poly {
+    fn from(h: &Hull) -> Self {
+        Self {
+            points: h.points.iter().map(|&p| Vec3::from(p)).collect(),
+            faces: h.faces.clone(),
+        }
     }
 }
 
@@ -60,12 +114,14 @@ impl Face {
     }
 }
 
-/// The convex hull of `points`; `None` when they do not span a volume (fewer than four
-/// points, or all on one plane).
-pub fn hull(points: &[Vec3]) -> Option<Hull> {
+/// The convex hull of `points`; `None` when they do not span a volume.
+pub(crate) fn quickhull(points: &[Vec3]) -> Option<Poly> {
+    if !points.iter().all(|p| p.is_finite()) {
+        return None;
+    }
     let input = points;
     let points: Vec<DVec3> = points.iter().map(|p| p.as_dvec3()).collect();
-    let (mut min, mut max) = (DVec3::INFINITY, DVec3::NEG_INFINITY);
+    let (mut min, mut max) = (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY));
     for &p in &points {
         (min, max) = (min.min(p), max.max(p));
     }
@@ -216,7 +272,7 @@ pub fn hull(points: &[Vec3]) -> Option<Hull> {
 
     // Keep the points the faces use, renumbered.
     let mut index = vec![usize::MAX; points.len()];
-    let mut out = Hull::default();
+    let mut out = Poly::default();
     for face in faces.iter().filter(|f| f.alive) {
         out.faces.push(face.v.map(|i| {
             if index[i] == usize::MAX {
@@ -265,6 +321,10 @@ fn assign(
 mod tests {
     use super::*;
 
+    fn hull(points: &[Vec3]) -> Option<Poly> {
+        quickhull(points)
+    }
+
     fn cube_corners() -> Vec<Vec3> {
         (0..8)
             .map(|i| Vec3::new((i & 1) as f32, ((i >> 1) & 1) as f32, ((i >> 2) & 1) as f32))
@@ -272,18 +332,22 @@ mod tests {
     }
 
     /// Every point is inside or on the hull, every face faces out.
-    fn check(points: &[Vec3], hull: &Hull) {
+    fn check(points: &[Vec3], hull: &Poly) {
         let center = hull.points.iter().sum::<Vec3>() / hull.points.len() as f32;
         for &[a, b, c] in &hull.faces {
             let [a, b, c] = [a, b, c].map(|i| hull.points[i]);
             let normal = (b - a).cross(c - a).normalize();
             assert!(normal.dot(a - center) > 0.0, "faces out");
             for &p in points {
-                assert!(normal.dot(p - a) <= 1e-4, "{p} outside");
+                assert!(normal.dot(p - a) <= 1e-4, "{p:?} outside");
             }
         }
         // Closed: every edge in exactly two faces, a solid's Euler characteristic.
-        let (v, e, f) = (hull.points.len(), hull.edges().len(), hull.faces.len());
+        let (v, e, f) = (
+            hull.points.len(),
+            Hull::from(hull).edges().len(),
+            hull.faces.len(),
+        );
         assert_eq!(v as i64 - e as i64 + f as i64, 2);
     }
 
@@ -322,5 +386,13 @@ mod tests {
             .collect();
         assert!(hull(&flat).is_none());
         assert!(hull(&[]).is_none());
+        assert!(hull(&[Vec3::splat(f32::NAN), Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z]).is_none());
+        // The public form gives the same hull.
+        let corners: Vec<[f32; 3]> = cube_corners().iter().map(|p| p.to_array()).collect();
+        assert_eq!(
+            super::hull(&corners).unwrap(),
+            Hull::from(&quickhull(&cube_corners()).unwrap())
+        );
+        assert!((super::hull(&corners).unwrap().volume() - 1.0).abs() < 1e-6);
     }
 }

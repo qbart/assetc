@@ -84,7 +84,7 @@ pub enum Job {
     /// A model's collider, from its `.acollider` sidecar; see docs/features/colliders.md#build.
     Collider {
         source: String,
-        settings: crate::decompose::Settings,
+        settings: assetc_collider::Settings,
     },
     /// A font (relative to `input`): writes its `.afont.bin` and SDF atlas; see
     /// docs/features/fonts.md#build.
@@ -205,7 +205,7 @@ fn model_assets(
     source: &str,
     outputs: &model::Outputs,
     options: MeshOptions,
-    (sidecar, collider): (crate::amod::Amod, Option<crate::decompose::Settings>),
+    (sidecar, collider): (crate::amod::Amod, Option<assetc_collider::Settings>),
 ) {
     let p = strip_extension(source);
     let colors = sidecar.colors.clone();

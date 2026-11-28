@@ -1,11 +1,27 @@
-//! Convex decomposition: a model's triangles as a few convex hulls that follow its shape, for
-//! a compound collider; see docs/features/colliders.md#how-it-is-made.
+//! The convex decomposition of [assetc](https://github.com/qbart/assetc): a model's triangles
+//! as a few convex hulls that follow its shape, for a compound collider; and 3D convex hulls.
+#![doc = include_str!("../README.md")]
 
-use bevy::math::Vec3;
+use std::ops::RangeInclusive;
 
-use crate::hull::{Hull, hull};
+mod hull;
+mod math;
 
-/// How a model is decomposed; see docs/spec/acollider.md.
+pub use hull::{Hull, hull};
+
+use hull::{Poly, quickhull};
+use math::{AsDouble, Ext, Vec3};
+
+/// The range of [`Settings::max_hulls`].
+pub const MAX_HULLS: RangeInclusive<u32> = 1..=256;
+/// The range of [`Settings::max_vertices`].
+pub const MAX_VERTICES: RangeInclusive<u32> = 4..=255;
+/// The range of [`Settings::error`].
+pub const ERROR: RangeInclusive<f32> = 0.001..=0.5;
+/// The range of [`Settings::resolution`].
+pub const RESOLUTION: RangeInclusive<u32> = 16..=256;
+
+/// How a model is decomposed; see docs/features/colliders.md#settings.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Settings {
     /// Most hulls in the collider.
@@ -30,15 +46,41 @@ impl Default for Settings {
     }
 }
 
+impl Settings {
+    /// The first setting out of its range, as `max_hulls must be 1 to 256, not 300`.
+    pub fn validate(&self) -> Result<(), String> {
+        fn check<T: PartialOrd + std::fmt::Display>(
+            key: &str,
+            v: T,
+            range: RangeInclusive<T>,
+        ) -> Result<(), String> {
+            if range.contains(&v) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{key} must be {} to {}, not {v}",
+                    range.start(),
+                    range.end()
+                ))
+            }
+        }
+        check("max_hulls", self.max_hulls, MAX_HULLS)?;
+        check("max_vertices", self.max_vertices, MAX_VERTICES)?;
+        check("error", self.error, ERROR)?;
+        check("resolution", self.resolution, RESOLUTION)
+    }
+}
+
 /// One convex piece of a collider, in the model's space.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Convex {
     pub hull: Hull,
     pub volume: f32,
     /// Center of its volume.
-    pub center: Vec3,
-    pub min: Vec3,
-    pub max: Vec3,
+    pub center: [f32; 3],
+    /// Its box.
+    pub min: [f32; 3],
+    pub max: [f32; 3],
 }
 
 /// A model as convex hulls; see docs/features/colliders.md.
@@ -51,38 +93,45 @@ pub struct Collider {
 }
 
 impl Collider {
+    /// Corner points of every hull.
     pub fn points(&self) -> usize {
         self.hulls.iter().map(|h| h.hull.points.len()).sum()
     }
 
+    /// Triangles of every hull.
     pub fn faces(&self) -> usize {
         self.hulls.iter().map(|h| h.hull.faces.len()).sum()
     }
 
+    /// The hulls' volume, summed.
     pub fn volume(&self) -> f32 {
         self.hulls.iter().map(|h| h.volume).sum()
     }
 
     /// The box around every hull (zero without hulls).
-    pub fn bounds(&self) -> [Vec3; 2] {
-        let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    pub fn bounds(&self) -> [[f32; 3]; 2] {
+        let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
         for h in &self.hulls {
-            (min, max) = (min.min(h.min), max.max(h.max));
+            (min, max) = (min.min(h.min.into()), max.max(h.max.into()));
         }
         if self.hulls.is_empty() {
-            [Vec3::ZERO; 2]
+            [[0.0; 3]; 2]
         } else {
-            [min, max]
+            [min.to_array(), max.to_array()]
         }
     }
 }
 
-/// Decomposes the triangles (`positions` indexed by `triangles`) into convex hulls.
+/// Decomposes the triangles (`positions` indexed by `triangles`) into convex hulls; see
+/// docs/features/colliders.md#how-it-is-made.
 pub fn decompose(
-    positions: &[Vec3],
+    positions: &[[f32; 3]],
     triangles: &[[u32; 3]],
     settings: &Settings,
 ) -> Result<Collider, String> {
+    settings.validate()?;
+    let positions: Vec<Vec3> = positions.iter().map(|&p| Vec3::from(p)).collect();
+    let positions = positions.as_slice();
     let grid = Grid::new(positions, triangles, settings.resolution)?;
     let solid: Voxels = grid.solid_voxels();
     let total = solid.len() as f32;
@@ -180,7 +229,7 @@ pub fn decompose(
             )
             .or_else(|| {
                 let corners = voxel_corners(&part.voxels, grid.n);
-                hull(&corners.iter().map(|&p| grid.world(p)).collect::<Vec<_>>())
+                quickhull(&corners.iter().map(|&p| grid.world(p)).collect::<Vec<_>>())
             })?
             .points;
             let mut rows = Rows::new(grid.n);
@@ -201,7 +250,7 @@ pub fn decompose(
 
     let mut hulls: Vec<Convex> = pieces
         .into_iter()
-        .filter_map(|piece| convex(hull(&piece.simple)?))
+        .filter_map(|piece| convex(quickhull(&piece.simple)?))
         .collect();
     hulls.sort_by(|a, b| b.volume.total_cmp(&a.volume));
     Ok(Collider {
@@ -225,7 +274,7 @@ struct Grid {
 
 impl Grid {
     fn new(positions: &[Vec3], triangles: &[[u32; 3]], resolution: u32) -> Result<Self, String> {
-        let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+        let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
         for t in triangles {
             for &i in t {
                 let p = *positions
@@ -339,7 +388,7 @@ fn overlaps(center: Vec3, half: f32, tri: [Vec3; 3]) -> bool {
         (d[0].min(d[1]).min(d[2]), d[0].max(d[1]).max(d[2]))
     };
     let separated = |axis: Vec3| {
-        let r = half * axis.abs().element_sum();
+        let r = half * axis.abs().sum();
         let (lo, hi) = range(axis);
         lo > r || hi < -r
     };
@@ -348,13 +397,13 @@ fn overlaps(center: Vec3, half: f32, tri: [Vec3; 3]) -> bool {
     }
     let edges = [v[1] - v[0], v[2] - v[1], v[0] - v[2]];
     let normal = edges[0].cross(edges[1]);
-    if normal.length_squared() > 0.0 && separated(normal) {
+    if normal.length2() > 0.0 && separated(normal) {
         return false;
     }
     for edge in edges {
         for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
             let axis = axis.cross(edge);
-            if axis.length_squared() > 1e-12 && separated(axis) {
+            if axis.length2() > 1e-12 && separated(axis) {
                 return false;
             }
         }
@@ -525,13 +574,13 @@ impl Rows {
                 centers.push(Vec3::new(hi as f32, y, z));
             }
         }
-        let Some(hull) = hull(&centers).or_else(|| {
+        let Some(hull) = quickhull(&centers).or_else(|| {
             let corners: Vec<Vec3> = self
                 .corners()
                 .into_iter()
                 .map(|p| Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32) - 0.5)
                 .collect();
-            hull(&corners)
+            quickhull(&corners)
         }) else {
             return 0.0;
         };
@@ -540,9 +589,9 @@ impl Rows {
 }
 
 /// The points with whole coordinates inside or on `hull`.
-fn lattice_points(hull: &Hull) -> usize {
+fn lattice_points(hull: &Poly) -> usize {
     const EPS: f64 = 1e-4;
-    let planes: Vec<(bevy::math::DVec3, f64)> = hull
+    let planes: Vec<(math::DVec3, f64)> = hull
         .faces
         .iter()
         .map(|&[a, b, c]| {
@@ -551,7 +600,7 @@ fn lattice_points(hull: &Hull) -> usize {
             (n, n.dot(a))
         })
         .collect();
-    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     for &p in &hull.points {
         (min, max) = (min.min(p), max.max(p));
     }
@@ -684,7 +733,7 @@ fn surface_hull(
     label: u32,
     part: &Part,
     (positions, triangles, boxes): (&[Vec3], &[[u32; 3]], &[[Vec3; 2]]),
-) -> Option<Hull> {
+) -> Option<Poly> {
     let (mut lo, mut hi) = ([u16::MAX; 3], [0u16; 3]);
     for v in &part.voxels {
         for k in 0..3 {
@@ -699,7 +748,7 @@ fn surface_hull(
     );
     let mut points = Vec::new();
     for (t, b) in triangles.iter().zip(boxes) {
-        if b[0].cmpgt(max).any() || b[1].cmplt(min).any() {
+        if (0..3).any(|k| b[0][k] > max[k] || b[1][k] < min[k]) {
             continue;
         }
         let polygon = clip(t.map(|i| positions[i as usize]).to_vec(), min, max);
@@ -721,7 +770,7 @@ fn surface_hull(
             points.extend(polygon);
         }
     }
-    hull(&points).filter(|h| volume(h) > 0.0)
+    quickhull(&points).filter(|h| h.volume() > 0.0)
 }
 
 /// `polygon` clipped to the box `min`–`max`.
@@ -773,7 +822,7 @@ struct Piece {
 impl Piece {
     fn new(points: Vec<Vec3>, max_vertices: usize, rows: Rows) -> Self {
         let simple = simplify(&points, max_vertices);
-        let volume = hull(&simple).map_or(0.0, |h| volume(&h));
+        let volume = quickhull(&simple).map_or(0.0, |h| h.volume());
         Self {
             points,
             simple,
@@ -788,7 +837,7 @@ impl Piece {
 fn joint_volume(a: &Piece, b: &Piece) -> f32 {
     let mut both = a.simple.clone();
     both.extend(&b.simple);
-    hull(&both).map_or(0.0, |h| volume(&h))
+    quickhull(&both).map_or(0.0, |h| h.volume())
 }
 
 /// Merges pieces two at a time: while there are more than `max_hulls`, the two whose joint
@@ -860,7 +909,7 @@ fn merge(pieces: &mut Vec<Piece>, (max_hulls, max_vertices): (usize, usize), bud
         let Some((i, j, _)) = best else { break };
         let mut points = std::mem::take(&mut pieces[i].points);
         points.extend(std::mem::take(&mut pieces[j].points));
-        let points = hull(&points).map_or(points, |h| h.points);
+        let points = quickhull(&points).map_or(points, |h| h.points);
         let rows = pieces[i].rows.joined(&pieces[j].rows);
         pieces[i] = Piece::new(points, max_vertices, rows);
         alive[j] = false;
@@ -879,14 +928,14 @@ fn merge(pieces: &mut Vec<Piece>, (max_hulls, max_vertices): (usize, usize), bud
 /// At most `max` of `points` whose hull keeps as much of theirs as it can: from a first
 /// tetrahedron, the point farthest outside the hull so far, again and again.
 fn simplify(points: &[Vec3], max: usize) -> Vec<Vec3> {
-    let Some(full) = hull(points) else {
+    let Some(full) = quickhull(points) else {
         return points.to_vec();
     };
     if full.points.len() <= max {
         return full.points;
     }
     let points = full.points;
-    let (mut lo, mut hi) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     for &p in &points {
         (lo, hi) = (lo.min(p), hi.max(p));
     }
@@ -911,7 +960,8 @@ fn simplify(points: &[Vec3], max: usize) -> Vec<Vec3> {
     let mut chosen = vec![a, b, c, d];
     chosen.dedup();
     while chosen.len() < max {
-        let Some(current) = hull(&chosen.iter().map(|&i| points[i]).collect::<Vec<_>>()) else {
+        let Some(current) = quickhull(&chosen.iter().map(|&i| points[i]).collect::<Vec<_>>())
+        else {
             break;
         };
         let planes: Vec<(Vec3, f32)> = current
@@ -938,25 +988,10 @@ fn simplify(points: &[Vec3], max: usize) -> Vec<Vec3> {
         }
     }
     let kept: Vec<Vec3> = chosen.iter().map(|&i| points[i]).collect();
-    hull(&kept).map_or(kept, |h| h.points)
+    quickhull(&kept).map_or(kept, |h| h.points)
 }
 
-/// Volume enclosed by `hull`.
-pub fn volume(hull: &Hull) -> f32 {
-    let Some(&o) = hull.points.first() else {
-        return 0.0;
-    };
-    hull.faces
-        .iter()
-        .map(|&[a, b, c]| {
-            let [a, b, c] = [a, b, c].map(|i| hull.points[i] - o);
-            a.dot(b.cross(c))
-        })
-        .sum::<f32>()
-        / 6.0
-}
-
-fn convex(hull: Hull) -> Option<Convex> {
+fn convex(hull: Poly) -> Option<Convex> {
     let o = *hull.points.first()?;
     let (mut volume, mut moment) = (0.0, Vec3::ZERO);
     for &[a, b, c] in &hull.faces {
@@ -968,32 +1003,32 @@ fn convex(hull: Hull) -> Option<Convex> {
     if volume <= 0.0 {
         return None;
     }
-    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    let (mut min, mut max) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
     for &p in &hull.points {
         (min, max) = (min.min(p), max.max(p));
     }
     Some(Convex {
-        center: o + moment / volume,
+        center: (o + moment / volume).to_array(),
         volume,
-        min,
-        max,
-        hull,
+        min: min.to_array(),
+        max: max.to_array(),
+        hull: Hull::from(&hull),
     })
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
 
     /// An axis-aligned box's 12 triangles, facing out.
-    pub fn cuboid(min: Vec3, max: Vec3, positions: &mut Vec<Vec3>, triangles: &mut Vec<[u32; 3]>) {
+    fn cuboid(min: Vec3, max: Vec3, positions: &mut Vec<[f32; 3]>, triangles: &mut Vec<[u32; 3]>) {
         let base = positions.len() as u32;
         for i in 0..8 {
-            positions.push(Vec3::new(
+            positions.push([
                 if i & 1 == 0 { min.x } else { max.x },
                 if i & 2 == 0 { min.y } else { max.y },
                 if i & 4 == 0 { min.z } else { max.z },
-            ));
+            ]);
         }
         for [a, b, c] in [
             [0, 2, 1],
@@ -1014,7 +1049,7 @@ pub(crate) mod tests {
     }
 
     /// An L of two boxes, `2 × 1 × 1` and `1 × 2 × 1` from the origin.
-    fn l_shape() -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    fn l_shape() -> (Vec<[f32; 3]>, Vec<[u32; 3]>) {
         let (mut p, mut t) = (Vec::new(), Vec::new());
         cuboid(Vec3::ZERO, Vec3::new(2.0, 1.0, 1.0), &mut p, &mut t);
         cuboid(
@@ -1029,7 +1064,7 @@ pub(crate) mod tests {
     fn inside(c: &Collider, p: Vec3) -> bool {
         c.hulls.iter().any(|h| {
             h.hull.faces.iter().all(|&[a, b, cc]| {
-                let [a, b, cc] = [a, b, cc].map(|i| h.hull.points[i]);
+                let [a, b, cc] = [a, b, cc].map(|i| Vec3::from(h.hull.points[i]));
                 (b - a).cross(cc - a).normalize().dot(p - a) <= 1e-3
             })
         })
@@ -1044,8 +1079,8 @@ pub(crate) mod tests {
         let h = &c.hulls[0];
         assert_eq!(h.hull.points.len(), 8);
         assert!((h.volume - 1.0).abs() < 1e-4, "{}", h.volume);
-        assert!((h.center - Vec3::new(1.0, 0.5, 0.25)).length() < 1e-4);
-        assert_eq!(c.bounds(), [Vec3::ZERO, Vec3::new(2.0, 1.0, 0.5)]);
+        assert!((Vec3::from(h.center) - Vec3::new(1.0, 0.5, 0.25)).length() < 1e-4);
+        assert_eq!(c.bounds(), [[0.0; 3], [2.0, 1.0, 0.5]]);
         // Filled: the voxels inside count.
         assert!((c.model_volume - 1.0).abs() < 0.3, "{}", c.model_volume);
     }
@@ -1123,13 +1158,13 @@ pub(crate) mod tests {
 
     #[test]
     fn a_flat_model_is_a_thin_slab() {
-        let p = vec![Vec3::ZERO, Vec3::X, Vec3::Z, Vec3::new(1.0, 0.0, 1.0)];
+        let p = vec![[0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0]];
         let t = vec![[0, 2, 1], [1, 2, 3]];
         let c = decompose(&p, &t, &Settings::default()).unwrap();
         assert_eq!(c.hulls.len(), 1);
         let [min, max] = c.bounds();
-        assert!(max.y - min.y > 0.0 && max.y - min.y <= 2.0 / 64.0 + 1e-4);
-        assert!(min.x <= 0.0 && max.x >= 1.0);
+        assert!(max[1] - min[1] > 0.0 && max[1] - min[1] <= 2.0 / 64.0 + 1e-4);
+        assert!(min[0] <= 0.0 && max[0] >= 1.0);
     }
 
     #[test]
@@ -1143,7 +1178,7 @@ pub(crate) mod tests {
                 )
             })
             .collect();
-        assert_eq!(lattice_points(&hull(&cube).unwrap()), 27);
+        assert_eq!(lattice_points(&quickhull(&cube).unwrap()), 27);
         // An L of voxels: its hull holds one more.
         let mut rows = Rows::new([4, 4, 4]);
         for v in [
@@ -1167,7 +1202,46 @@ pub(crate) mod tests {
     fn no_triangles_fail() {
         let e = decompose(&[], &[], &Settings::default()).unwrap_err();
         assert_eq!(e, "the model has no triangles to make a collider of");
-        let e = decompose(&[Vec3::ZERO], &[[0, 0, 1]], &Settings::default()).unwrap_err();
+        let e = decompose(&[[0.0; 3]], &[[0, 0, 1]], &Settings::default()).unwrap_err();
         assert_eq!(e, "a triangle uses a vertex the model does not have");
+    }
+
+    #[test]
+    fn settings_out_of_range_fail() {
+        assert_eq!(Settings::default().validate(), Ok(()));
+        let (p, t) = l_shape();
+        for (settings, error) in [
+            (
+                Settings {
+                    max_hulls: 300,
+                    ..Settings::default()
+                },
+                "max_hulls must be 1 to 256, not 300",
+            ),
+            (
+                Settings {
+                    max_vertices: 3,
+                    ..Settings::default()
+                },
+                "max_vertices must be 4 to 255, not 3",
+            ),
+            (
+                Settings {
+                    error: 0.0,
+                    ..Settings::default()
+                },
+                "error must be 0.001 to 0.5, not 0",
+            ),
+            (
+                Settings {
+                    resolution: 1000,
+                    ..Settings::default()
+                },
+                "resolution must be 16 to 256, not 1000",
+            ),
+        ] {
+            assert_eq!(settings.validate().unwrap_err(), error);
+            assert_eq!(decompose(&p, &t, &settings).unwrap_err(), error);
+        }
     }
 }

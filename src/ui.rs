@@ -438,7 +438,7 @@ struct Inspected {
     /// A model's geometry, for hulls, shape sizes and region materials.
     geometry: Option<model::ModelGeometry>,
     /// Convex hulls computed for shapes, by joint (`None` for model space).
-    hulls: HashMap<Option<String>, Option<crate::hull::Hull>>,
+    hulls: HashMap<Option<String>, Option<assetc_collider::Hull>>,
     /// What the Structs tab read; see docs/features/structs.md#structs-tab.
     structs_cache: Option<structs_edit::StructsCache>,
 }
@@ -7985,12 +7985,12 @@ fn canvas_model(
                     let hull = hulls.entry(shape.joint.clone()).or_insert_with(|| {
                         geometry
                             .and_then(|g| g.hull_points(shape.joint.as_deref()))
-                            .and_then(|p| crate::hull::hull(&p))
+                            .and_then(|p| assetc_collider::hull(&p))
                     });
                     hull.as_ref().map_or_else(Vec::new, |h| {
                         h.edges()
                             .into_iter()
-                            .map(|[a, b]| [h.points[a], h.points[b]])
+                            .map(|[a, b]| [h.points[a], h.points[b]].map(Vec3::from))
                             .collect()
                     })
                 }
@@ -9278,7 +9278,7 @@ fn shape_fields(
     i: usize,
     joints: &[String],
     extent: f32,
-    hulls: &mut HashMap<Option<String>, Option<crate::hull::Hull>>,
+    hulls: &mut HashMap<Option<String>, Option<assetc_collider::Hull>>,
     geometry: Option<&model::ModelGeometry>,
     gizmo: Option<gizmo::Mode>,
     movable: bool,
@@ -9368,7 +9368,7 @@ fn shape_fields(
         let hull = hulls.entry(shape.joint.clone()).or_insert_with(|| {
             geometry
                 .and_then(|g| g.hull_points(shape.joint.as_deref()))
-                .and_then(|p| crate::hull::hull(&p))
+                .and_then(|p| assetc_collider::hull(&p))
         });
         let around = shape
             .joint

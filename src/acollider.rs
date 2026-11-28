@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use bevy::math::Vec3;
 
 use crate::chunks::{Bytes, Writer};
-use crate::decompose::{Collider, Settings};
+use assetc_collider::{Collider, Settings};
 
 pub const EXTENSION: &str = "acollider";
 pub const FORMAT: &str = "ACOLL";
@@ -40,20 +40,21 @@ pub const KEYS: [Key; 4] = [
     Key {
         key: "max_hulls",
         label: "Max hulls",
-        min: 1.0,
-        max: 256.0,
+        min: *assetc_collider::MAX_HULLS.start() as f64,
+        max: *assetc_collider::MAX_HULLS.end() as f64,
         hint: "Most hulls in the collider. Fewer is faster to simulate; more follows the model closer.",
     },
     Key {
         key: "max_vertices",
         label: "Max vertices",
-        min: 4.0,
-        max: 255.0,
+        min: *assetc_collider::MAX_VERTICES.start() as f64,
+        max: *assetc_collider::MAX_VERTICES.end() as f64,
         hint: "Most corner points of one hull (most engines want 255 or fewer; 32–64 is common).",
     },
     Key {
         key: "error",
         label: "Error",
+        // assetc_collider::ERROR's, written as f64: 0.001f32 as f64 is not 0.001.
         min: 0.001,
         max: 0.5,
         hint: "How much empty space the hulls may hold in all, as a share of the model's volume (0.01 = 1%). Lower splits the model into more hulls.",
@@ -61,8 +62,8 @@ pub const KEYS: [Key; 4] = [
     Key {
         key: "resolution",
         label: "Resolution",
-        min: 16.0,
-        max: 256.0,
+        min: *assetc_collider::RESOLUTION.start() as f64,
+        max: *assetc_collider::RESOLUTION.end() as f64,
         hint: "Voxels along the model's longest side. Higher sees thinner gaps and smaller details, and takes longer.",
     },
 ];
@@ -209,7 +210,8 @@ fn ends_with_newline(mut text: String) -> String {
 /// Makes the collider of the model in `file`; see docs/features/colliders.md#how-it-is-made.
 pub fn make(file: &Path, settings: &Settings) -> Result<Collider, String> {
     let (positions, triangles) = crate::model::triangles(file)?;
-    crate::decompose::decompose(&positions, &triangles, settings)
+    let positions: Vec<[f32; 3]> = positions.iter().map(|p| p.to_array()).collect();
+    assetc_collider::decompose(&positions, &triangles, settings)
 }
 
 /// The `.acollider.bin` of `collider`, for the mesh with asset ID `mesh`.
@@ -220,8 +222,8 @@ pub fn encode(collider: &Collider, mesh: u64) -> Vec<u8> {
         .u32(collider.points() as u32)
         .u32(collider.faces() as u32)
         .u32(0)
-        .f32s(&min.to_array())
-        .f32s(&max.to_array())
+        .f32s(&min)
+        .f32s(&max)
         .f32s(&[collider.volume(), collider.model_volume])
         .u64(mesh)
         .u64(0);
@@ -233,13 +235,13 @@ pub fn encode(collider: &Collider, mesh: u64) -> Vec<u8> {
             .u32(h.hull.points.len() as u32)
             .u32(first_face)
             .u32(h.hull.faces.len() as u32)
-            .f32s(&h.center.to_array())
+            .f32s(&h.center)
             .f32s(&[h.volume])
-            .f32s(&h.min.to_array())
-            .f32s(&h.max.to_array())
+            .f32s(&h.min)
+            .f32s(&h.max)
             .u64(0);
         for p in &h.hull.points {
-            points.extend(p.to_array().iter().flat_map(|f| f.to_le_bytes()));
+            points.extend(p.iter().flat_map(|f| f.to_le_bytes()));
         }
         for f in &h.hull.faces {
             faces.extend(f.iter().flat_map(|&i| (i as u32).to_le_bytes()));
@@ -338,7 +340,49 @@ pub fn rows(bytes: &[u8]) -> Result<Vec<(&'static str, String)>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::decompose::{decompose, tests::cuboid};
+    use assetc_collider::decompose;
+
+    /// An axis-aligned box's 12 triangles, facing out.
+    fn cuboid(min: Vec3, max: Vec3, positions: &mut Vec<[f32; 3]>, triangles: &mut Vec<[u32; 3]>) {
+        let base = positions.len() as u32;
+        for i in 0..8 {
+            positions.push([
+                if i & 1 == 0 { min.x } else { max.x },
+                if i & 2 == 0 { min.y } else { max.y },
+                if i & 4 == 0 { min.z } else { max.z },
+            ]);
+        }
+        for [a, b, c] in [
+            [0, 2, 1],
+            [1, 2, 3],
+            [4, 5, 6],
+            [5, 7, 6],
+            [0, 1, 4],
+            [1, 5, 4],
+            [2, 6, 3],
+            [3, 6, 7],
+            [0, 4, 2],
+            [2, 4, 6],
+            [1, 3, 5],
+            [3, 7, 5],
+        ] {
+            triangles.push([base + a, base + b, base + c]);
+        }
+    }
+
+    #[test]
+    fn keys_are_the_crate_ranges() {
+        let error = &KEYS[2];
+        assert_eq!(
+            (error.min as f32, error.max as f32),
+            (
+                *assetc_collider::ERROR.start(),
+                *assetc_collider::ERROR.end()
+            )
+        );
+        assert_eq!(parse("error = 0.001").unwrap().error, 0.001);
+        assert_eq!(parse("error = 0.5").unwrap().error, 0.5);
+    }
 
     #[test]
     fn sidecar_settings() {

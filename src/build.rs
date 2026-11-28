@@ -768,7 +768,7 @@ fn compile_collider(
     input: &Path,
     source: &str,
     dest: &Path,
-    settings: &crate::decompose::Settings,
+    settings: &assetc_collider::Settings,
 ) -> Result<String, String> {
     let collider = crate::acollider::make(&input.join(source), settings)?;
     let mesh = crate::hash::fnv1a64(format!("{}.amesh.bin", strip_extension(source)).as_bytes());

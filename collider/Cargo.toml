@@ -1,0 +1,17 @@
+[package]
+name = "assetc-collider"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Bartłomiej Wójtowicz"]
+description = "The convex decomposition of assetc: a model's triangles as a few convex hulls that follow its shape, for compound physics colliders; and 3D convex hulls (quickhull)"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/qbart/assetc"
+homepage = "https://github.com/qbart/assetc"
+readme = "README.md"
+keywords = ["gamedev", "physics", "collision", "convex-hull", "decomposition"]
+categories = ["game-development", "graphics", "mathematics"]
+
+[dependencies]
+# Vector math inside; the API takes and gives plain arrays.
+matma = { version = "0.3.0", default-features = false }

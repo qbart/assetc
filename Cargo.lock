@@ -331,6 +331,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "assetc-collider"
+version = "0.4.0"
+dependencies = [
+ "matma",
+]
+
+[[package]]
 name = "assetc-colors"
 version = "0.4.0"
 
@@ -341,6 +348,7 @@ dependencies = [
  "ab_glyph",
  "assetc",
  "assetc-atlas",
+ "assetc-collider",
  "assetc-colors",
  "assetc-noise",
  "base64 0.23.1",

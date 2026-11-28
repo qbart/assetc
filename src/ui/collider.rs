@@ -9,9 +9,9 @@ use bevy_egui::egui::{self, Frame, Margin, RichText, Ui, vec2};
 
 use super::{placeholder, prop_row_colored, property_style, set_color};
 use crate::acollider::{self, KEYS};
-use crate::decompose::{Collider, Settings};
 use crate::icons::Icon;
 use crate::theme::{CHANNEL_R, TEXT, TEXT_WEAK};
+use assetc_collider::{Collider, Settings};
 
 /// A model's `.acollider` sidecar being edited.
 pub struct ColliderEdit {
@@ -179,7 +179,7 @@ pub fn segments(collider: &Collider) -> Vec<(usize, Vec<[bevy::math::Vec3; 2]>)>
                 .hull
                 .edges()
                 .into_iter()
-                .map(|[a, b]| [h.hull.points[a], h.hull.points[b]])
+                .map(|[a, b]| [h.hull.points[a], h.hull.points[b]].map(bevy::math::Vec3::from))
                 .collect();
             (i, edges)
         })
