@@ -1,0 +1,15 @@
+[package]
+name = "assetc-ibl"
+version = "0.4.0"
+edition = "2024"
+rust-version = "1.88"
+authors = ["Bartłomiej Wójtowicz"]
+description = "The image-based lighting of assetc: latitude-longitude HDR images into skybox cubemaps, GGX-prefiltered specular maps and irradiance maps with spherical harmonics"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/qbart/assetc"
+homepage = "https://github.com/qbart/assetc"
+readme = "README.md"
+keywords = ["gamedev", "ibl", "cubemap", "hdr", "pbr"]
+categories = ["game-development", "graphics", "rendering"]
+
+[dependencies]
