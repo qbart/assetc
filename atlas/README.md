@@ -15,7 +15,7 @@ Images are RGBA8 ([`Image`], from [`assetc-colors`](https://crates.io/crates/ass
 
 ```toml
 [dependencies]
-assetc-atlas = "0.4"
+assetc-atlas = "0.5"
 ```
 
 ```rust

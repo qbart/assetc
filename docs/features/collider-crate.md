@@ -37,7 +37,7 @@ builds: the same voxels, cuts, hulls and merges, the same points.
 
 ```toml
 [dependencies]
-assetc-collider = "0.4"
+assetc-collider = "0.5"
 ```
 
 ## Contents

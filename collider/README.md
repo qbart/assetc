@@ -17,7 +17,7 @@ Points are plain `[f32; 3]` arrays and triangles `[u32; 3]` indices, so it works
 
 ```toml
 [dependencies]
-assetc-collider = "0.4"
+assetc-collider = "0.5"
 ```
 
 ```rust

@@ -36,7 +36,7 @@ generators, the same parameters and defaults, the same pixels.
 
 ```toml
 [dependencies]
-assetc-noise = "0.4"
+assetc-noise = "0.5"
 ```
 
 ## Contents

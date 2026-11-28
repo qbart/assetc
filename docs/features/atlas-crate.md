@@ -38,7 +38,7 @@ padding and extrusion, the same frame rectangles to the pixel.
 
 ```toml
 [dependencies]
-assetc-atlas = "0.4"
+assetc-atlas = "0.5"
 ```
 
 ## Contents

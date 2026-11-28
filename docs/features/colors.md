@@ -34,7 +34,7 @@ byte.
 
 ```toml
 [dependencies]
-assetc-colors = "0.4"
+assetc-colors = "0.5"
 ```
 
 ## Contents

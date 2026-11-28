@@ -35,7 +35,7 @@ irradiance and spherical harmonics, the same floats.
 
 ```toml
 [dependencies]
-assetc-ibl = "0.4"
+assetc-ibl = "0.5"
 ```
 
 ## Contents

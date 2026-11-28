@@ -14,7 +14,7 @@ Images, parameters and modifiers are [`assetc-colors`](https://crates.io/crates/
 
 ```toml
 [dependencies]
-assetc-noise = "0.4"
+assetc-noise = "0.5"
 ```
 
 ```rust

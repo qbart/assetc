@@ -159,7 +159,7 @@ Keybindings: [KEYS.md](KEYS.md). Layout and look: [docs/features/gui.md](docs/fe
 
 ```toml
 [dependencies]
-assetc = "0.4"
+assetc = "0.5"
 ```
 
 ```rust
@@ -181,7 +181,7 @@ The compiler itself is the unpublished `assetc-core` package at the repository r
 
 ```toml
 [dependencies]
-assetc-colors = "0.4"
+assetc-colors = "0.5"
 ```
 
 See [docs/features/colors.md](docs/features/colors.md) and [colors/README.md](colors/README.md).
@@ -192,7 +192,7 @@ See [docs/features/colors.md](docs/features/colors.md) and [colors/README.md](co
 
 ```toml
 [dependencies]
-assetc-atlas = "0.4"
+assetc-atlas = "0.5"
 ```
 
 See [docs/features/atlas-crate.md](docs/features/atlas-crate.md) and [atlas/README.md](atlas/README.md).
@@ -203,7 +203,7 @@ See [docs/features/atlas-crate.md](docs/features/atlas-crate.md) and [atlas/READ
 
 ```toml
 [dependencies]
-assetc-noise = "0.4"
+assetc-noise = "0.5"
 ```
 
 See [docs/features/noise-crate.md](docs/features/noise-crate.md) and [noise/README.md](noise/README.md).
@@ -214,7 +214,7 @@ See [docs/features/noise-crate.md](docs/features/noise-crate.md) and [noise/READ
 
 ```toml
 [dependencies]
-assetc-collider = "0.4"
+assetc-collider = "0.5"
 ```
 
 See [docs/features/collider-crate.md](docs/features/collider-crate.md) and [collider/README.md](collider/README.md).
@@ -225,7 +225,7 @@ See [docs/features/collider-crate.md](docs/features/collider-crate.md) and [coll
 
 ```toml
 [dependencies]
-assetc-ibl = "0.4"
+assetc-ibl = "0.5"
 ```
 
 See [docs/features/ibl-crate.md](docs/features/ibl-crate.md) and [ibl/README.md](ibl/README.md).

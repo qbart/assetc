@@ -15,7 +15,7 @@ No random seeds: the same image always gives the same floats, and the work is sp
 
 ```toml
 [dependencies]
-assetc-ibl = "0.4"
+assetc-ibl = "0.5"
 ```
 
 ```rust
