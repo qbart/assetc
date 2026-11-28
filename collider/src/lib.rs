@@ -595,7 +595,7 @@ fn lattice_points(hull: &Poly) -> usize {
         .faces
         .iter()
         .map(|&[a, b, c]| {
-            let [a, b, c] = [a, b, c].map(|i| hull.points[i].as_dvec3());
+            let [a, b, c] = [a, b, c].map(|i| hull.points[i].to_dvec3());
             let n = (b - a).cross(c - a).normalize_or_zero();
             (n, n.dot(a))
         })

@@ -38,11 +38,11 @@ ext!(f32);
 ext!(f64);
 
 pub(crate) trait AsDouble {
-    fn as_dvec3(self) -> DVec3;
+    fn to_dvec3(self) -> DVec3;
 }
 
 impl AsDouble for Vec3 {
-    fn as_dvec3(self) -> DVec3 {
+    fn to_dvec3(self) -> DVec3 {
         self.map(|c| c as f64)
     }
 }

@@ -120,7 +120,7 @@ pub(crate) fn quickhull(points: &[Vec3]) -> Option<Poly> {
         return None;
     }
     let input = points;
-    let points: Vec<DVec3> = points.iter().map(|p| p.as_dvec3()).collect();
+    let points: Vec<DVec3> = points.iter().map(|p| p.to_dvec3()).collect();
     let (mut min, mut max) = (DVec3::splat(f64::INFINITY), DVec3::splat(f64::NEG_INFINITY));
     for &p in &points {
         (min, max) = (min.min(p), max.max(p));
