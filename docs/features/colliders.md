@@ -6,7 +6,9 @@ engines (Jolt, PhysX, Rapier, Bullet, Havok, …) collide convex shapes fast,
 but a chair, a rock arch or a car is not convex; one hull around all of it
 fills the space under the chair's seat. A collider splits the model into
 pieces that each are close to convex and wraps each in its own hull: the
-*convex decomposition* V-HACD and CoACD do, built into assetc.
+*convex decomposition* V-HACD and CoACD do, built into assetc. The
+decomposition is the [`assetc-collider`](collider-crate.md) crate, so other
+programs can make the same colliders.
 
 Colliders are made **per model**: a model gets one when its collider
 sidecar, [`<model file>.acollider`](../spec/acollider.md), exists next to it

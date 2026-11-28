@@ -208,6 +208,17 @@ assetc-noise = "0.4"
 
 See [docs/features/noise-crate.md](docs/features/noise-crate.md) and [noise/README.md](noise/README.md).
 
+## Colliders: the `assetc-collider` crate
+
+[`collider/`](collider/) is assetc's convex decomposition as a crate of its own: a model's triangles in, a few convex hulls that follow its shape out (a compound collider for Jolt, PhysX, Rapier, …), made as assetc makes `.acollider` colliders; plus 3D convex hulls (quickhull). It depends only on `matma` and takes plain `[f32; 3]` arrays, with no file formats.
+
+```toml
+[dependencies]
+assetc-collider = "0.4"
+```
+
+See [docs/features/collider-crate.md](docs/features/collider-crate.md) and [collider/README.md](collider/README.md).
+
 ## Sample assets
 
 [`samples/`](samples/) is a project with an input of every kind, used by the tests, the screenshots and the demo. Most of it was made for assetc; the third-party assets (the Khronos Fox model, the monogram font, …) and their licenses are listed in [NOTICE.md](NOTICE.md).

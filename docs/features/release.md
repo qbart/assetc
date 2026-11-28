@@ -6,8 +6,8 @@ binaries as a GitHub release. It is a GitHub Actions workflow,
 `.github/workflows/release.yml`.
 
 The [SDK](sdk.md), [`assetc-colors`](colors.md),
-[`assetc-atlas`](atlas-crate.md) and [`assetc-noise`](noise-crate.md) are
-not part of it: the
+[`assetc-atlas`](atlas-crate.md), [`assetc-noise`](noise-crate.md) and
+[`assetc-collider`](collider-crate.md) are not part of it: the
 crates are only published by hand, with `make publish` (see
 [Publishing](colors.md#publishing)).
 
@@ -39,11 +39,12 @@ all of them hold the new one, in one pushed commit:
 | `colors/Cargo.toml` | `version` of the [`assetc-colors`](colors.md) crate, kept the same |
 | `atlas/Cargo.toml` | `version` of the [`assetc-atlas`](atlas-crate.md) crate, kept the same, and of its `assetc-colors` path dependency |
 | `noise/Cargo.toml` | `version` of the [`assetc-noise`](noise-crate.md) crate, kept the same, and of its `assetc-colors` path dependency |
+| `collider/Cargo.toml` | `version` of the [`assetc-collider`](collider-crate.md) crate, kept the same |
 | `demo/Cargo.toml` | `version` of `assetc-demo`, kept the same |
-| `Cargo.toml` `[dependencies]` | the `version` of the `assetc-colors`, `assetc-atlas` and `assetc-noise` path dependencies |
-| `Cargo.lock` | the six packages' entries; `cargo update --workspace` writes them. The release builds with `--locked`, so a stale lock file fails it |
+| `Cargo.toml` `[dependencies]` | the `version` of the `assetc-colors`, `assetc-atlas`, `assetc-noise` and `assetc-collider` path dependencies |
+| `Cargo.lock` | the seven packages' entries; `cargo update --workspace` writes them. The release builds with `--locked`, so a stale lock file fails it |
 | `docs/features/gui.md` | the `assetc <version>` shown in the status bar's example |
-| `README.md`, `sdk/README.md`, `colors/README.md`, `atlas/README.md`, `noise/README.md`, `docs/features/sdk.md`, `docs/features/colors.md`, `docs/features/atlas-crate.md`, `docs/features/noise-crate.md` | the `assetc = "<major>.<minor>"`, `assetc-colors = "<major>.<minor>"`, `assetc-atlas = "<major>.<minor>"` and `assetc-noise = "<major>.<minor>"` dependency lines, when the minor (or major) version changes |
+| `README.md`, `sdk/README.md`, `colors/README.md`, `atlas/README.md`, `noise/README.md`, `collider/README.md`, `docs/features/sdk.md`, `docs/features/colors.md`, `docs/features/atlas-crate.md`, `docs/features/noise-crate.md`, `docs/features/collider-crate.md` | the `assetc = "<major>.<minor>"`, `assetc-colors = "<major>.<minor>"`, `assetc-atlas = "<major>.<minor>"`, `assetc-noise = "<major>.<minor>"` and `assetc-collider = "<major>.<minor>"` dependency lines, when the minor (or major) version changes |
 
 To check, before tagging (`0.2.0` being the old version; hits in
 `Cargo.lock` for other crates and the example tags in this file do not
